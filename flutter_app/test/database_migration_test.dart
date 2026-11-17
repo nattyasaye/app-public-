@@ -2448,7 +2448,7 @@ void main() {
         expect(v6Project.title, 'v6 Project');
         expect(v6Project.description, 'Legacy v6 roadmap');
         expect(v6Project.status, 'on_hold');
-        expect(v6Project.targetDate, '2026-12-20');
+        expect(v6Project.targetDate?.toIsoString(), '2026-12-20');
         expect(v6Project.isArchived, isFalse);
         expect(v6Project.startDate, isNull);
         expect(v6Project.customFields, const <String, String>{});
