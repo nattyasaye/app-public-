@@ -41,6 +41,7 @@ import {
   Archive,
   ArrowLeft,
   Smartphone,
+  Monitor,
   Eye,
   CheckSquare,
   Sparkles
@@ -211,8 +212,16 @@ export default function App() {
   const [noteFilter, setNoteFilter] = useState<'recent' | 'inbox' | 'collections'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Device Frame View: 'mobile_frame' | 'side_by_side'
-  const [viewMode, setViewMode] = useState<'mobile_frame' | 'side_by_side'>('mobile_frame');
+  // Viewport View: 'desktop' | 'mobile_frame' | 'side_by_side'
+  const [viewMode, setViewMode] = useState<'desktop' | 'mobile_frame' | 'side_by_side'>(() => {
+    if (
+      typeof window !== 'undefined' &&
+      window.innerWidth >= SHARED_DESIGN_TOKENS.breakpoints.expanded
+    ) {
+      return 'desktop';
+    }
+    return 'mobile_frame';
+  });
 
   // Application Data State (Persistent Daywell Tasks with subtasks & deadlines)
   const [tasks, setTasks] = useState<DaywellTask[]>(() => {
@@ -848,6 +857,18 @@ export default function App() {
             <div className="flex items-center bg-[var(--dw-surface-subtle)] p-1 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
               <button
                 type="button"
+                onClick={() => setViewMode('desktop')}
+                className={`text-xs px-2.5 py-1 rounded-[var(--dw-radius-sm)] font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  viewMode === 'desktop'
+                    ? 'bg-[var(--dw-card)] text-[var(--dw-text-primary)] shadow-sm'
+                    : 'text-[var(--dw-text-muted)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                Desktop
+              </button>
+              <button
+                type="button"
                 onClick={() => setViewMode('mobile_frame')}
                 className={`text-xs px-2.5 py-1 rounded-[var(--dw-radius-sm)] font-medium transition-all flex items-center gap-1 cursor-pointer ${
                   viewMode === 'mobile_frame'
@@ -886,8 +907,22 @@ export default function App() {
       </header>
 
       {/* Main Preview Container */}
-      <main className="flex-1 p-4 md:p-8 flex items-center justify-center overflow-auto">
-        <div className={`w-full ${viewMode === 'side_by_side' ? 'max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-start' : 'max-w-md mx-auto'}`}>
+      <main
+        className={`flex-1 flex overflow-auto ${
+          viewMode === 'desktop'
+            ? 'p-3 md:p-6 items-stretch justify-center'
+            : 'p-4 md:p-8 items-center justify-center'
+        }`}
+      >
+        <div
+          className={`w-full ${
+            viewMode === 'desktop'
+              ? 'max-w-[1120px] mx-auto flex flex-col'
+              : viewMode === 'side_by_side'
+              ? 'max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-start'
+              : 'max-w-md mx-auto'
+          }`}
+        >
           {/* Side-by-Side Reference PNG (if side-by-side mode is active) */}
           {viewMode === 'side_by_side' && (
             <div className="bg-[var(--dw-card)] rounded-[38px] p-4 shadow-xl border border-[var(--dw-border)] flex flex-col items-center">
@@ -957,24 +992,38 @@ export default function App() {
             </div>
           )}
 
-          {/* Interactive Mobile Device Frame */}
-          <div className="relative mx-auto w-full max-w-[390px] h-[820px] bg-[var(--dw-canvas)] rounded-[48px] shadow-2xl border-[10px] border-[var(--dw-border)] flex flex-col overflow-hidden text-[var(--dw-text-primary)] transition-colors duration-200">
-            {/* Top Phone Speaker & Camera Notch */}
-            <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-[var(--dw-border)] rounded-[var(--dw-radius-full)] z-40 pointer-events-none" />
+          {/* Interactive App Frame (Responsive Desktop Workspace vs Mobile Device Frame) */}
+          <div
+            className={
+              viewMode === 'desktop'
+                ? 'relative mx-auto w-full flex-1 min-h-[calc(100vh-8.5rem)] bg-[var(--dw-canvas)] rounded-[var(--dw-radius-xl)] shadow-xl border border-[var(--dw-border)] flex flex-col overflow-hidden text-[var(--dw-text-primary)] transition-colors duration-200'
+                : 'relative mx-auto w-full max-w-[390px] h-[820px] bg-[var(--dw-canvas)] rounded-[48px] shadow-2xl border-[10px] border-[var(--dw-border)] flex flex-col overflow-hidden text-[var(--dw-text-primary)] transition-colors duration-200'
+            }
+          >
+            {viewMode !== 'desktop' && (
+              <>
+                {/* Top Phone Speaker & Camera Notch */}
+                <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-[var(--dw-border)] rounded-[var(--dw-radius-full)] z-40 pointer-events-none" />
 
-            {/* Mobile System Status Bar (9:05, Wi-Fi, Cellular, Battery) */}
-            <div className="pt-3 px-7 pb-1 flex items-center justify-between text-xs font-semibold text-[var(--dw-text-secondary)] select-none z-30 shrink-0">
-              <span>9:05</span>
-              <div className="flex items-center gap-1.5 text-[var(--dw-text-secondary)]">
-                <span className="text-[10px]">5G</span>
-                <div className="w-4 h-2.5 border border-current rounded-sm relative p-0.5">
-                  <div className="h-full bg-current rounded-xs w-3/4" />
+                {/* Mobile System Status Bar (9:05, Wi-Fi, Cellular, Battery) */}
+                <div className="pt-3 px-7 pb-1 flex items-center justify-between text-xs font-semibold text-[var(--dw-text-secondary)] select-none z-30 shrink-0">
+                  <span>9:05</span>
+                  <div className="flex items-center gap-1.5 text-[var(--dw-text-secondary)]">
+                    <span className="text-[10px]">5G</span>
+                    <div className="w-4 h-2.5 border border-current rounded-sm relative p-0.5">
+                      <div className="h-full bg-current rounded-xs w-3/4" />
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              </>
+            )}
 
             {/* Active Screen Scrollable Body Area */}
-            <div className="flex-1 overflow-y-auto px-5 pb-24 pt-2">
+            <div
+              className={`flex-1 overflow-y-auto pb-24 ${
+                viewMode === 'desktop' ? 'px-5 md:px-8 pt-5' : 'px-5 pt-2'
+              }`}
+            >
               {/* SCREEN 01: TODAY DASHBOARD */}
               {activeScreen === 'today' && (
                 <div className="space-y-4">
@@ -2113,17 +2162,27 @@ export default function App() {
               )}
             </div>
 
-            {/* SCREEN 14: QUICK CAPTURE BOTTOM SHEET OVERLAY */}
+            {/* SCREEN 14: QUICK CAPTURE OVERLAY */}
             {isQuickCaptureOpen && (
               <div
                 role="dialog"
                 aria-modal="true"
                 aria-label="Quick capture"
-                className="absolute inset-0 bg-black/40 backdrop-blur-xs z-50 flex flex-col justify-end"
+                className={`absolute inset-0 bg-black/40 backdrop-blur-xs z-50 flex flex-col ${
+                  viewMode === 'desktop' ? 'items-center justify-center p-4' : 'justify-end'
+                }`}
               >
-                <div className="bg-[var(--dw-elevated)] rounded-t-[32px] border-t border-[var(--dw-border)] p-5 shadow-2xl space-y-4">
+                <div
+                  className={`bg-[var(--dw-elevated)] border border-[var(--dw-border)] p-5 shadow-2xl space-y-4 w-full ${
+                    viewMode === 'desktop'
+                      ? 'max-w-lg rounded-[var(--dw-radius-xl)]'
+                      : 'rounded-t-[32px] border-t'
+                  }`}
+                >
                   {/* Top Drag Handle & Title */}
-                  <div className="w-10 h-1 bg-[var(--dw-border)] rounded-[var(--dw-radius-full)] mx-auto" />
+                  {viewMode !== 'desktop' && (
+                    <div className="w-10 h-1 bg-[var(--dw-border)] rounded-[var(--dw-radius-full)] mx-auto" />
+                  )}
                   <div className="flex items-center justify-between pt-1">
                     <h3 className="dw-type-title text-[var(--dw-text-primary)]">Quick capture</h3>
                     <DaywellIconButton
@@ -2326,8 +2385,13 @@ export default function App() {
             <nav
               role="navigation"
               aria-label="Main Navigation"
-              className="absolute bottom-0 left-0 right-0 h-16 bg-[var(--dw-card)]/95 backdrop-blur-md border-t border-[var(--dw-border)] grid grid-cols-6 items-center px-1 z-40 select-none"
+              className="absolute bottom-0 left-0 right-0 h-16 bg-[var(--dw-card)]/95 backdrop-blur-md border-t border-[var(--dw-border)] px-1 z-40 select-none flex items-center justify-center"
             >
+              <div
+                className={`w-full grid grid-cols-6 items-center ${
+                  viewMode === 'desktop' ? 'max-w-2xl mx-auto' : ''
+                }`}
+              >
               {[
                 { id: 'today' as ScreenId, aria: 'Today Dashboard', label: 'Today', icon: Calendar },
                 { id: 'tasks' as ScreenId, aria: 'To-Do Tasks', label: 'To-Do', icon: CheckCircle2 },
@@ -2385,6 +2449,7 @@ export default function App() {
                   </button>
                 );
               })}
+              </div>
             </nav>
           </div>
         </div>

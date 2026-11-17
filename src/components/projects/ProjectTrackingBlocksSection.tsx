@@ -1169,7 +1169,14 @@ function GroupedListBlockBody(props: {
 
   const [itemSearch, setItemSearch] = useState('');
   const [itemFilter, setItemFilter] = useState<'all' | 'remaining' | 'done' | 'over'>('all');
+  const [selectedGroupId, setSelectedGroupId] = useState<string>('all');
   const [collapsedGroupIds, setCollapsedGroupIds] = useState<Record<string, boolean>>({});
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null);
+  const [editingGroupTitle, setEditingGroupTitle] = useState('');
+  const [editingGroupTarget, setEditingGroupTarget] = useState('');
+  const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [editingItemTitle, setEditingItemTitle] = useState('');
+  const [editingItemTarget, setEditingItemTarget] = useState('');
 
   const cfg = block.config ?? {};
   const showGroupTotals = cfg.showGroupTotals !== false;
@@ -1190,9 +1197,13 @@ function GroupedListBlockBody(props: {
     (metric?.groupMetrics ?? []).map((g) => [g.groupId, g])
   );
   const itemTotals = metric?.itemTotals ?? {};
-  const showFilterToolbar = items.length > 6 || groups.length > 2;
+  const showFilterToolbar = items.length > 6 || groups.length > 1;
   const normalizedQuery = itemSearch.trim().toLowerCase();
   const hasOverItems = (metric?.overTargetItemCount ?? 0) > 0;
+  const activeGroupFilterId =
+    selectedGroupId !== 'all' && groups.some((g) => g.id === selectedGroupId)
+      ? selectedGroupId
+      : 'all';
 
   const itemMatchesFilter = (item: SharedProjectTrackingRecord): boolean => {
     const logged = itemTotals[item.id] ?? 0;
@@ -1207,14 +1218,17 @@ function GroupedListBlockBody(props: {
     return true;
   };
 
-  const ungroupedItems = items.filter((i) => {
-    if (i.parentRecordId) return false;
-    if (!itemMatchesFilter(i)) return false;
-    if (normalizedQuery) {
-      return (i.title ?? '').toLowerCase().includes(normalizedQuery);
-    }
-    return true;
-  });
+  const ungroupedItems =
+    activeGroupFilterId !== 'all'
+      ? []
+      : items.filter((i) => {
+          if (i.parentRecordId) return false;
+          if (!itemMatchesFilter(i)) return false;
+          if (normalizedQuery) {
+            return (i.title ?? '').toLowerCase().includes(normalizedQuery);
+          }
+          return true;
+        });
 
   const allCollapsed =
     groups.length > 0 && groups.every((g) => Boolean(collapsedGroupIds[g.id]));
@@ -1237,6 +1251,7 @@ function GroupedListBlockBody(props: {
     const remainingAmount =
       target !== undefined && target > 0 ? Math.max(0, target - logged) : undefined;
     const isLogging = loggingItemId === item.id;
+    const isEditing = editingItemId === item.id;
     const done =
       item.isCompleted || (target !== undefined && target > 0 && logged >= target);
     const parsedDelta = Number(itemLogDelta);
@@ -1249,79 +1264,183 @@ function GroupedListBlockBody(props: {
       logged + parsedDelta > target;
     const parsedLogDate = CalendarDate.tryParse(itemLogDate);
 
+    const submitItemLog = (e?: React.FormEvent) => {
+      if (e) e.preventDefault();
+      const delta = Number(itemLogDelta);
+      if (!Number.isFinite(delta) || delta <= 0) {
+        onError('Logged progress must be greater than 0.');
+        return;
+      }
+      onRunAction(() => {
+        projectsService.logProgress({
+          projectId,
+          blockId: block.id,
+          parentRecordId: item.id,
+          deltaValue: delta,
+          recordedDate: itemLogDate || CalendarDate.today().toIsoString(),
+        });
+        setLoggingItemId(null);
+      });
+    };
+
+    const submitItemEdit = (e: React.FormEvent) => {
+      e.preventDefault();
+      const cleanTitle = editingItemTitle.trim();
+      if (!cleanTitle) {
+        onError(`${itemNoun} title is required.`);
+        return;
+      }
+      let parsedTarget: number | undefined;
+      if (editingItemTarget.trim()) {
+        const t = Number(editingItemTarget);
+        if (!Number.isFinite(t) || t < 0) {
+          onError(`${itemNoun} target must be a valid non-negative number.`);
+          return;
+        }
+        parsedTarget = t;
+      }
+      const nextRecord: SharedProjectTrackingRecord = {
+        ...item,
+        title: cleanTitle,
+      };
+      if (parsedTarget !== undefined) {
+        nextRecord.targetValue = parsedTarget;
+      } else {
+        delete nextRecord.targetValue;
+      }
+      onRunAction(() => {
+        projectsService.updateRecord(nextRecord);
+        setEditingItemId(null);
+      });
+    };
+
     return (
       <div
         key={item.id}
-        className="py-1.5 border-b border-[var(--dw-divider)] last:border-b-0 space-y-1.5"
+        className={`py-2 border-b border-[var(--dw-divider)] space-y-1.5 ${
+          isLogging || isEditing
+            ? 'md:col-span-2 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] px-2.5 my-1'
+            : ''
+        }`}
       >
-        <div className="flex items-center justify-between gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              onRunAction(() => projectsService.toggleRecordCompleted(item))
-            }
-            className="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer"
-          >
-            <span
-              className={`w-4 h-4 rounded-[var(--dw-radius-sm)] border flex items-center justify-center shrink-0 ${
-                done
-                  ? 'bg-[var(--dw-primary)] border-[var(--dw-primary)] text-[var(--dw-on-primary)]'
-                  : 'border-[var(--dw-border)]'
-              }`}
-            >
-              {done && <Check className="w-3 h-3 stroke-[3]" />}
-            </span>
-            <span
-              className={`text-xs truncate ${
-                done
-                  ? 'line-through text-[var(--dw-text-muted)]'
-                  : 'text-[var(--dw-text-primary)] font-medium'
-              }`}
-            >
-              {item.title}
-            </span>
-          </button>
-
-          <div className="flex items-center gap-1.5 shrink-0">
-            {overAmount > 0 && (
-              <DaywellStatusBadge
-                tone="warning"
-                showIcon={false}
-                label={`Over +${formatNumber(overAmount)}`}
-              />
-            )}
-            <span className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
-              {target !== undefined
-                ? `${formatNumber(logged)}/${formatNumber(target)}${
-                    unit ? ` ${unit}` : ''
-                  }`
-                : logged > 0
-                ? `${formatNumber(logged)}${unit ? ` ${unit}` : ''}`
-                : ''}
-            </span>
+        {isEditing ? (
+          <form onSubmit={submitItemEdit} className="flex flex-wrap items-center gap-1.5">
+            <input
+              type="text"
+              aria-label={`Edit ${itemNoun.toLowerCase()} title`}
+              placeholder={`${itemNoun} title...`}
+              value={editingItemTitle}
+              onChange={(e) => setEditingItemTitle(e.target.value)}
+              className="flex-1 min-w-[150px] min-h-[34px] px-2.5 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
+            />
+            <input
+              type="number"
+              min="0"
+              step="any"
+              aria-label={`Edit ${itemNoun.toLowerCase()} target`}
+              placeholder="Target"
+              value={editingItemTarget}
+              onChange={(e) => setEditingItemTarget(e.target.value)}
+              className="w-24 min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)] dw-type-numeric-body"
+            />
             <DaywellButton
-              label="+ Log"
+              type="submit"
+              label="Save"
+              variant="primary"
+              size="compact"
+            />
+            <DaywellButton
+              label="Cancel"
               variant="text"
               size="compact"
-              onClick={() => {
-                setLoggingItemId(isLogging ? null : item.id);
-                setItemLogDelta('1');
-              }}
+              onClick={() => setEditingItemId(null)}
             />
-            <DaywellIconButton
-              label={`Delete ${item.title}`}
-              size="compact"
-              tone="danger"
+          </form>
+        ) : (
+          <div className="flex items-center justify-between gap-2">
+            <button
+              type="button"
               onClick={() =>
-                onRunAction(() => projectsService.deleteRecord(item.id))
+                onRunAction(() => projectsService.toggleRecordCompleted(item))
               }
-              icon={<Trash2 className="w-3 h-3" />}
-            />
-          </div>
-        </div>
+              className="flex items-center gap-2 flex-1 min-w-0 text-left cursor-pointer"
+            >
+              <span
+                className={`w-4 h-4 rounded-[var(--dw-radius-sm)] border flex items-center justify-center shrink-0 ${
+                  done
+                    ? 'bg-[var(--dw-primary)] border-[var(--dw-primary)] text-[var(--dw-on-primary)]'
+                    : 'border-[var(--dw-border)]'
+                }`}
+              >
+                {done && <Check className="w-3 h-3 stroke-[3]" />}
+              </span>
+              <span
+                className={`text-xs truncate ${
+                  done
+                    ? 'line-through text-[var(--dw-text-muted)]'
+                    : 'text-[var(--dw-text-primary)] font-medium'
+                }`}
+              >
+                {item.title}
+              </span>
+            </button>
 
-        {isLogging && (
-          <div className="pl-6 space-y-1.5">
+            <div className="flex items-center gap-1 shrink-0">
+              {overAmount > 0 && (
+                <DaywellStatusBadge
+                  tone="warning"
+                  showIcon={false}
+                  label={`Over +${formatNumber(overAmount)}`}
+                />
+              )}
+              <span className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                {target !== undefined
+                  ? `${formatNumber(logged)}/${formatNumber(target)}${
+                      unit ? ` ${unit}` : ''
+                    }`
+                  : logged > 0
+                  ? `${formatNumber(logged)}${unit ? ` ${unit}` : ''}`
+                  : ''}
+              </span>
+              <DaywellButton
+                label="+ Log"
+                variant="text"
+                size="compact"
+                onClick={() => {
+                  setEditingItemId(null);
+                  setLoggingItemId(isLogging ? null : item.id);
+                  setItemLogDelta('1');
+                }}
+              />
+              <DaywellIconButton
+                label={`Edit ${item.title}`}
+                size="compact"
+                tone="muted"
+                onClick={() => {
+                  setLoggingItemId(null);
+                  setEditingItemId(item.id);
+                  setEditingItemTitle(item.title ?? '');
+                  setEditingItemTarget(
+                    item.targetValue !== undefined ? String(item.targetValue) : ''
+                  );
+                }}
+                icon={<Edit3 className="w-3 h-3" />}
+              />
+              <DaywellIconButton
+                label={`Delete ${item.title}`}
+                size="compact"
+                tone="danger"
+                onClick={() =>
+                  onRunAction(() => projectsService.deleteRecord(item.id))
+                }
+                icon={<Trash2 className="w-3 h-3" />}
+              />
+            </div>
+          </div>
+        )}
+
+        {isLogging && !isEditing && (
+          <form onSubmit={submitItemLog} className="pl-6 space-y-1.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <input
                 type="number"
@@ -1330,7 +1449,7 @@ function GroupedListBlockBody(props: {
                 aria-label={`Progress delta for ${item.title}`}
                 value={itemLogDelta}
                 onChange={(e) => setItemLogDelta(e.target.value)}
-                className="w-20 min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-primary)] dw-type-numeric-body"
+                className="w-20 min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)] dw-type-numeric-body"
               />
               <DaywellButton
                 label="+5"
@@ -1357,30 +1476,13 @@ function GroupedListBlockBody(props: {
                 aria-label={`Log date for ${item.title}`}
                 value={itemLogDate}
                 onChange={(e) => setItemLogDate(e.target.value)}
-                className="min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
+                className="min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
               />
               <DaywellButton
+                type="submit"
                 label="Save"
                 variant="primary"
                 size="compact"
-                onClick={() => {
-                  const delta = Number(itemLogDelta);
-                  if (!Number.isFinite(delta) || delta <= 0) {
-                    onError('Logged progress must be greater than 0.');
-                    return;
-                  }
-                  onRunAction(() => {
-                    projectsService.logProgress({
-                      projectId,
-                      blockId: block.id,
-                      parentRecordId: item.id,
-                      deltaValue: delta,
-                      recordedDate:
-                        itemLogDate || CalendarDate.today().toIsoString(),
-                    });
-                    setLoggingItemId(null);
-                  });
-                }}
               />
             </div>
             {parsedLogDate && (
@@ -1390,12 +1492,12 @@ function GroupedListBlockBody(props: {
             )}
             {willExceedTarget && target !== undefined && (
               <p className="text-[11px] text-[var(--dw-warning)] dw-type-numeric-body">
-                Exceeds city target by +
+                Exceeds {itemNoun.toLowerCase()} target by +
                 {formatNumber(logged + parsedDelta - target)}: actual sent count
                 is saved, excess does not inflate target completion.
               </p>
             )}
-          </div>
+          </form>
         )}
       </div>
     );
@@ -1468,7 +1570,7 @@ function GroupedListBlockBody(props: {
               ariaLabel={`Search ${block.title}`}
               className="flex-1 min-w-[180px]"
             />
-            {groups.length > 0 && !normalizedQuery && (
+            {groups.length > 0 && !normalizedQuery && activeGroupFilterId === 'all' && (
               <DaywellButton
                 label={allCollapsed ? 'Expand all' : 'Collapse all'}
                 variant="outlined"
@@ -1510,10 +1612,49 @@ function GroupedListBlockBody(props: {
               );
             })}
           </div>
+          {groups.length > 1 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1 border-t border-[var(--dw-divider)]">
+              <button
+                type="button"
+                onClick={() => setSelectedGroupId('all')}
+                className={`min-h-[28px] px-2.5 py-0.5 rounded-[var(--dw-radius-full)] text-[11px] font-semibold transition-colors cursor-pointer ${
+                  activeGroupFilterId === 'all'
+                    ? 'bg-[var(--dw-primary)] text-[var(--dw-on-primary)]'
+                    : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                }`}
+              >
+                All {groupNoun.toLowerCase()}s ({groups.length})
+              </button>
+              {groups.map((grp) => {
+                const gm = groupMetricMap.get(grp.id);
+                const count =
+                  gm?.itemCount ??
+                  items.filter((i) => i.parentRecordId === grp.id).length;
+                const isSelected = activeGroupFilterId === grp.id;
+                return (
+                  <button
+                    key={grp.id}
+                    type="button"
+                    onClick={() => setSelectedGroupId(isSelected ? 'all' : grp.id)}
+                    className={`min-h-[28px] px-2.5 py-0.5 rounded-[var(--dw-radius-full)] text-[11px] font-semibold transition-colors cursor-pointer ${
+                      isSelected
+                        ? 'bg-[var(--dw-primary)] text-[var(--dw-on-primary)]'
+                        : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                    }`}
+                  >
+                    {grp.title} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
       {groups.map((grp) => {
+        if (activeGroupFilterId !== 'all' && grp.id !== activeGroupFilterId) {
+          return null;
+        }
         const gm = groupMetricMap.get(grp.id);
         const rawChildren = items.filter((i) => i.parentRecordId === grp.id);
         const groupMatchesQuery =
@@ -1534,13 +1675,47 @@ function GroupedListBlockBody(props: {
         }
 
         const isAddingHere = addingItemGroupId === grp.id;
+        const isEditingGroup = editingGroupId === grp.id;
         const isCollapsed =
+          activeGroupFilterId === 'all' &&
           !normalizedQuery &&
           itemFilter === 'all' &&
           !isAddingHere &&
+          !isEditingGroup &&
           Boolean(collapsedGroupIds[grp.id]);
         const groupCompleted = gm?.targetCompletedTotal ?? gm?.loggedTotal ?? 0;
         const groupOver = gm?.overTargetAmount ?? 0;
+
+        const submitGroupEdit = (e: React.FormEvent) => {
+          e.preventDefault();
+          const cleanTitle = editingGroupTitle.trim();
+          if (!cleanTitle) {
+            onError(`${groupNoun} title is required.`);
+            return;
+          }
+          let parsedTarget: number | undefined;
+          if (editingGroupTarget.trim()) {
+            const t = Number(editingGroupTarget);
+            if (!Number.isFinite(t) || t < 0) {
+              onError(`${groupNoun} target must be a valid non-negative number.`);
+              return;
+            }
+            parsedTarget = t;
+          }
+          const nextGroup: SharedProjectTrackingRecord = {
+            ...grp,
+            title: cleanTitle,
+          };
+          if (parsedTarget !== undefined) {
+            nextGroup.targetValue = parsedTarget;
+          } else {
+            delete nextGroup.targetValue;
+          }
+          onRunAction(() => {
+            projectsService.updateRecord(nextGroup);
+            setEditingGroupId(null);
+          });
+        };
 
         return (
           <div
@@ -1610,6 +1785,19 @@ function GroupedListBlockBody(props: {
                   }}
                 />
                 <DaywellIconButton
+                  label={`Edit ${grp.title}`}
+                  size="compact"
+                  tone="muted"
+                  onClick={() => {
+                    setEditingGroupId(isEditingGroup ? null : grp.id);
+                    setEditingGroupTitle(grp.title ?? '');
+                    setEditingGroupTarget(
+                      grp.targetValue !== undefined ? String(grp.targetValue) : ''
+                    );
+                  }}
+                  icon={<Edit3 className="w-3 h-3" />}
+                />
+                <DaywellIconButton
                   label={`Delete ${grp.title}`}
                   size="compact"
                   tone="danger"
@@ -1621,6 +1809,44 @@ function GroupedListBlockBody(props: {
               </div>
             </div>
 
+            {isEditingGroup && (
+              <form
+                onSubmit={submitGroupEdit}
+                className="flex flex-wrap items-center gap-1.5 p-2 rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)]"
+              >
+                <input
+                  type="text"
+                  aria-label={`Edit ${groupNoun.toLowerCase()} title`}
+                  placeholder={`${groupNoun} title...`}
+                  value={editingGroupTitle}
+                  onChange={(e) => setEditingGroupTitle(e.target.value)}
+                  className="flex-1 min-w-[150px] min-h-[34px] px-2.5 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
+                />
+                <input
+                  type="number"
+                  min="0"
+                  step="any"
+                  aria-label={`Edit ${groupNoun.toLowerCase()} target`}
+                  placeholder="Target"
+                  value={editingGroupTarget}
+                  onChange={(e) => setEditingGroupTarget(e.target.value)}
+                  className="w-24 min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)] dw-type-numeric-body"
+                />
+                <DaywellButton
+                  type="submit"
+                  label="Save"
+                  variant="primary"
+                  size="compact"
+                />
+                <DaywellButton
+                  label="Cancel"
+                  variant="text"
+                  size="compact"
+                  onClick={() => setEditingGroupId(null)}
+                />
+              </form>
+            )}
+
             {showGroupTotals && gm?.progressPercent !== undefined && (
               <DaywellProgressBar
                 value={gm.progressPercent}
@@ -1629,7 +1855,9 @@ function GroupedListBlockBody(props: {
             )}
 
             {!isCollapsed && filteredChildren.length > 0 && (
-              <div className="pl-1">{filteredChildren.map(renderItemRow)}</div>
+              <div className="pl-1 grid grid-cols-1 md:grid-cols-2 gap-x-4">
+                {filteredChildren.map(renderItemRow)}
+              </div>
             )}
 
             {isAddingHere && (
@@ -1684,7 +1912,9 @@ function GroupedListBlockBody(props: {
       })}
 
       {ungroupedItems.length > 0 && (
-        <div className="space-y-1">{ungroupedItems.map(renderItemRow)}</div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4">
+          {ungroupedItems.map(renderItemRow)}
+        </div>
       )}
 
       {addingItemGroupId === '__ungrouped__' && (
@@ -1841,6 +2071,11 @@ function ScheduleBlockBody(props: {
     onError,
   } = props;
 
+  const [editingSchedId, setEditingSchedId] = useState<string | null>(null);
+  const [editingSchedTitle, setEditingSchedTitle] = useState('');
+  const [editingSchedDate, setEditingSchedDate] = useState('');
+  const [editingSchedDuration, setEditingSchedDuration] = useState('');
+
   const cfg = parseScheduleBlockConfig(block.config);
   const items = records.filter((r) => r.recordType === 'schedule_item');
   const itemTotals = metric?.itemTotals ?? {};
@@ -1867,6 +2102,7 @@ function ScheduleBlockBody(props: {
         {items.map((item) => {
           const loggedMins = itemTotals[item.id] ?? 0;
           const isLogging = loggingSchedId === item.id;
+          const isEditing = editingSchedId === item.id;
           const schedCal = item.scheduledDate
             ? CalendarDate.tryParse(item.scheduledDate)
             : undefined;
@@ -1874,80 +2110,186 @@ function ScheduleBlockBody(props: {
             ? SharedDateFormatter.formatDual(schedCal)
             : item.scheduledDate;
 
+          const submitScheduleEdit = (e: React.FormEvent) => {
+            e.preventDefault();
+            const cleanTitle = editingSchedTitle.trim();
+            if (!cleanTitle) {
+              onError('Session title is required.');
+              return;
+            }
+            const cleanDate = editingSchedDate.trim() || undefined;
+            if (cleanDate && !CalendarDate.tryParse(cleanDate)) {
+              onError('Scheduled date must be a valid date.');
+              return;
+            }
+            let parsedMins: number | undefined;
+            if (editingSchedDuration.trim()) {
+              const raw = Number(editingSchedDuration);
+              if (!Number.isFinite(raw) || raw < 0) {
+                onError('Duration must be non-negative minutes.');
+                return;
+              }
+              parsedMins = Math.round(raw);
+            }
+            const nextSession: SharedProjectTrackingRecord = {
+              ...item,
+              title: cleanTitle,
+            };
+            if (cleanDate !== undefined) {
+              nextSession.scheduledDate = cleanDate;
+            } else {
+              delete nextSession.scheduledDate;
+            }
+            if (parsedMins !== undefined) {
+              nextSession.durationMinutes = parsedMins;
+            } else {
+              delete nextSession.durationMinutes;
+            }
+            onRunAction(() => {
+              projectsService.updateRecord(nextSession);
+              setEditingSchedId(null);
+            });
+          };
+
           return (
             <div
               key={item.id}
               className="py-1.5 border-b border-[var(--dw-divider)] last:border-b-0 space-y-1.5"
             >
-              <div className="flex items-start justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() =>
-                    onRunAction(() => projectsService.toggleRecordCompleted(item))
-                  }
-                  className="flex items-start gap-2.5 flex-1 min-w-0 text-left cursor-pointer"
+              {isEditing ? (
+                <form
+                  onSubmit={submitScheduleEdit}
+                  className="p-2 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] space-y-2"
                 >
-                  <span
-                    className={`mt-0.5 w-4 h-4 rounded-[var(--dw-radius-sm)] border flex items-center justify-center shrink-0 ${
-                      item.isCompleted
-                        ? 'bg-[var(--dw-primary)] border-[var(--dw-primary)] text-[var(--dw-on-primary)]'
-                        : 'border-[var(--dw-border)]'
-                    }`}
-                  >
-                    {item.isCompleted && <Check className="w-3 h-3 stroke-[3]" />}
-                  </span>
-                  <div className="min-w-0">
-                    <p
-                      className={`text-xs truncate ${
-                        item.isCompleted
-                          ? 'line-through text-[var(--dw-text-muted)]'
-                          : 'text-[var(--dw-text-primary)] font-medium'
-                      }`}
-                    >
-                      {item.title}
-                    </p>
-                    <p className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
-                      {[
-                        dateSubtitle ?? null,
-                        item.durationMinutes !== undefined
-                          ? `${formatNumber(loggedMins)}/${item.durationMinutes} min`
-                          : loggedMins > 0
-                          ? `${formatNumber(loggedMins)} min logged`
-                          : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ') || 'Unscheduled'}
-                    </p>
-                  </div>
-                </button>
-
-                <div className="flex items-center gap-0.5 shrink-0">
-                  {cfg.trackActualDuration && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <input
+                      type="text"
+                      aria-label={`Edit session title for ${item.title}`}
+                      placeholder="Session title..."
+                      value={editingSchedTitle}
+                      onChange={(e) => setEditingSchedTitle(e.target.value)}
+                      className="flex-1 min-w-[160px] min-h-[34px] px-2.5 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
+                    />
+                    <input
+                      type="date"
+                      aria-label={`Edit scheduled date for ${item.title}`}
+                      value={editingSchedDate}
+                      onChange={(e) => setEditingSchedDate(e.target.value)}
+                      className="min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      aria-label={`Edit planned minutes for ${item.title}`}
+                      placeholder="Min"
+                      value={editingSchedDuration}
+                      onChange={(e) => setEditingSchedDuration(e.target.value)}
+                      className="w-20 min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-primary)] dw-type-numeric-body"
+                    />
                     <DaywellButton
-                      label="+ Min"
+                      type="submit"
+                      label="Save"
+                      variant="primary"
+                      size="compact"
+                    />
+                    <DaywellButton
+                      label="Cancel"
                       variant="text"
                       size="compact"
+                      onClick={() => setEditingSchedId(null)}
+                    />
+                  </div>
+                </form>
+              ) : (
+                <div className="flex items-start justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onRunAction(() => projectsService.toggleRecordCompleted(item))
+                    }
+                    className="flex items-start gap-2.5 flex-1 min-w-0 text-left cursor-pointer"
+                  >
+                    <span
+                      className={`mt-0.5 w-4 h-4 rounded-[var(--dw-radius-sm)] border flex items-center justify-center shrink-0 ${
+                        item.isCompleted
+                          ? 'bg-[var(--dw-primary)] border-[var(--dw-primary)] text-[var(--dw-on-primary)]'
+                          : 'border-[var(--dw-border)]'
+                      }`}
+                    >
+                      {item.isCompleted && <Check className="w-3 h-3 stroke-[3]" />}
+                    </span>
+                    <div className="min-w-0">
+                      <p
+                        className={`text-xs truncate ${
+                          item.isCompleted
+                            ? 'line-through text-[var(--dw-text-muted)]'
+                            : 'text-[var(--dw-text-primary)] font-medium'
+                        }`}
+                      >
+                        {item.title}
+                      </p>
+                      <p className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                        {[
+                          dateSubtitle ?? null,
+                          item.durationMinutes !== undefined
+                            ? `${formatNumber(loggedMins)}/${item.durationMinutes} min`
+                            : loggedMins > 0
+                            ? `${formatNumber(loggedMins)} min logged`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ') || 'Unscheduled'}
+                      </p>
+                    </div>
+                  </button>
+
+                  <div className="flex items-center gap-0.5 shrink-0">
+                    {cfg.trackActualDuration && (
+                      <DaywellButton
+                        label="+ Min"
+                        variant="text"
+                        size="compact"
+                        onClick={() => {
+                          setEditingSchedId(null);
+                          setLoggingSchedId(isLogging ? null : item.id);
+                          setSchedLogMinutes(
+                            item.durationMinutes ? String(item.durationMinutes) : '30'
+                          );
+                        }}
+                      />
+                    )}
+                    <DaywellIconButton
+                      label={`Edit session ${item.title}`}
+                      size="compact"
+                      tone="muted"
                       onClick={() => {
-                        setLoggingSchedId(isLogging ? null : item.id);
-                        setSchedLogMinutes(
-                          item.durationMinutes ? String(item.durationMinutes) : '30'
+                        setLoggingSchedId(null);
+                        setEditingSchedId(item.id);
+                        setEditingSchedTitle(item.title ?? '');
+                        setEditingSchedDate(item.scheduledDate ?? '');
+                        setEditingSchedDuration(
+                          item.durationMinutes !== undefined
+                            ? String(item.durationMinutes)
+                            : ''
                         );
                       }}
+                      icon={<Edit3 className="w-3 h-3" />}
                     />
-                  )}
-                  <DaywellIconButton
-                    label={`Delete session ${item.title}`}
-                    size="compact"
-                    tone="danger"
-                    onClick={() =>
-                      onRunAction(() => projectsService.deleteRecord(item.id))
-                    }
-                    icon={<Trash2 className="w-3 h-3" />}
-                  />
+                    <DaywellIconButton
+                      label={`Delete session ${item.title}`}
+                      size="compact"
+                      tone="danger"
+                      onClick={() =>
+                        onRunAction(() => projectsService.deleteRecord(item.id))
+                      }
+                      icon={<Trash2 className="w-3 h-3" />}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {isLogging && (
+              {isLogging && !isEditing && (
                 <div className="pl-6 flex flex-wrap items-center gap-1.5">
                   <input
                     type="number"

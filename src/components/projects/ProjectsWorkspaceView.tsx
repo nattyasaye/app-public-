@@ -214,28 +214,30 @@ export function ProjectsWorkspaceView({
   return (
     <div className="space-y-4">
       {/* Search + Primary Actions */}
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <DaywellSearchField
           value={searchQuery}
           onChange={setSearchQuery}
           placeholder="Search projects..."
           ariaLabel="Search projects"
-          className="flex-1"
+          className="flex-1 min-w-[200px]"
         />
-        <DaywellButton
-          label="Import"
-          variant="outlined"
-          size="compact"
-          leadingIcon={<Upload className="w-4 h-4" />}
-          onClick={() => setIsImportOpen(true)}
-        />
-        <DaywellButton
-          label="New Project"
-          variant="primary"
-          size="compact"
-          leadingIcon={<Plus className="w-4 h-4" />}
-          onClick={() => setIsCreateOpen(true)}
-        />
+        <div className="flex items-center gap-2 shrink-0">
+          <DaywellButton
+            label="Import / Template"
+            variant="outlined"
+            size="compact"
+            leadingIcon={<Upload className="w-4 h-4" />}
+            onClick={() => setIsImportOpen(true)}
+          />
+          <DaywellButton
+            label="New Project"
+            variant="primary"
+            size="compact"
+            leadingIcon={<Plus className="w-4 h-4" />}
+            onClick={() => setIsCreateOpen(true)}
+          />
+        </div>
       </div>
 
       {statusNotice && (
@@ -315,7 +317,7 @@ export function ProjectsWorkspaceView({
         onEmptyAction={() => setIsCreateOpen(true)}
         onRetry={reload}
       >
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filteredProjects.map((project) => {
             const summary = summaries[project.id];
             const activeMetrics = (summary?.blockMetrics ?? []).filter(
@@ -340,7 +342,7 @@ export function ProjectsWorkspaceView({
                 padding="md"
                 radius="lg"
                 onClick={() => selectProject(project.id)}
-                className="space-y-2.5"
+                className="flex flex-col justify-between h-full space-y-2.5"
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 space-y-1">
