@@ -803,7 +803,7 @@ class AppStateManager extends ChangeNotifier {
     );
   }
 
-  /// Quarantines live DB/WAL/SHM files, opens a fresh v8 database, imports
+  /// Quarantines live DB/WAL/SHM files, opens a fresh v9 database, imports
   /// an encrypted `.daywell` backup atomically, verifies reopened SQLite &
   /// ledger invariants + controller rehydration BEFORE removing quarantine,
   /// and executes the full 8-step rollback if any restore-critical step aborts.
@@ -1318,10 +1318,12 @@ class AppStateManager extends ChangeNotifier {
   Future<String> exportEncryptedBackup(String passphrase) async {
     final stateMap = await _persistenceCoordinator.exportSnapshot();
     final rawJson = jsonEncode(stateMap);
+    final exchangeSchemaVersion = (stateMap['schemaVersion'] as int?) ??
+        DatabasePersistenceCoordinator.canonicalExchangeSchemaVersion;
     return _backupService.encryptDatabasePayload(
       rawDatabaseJson: rawJson,
       passphrase: passphrase,
-      schemaVersion: _db.schemaVersion,
+      schemaVersion: exchangeSchemaVersion,
     );
   }
 

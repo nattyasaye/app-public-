@@ -10,6 +10,7 @@ import 'shared_foundation_core.dart';
 
 class SharedFoundationBridge {
   static const int schemaVersion = 5;
+  static const int snapshotFormatVersion = 2;
   static const String appVersion = '1.0.2+3';
 
   /// Exports the complete authoritative SQLite database snapshot as canonical
@@ -29,6 +30,7 @@ class SharedFoundationBridge {
   }) {
     final Map<String, dynamic> payload = {
       'schemaVersion': schemaVersion,
+      'snapshotFormatVersion': snapshotFormatVersion,
       'appVersion': appVersion,
       'exportedAt': LocalDateTime.now().toEthiopiaIsoString(),
       'isFinanceSetupCompleted': state.financeController.state.isSetupCompleted,

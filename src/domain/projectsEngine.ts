@@ -742,6 +742,15 @@ export function validateRecord(
     }
   }
 
+  const maxRecordTitleLength =
+    SHARED_BUSINESS_RULES.projects.bounds.maxTrackingRecordTitleLength;
+  const trimmedTitle = record.title?.trim();
+  if (trimmedTitle !== undefined && trimmedTitle.length > maxRecordTitleLength) {
+    throw new ProjectValidationError(
+      `Record title cannot exceed ${maxRecordTitleLength} characters.`
+    );
+  }
+
   switch (record.recordType as SharedProjectRecordType) {
     case 'group':
       if (block.blockType !== 'grouped_list') {

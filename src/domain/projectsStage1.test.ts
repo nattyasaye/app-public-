@@ -447,6 +447,22 @@ describe('PROJECTS STAGE 1: DOMAIN VALIDATION, PROGRESS ENGINE, REPOSITORY & BRI
         }),
       ProjectValidationError
     );
+
+    // Canonical 300-character record title limit (SHARED_BUSINESS_RULES)
+    const maxTitleLen = SHARED_BUSINESS_RULES.projects.bounds.maxTrackingRecordTitleLength;
+    assert.strictEqual(maxTitleLen, 300);
+    validateRecord(
+      { ...city, id: 'rec-title-300', title: 'A'.repeat(maxTitleLen) },
+      { block: groupedBlock, existingBlockRecords: [grp], isNew: true }
+    );
+    assert.throws(
+      () =>
+        validateRecord(
+          { ...city, id: 'rec-title-301', title: 'A'.repeat(maxTitleLen + 1) },
+          { block: groupedBlock, existingBlockRecords: [grp], isNew: true }
+        ),
+      ProjectValidationError
+    );
   });
 
   it('4. ProgressEngine preserves multi-block independence, computes schedule duration rules, and tracks tasks/milestones separately', () => {
@@ -784,6 +800,39 @@ describe('PROJECTS STAGE 1: DOMAIN VALIDATION, PROGRESS ENGINE, REPOSITORY & BRI
         updatedAt: NOW_ISO,
       });
 
+      // 300-char title accepted; 301-char title rejected in WebProjectsRepository
+      const maxRecTitle = SHARED_BUSINESS_RULES.projects.bounds.maxTrackingRecordTitleLength;
+      repo.createRecord({
+        id: 'city-max-300',
+        projectId: 'proj-bim',
+        blockId: glBlock.id,
+        parentRecordId: 'grp-4',
+        recordType: 'grouped_item',
+        title: 'C'.repeat(maxRecTitle),
+        sortOrder: 11,
+        isCompleted: false,
+        metadata: {},
+        createdAt: NOW_ISO,
+        updatedAt: NOW_ISO,
+      });
+      assert.throws(
+        () =>
+          repo.createRecord({
+            id: 'city-over-301',
+            projectId: 'proj-bim',
+            blockId: glBlock.id,
+            parentRecordId: 'grp-4',
+            recordType: 'grouped_item',
+            title: 'C'.repeat(maxRecTitle + 1),
+            sortOrder: 12,
+            isCompleted: false,
+            metadata: {},
+            createdAt: NOW_ISO,
+            updatedAt: NOW_ISO,
+          }),
+        ProjectValidationError
+      );
+
       // Missing linkedTaskId rejected
       assert.throws(
         () =>
@@ -960,10 +1009,17 @@ describe('PROJECTS STAGE 1: DOMAIN VALIDATION, PROGRESS ENGINE, REPOSITORY & BRI
       });
 
       const exported = SharedStateBridge.assembleLiveDatabaseState();
+      assert.strictEqual(exported.schemaVersion, 5);
+      assert.strictEqual(exported.snapshotFormatVersion, 2);
+      assert.strictEqual(exported.financeSchemaVersion, 7);
       assert.strictEqual(exported.projectTrackingBlocks?.length, 2);
       assert.strictEqual(exported.projectTrackingRecords?.length, 3);
 
-      // Re-import unordered (correction before log, log before schedule_item) + orphan linkedTaskId
+      // Re-import exported v5/snapshotFormatVersion=2 AND unordered legacy v9 payload + orphan linkedTaskId
+      const directReimport = SharedStateBridge.importFromAndroidJson(JSON.stringify(exported));
+      assert.strictEqual(directReimport.success, true, directReimport.error);
+      assert.strictEqual(directReimport.state?.snapshotFormatVersion, 2);
+
       const reorderedPayload = {
         ...exported,
         schemaVersion: 9,
@@ -999,6 +1055,35 @@ describe('PROJECTS STAGE 1: DOMAIN VALIDATION, PROGRESS ENGINE, REPOSITORY & BRI
       assert.strictEqual(afterReimport.projectTrackingRecords?.length, 4);
       const schedAfter = afterReimport.projectTrackingRecords!.find((r) => r.id === 'sched-1')!;
       assert.strictEqual(schedAfter.linkedTaskId, undefined);
+
+      // 301-char record title rejected fail-closed in SharedStateBridge BEFORE mutating localStorage
+      const recordsBeforeTooLong = store.get(SharedStateBridge.PROJECT_TRACKING_RECORDS_STORAGE_KEY);
+      const tooLongRecordRes = SharedStateBridge.importFromAndroidJson(
+        JSON.stringify({
+          ...exported,
+          projectTrackingRecords: [
+            ...exported.projectTrackingRecords!,
+            {
+              id: 'chk-item-301',
+              projectId: 'proj-video',
+              blockId: 'blk-chk',
+              recordType: 'checklist_item',
+              title: 'R'.repeat(SHARED_BUSINESS_RULES.projects.bounds.maxTrackingRecordTitleLength + 1),
+              sortOrder: 9,
+              isCompleted: false,
+              metadata: {},
+              createdAt: NOW_ISO,
+              updatedAt: NOW_ISO,
+            },
+          ],
+        })
+      );
+      assert.strictEqual(tooLongRecordRes.success, false);
+      assert.strictEqual(tooLongRecordRes.errorKind, 'invalid_payload');
+      assert.strictEqual(
+        store.get(SharedStateBridge.PROJECT_TRACKING_RECORDS_STORAGE_KEY),
+        recordsBeforeTooLong
+      );
 
       // Invalid cyclic snapshot rejects fail-closed BEFORE mutating localStorage
       const snapshotBeforeReject = store.get(SharedStateBridge.PROJECT_TRACKING_RECORDS_STORAGE_KEY);

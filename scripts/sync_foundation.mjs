@@ -443,6 +443,7 @@ export function validateBusinessRules(rules) {
     'maxCustomFieldSelectOptions',
     'maxCustomFieldIdLength',
     'maxCustomFieldTextLength',
+    'maxTrackingRecordTitleLength',
     'maxHierarchyDepth',
   ]) {
     assertFieldInteger(rules.projects.bounds[boundKey], fileLabel, `projects.bounds.${boundKey}`, {
@@ -1057,6 +1058,8 @@ export interface SharedAppSetting {
 
 export interface SharedDatabaseState {
   schemaVersion: number;
+  snapshotFormatVersion?: number;
+  databaseSchemaVersion?: number;
   appVersion: string;
   exportedAt: string;
   isFinanceSetupCompleted: boolean;
@@ -1395,7 +1398,7 @@ ${typeClass('dw-type-mono', t.scale.mono)}
 `;
 }
 
-export function buildDartFoundationCore({ seedDb }) {
+export function buildDartFoundationCore({ seedDb, rules }) {
   return `// SHARED FOUNDATION CORE — PURE DART (Single Source of Truth)
 // Generated automatically from /shared_foundation/*.json
 // DO NOT EDIT DIRECTLY. Run "npm run sync-foundation" to regenerate.
@@ -1566,6 +1569,8 @@ class SharedProjectRules {
   static const int maxCustomFieldSelectOptions = 50;
   static const int maxCustomFieldIdLength = 64;
   static const int maxCustomFieldTextLength = 1000;
+  static const int maxTrackingRecordTitleLength =
+      ${rules.projects.bounds.maxTrackingRecordTitleLength};
   static const int maxHierarchyDepth = 3;
   static const bool appendOnlyProgressLogs = true;
   static const bool allowCompensatingCorrections = true;
@@ -2585,7 +2590,7 @@ function prepareAndValidateFoundation({
 
   const tsContent = buildTypeScriptFoundation({ tokens, rules, seedDb });
   const cssContent = buildCssTokensFoundation({ tokens });
-  const dartCoreContent = buildDartFoundationCore({ seedDb });
+  const dartCoreContent = buildDartFoundationCore({ seedDb, rules });
   const dartContent = buildDartFoundation({ tokens });
 
   if (baseline) {

@@ -438,6 +438,14 @@ class ProjectValidationService {
       }
     }
 
+    final trimmedTitle = record.title?.trim();
+    if (trimmedTitle != null &&
+        trimmedTitle.length > SharedProjectRules.maxTrackingRecordTitleLength) {
+      throw ProjectValidationException(
+        'Record title cannot exceed ${SharedProjectRules.maxTrackingRecordTitleLength} characters.',
+      );
+    }
+
     switch (record.recordType) {
       case ProjectRecordType.group:
         if (block.blockType != ProjectBlockType.groupedList) {

@@ -77,8 +77,22 @@ class AppDatabase extends _$AppDatabase {
         }
         if (from < 3) {
           // Schema v2 -> v3: Safe non-destructive column additions for starting balances
-          await m.addColumn(accountsTable, accountsTable.openingBalanceCents);
-          await m.addColumn(accountsTable, accountsTable.openingBalanceDate);
+          await _addColumnIfMissing(
+            table: 'accounts_table',
+            column: 'opening_balance_cents',
+            addFn: () => m.addColumn(
+              accountsTable,
+              accountsTable.openingBalanceCents,
+            ),
+          );
+          await _addColumnIfMissing(
+            table: 'accounts_table',
+            column: 'opening_balance_date',
+            addFn: () => m.addColumn(
+              accountsTable,
+              accountsTable.openingBalanceDate,
+            ),
+          );
         }
         if (from < 4) {
           // Schema v3 -> v4: Non-destructive column additions & CalendarEvents table
@@ -141,11 +155,23 @@ class AppDatabase extends _$AppDatabase {
               },
             ),
           );
+          final existingProjectCols = await _existingTableColumns('projects');
+          final projectNewCols = <GeneratedColumn>[
+            for (final col in projects.$columns)
+              if (!existingProjectCols.contains(col.$name)) col,
+          ];
           await m.alterTable(
             TableMigration(
               projects,
+              newColumns: projectNewCols,
               columnTransformer: {
                 projects.targetDate: _nullableDateToIsoSql('target_date'),
+                if (!existingProjectCols.contains('is_archived'))
+                  projects.isArchived: const Constant(false),
+                if (!existingProjectCols.contains('custom_fields_json'))
+                  projects.customFieldsJson: const Constant('{}'),
+                if (!existingProjectCols.contains('updated_at'))
+                  projects.updatedAt: projects.createdAt,
               },
             ),
           );

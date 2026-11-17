@@ -191,6 +191,114 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
       );
       assert.strictEqual(omittedVersion.success, true);
       assert.strictEqual(omittedVersion.state?.schemaVersion, 5);
+      assert.strictEqual(omittedVersion.state?.snapshotFormatVersion, 1);
+    });
+  });
+
+  it('1b. SharedStateBridge validates separated snapshotFormatVersion (1..2, omitted->1) and optional databaseSchemaVersion (1..9) fail-closed before mutating localStorage', () => {
+    withMockBrowserStorage((store) => {
+      for (const fmtVersion of [1, 2]) {
+        const res = SharedStateBridge.importFromAndroidJson(
+          JSON.stringify({
+            schemaVersion: 5,
+            snapshotFormatVersion: fmtVersion,
+            databaseSchemaVersion: 9,
+            financeSchemaVersion: 7,
+            accounts: [],
+            transactions: [],
+          })
+        );
+        assert.strictEqual(res.success, true, `snapshotFormatVersion ${fmtVersion} rejected: ${res.error}`);
+        assert.strictEqual(res.state?.snapshotFormatVersion, fmtVersion);
+        assert.strictEqual(res.state?.databaseSchemaVersion, 9);
+      }
+
+      const rejectedMetadataCases: Array<{
+        name: string;
+        overrides: Record<string, unknown>;
+        expectedKind: string;
+      }> = [
+        {
+          name: 'future snapshotFormatVersion 3',
+          overrides: { snapshotFormatVersion: 3 },
+          expectedKind: 'unsupported_future_schema',
+        },
+        {
+          name: 'lower snapshotFormatVersion 0',
+          overrides: { snapshotFormatVersion: 0 },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'negative snapshotFormatVersion -1',
+          overrides: { snapshotFormatVersion: -1 },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'float snapshotFormatVersion 1.5',
+          overrides: { snapshotFormatVersion: 1.5 },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'string snapshotFormatVersion "2"',
+          overrides: { snapshotFormatVersion: '2' },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'null snapshotFormatVersion',
+          overrides: { snapshotFormatVersion: null },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'future databaseSchemaVersion 10',
+          overrides: { snapshotFormatVersion: 2, databaseSchemaVersion: 10 },
+          expectedKind: 'unsupported_future_schema',
+        },
+        {
+          name: 'lower databaseSchemaVersion 0',
+          overrides: { databaseSchemaVersion: 0 },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'negative databaseSchemaVersion -1',
+          overrides: { databaseSchemaVersion: -1 },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'float databaseSchemaVersion 9.5',
+          overrides: { databaseSchemaVersion: 9.5 },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'string databaseSchemaVersion "9"',
+          overrides: { databaseSchemaVersion: '9' },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'null databaseSchemaVersion',
+          overrides: { databaseSchemaVersion: null },
+          expectedKind: 'invalid_snapshot_version',
+        },
+      ];
+
+      for (const tc of rejectedMetadataCases) {
+        const baseline = seedAllDaywellStores(store);
+        const res = SharedStateBridge.importFromAndroidJson(
+          JSON.stringify({
+            schemaVersion: 5,
+            financeSchemaVersion: 7,
+            accounts: [],
+            transactions: [],
+            ...tc.overrides,
+          })
+        );
+        assert.strictEqual(res.success, false, `${tc.name} should be rejected`);
+        assert.strictEqual(
+          res.errorKind,
+          tc.expectedKind,
+          `${tc.name} produced wrong errorKind (${res.errorKind}): ${res.error}`
+        );
+        assertStoreUnchanged(store, baseline, tc.name);
+      }
     });
   });
 

@@ -150,7 +150,9 @@ class DatabasePersistenceCoordinator {
         settingsMap[AppDatabase.financeSetupKey] == 'true' || hasUserAccounts;
 
     return {
-      'schemaVersion': _db.schemaVersion,
+      'schemaVersion': canonicalExchangeSchemaVersion,
+      'snapshotFormatVersion': supportedSnapshotFormatVersion,
+      'databaseSchemaVersion': _db.schemaVersion,
       'appVersion': CanonicalSeedDatabase.appVersion,
       'exportedAt': LocalDateTime.now().toEthiopiaIsoString(),
       'isFinanceSetupCompleted': isSetupCompleted,
@@ -500,6 +502,12 @@ class DatabasePersistenceCoordinator {
     };
   }
 
+  static const int canonicalExchangeSchemaVersion = 5;
+  static const int supportedSnapshotFormatVersion = 2;
+  static const int legacyOmittedSnapshotFormatVersion = 1;
+  static const int minSupportedSnapshotFormatVersion = 1;
+  static const int maxSupportedSnapshotFormatVersion = 2;
+  static const int maxSupportedDatabaseSchemaVersion = 9;
   static const int minSupportedCanonicalSnapshotVersion = 4;
   static const int maxSupportedCanonicalSnapshotVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
@@ -742,6 +750,56 @@ class DatabasePersistenceCoordinator {
         'Backup header schema_version ($expectedHeaderVersion) does not match '
         'effective inner snapshot version ($resolvedVersion).',
       );
+    }
+
+    if (rawSnapshot.containsKey('snapshotFormatVersion')) {
+      final rawFormatVersion = rawSnapshot['snapshotFormatVersion'];
+      if (rawFormatVersion is! int) {
+        throw const BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Snapshot snapshotFormatVersion must be a valid integer.',
+        );
+      }
+      if (rawFormatVersion > maxSupportedSnapshotFormatVersion) {
+        throw BackupValidationException(
+          BackupFailureKind.unsupportedFutureSchema,
+          'Unsupported future snapshotFormatVersion $rawFormatVersion '
+          '(maximum supported version is $maxSupportedSnapshotFormatVersion). '
+          'Update Daywell before importing this snapshot.',
+        );
+      }
+      if (rawFormatVersion < minSupportedSnapshotFormatVersion) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Unsupported snapshotFormatVersion $rawFormatVersion '
+          '(supported versions are $minSupportedSnapshotFormatVersion..'
+          '$maxSupportedSnapshotFormatVersion).',
+        );
+      }
+    }
+
+    if (rawSnapshot.containsKey('databaseSchemaVersion')) {
+      final rawDbVersion = rawSnapshot['databaseSchemaVersion'];
+      if (rawDbVersion is! int) {
+        throw const BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Snapshot databaseSchemaVersion must be a valid integer.',
+        );
+      }
+      if (rawDbVersion < 1) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Invalid databaseSchemaVersion $rawDbVersion: must be >= 1.',
+        );
+      }
+      if (rawDbVersion > maxSupportedDatabaseSchemaVersion) {
+        throw BackupValidationException(
+          BackupFailureKind.unsupportedFutureSchema,
+          'Unsupported future databaseSchemaVersion $rawDbVersion '
+          '(maximum supported version is $maxSupportedDatabaseSchemaVersion). '
+          'Update Daywell before importing this snapshot.',
+        );
+      }
     }
 
     for (final field in _snapshotListFields) {
@@ -1445,10 +1503,11 @@ class DatabasePersistenceCoordinator {
           _optString(r, 'parentRecordId', ctx, allowEmpty: false);
       final rawTitle = _optString(r, 'title', ctx, allowEmpty: true)?.trim();
       final title = (rawTitle != null && rawTitle.isNotEmpty) ? rawTitle : null;
-      if (title != null && title.length > 300) {
+      const maxTitleLen = SharedProjectRules.maxTrackingRecordTitleLength;
+      if (title != null && title.length > maxTitleLen) {
         throw BackupValidationException(
           BackupFailureKind.invalidPayload,
-          'Invalid field "$ctx.title": length ${title.length} exceeds maximum of 300 characters.',
+          'Invalid field "$ctx.title": length ${title.length} exceeds maximum of $maxTitleLen characters.',
         );
       }
       final sortOrder = _optInt(r, 'sortOrder', ctx, min: 0) ?? 0;

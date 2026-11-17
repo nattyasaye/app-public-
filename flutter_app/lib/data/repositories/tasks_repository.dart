@@ -12,7 +12,7 @@ export '../../domain/tasks/task_contracts.dart';
 /// Drift SQLite implementation of [ITasksRepository].
 ///
 /// Unifies Task, Project, and Milestone persistence into a single atomic
-/// relational persistence unit under Drift SQLite schema v8.
+/// relational persistence unit under Drift SQLite schema v9.
 class DriftTasksRepository implements ITasksRepository {
   final AppDatabase _db;
 

@@ -236,9 +236,9 @@ void main() {
 
   group('Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation', () {
     test(
-        'Accepts canonical snapshots v4..v8 and omitted-version legacy default 5',
+        'Accepts canonical snapshots v4..v9 and omitted-version legacy default 5',
         () async {
-      for (final version in [4, 5, 6, 7, 8]) {
+      for (final version in [4, 5, 6, 7, 8, 9]) {
         final db = AppDatabase(NativeDatabase.memory());
         await db.ensureInitialized();
         final coordinator = DatabasePersistenceCoordinator(db);
@@ -265,7 +265,7 @@ void main() {
     });
 
     test(
-        'Rejects 0..3, 9, 99, negative, non-int, null, contradictory, and malformed snapshots with zero data/reminder/settings loss',
+        'Rejects 0..3, 10, 99, negative, non-int, null, contradictory, and malformed snapshots with zero data/reminder/settings loss',
         () async {
       final db = AppDatabase(NativeDatabase.memory());
       await db.ensureInitialized();
@@ -294,8 +294,8 @@ void main() {
           kind: BackupFailureKind.invalidSnapshotVersion,
         ),
         (
-          name: 'future schemaVersion 9',
-          payload: _minimalValidSnapshot(schemaVersion: 9),
+          name: 'future schemaVersion 10',
+          payload: _minimalValidSnapshot(schemaVersion: 10),
           kind: BackupFailureKind.unsupportedFutureSchema,
         ),
         (
@@ -660,9 +660,9 @@ void main() {
         _throwsValidation(BackupFailureKind.invalidSnapshotVersion),
       );
 
-      // Valid header schema 8 wrapping inner future version 9 -> unsupportedFutureSchema
+      // Valid header schema 8 wrapping inner future version 10 -> unsupportedFutureSchema
       final innerFutureEnvelope = await _encryptRawEnvelopeWithHeaderOverrides(
-        plaintext: jsonEncode(_minimalValidSnapshot(schemaVersion: 9)),
+        plaintext: jsonEncode(_minimalValidSnapshot(schemaVersion: 10)),
         passphrase: 'Passphrase#Stage342',
         headerSchemaVersion: 8,
       );
@@ -673,6 +673,123 @@ void main() {
         ),
         _throwsValidation(BackupFailureKind.unsupportedFutureSchema),
       );
+    });
+
+    test(
+        'Stage 1.1 separates snapshotFormatVersion (1..2) & databaseSchemaVersion (1..9) from exchange schemaVersion (4..9) across coordinator and encryption service',
+        () async {
+      final service = EncryptionBackupService();
+
+      // Accepted canonical combinations (with exchange schemaVersion 5, snapshotFormatVersion 1|2|omitted, databaseSchemaVersion 9|omitted)
+      final acceptedSnapshots = <Map<String, dynamic>>[
+        _minimalValidSnapshot(schemaVersion: 5)
+          ..['snapshotFormatVersion'] = 2
+          ..['databaseSchemaVersion'] = 9,
+        _minimalValidSnapshot(schemaVersion: 5)
+          ..['snapshotFormatVersion'] = 1
+          ..['databaseSchemaVersion'] = 8,
+        _minimalValidSnapshot(schemaVersion: 8), // omitted snapshotFormatVersion -> legacy 1
+        _minimalValidSnapshot(schemaVersion: 9), // pre-1.1 v9 snapshot without snapshotFormatVersion
+      ];
+
+      for (final snap in acceptedSnapshots) {
+        final rawJson = jsonEncode(snap);
+        final headerSv = snap['schemaVersion'] as int;
+        final env = await service.encryptDatabasePayload(
+          rawDatabaseJson: rawJson,
+          passphrase: 'SepPass#11',
+          schemaVersion: headerSv,
+        );
+        expect(
+          await service.decryptDatabasePayload(
+            encryptedEnvelopeJson: env,
+            passphrase: 'SepPass#11',
+          ),
+          rawJson,
+        );
+        expect(
+          DatabasePersistenceCoordinator.validateCanonicalSnapshot(
+            snap,
+            expectedHeaderVersion: headerSv,
+          ),
+          headerSv,
+        );
+      }
+
+      // Rejected future / invalid snapshotFormatVersion and databaseSchemaVersion fail closed
+      final rejectedMetaCases = <({
+        String name,
+        Map<String, dynamic> snap,
+        BackupFailureKind kind,
+      })>[
+        (
+          name: 'future snapshotFormatVersion 3',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 3,
+          kind: BackupFailureKind.unsupportedFutureSchema,
+        ),
+        (
+          name: 'invalid snapshotFormatVersion 0',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 0,
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+        (
+          name: 'non-int snapshotFormatVersion',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = '2',
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+        (
+          name: 'null snapshotFormatVersion',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = null,
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+        (
+          name: 'future databaseSchemaVersion 10',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 2
+            ..['databaseSchemaVersion'] = 10,
+          kind: BackupFailureKind.unsupportedFutureSchema,
+        ),
+        (
+          name: 'invalid databaseSchemaVersion 0',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['databaseSchemaVersion'] = 0,
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+        (
+          name: 'non-int databaseSchemaVersion',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['databaseSchemaVersion'] = '9',
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+      ];
+
+      for (final tc in rejectedMetaCases) {
+        expect(
+          () => DatabasePersistenceCoordinator.validateCanonicalSnapshot(
+            tc.snap,
+            expectedHeaderVersion: 5,
+          ),
+          _throwsValidation(tc.kind),
+          reason: '${tc.name} must fail coordinator validation',
+        );
+        final env = await service.encryptDatabasePayload(
+          rawDatabaseJson: jsonEncode(tc.snap),
+          passphrase: 'SepPass#11',
+          schemaVersion: 5,
+        );
+        await expectLater(
+          () => service.decryptDatabasePayload(
+            encryptedEnvelopeJson: env,
+            passphrase: 'SepPass#11',
+          ),
+          _throwsValidation(tc.kind),
+          reason: '${tc.name} must fail encryption service validation',
+        );
+      }
     });
 
     test(
@@ -959,6 +1076,20 @@ void main() {
       expect(manager.liquidCashCents, 330000);
 
       final validBackup = await manager.exportEncryptedBackup('SecretKey#342');
+      final decodedBackup = jsonDecode(validBackup) as Map<String, dynamic>;
+      expect(
+        (decodedBackup['header'] as Map<String, dynamic>)['schema_version'],
+        5,
+      );
+      final decryptedPayload = jsonDecode(
+        await EncryptionBackupService().decryptDatabasePayload(
+          encryptedEnvelopeJson: validBackup,
+          passphrase: 'SecretKey#342',
+        ),
+      ) as Map<String, dynamic>;
+      expect(decryptedPayload['schemaVersion'], 5);
+      expect(decryptedPayload['snapshotFormatVersion'], 2);
+      expect(decryptedPayload['databaseSchemaVersion'], 9);
       final quarantineDir =
           Directory(p.join(docsDir.path, 'recovery_quarantine'));
 

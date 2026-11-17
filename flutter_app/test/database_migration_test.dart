@@ -15,7 +15,9 @@ import 'package:personal_management_app/data/repositories/calendar_repository.da
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
 import 'package:personal_management_app/data/repositories/inbox_repository.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
+import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
+import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 
 import 'support/sqlite_test_helper.dart';
@@ -498,7 +500,7 @@ void main() {
         // 1. Upgraded schema version & FK integrity
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 8);
+        expect(versionRows.single.read<int>('user_version'), 9);
 
         final fkCheckRows =
             await migratedDb.customSelect('PRAGMA foreign_key_check').get();
@@ -637,7 +639,7 @@ void main() {
 
         final reopenedVersion =
             await reopenedDb.customSelect('PRAGMA user_version').get();
-        expect(reopenedVersion.single.read<int>('user_version'), 8);
+        expect(reopenedVersion.single.read<int>('user_version'), 9);
 
         final reopenedEvents =
             await DriftCalendarRepository(reopenedDb).getEvents();
@@ -958,7 +960,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 8);
+        expect(versionRows.single.read<int>('user_version'), 9);
 
         final fkCheck =
             await migratedDb.customSelect('PRAGMA foreign_key_check').get();
@@ -1717,7 +1719,9 @@ void main() {
 
         final exported =
             await DatabasePersistenceCoordinator(reopened).exportSnapshot();
-        expect(exported['schemaVersion'], 9);
+        expect(exported['schemaVersion'], 5);
+        expect(exported['snapshotFormatVersion'], 2);
+        expect(exported['databaseSchemaVersion'], 9);
         final exportedRems = (exported['reminders'] as List).cast<Map>();
         expect(exportedRems.single['title'], 'Water Plants');
         expect(exportedRems.single['channelId'], 'daily_habits');
@@ -2056,7 +2060,9 @@ void main() {
 
         final exported =
             await DatabasePersistenceCoordinator(sourceDb).exportSnapshot();
-        expect(exported['schemaVersion'], 9);
+        expect(exported['schemaVersion'], 5);
+        expect(exported['snapshotFormatVersion'], 2);
+        expect(exported['databaseSchemaVersion'], 9);
         expect(
           (exported['projectTrackingBlocks'] as List).length,
           1,
@@ -2085,9 +2091,11 @@ void main() {
           isEmpty,
         );
 
-        // Backward compat: v8 snapshot without tracking arrays imports cleanly
+        // Backward compat: v8 snapshot without tracking arrays or Stage 1.1 format keys imports cleanly
         final v8Snapshot = Map<String, dynamic>.from(exported)
           ..['schemaVersion'] = 8
+          ..remove('snapshotFormatVersion')
+          ..remove('databaseSchemaVersion')
           ..remove('projectTrackingBlocks')
           ..remove('projectTrackingRecords');
         final v8Res = await DatabasePersistenceCoordinator(targetDb)
@@ -2143,7 +2151,485 @@ void main() {
         );
       },
     );
+
+    test(
+      '4. Real v1 -> v9 upgrade preserves populated Projects and all legacy '
+      'tables without TableMigration or duplicate-column errors',
+      () async {
+        final dbFile = File(p.join(tempDir.path, 'real_v1_to_v9.sqlite'));
+        _createRawV1Database(dbFile);
+
+        final migratedDb = AppDatabase(NativeDatabase(dbFile));
+        await migratedDb.ensureInitialized();
+
+        expect(
+          (await migratedDb.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          (await migratedDb.customSelect('PRAGMA foreign_keys').get())
+              .single
+              .read<int>('foreign_keys'),
+          1,
+        );
+        expect(
+          await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+
+        final projRow = await migratedDb
+            .customSelect(
+              'SELECT id, title, target_date, is_archived, start_date, '
+              'custom_fields_json, created_at, updated_at '
+              "FROM projects WHERE id = 'proj-v1';",
+            )
+            .getSingle();
+        expect(projRow.read<String>('title'), 'V1 Project');
+        expect(projRow.read<String>('target_date'), '2026-11-10');
+        expect(projRow.read<int>('is_archived'), 0);
+        expect(projRow.readNullable<String>('start_date'), isNull);
+        expect(projRow.read<String>('custom_fields_json'), '{}');
+        expect(
+          projRow.read<int>('updated_at'),
+          projRow.read<int>('created_at'),
+        );
+
+        final projectsRepo = DriftProjectsRepository(migratedDb);
+        final v1Project = await projectsRepo.getProjectById('proj-v1');
+        expect(v1Project, isNotNull);
+        expect(v1Project!.isArchived, isFalse);
+
+        final created = await projectsRepo.createProject(
+          ProjectEntity(
+            id: 'proj-post-v1',
+            title: 'Post V1 Upgrade Project',
+            status: 'active',
+            createdAt: DateTime.utc(2026, 11, 17, 10, 0),
+          ),
+        );
+        expect(created.id, 'proj-post-v1');
+        expect((await DriftTasksRepository(migratedDb).getTasks()).length, 1);
+        expect((await DriftNotesRepository(migratedDb).getNotes()).length, 1);
+        await migratedDb.close();
+
+        final reopened = AppDatabase(NativeDatabase(dbFile));
+        await reopened.ensureInitialized();
+        expect(
+          (await reopened.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await DriftProjectsRepository(reopened).getProjectById('proj-v1'),
+          isNotNull,
+        );
+        expect(
+          await DriftProjectsRepository(reopened).getProjectById('proj-post-v1'),
+          isNotNull,
+        );
+        expect(
+          await reopened.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+        await reopened.close();
+      },
+    );
+
+    test(
+      '5. Real v2 -> v9 upgrade preserves populated Projects, tasks, and '
+      'pre-v3 double-entry ledger cleanly',
+      () async {
+        final dbFile = File(p.join(tempDir.path, 'real_v2_to_v9.sqlite'));
+        _createRawV2Database(dbFile);
+
+        final migratedDb = AppDatabase(NativeDatabase(dbFile));
+        await migratedDb.ensureInitialized();
+
+        expect(
+          (await migratedDb.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+
+        final projRow = await migratedDb
+            .customSelect(
+              'SELECT id, title, target_date, is_archived, start_date, '
+              'custom_fields_json, created_at, updated_at '
+              "FROM projects WHERE id = 'proj-v2';",
+            )
+            .getSingle();
+        expect(projRow.read<String>('title'), 'V2 Project');
+        expect(projRow.read<String>('target_date'), '2026-11-10');
+        expect(projRow.read<int>('is_archived'), 0);
+        expect(projRow.readNullable<String>('start_date'), isNull);
+        expect(projRow.read<String>('custom_fields_json'), '{}');
+        expect(
+          projRow.read<int>('updated_at'),
+          projRow.read<int>('created_at'),
+        );
+
+        final accounts = await DriftFinanceRepository(migratedDb).getAccounts();
+        expect(accounts.map((a) => a.id), contains('acc-v2-cash'));
+
+        final projectsRepo = DriftProjectsRepository(migratedDb);
+        expect(await projectsRepo.getProjectById('proj-v2'), isNotNull);
+        await projectsRepo.createProject(
+          ProjectEntity(
+            id: 'proj-post-v2',
+            title: 'Post V2 Upgrade Project',
+            status: 'active',
+            createdAt: DateTime.utc(2026, 11, 17, 10, 0),
+          ),
+        );
+        await migratedDb.close();
+
+        final reopened = AppDatabase(NativeDatabase(dbFile));
+        await reopened.ensureInitialized();
+        expect(
+          (await reopened.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await DriftProjectsRepository(reopened).getProjectById('proj-v2'),
+          isNotNull,
+        );
+        expect(
+          await DriftProjectsRepository(reopened).getProjectById('proj-post-v2'),
+          isNotNull,
+        );
+        await reopened.close();
+      },
+    );
+
+    test(
+      '6. Real v5 -> v9 upgrade preserves populated Projects, civil dates, '
+      'and hardens v6/v7 finance cleanly',
+      () async {
+        final dbFile = File(p.join(tempDir.path, 'real_v5_to_v9.sqlite'));
+        _createRawV5Database(dbFile);
+
+        final migratedDb = AppDatabase(NativeDatabase(dbFile));
+        await migratedDb.ensureInitialized();
+
+        expect(
+          (await migratedDb.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+
+        final projRow = await migratedDb
+            .customSelect(
+              'SELECT id, title, target_date, is_archived, start_date, '
+              'custom_fields_json, created_at, updated_at '
+              "FROM projects WHERE id = 'proj-v5';",
+            )
+            .getSingle();
+        expect(projRow.read<String>('title'), 'V5 Project');
+        expect(projRow.read<String>('target_date'), '2026-12-15');
+        expect(projRow.read<int>('is_archived'), 0);
+        expect(projRow.readNullable<String>('start_date'), isNull);
+        expect(projRow.read<String>('custom_fields_json'), '{}');
+        expect(
+          projRow.read<int>('updated_at'),
+          projRow.read<int>('created_at'),
+        );
+
+        final projectsRepo = DriftProjectsRepository(migratedDb);
+        expect(await projectsRepo.getProjectById('proj-v5'), isNotNull);
+        await projectsRepo.createProject(
+          ProjectEntity(
+            id: 'proj-post-v5',
+            title: 'Post V5 Upgrade Project',
+            status: 'active',
+            createdAt: DateTime.utc(2026, 11, 17, 10, 0),
+          ),
+        );
+        await migratedDb.close();
+
+        final reopened = AppDatabase(NativeDatabase(dbFile));
+        await reopened.ensureInitialized();
+        expect(
+          (await reopened.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await DriftProjectsRepository(reopened).getProjectById('proj-v5'),
+          isNotNull,
+        );
+        expect(
+          await DriftProjectsRepository(reopened).getProjectById('proj-post-v5'),
+          isNotNull,
+        );
+        await reopened.close();
+      },
+    );
+
+    test(
+      '7. Deliberately failed pre-v5 (v4 -> v9) migration rolls back '
+      'atomically leaving v4 projects schema, user_version=4, and data intact',
+      () async {
+        final dbFile = File(p.join(tempDir.path, 'v4_to_v9_rollback.sqlite'));
+        const ts = 1794304800; // 2026-11-10T10:00:00Z
+        final rawSetup = sqlite3.open(dbFile.path);
+        try {
+          rawSetup.execute('PRAGMA foreign_keys = OFF;');
+          rawSetup.execute('''
+            CREATE TABLE inbox_items (id TEXT NOT NULL PRIMARY KEY, raw_text TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', is_processed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+            CREATE TABLE goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, target_date INTEGER, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+            CREATE TABLE projects (id TEXT NOT NULL PRIMARY KEY, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'active', target_date INTEGER, created_at INTEGER NOT NULL);
+            CREATE TABLE milestones (id TEXT NOT NULL PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE, title TEXT NOT NULL, due_date INTEGER, is_completed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+            CREATE TABLE tasks (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'inbox', priority TEXT NOT NULL DEFAULT 'medium', due_date INTEGER, scheduled_date INTEGER, estimated_duration_minutes INTEGER, project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, milestone_id TEXT REFERENCES milestones (id) ON DELETE SET NULL, subtasks_json TEXT NOT NULL DEFAULT '[]', labels_json TEXT NOT NULL DEFAULT '[]', is_pinned INTEGER NOT NULL DEFAULT 0, is_my_day INTEGER NOT NULL DEFAULT 0, recurrence_rule TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+            CREATE TABLE notes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, tags_json TEXT NOT NULL DEFAULT '[]', is_pinned INTEGER NOT NULL DEFAULT 0, is_favorite INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0, is_trashed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+            CREATE TABLE calendar_events (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, date_iso TEXT NOT NULL, start_time TEXT, end_time TEXT, is_all_day INTEGER NOT NULL DEFAULT 0, category TEXT NOT NULL DEFAULT 'personal', color_hex TEXT NOT NULL DEFAULT '#1B4D3E', has_reminder INTEGER NOT NULL DEFAULT 0, notes TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+            CREATE TABLE financial_categories (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, color_hex TEXT NOT NULL DEFAULT '#4CAF50', is_default INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE financial_transactions (id TEXT NOT NULL PRIMARY KEY, category_id TEXT NOT NULL REFERENCES financial_categories (id), amount_cents INTEGER NOT NULL, type TEXT NOT NULL, transaction_date INTEGER NOT NULL, note TEXT, payee TEXT, account_id TEXT, destination_account_id TEXT, is_superseded INTEGER NOT NULL DEFAULT 0, corrected_from_id TEXT, correction_reason TEXT, created_at INTEGER NOT NULL);
+            CREATE TABLE financial_commitments (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, amount_cents INTEGER NOT NULL, due_date INTEGER NOT NULL, is_paid INTEGER NOT NULL DEFAULT 0, recurring_rule TEXT, created_at INTEGER NOT NULL);
+            CREATE TABLE savings_goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, target_cents INTEGER NOT NULL, current_allocated_cents INTEGER NOT NULL DEFAULT 0, target_date INTEGER, created_at INTEGER NOT NULL);
+            CREATE TABLE reminders (id TEXT NOT NULL PRIMARY KEY, target_id TEXT NOT NULL, target_type TEXT NOT NULL, trigger_time_utc INTEGER NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+            CREATE TABLE app_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+            CREATE TABLE accounts_table (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, currency_code TEXT NOT NULL DEFAULT 'ETB', opening_balance_cents INTEGER NOT NULL DEFAULT 0, opening_balance_date TEXT, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+            CREATE TABLE parties_table (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, phone TEXT, notes TEXT, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+            CREATE TABLE journal_entries_table (id TEXT NOT NULL PRIMARY KEY, entry_type TEXT NOT NULL, description TEXT NOT NULL, occurrence_date TEXT NOT NULL, is_voided INTEGER NOT NULL DEFAULT 0, void_reason TEXT, created_at INTEGER NOT NULL);
+            CREATE TABLE postings_table (id TEXT NOT NULL PRIMARY KEY, entry_id TEXT NOT NULL REFERENCES journal_entries_table (id) ON DELETE CASCADE, account_id TEXT NOT NULL REFERENCES accounts_table (id), amount_cents INTEGER NOT NULL, direction TEXT NOT NULL, account_movement_date TEXT NOT NULL, category_id TEXT REFERENCES financial_categories (id), note TEXT);
+            CREATE TABLE debts_table (id TEXT NOT NULL PRIMARY KEY, origin_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id), party_id TEXT NOT NULL REFERENCES parties_table (id), debt_type TEXT NOT NULL, principal_cents INTEGER NOT NULL, outstanding_cents INTEGER NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+            CREATE TABLE settlement_allocations_table (id TEXT NOT NULL PRIMARY KEY, settlement_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id), debt_id TEXT NOT NULL REFERENCES debts_table (id), allocated_cents INTEGER NOT NULL, settlement_date TEXT NOT NULL);
+            INSERT INTO financial_categories (id, name, type) VALUES ('cat-v4-rb', 'Food', 'expense');
+            INSERT INTO projects (id, title, target_date, created_at)
+            VALUES ('proj-v4-valid', 'Valid V4 Project', $ts, $ts),
+                   ('proj-v4-corrupt', 'Corrupt V4 Project', 'bad-date', $ts);
+            PRAGMA user_version = 4;
+          ''');
+        } finally {
+          rawSetup.dispose();
+        }
+
+        final failingDb = AppDatabase(NativeDatabase(dbFile));
+        await expectLater(
+          failingDb.ensureInitialized(),
+          throwsA(isA<StateError>()),
+        );
+        await failingDb.close();
+
+        final rawCheck = sqlite3.open(dbFile.path);
+        try {
+          expect(
+            rawCheck.select('PRAGMA user_version;').single['user_version'],
+            4,
+          );
+          final projectCols = rawCheck
+              .select("PRAGMA table_info('projects');")
+              .map((r) => r['name'] as String)
+              .toSet();
+          expect(projectCols, isNot(contains('is_archived')));
+          expect(projectCols, isNot(contains('custom_fields_json')));
+          expect(
+            rawCheck.select(
+              "SELECT name FROM sqlite_master WHERE type='table' "
+              "AND name IN ('project_tracking_blocks', 'project_tracking_records');",
+            ),
+            isEmpty,
+          );
+          expect(rawCheck.select('SELECT id FROM projects;').length, 2);
+
+          // Fix corrupt date and verify clean v4 -> v9 recovery
+          rawCheck.execute(
+            "UPDATE projects SET target_date = $ts WHERE id = 'proj-v4-corrupt';",
+          );
+        } finally {
+          rawCheck.dispose();
+        }
+
+        final recoveredDb = AppDatabase(NativeDatabase(dbFile));
+        await recoveredDb.ensureInitialized();
+        expect(
+          (await recoveredDb.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await recoveredDb.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+        expect(
+          (await DriftProjectsRepository(recoveredDb).getProjects()).length,
+          2,
+        );
+        await recoveredDb.close();
+      },
+    );
   });
+}
+
+void _createRawV1Database(File dbFile) {
+  final rawDb = sqlite3.open(dbFile.path);
+  const ts = 1794304800; // 2026-11-10T10:00:00Z -> 2026-11-10 in EAT
+  try {
+    rawDb.execute('PRAGMA foreign_keys = OFF;');
+    rawDb.execute('''
+      CREATE TABLE inbox_items (id TEXT NOT NULL PRIMARY KEY, raw_text TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', is_processed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, target_date INTEGER, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+      CREATE TABLE projects (id TEXT NOT NULL PRIMARY KEY, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'active', target_date INTEGER, created_at INTEGER NOT NULL);
+      CREATE TABLE milestones (id TEXT NOT NULL PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE, title TEXT NOT NULL, due_date INTEGER, is_completed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE tasks (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'inbox', priority TEXT NOT NULL DEFAULT 'medium', due_date INTEGER, scheduled_date INTEGER, estimated_duration_minutes INTEGER, project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, milestone_id TEXT REFERENCES milestones (id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE notes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE financial_categories (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, color_hex TEXT NOT NULL DEFAULT '#4CAF50', is_default INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE financial_transactions (id TEXT NOT NULL PRIMARY KEY, category_id TEXT NOT NULL REFERENCES financial_categories (id), amount_cents INTEGER NOT NULL, type TEXT NOT NULL, transaction_date INTEGER NOT NULL, note TEXT, payee TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE financial_commitments (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, amount_cents INTEGER NOT NULL, due_date INTEGER NOT NULL, is_paid INTEGER NOT NULL DEFAULT 0, recurring_rule TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE savings_goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, target_cents INTEGER NOT NULL, current_allocated_cents INTEGER NOT NULL DEFAULT 0, target_date INTEGER, created_at INTEGER NOT NULL);
+      CREATE TABLE reminders (id TEXT NOT NULL PRIMARY KEY, target_id TEXT NOT NULL, target_type TEXT NOT NULL, trigger_time_utc INTEGER NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+      CREATE TABLE app_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+
+      INSERT INTO financial_categories (id, name, type, color_hex, is_default)
+      VALUES ('cat-v1-food', 'Food', 'expense', '#EF4444', 1);
+      INSERT INTO goals (id, title, target_date, created_at)
+      VALUES ('goal-v1', 'V1 Goal', $ts, $ts);
+      INSERT INTO projects (id, goal_id, title, description, status, target_date, created_at)
+      VALUES ('proj-v1', 'goal-v1', 'V1 Project', 'Created in v1', 'active', $ts, $ts);
+      INSERT INTO milestones (id, project_id, title, due_date, is_completed, created_at)
+      VALUES ('ms-v1', 'proj-v1', 'V1 Milestone', $ts, 0, $ts);
+      INSERT INTO tasks (id, title, due_date, project_id, milestone_id, created_at, updated_at)
+      VALUES ('task-v1', 'V1 Task', $ts, 'proj-v1', 'ms-v1', $ts, $ts);
+      INSERT INTO notes (id, title, content, project_id, goal_id, created_at, updated_at)
+      VALUES ('note-v1', 'V1 Note', 'Preserved content', 'proj-v1', 'goal-v1', $ts, $ts);
+      INSERT INTO inbox_items (id, raw_text, created_at)
+      VALUES ('inbox-v1', 'V1 Inbox item', $ts);
+      INSERT INTO financial_transactions (id, category_id, amount_cents, type, transaction_date, created_at)
+      VALUES ('tx-v1', 'cat-v1-food', 12000, 'expense', $ts, $ts);
+      INSERT INTO financial_commitments (id, title, amount_cents, due_date, created_at)
+      VALUES ('com-v1', 'V1 Bill', 50000, $ts, $ts);
+      INSERT INTO savings_goals (id, title, target_cents, target_date, created_at)
+      VALUES ('sav-v1', 'V1 Savings', 100000, $ts, $ts);
+      INSERT INTO reminders (id, target_id, target_type, trigger_time_utc, created_at)
+      VALUES ('rem-v1', 'task-v1', 'task', $ts, $ts);
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ('initial_seed_completed', 'true', $ts),
+             ('is_finance_setup_completed', 'true', $ts),
+             ('opening_balance_cents', '100000', $ts);
+      PRAGMA user_version = 1;
+    ''');
+  } finally {
+    rawDb.dispose();
+  }
+}
+
+void _createRawV2Database(File dbFile) {
+  final rawDb = sqlite3.open(dbFile.path);
+  const ts = 1794304800; // 2026-11-10T10:00:00Z -> 2026-11-10 in EAT
+  try {
+    rawDb.execute('PRAGMA foreign_keys = OFF;');
+    rawDb.execute('''
+      CREATE TABLE inbox_items (id TEXT NOT NULL PRIMARY KEY, raw_text TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', is_processed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, target_date INTEGER, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+      CREATE TABLE projects (id TEXT NOT NULL PRIMARY KEY, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'active', target_date INTEGER, created_at INTEGER NOT NULL);
+      CREATE TABLE milestones (id TEXT NOT NULL PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE, title TEXT NOT NULL, due_date INTEGER, is_completed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE tasks (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'inbox', priority TEXT NOT NULL DEFAULT 'medium', due_date INTEGER, scheduled_date INTEGER, estimated_duration_minutes INTEGER, project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, milestone_id TEXT REFERENCES milestones (id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE notes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE financial_categories (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, color_hex TEXT NOT NULL DEFAULT '#4CAF50', is_default INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE financial_transactions (id TEXT NOT NULL PRIMARY KEY, category_id TEXT NOT NULL REFERENCES financial_categories (id), amount_cents INTEGER NOT NULL, type TEXT NOT NULL, transaction_date INTEGER NOT NULL, note TEXT, payee TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE financial_commitments (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, amount_cents INTEGER NOT NULL, due_date INTEGER NOT NULL, is_paid INTEGER NOT NULL DEFAULT 0, recurring_rule TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE savings_goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, target_cents INTEGER NOT NULL, current_allocated_cents INTEGER NOT NULL DEFAULT 0, target_date INTEGER, created_at INTEGER NOT NULL);
+      CREATE TABLE reminders (id TEXT NOT NULL PRIMARY KEY, target_id TEXT NOT NULL, target_type TEXT NOT NULL, trigger_time_utc INTEGER NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+      CREATE TABLE app_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE accounts_table (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, currency_code TEXT NOT NULL DEFAULT 'ETB', is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE parties_table (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, phone TEXT, notes TEXT, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE journal_entries_table (id TEXT NOT NULL PRIMARY KEY, entry_type TEXT NOT NULL, description TEXT NOT NULL, occurrence_date TEXT NOT NULL, is_voided INTEGER NOT NULL DEFAULT 0, void_reason TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE postings_table (id TEXT NOT NULL PRIMARY KEY, entry_id TEXT NOT NULL REFERENCES journal_entries_table (id) ON DELETE CASCADE, account_id TEXT NOT NULL REFERENCES accounts_table (id), amount_cents INTEGER NOT NULL, direction TEXT NOT NULL, account_movement_date TEXT NOT NULL, category_id TEXT REFERENCES financial_categories (id), note TEXT);
+      CREATE TABLE debts_table (id TEXT NOT NULL PRIMARY KEY, origin_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id), party_id TEXT NOT NULL REFERENCES parties_table (id), debt_type TEXT NOT NULL, principal_cents INTEGER NOT NULL, outstanding_cents INTEGER NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+      CREATE TABLE settlement_allocations_table (id TEXT NOT NULL PRIMARY KEY, settlement_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id), debt_id TEXT NOT NULL REFERENCES debts_table (id), allocated_cents INTEGER NOT NULL, settlement_date TEXT NOT NULL);
+
+      INSERT INTO financial_categories (id, name, type, color_hex, is_default)
+      VALUES ('cat-v2-exp', 'Transport', 'expense', '#B45309', 1);
+      INSERT INTO accounts_table (id, name, type, currency_code, is_archived, created_at)
+      VALUES ('acc-v2-cash', 'Cash Wallet', 'asset', 'ETB', 0, $ts),
+             ('acc-v2-exp', 'Expense Ledger', 'expense', 'ETB', 0, $ts);
+      INSERT INTO journal_entries_table (id, entry_type, description, occurrence_date, created_at)
+      VALUES ('je-v2-1', 'standard', 'Bus fare', '2026-11-10', $ts);
+      INSERT INTO postings_table (id, entry_id, account_id, amount_cents, direction, account_movement_date, category_id)
+      VALUES ('post-v2-dr', 'je-v2-1', 'acc-v2-exp', 5000, 'debit', '2026-11-10', 'cat-v2-exp'),
+             ('post-v2-cr', 'je-v2-1', 'acc-v2-cash', 5000, 'credit', '2026-11-10', NULL);
+      INSERT INTO goals (id, title, target_date, created_at)
+      VALUES ('goal-v2', 'V2 Goal', $ts, $ts);
+      INSERT INTO projects (id, goal_id, title, target_date, created_at)
+      VALUES ('proj-v2', 'goal-v2', 'V2 Project', $ts, $ts);
+      INSERT INTO tasks (id, title, due_date, project_id, created_at, updated_at)
+      VALUES ('task-v2', 'V2 Task', $ts, 'proj-v2', $ts, $ts);
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ('initial_seed_completed', 'true', $ts),
+             ('is_finance_setup_completed', 'true', $ts);
+      PRAGMA user_version = 2;
+    ''');
+  } finally {
+    rawDb.dispose();
+  }
+}
+
+void _createRawV5Database(File dbFile) {
+  final rawDb = sqlite3.open(dbFile.path);
+  const ts = 1794304800; // 2026-11-10T10:00:00Z
+  try {
+    rawDb.execute('PRAGMA foreign_keys = OFF;');
+    rawDb.execute('''
+      CREATE TABLE inbox_items (id TEXT NOT NULL PRIMARY KEY, raw_text TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', is_processed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, target_date TEXT, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+      CREATE TABLE projects (id TEXT NOT NULL PRIMARY KEY, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'active', target_date TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE milestones (id TEXT NOT NULL PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE, title TEXT NOT NULL, due_date TEXT, is_completed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE tasks (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, description TEXT, status TEXT NOT NULL DEFAULT 'inbox', priority TEXT NOT NULL DEFAULT 'medium', due_date TEXT, scheduled_date TEXT, estimated_duration_minutes INTEGER, project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, milestone_id TEXT REFERENCES milestones (id) ON DELETE SET NULL, subtasks_json TEXT NOT NULL DEFAULT '[]', labels_json TEXT NOT NULL DEFAULT '[]', is_pinned INTEGER NOT NULL DEFAULT 0, is_my_day INTEGER NOT NULL DEFAULT 0, recurrence_rule TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE notes (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, content TEXT NOT NULL, category TEXT NOT NULL DEFAULT 'general', project_id TEXT REFERENCES projects (id) ON DELETE SET NULL, goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL, tags_json TEXT NOT NULL DEFAULT '[]', is_pinned INTEGER NOT NULL DEFAULT 0, is_favorite INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0, is_trashed INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE calendar_events (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, date_iso TEXT NOT NULL, end_date_iso TEXT, start_time TEXT, end_time TEXT, is_all_day INTEGER NOT NULL DEFAULT 0, category TEXT NOT NULL DEFAULT 'personal', color_hex TEXT NOT NULL DEFAULT '#1B4D3E', has_reminder INTEGER NOT NULL DEFAULT 0, notes TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE financial_categories (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, color_hex TEXT NOT NULL DEFAULT '#4CAF50', is_default INTEGER NOT NULL DEFAULT 0, is_archived INTEGER NOT NULL DEFAULT 0);
+      CREATE TABLE financial_transactions (id TEXT NOT NULL PRIMARY KEY, category_id TEXT NOT NULL REFERENCES financial_categories (id), amount_cents INTEGER NOT NULL, type TEXT NOT NULL, transaction_date TEXT NOT NULL, note TEXT, payee TEXT, account_id TEXT, destination_account_id TEXT, is_superseded INTEGER NOT NULL DEFAULT 0, corrected_from_id TEXT, correction_reason TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE financial_commitments (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, amount_cents INTEGER NOT NULL, due_date TEXT NOT NULL, is_paid INTEGER NOT NULL DEFAULT 0, recurring_rule TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE savings_goals (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, target_cents INTEGER NOT NULL, current_allocated_cents INTEGER NOT NULL DEFAULT 0, target_date TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE reminders (id TEXT NOT NULL PRIMARY KEY, target_id TEXT NOT NULL, target_type TEXT NOT NULL, trigger_time_utc INTEGER NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
+      CREATE TABLE app_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
+      CREATE TABLE accounts_table (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, currency_code TEXT NOT NULL DEFAULT 'ETB', opening_balance_cents INTEGER NOT NULL DEFAULT 0, opening_balance_date TEXT, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE parties_table (id TEXT NOT NULL PRIMARY KEY, name TEXT NOT NULL, phone TEXT, notes TEXT, is_archived INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL);
+      CREATE TABLE journal_entries_table (id TEXT NOT NULL PRIMARY KEY, entry_type TEXT NOT NULL, description TEXT NOT NULL, occurrence_date TEXT NOT NULL, is_voided INTEGER NOT NULL DEFAULT 0, void_reason TEXT, created_at INTEGER NOT NULL);
+      CREATE TABLE postings_table (id TEXT NOT NULL PRIMARY KEY, entry_id TEXT NOT NULL REFERENCES journal_entries_table (id) ON DELETE CASCADE, account_id TEXT NOT NULL REFERENCES accounts_table (id), amount_cents INTEGER NOT NULL, direction TEXT NOT NULL, account_movement_date TEXT NOT NULL, category_id TEXT REFERENCES financial_categories (id), note TEXT);
+      CREATE TABLE debts_table (id TEXT NOT NULL PRIMARY KEY, origin_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id), party_id TEXT NOT NULL REFERENCES parties_table (id), debt_type TEXT NOT NULL, principal_cents INTEGER NOT NULL, outstanding_cents INTEGER NOT NULL, due_date TEXT, status TEXT NOT NULL DEFAULT 'active', created_at INTEGER NOT NULL);
+      CREATE TABLE settlement_allocations_table (id TEXT NOT NULL PRIMARY KEY, settlement_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id), debt_id TEXT NOT NULL REFERENCES debts_table (id), allocated_cents INTEGER NOT NULL, settlement_date TEXT NOT NULL);
+
+      INSERT INTO financial_categories (id, name, type, color_hex, is_default)
+      VALUES ('cat-v5-exp', 'Groceries', 'expense', '#EF4444', 1);
+      INSERT INTO accounts_table (id, name, type, currency_code, opening_balance_cents, opening_balance_date, created_at)
+      VALUES ('acc-v5-cbe', 'CBE v5', 'asset', 'ETB', 250000, '2026-11-01', $ts);
+      INSERT INTO goals (id, title, target_date, created_at)
+      VALUES ('goal-v5', 'V5 Goal', '2026-12-31', $ts);
+      INSERT INTO projects (id, goal_id, title, target_date, created_at)
+      VALUES ('proj-v5', 'goal-v5', 'V5 Project', '2026-12-15', $ts);
+      INSERT INTO tasks (id, title, due_date, project_id, created_at, updated_at)
+      VALUES ('task-v5', 'V5 Task', '2026-11-20', 'proj-v5', $ts, $ts);
+      INSERT INTO calendar_events (id, title, date_iso, created_at, updated_at)
+      VALUES ('evt-v5', 'V5 Event', '2026-11-12', $ts, $ts);
+      INSERT INTO reminders (id, target_id, target_type, trigger_time_utc, created_at)
+      VALUES ('rem-v5', 'task-v5', 'task', $ts, $ts);
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ('initial_seed_completed', 'true', $ts),
+             ('is_finance_setup_completed', 'true', $ts),
+             ('opening_balance_cents', '250000', $ts);
+      PRAGMA user_version = 5;
+    ''');
+  } finally {
+    rawDb.dispose();
+  }
 }
 
 void _createRawV7Database(File dbFile) {

@@ -48,6 +48,7 @@
       "maxCustomFieldSelectOptions": 50,
       "maxCustomFieldIdLength": 64,
       "maxCustomFieldTextLength": 1000,
+      "maxTrackingRecordTitleLength": 300,
       "maxHierarchyDepth": 3
     },
     "rules": {

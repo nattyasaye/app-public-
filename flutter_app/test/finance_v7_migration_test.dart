@@ -765,13 +765,14 @@ void main() {
             openingBalanceDate: '2026-11-01',
           ),
         ]);
-        final snapJson = jsonEncode(
-            await DatabasePersistenceCoordinator(seedDb).exportSnapshot());
+        final snapMap =
+            await DatabasePersistenceCoordinator(seedDb).exportSnapshot();
+        final snapJson = jsonEncode(snapMap);
         final encryptedEnvelope =
             await EncryptionBackupService().encryptDatabasePayload(
           rawDatabaseJson: snapJson,
           passphrase: 'recover-password',
-          schemaVersion: seedDb.schemaVersion,
+          schemaVersion: snapMap['schemaVersion'] as int,
         );
         await seedDb.close();
 

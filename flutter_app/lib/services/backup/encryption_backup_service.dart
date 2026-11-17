@@ -48,6 +48,9 @@ class EncryptionBackupService {
   static const int minSupportedCanonicalSchemaVersion = 4;
   static const int maxSupportedCanonicalSchemaVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
+  static const int minSupportedSnapshotFormatVersion = 1;
+  static const int maxSupportedSnapshotFormatVersion = 2;
+  static const int maxSupportedDatabaseSchemaVersion = 9;
   static const String currentAppVersion = '1.0.2+3';
   static const String authenticationFailureMessage =
       'Backup authentication failed. Check the passphrase and ensure the backup file has not been modified.';
@@ -505,6 +508,54 @@ class EncryptionBackupService {
         'Backup header schema_version ($headerSchemaVersion) does not match '
         'effective inner snapshot version ($innerVersion).',
       );
+    }
+
+    if (payload.containsKey('snapshotFormatVersion')) {
+      final rawFormatVersion = payload['snapshotFormatVersion'];
+      if (rawFormatVersion is! int) {
+        throw const BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Decrypted backup payload snapshotFormatVersion must be an integer.',
+        );
+      }
+      if (rawFormatVersion > maxSupportedSnapshotFormatVersion) {
+        throw BackupValidationException(
+          BackupFailureKind.unsupportedFutureSchema,
+          'Unsupported future inner snapshotFormatVersion $rawFormatVersion '
+          '(maximum supported version is $maxSupportedSnapshotFormatVersion).',
+        );
+      }
+      if (rawFormatVersion < minSupportedSnapshotFormatVersion) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Unsupported inner snapshotFormatVersion $rawFormatVersion '
+          '(supported versions are $minSupportedSnapshotFormatVersion..'
+          '$maxSupportedSnapshotFormatVersion).',
+        );
+      }
+    }
+
+    if (payload.containsKey('databaseSchemaVersion')) {
+      final rawDbVersion = payload['databaseSchemaVersion'];
+      if (rawDbVersion is! int) {
+        throw const BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Decrypted backup payload databaseSchemaVersion must be an integer.',
+        );
+      }
+      if (rawDbVersion < 1) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidSnapshotVersion,
+          'Invalid inner databaseSchemaVersion $rawDbVersion: must be >= 1.',
+        );
+      }
+      if (rawDbVersion > maxSupportedDatabaseSchemaVersion) {
+        throw BackupValidationException(
+          BackupFailureKind.unsupportedFutureSchema,
+          'Unsupported future inner databaseSchemaVersion $rawDbVersion '
+          '(maximum supported version is $maxSupportedDatabaseSchemaVersion).',
+        );
+      }
     }
   }
 }

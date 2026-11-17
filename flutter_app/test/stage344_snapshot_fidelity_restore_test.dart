@@ -430,6 +430,9 @@ void main() {
 
           final coordinator = DatabasePersistenceCoordinator(db);
           final exportedBefore = await coordinator.exportSnapshot();
+          expect(exportedBefore['schemaVersion'], 5);
+          expect(exportedBefore['snapshotFormatVersion'], 2);
+          expect(exportedBefore['databaseSchemaVersion'], 9);
           final exportedKeys = (exportedBefore['appSettings'] as List)
               .cast<Map<String, dynamic>>()
               .map((e) => e['key'] as String)

@@ -20,6 +20,7 @@ import {
   SharedRecurringRule,
   SharedReminder,
   SharedAppSetting,
+  SHARED_BUSINESS_RULES,
   CANONICAL_SEED_DATABASE,
   KNOWN_SEED_IDS,
   SYSTEM_CONTROL_ACCOUNT_IDS,
@@ -1029,6 +1030,7 @@ export class SharedStateBridge {
     if (typeof window === 'undefined') {
       return {
         ...(JSON.parse(JSON.stringify(CANONICAL_SEED_DATABASE)) as SharedDatabaseStateV7),
+        snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         milestones: [],
         projectTrackingBlocks: [],
@@ -1247,8 +1249,9 @@ export class SharedStateBridge {
           : undefined;
 
       return {
-        schemaVersion: 5,
-        financeSchemaVersion: 7,
+        schemaVersion: this.SUPPORTED_EXCHANGE_SCHEMA_VERSION,
+        snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
+        financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         appVersion:
           typeof canonicalStored?.appVersion === 'string' && canonicalStored.appVersion.trim()
             ? canonicalStored.appVersion.trim()
@@ -1286,6 +1289,7 @@ export class SharedStateBridge {
       console.warn('[SharedStateBridge] Error assembling live database, falling back to seed:', e);
       return {
         ...(JSON.parse(JSON.stringify(CANONICAL_SEED_DATABASE)) as SharedDatabaseStateV7),
+        snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         milestones: [],
         projectTrackingBlocks: [],
@@ -1721,6 +1725,11 @@ export class SharedStateBridge {
   }
 
   public static readonly SUPPORTED_EXCHANGE_SCHEMA_VERSION = 5;
+  public static readonly SUPPORTED_SNAPSHOT_FORMAT_VERSION = 2;
+  public static readonly LEGACY_OMITTED_SNAPSHOT_FORMAT_VERSION = 1;
+  public static readonly MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 1;
+  public static readonly MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 2;
+  public static readonly MAX_SUPPORTED_DATABASE_SCHEMA_VERSION = 9;
   public static readonly MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION = 4;
   public static readonly MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION = 9;
   public static readonly SUPPORTED_FINANCE_SCHEMA_VERSION = 7;
@@ -1820,6 +1829,8 @@ export class SharedStateBridge {
   private static validateIncomingSnapshot(raw: unknown): {
     record: Record<string, any>;
     schemaVersion: number;
+    snapshotFormatVersion: number;
+    databaseSchemaVersion?: number;
     financeSchemaVersion: number;
   } {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -1896,6 +1907,54 @@ export class SharedStateBridge {
       );
     }
 
+    let resolvedSnapshotFormatVersion = this.LEGACY_OMITTED_SNAPSHOT_FORMAT_VERSION;
+    if (Object.prototype.hasOwnProperty.call(record, 'snapshotFormatVersion')) {
+      const sfv = record.snapshotFormatVersion;
+      if (typeof sfv !== 'number' || !Number.isInteger(sfv)) {
+        throw new BackupValidationError(
+          'invalid_snapshot_version',
+          'Snapshot snapshotFormatVersion must be a valid integer.'
+        );
+      }
+      if (sfv > this.MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION) {
+        throw new BackupValidationError(
+          'unsupported_future_schema',
+          `Unsupported future snapshotFormatVersion ${sfv} (maximum supported is ${this.MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION}).`
+        );
+      }
+      if (sfv < this.MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION) {
+        throw new BackupValidationError(
+          'invalid_snapshot_version',
+          `Unsupported snapshotFormatVersion ${sfv}. Accepted values are ${this.MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION}..${this.MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION}.`
+        );
+      }
+      resolvedSnapshotFormatVersion = sfv;
+    }
+
+    let resolvedDatabaseSchemaVersion: number | undefined;
+    if (Object.prototype.hasOwnProperty.call(record, 'databaseSchemaVersion')) {
+      const dsv = record.databaseSchemaVersion;
+      if (typeof dsv !== 'number' || !Number.isInteger(dsv)) {
+        throw new BackupValidationError(
+          'invalid_snapshot_version',
+          'Snapshot databaseSchemaVersion must be a valid integer.'
+        );
+      }
+      if (dsv < 1) {
+        throw new BackupValidationError(
+          'invalid_snapshot_version',
+          `Invalid databaseSchemaVersion ${dsv}: must be >= 1.`
+        );
+      }
+      if (dsv > this.MAX_SUPPORTED_DATABASE_SCHEMA_VERSION) {
+        throw new BackupValidationError(
+          'unsupported_future_schema',
+          `Unsupported future databaseSchemaVersion ${dsv} (maximum supported is ${this.MAX_SUPPORTED_DATABASE_SCHEMA_VERSION}).`
+        );
+      }
+      resolvedDatabaseSchemaVersion = dsv;
+    }
+
     let resolvedFinanceVersion = this.SUPPORTED_FINANCE_SCHEMA_VERSION;
     if (Object.prototype.hasOwnProperty.call(record, 'financeSchemaVersion')) {
       const fv = record.financeSchemaVersion;
@@ -1968,6 +2027,10 @@ export class SharedStateBridge {
     return {
       record,
       schemaVersion: resolvedVersion,
+      snapshotFormatVersion: resolvedSnapshotFormatVersion,
+      ...(resolvedDatabaseSchemaVersion !== undefined
+        ? { databaseSchemaVersion: resolvedDatabaseSchemaVersion }
+        : {}),
       financeSchemaVersion: resolvedFinanceVersion,
     };
   }
@@ -1999,6 +2062,8 @@ export class SharedStateBridge {
       const {
         record: parsed,
         schemaVersion,
+        snapshotFormatVersion,
+        databaseSchemaVersion,
         financeSchemaVersion,
       } = this.validateIncomingSnapshot(rawParsed);
 
@@ -2629,10 +2694,12 @@ export class SharedStateBridge {
         }
         const parentRecordId = this.optionalString(r, 'parentRecordId', ctx);
         const title = this.optionalString(r, 'title', ctx, { allowEmpty: true });
-        if (title !== undefined && title.trim().length > 200) {
+        const maxRecordTitleLength =
+          SHARED_BUSINESS_RULES.projects.bounds.maxTrackingRecordTitleLength;
+        if (title !== undefined && title.trim().length > maxRecordTitleLength) {
           throw new BackupValidationError(
             'invalid_payload',
-            `Invalid field "${ctx}.title": exceeds 200 characters.`
+            `Invalid field "${ctx}.title": exceeds ${maxRecordTitleLength} characters.`
           );
         }
         const sortOrder = this.optionalIntMin(r, 'sortOrder', ctx, 0) ?? 0;
@@ -3634,6 +3701,8 @@ export class SharedStateBridge {
 
       const importedState: SharedDatabaseStateV7 = {
         schemaVersion,
+        snapshotFormatVersion,
+        ...(databaseSchemaVersion !== undefined ? { databaseSchemaVersion } : {}),
         financeSchemaVersion,
         appVersion,
         exportedAt: LocalDateTime.now().toEthiopiaIsoString(),

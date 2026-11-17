@@ -381,6 +381,38 @@ void main() {
           ),
           throwsA(isA<ProjectValidationException>()),
         );
+
+        // Tracking record title enforces canonical 300-character limit
+        expect(
+          SharedProjectRules.maxTrackingRecordTitleLength,
+          300,
+        );
+        expect(
+          () => ProjectValidationService.validateRecord(
+            ProjectTrackingRecordEntity(
+              id: 'item-300',
+              projectId: 'proj-1',
+              blockId: 'blk-check',
+              recordType: ProjectRecordType.checklistItem,
+              title: List<String>.filled(300, 'a').join(),
+            ),
+            block: checklistBlock,
+          ),
+          returnsNormally,
+        );
+        expect(
+          () => ProjectValidationService.validateRecord(
+            ProjectTrackingRecordEntity(
+              id: 'item-301',
+              projectId: 'proj-1',
+              blockId: 'blk-check',
+              recordType: ProjectRecordType.checklistItem,
+              title: List<String>.filled(301, 'a').join(),
+            ),
+            block: checklistBlock,
+          ),
+          throwsA(isA<ProjectValidationException>()),
+        );
         expect(
           () => ProjectValidationService.assertAppendOnlyLogProtection(
             existing: log1,

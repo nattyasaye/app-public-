@@ -283,6 +283,7 @@ export const SHARED_BUSINESS_RULES = {
       "maxCustomFieldSelectOptions": 50,
       "maxCustomFieldIdLength": 64,
       "maxCustomFieldTextLength": 1000,
+      "maxTrackingRecordTitleLength": 300,
       "maxHierarchyDepth": 3
     },
     "rules": {
@@ -691,6 +692,8 @@ export interface SharedAppSetting {
 
 export interface SharedDatabaseState {
   schemaVersion: number;
+  snapshotFormatVersion?: number;
+  databaseSchemaVersion?: number;
   appVersion: string;
   exportedAt: string;
   isFinanceSetupCompleted: boolean;

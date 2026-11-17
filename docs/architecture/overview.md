@@ -14,8 +14,8 @@ Daywell consists of two client runtimes fed by a single specification layer (`/s
 │                   CANONICAL SPECIFICATION LAYER                            │
 │  /shared_foundation/                                                       │
 │   ├── design_tokens.json (v1.1.0)                                          │
-│   ├── business_rules.json (v1.1.0; Finance, Tasks, Calendar & Projects rules)│
-│   ├── schema_contracts.json (v2.1.0, schemaVersion: 9)                     │
+│   ├── business_rules.json (v1.0.0; Finance, Tasks, Calendar & Projects rules)│
+│   ├── schema_contracts.json (v2.0.0, schemaVersion: 9)                     │
 │   ├── canonical_seed_database.json (schemaVersion: 5; clean seed + cats)   │
 │   └── calendar_test_vectors.json (Ethiopian <-> Gregorian reference cases) │
 └─────────────────────┬──────────────────────────────────────────────────────┘
@@ -49,7 +49,7 @@ Per [PROJECT_CONSTITUTION.md](../../PROJECT_CONSTITUTION.md), every module and s
 
 | Capability / Area | Status | Verified Reality in Repository | Authoritative Detail |
 | :--- | :--- | :--- | :--- |
-| **Shared Foundation Specs & Codegen** | **Implemented** | `scripts/sync_foundation.mjs` validates `design_tokens.json` (`v1.1.0`), `business_rules.json` (`v1.1.0`), and `schema_contracts.json` (`schemaVersion: 9`) and generates `src/domain/sharedFoundation.ts`, `src/styles/daywellTokens.css`, `flutter_app/lib/core/shared_foundation_core.dart`, and `flutter_app/lib/core/shared_foundation.dart`. | [shared-foundation.md](./shared-foundation.md) |
+| **Shared Foundation Specs & Codegen** | **Implemented** | `scripts/sync_foundation.mjs` validates `design_tokens.json` (`v1.1.0`), `business_rules.json` (`v1.0.0`), and `schema_contracts.json` (`v2.0.0`, `schemaVersion: 9`) and generates `src/domain/sharedFoundation.ts`, `src/styles/daywellTokens.css`, `flutter_app/lib/core/shared_foundation_core.dart`, and `flutter_app/lib/core/shared_foundation.dart`. | [shared-foundation.md](./shared-foundation.md) |
 | **Dual Ethiopian-Gregorian Date Engine** | **Implemented** | Parallel verified engines in `flutter_app/lib/core/date/` and `src/domain/date/`, both tested against `calendar_test_vectors.json` (`UTC+3` Addis Ababa, 13 months, Pagume 5/6 leap rule). | [shared-foundation.md](./shared-foundation.md) |
 | **Drift SQLite Database (Schema v9)** | **Implemented** (Flutter execution **Unverified** locally) | `AppDatabase` (`schemaVersion => 9`) defines 24 tables (including `ProjectTrackingBlocks` and `ProjectTrackingRecords`), performance indices, `V6LedgerMigrator`, `V7LedgerHardener`, atomic `from < 9` migration, `DatabasePersistenceCoordinator`, and `RawDatabaseRecoveryExporter`. Dart `build_runner` regeneration and Android execution are **Unverified** locally (no `flutter`/`dart`/`adb` in container). | [data-and-persistence.md](./data-and-persistence.md) |
 | **Finance Module (v7 Double-Entry + Safe Harbor)** | **Partially implemented** | **Recovery Stage 2.1** is **Implemented** and conditionally accepted (integer-cents ledger scaffold, `SYSTEM_CONTROL_ACCOUNT_IDS`, immutable void/correction patterns, 4 UI tabs + composer/wizard in Flutter and Web Preview). **Stage 2.2 Strict ETB Isolation** is implemented in code (Web verified in Node; Flutter CI-pending), while remaining Finance v7 cross-platform integration defects keep overall status **Partially implemented**. | [module-boundaries.md](./module-boundaries.md), [data-and-persistence.md](./data-and-persistence.md), [cross-platform-parity.md](./cross-platform-parity.md) |

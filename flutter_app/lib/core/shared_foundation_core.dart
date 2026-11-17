@@ -272,6 +272,8 @@ class SharedProjectRules {
   static const int maxCustomFieldSelectOptions = 50;
   static const int maxCustomFieldIdLength = 64;
   static const int maxCustomFieldTextLength = 1000;
+  static const int maxTrackingRecordTitleLength =
+      300;
   static const int maxHierarchyDepth = 3;
   static const bool appendOnlyProgressLogs = true;
   static const bool allowCompensatingCorrections = true;
