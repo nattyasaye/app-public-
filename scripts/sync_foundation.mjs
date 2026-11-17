@@ -423,6 +423,48 @@ export function validateBusinessRules(rules) {
     max: 180,
   });
 
+  if (!isPlainObject(rules.projects)) {
+    throw new Error(`Missing or invalid "projects" object in ${fileLabel}.`);
+  }
+  for (const listKey of ['statuses', 'blockTypes', 'recordTypes', 'customFieldTypes']) {
+    if (!Array.isArray(rules.projects[listKey]) || rules.projects[listKey].length === 0) {
+      throw new Error(`Missing or empty "${fileLabel}" array "projects.${listKey}".`);
+    }
+    for (let i = 0; i < rules.projects[listKey].length; i += 1) {
+      assertFieldNonEmptyString(rules.projects[listKey][i], fileLabel, `projects.${listKey}[${i}]`);
+    }
+  }
+  if (!isPlainObject(rules.projects.bounds)) {
+    throw new Error(`Missing or invalid "projects.bounds" object in ${fileLabel}.`);
+  }
+  for (const boundKey of [
+    'maxBlocksPerProject',
+    'maxCustomFieldDefinitions',
+    'maxCustomFieldSelectOptions',
+    'maxCustomFieldIdLength',
+    'maxCustomFieldTextLength',
+    'maxHierarchyDepth',
+  ]) {
+    assertFieldInteger(rules.projects.bounds[boundKey], fileLabel, `projects.bounds.${boundKey}`, {
+      min: 1,
+    });
+  }
+  if (!isPlainObject(rules.projects.rules)) {
+    throw new Error(`Missing or invalid "projects.rules" object in ${fileLabel}.`);
+  }
+  for (const flagKey of [
+    'appendOnlyProgressLogs',
+    'allowCompensatingCorrections',
+    'allowMultipleIndependentMetrics',
+    'disallowImplicitMetricAveraging',
+    'requiresExplicitPrimaryBlockForOverallPercent',
+    'requirePositiveProgressLogDelta',
+    'preventDuplicateRollupLogging',
+    'enforceParentChildOwnership',
+  ]) {
+    assertFieldBoolean(rules.projects.rules[flagKey], fileLabel, `projects.rules.${flagKey}`);
+  }
+
   return rules;
 }
 
@@ -903,6 +945,33 @@ export interface SharedRecurringRule {
   createdAt: string;
 }
 
+export type SharedProjectBlockType = 'counter' | 'grouped_list' | 'checklist' | 'schedule';
+
+export type SharedProjectRecordType =
+  | 'group'
+  | 'grouped_item'
+  | 'checklist_item'
+  | 'schedule_item'
+  | 'progress_log';
+
+export type SharedProjectCustomFieldType = 'text' | 'number' | 'date' | 'boolean' | 'select';
+
+export type SharedProjectCustomFieldValue = string | number | boolean | null;
+
+export interface SharedProjectCustomFieldDefinition {
+  id: string;
+  label: string;
+  type: SharedProjectCustomFieldType;
+  required?: boolean;
+  options?: string[];
+}
+
+export interface SharedProjectCustomFieldsPayload {
+  definitions?: SharedProjectCustomFieldDefinition[];
+  values?: Record<string, SharedProjectCustomFieldValue>;
+  primaryBlockId?: string;
+}
+
 export interface SharedProject {
   id: string;
   title: string;
@@ -910,6 +979,47 @@ export interface SharedProject {
   status: 'active' | 'completed' | 'on_hold';
   targetDate?: string;
   goalId?: string;
+  isArchived?: boolean;
+  startDate?: string;
+  customFields?: SharedProjectCustomFieldsPayload | Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SharedProjectTrackingBlock {
+  id: string;
+  projectId: string;
+  blockType: SharedProjectBlockType;
+  title: string;
+  sortOrder: number;
+  unitLabel?: string;
+  targetValue?: number;
+  dailyTargetValue?: number;
+  config?: Record<string, unknown>;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SharedProjectTrackingRecord {
+  id: string;
+  projectId: string;
+  blockId: string;
+  parentRecordId?: string;
+  recordType: SharedProjectRecordType;
+  title?: string;
+  sortOrder: number;
+  targetValue?: number;
+  deltaValue?: number;
+  durationMinutes?: number;
+  isCompleted: boolean;
+  completedAt?: string;
+  recordedDate?: string;
+  scheduledDate?: string;
+  linkedTaskId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SharedGoal {
@@ -962,6 +1072,8 @@ export interface SharedDatabaseState {
   tasks: SharedTask[];
   notes: SharedNote[];
   projects: SharedProject[];
+  projectTrackingBlocks?: SharedProjectTrackingBlock[];
+  projectTrackingRecords?: SharedProjectTrackingRecord[];
   goals: SharedGoal[];
   inboxItems: SharedInboxItem[];
   calendarEvents?: SharedCalendarEvent[];
@@ -1425,6 +1537,44 @@ class SharedBusinessRules {
     }
     return null;
   }
+}
+
+class SharedProjectRules {
+  static const List<String> statuses = ['active', 'completed', 'on_hold'];
+  static const List<String> blockTypes = [
+    'counter',
+    'grouped_list',
+    'checklist',
+    'schedule',
+  ];
+  static const List<String> recordTypes = [
+    'group',
+    'grouped_item',
+    'checklist_item',
+    'schedule_item',
+    'progress_log',
+  ];
+  static const List<String> customFieldTypes = [
+    'text',
+    'number',
+    'date',
+    'boolean',
+    'select',
+  ];
+  static const int maxBlocksPerProject = 32;
+  static const int maxCustomFieldDefinitions = 24;
+  static const int maxCustomFieldSelectOptions = 50;
+  static const int maxCustomFieldIdLength = 64;
+  static const int maxCustomFieldTextLength = 1000;
+  static const int maxHierarchyDepth = 3;
+  static const bool appendOnlyProgressLogs = true;
+  static const bool allowCompensatingCorrections = true;
+  static const bool allowMultipleIndependentMetrics = true;
+  static const bool disallowImplicitMetricAveraging = true;
+  static const bool requiresExplicitPrimaryBlockForOverallPercent = true;
+  static const bool requirePositiveProgressLogDelta = true;
+  static const bool preventDuplicateRollupLogging = true;
+  static const bool enforceParentChildOwnership = true;
 }
 
 class KnownSeedIds {

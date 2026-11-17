@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "governedBy": "docs/architecture/decisions/ADR-007-mandatory-backward-compatibility.md",
   "appDatabasePath": "flutter_app/lib/data/database/app_database.dart",
-  "minimumSchemaVersion": 8,
+  "minimumSchemaVersion": 9,
   "downgradePolicy": "on-upgrade-explicit-throw-fail-closed",
   "forbiddenDestructivePatterns": [
     "fallbackToDestructiveMigration"
@@ -67,16 +67,24 @@
         "reminders.title",
         "reminders.channelId"
       ]
+    },
+    {
+      "version": 9,
+      "requiredMarkers": [
+        "projects.customFieldsJson",
+        "m.createTable(projectTrackingBlocks)",
+        "m.createTable(projectTrackingRecords)"
+      ]
     }
   ],
   "verifiedHistoricalNotes": [
-    "AppDatabase.schemaVersion is 8 (Stage 3.4.4.1 forward-migration baseline) and released onUpgrade branches execute sequentially in ascending order for from < 2 through from < 8.",
+    "AppDatabase.schemaVersion is 9 (Projects Stage 1 foundation baseline) and released onUpgrade branches execute sequentially in ascending order for from < 2 through from < 9.",
     "AppDatabase.migration.onUpgrade enforces an explicit fail-closed if (from > to) guard throwing UnsupportedDatabaseVersionException before any from < N branch or createPerformanceIndices() runs (Drift MigrationStrategy has no onDowngrade callback).",
     "SQLite runtime execution of Flutter migration tests requires Flutter SDK / Dart / SQLite native bindings in CI (not available locally in this container)."
   ],
   "knownUnresolvedCompatibilityGaps": {
-    "snapshotUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and extended to v8 in Stage 3.4.4.1: DatabasePersistenceCoordinator.validateCanonicalSnapshot/importSnapshot accepts canonical versions 4..8 (omitted default 5) and SharedStateBridge.importFromAndroidJson accepts exchange schemaVersion 5 (+ financeSchemaVersion 7) while rejecting future (>8 or >5) and malformed payloads before mutation. Flutter runtime verification remains CI-pending.",
-    "backupUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and extended to v8 in Stage 3.4.4.1: EncryptionBackupService and Web backupCrypto.ts validate format_version 1, PBKDF2-HMAC-SHA256, exact 100000 iterations, envelope headers, and inner schema bounds (4..8 on Flutter; LocalDatabaseState v3 on Web) fail-closed before decryption or quarantine. Flutter runtime verification remains CI-pending.",
-    "legacySeedAndBridgeSchemaVersion5": "Tracked under ADR-007: canonical_seed_database.json and SharedStateBridge emit schemaVersion=5 (with financeSchemaVersion=7) while AppDatabase is schemaVersion=8."
+    "snapshotUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and extended to v9 in Projects Stage 1: DatabasePersistenceCoordinator.validateCanonicalSnapshot/importSnapshot accepts canonical versions 4..9 (omitted default 5) and SharedStateBridge.importFromAndroidJson accepts exchange schemaVersion 5..9 while emitting schemaVersion 5 (+ financeSchemaVersion 7) and rejecting future (>9) and malformed payloads before mutation. Flutter runtime verification remains CI-pending.",
+    "backupUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and extended to v9 in Projects Stage 1: EncryptionBackupService and Web backupCrypto.ts validate format_version 1, PBKDF2-HMAC-SHA256, exact 100000 iterations, envelope headers, and inner schema bounds (4..9 on Flutter; LocalDatabaseState v3 on Web) fail-closed before decryption or quarantine. Flutter runtime verification remains CI-pending.",
+    "legacySeedAndBridgeSchemaVersion5": "Tracked under ADR-007: canonical_seed_database.json and SharedStateBridge emit schemaVersion=5 (with financeSchemaVersion=7) while AppDatabase is schemaVersion=9."
   }
 }

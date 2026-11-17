@@ -37,6 +37,8 @@ part 'app_database.g.dart';
   SettlementAllocationsTable,
   BudgetsTable,
   RecurringRulesTable,
+  ProjectTrackingBlocks,
+  ProjectTrackingRecords,
 ])
 class AppDatabase extends _$AppDatabase {
   static const String seedSentinelKey = 'initial_seed_completed';
@@ -46,7 +48,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration {
@@ -465,6 +467,51 @@ class AppDatabase extends _$AppDatabase {
             );
           }
         }
+        if (from < 9) {
+          // Schema v8 -> v9: Additive Projects metadata and tracking tables
+          await _addColumnIfMissing(
+            table: 'projects',
+            column: 'is_archived',
+            addFn: () => m.addColumn(projects, projects.isArchived),
+          );
+          await _addColumnIfMissing(
+            table: 'projects',
+            column: 'start_date',
+            addFn: () => m.addColumn(projects, projects.startDate),
+          );
+          await _addColumnIfMissing(
+            table: 'projects',
+            column: 'custom_fields_json',
+            addFn: () => m.addColumn(projects, projects.customFieldsJson),
+          );
+          await _addColumnIfMissing(
+            table: 'projects',
+            column: 'updated_at',
+            addFn: () => m.addColumn(projects, projects.updatedAt),
+          );
+          await customStatement(
+            'UPDATE projects SET updated_at = created_at WHERE updated_at IS NULL;',
+          );
+
+          await _createTableIfMissing(
+            table: 'project_tracking_blocks',
+            createFn: () => m.createTable(projectTrackingBlocks),
+          );
+          await _createTableIfMissing(
+            table: 'project_tracking_records',
+            createFn: () => m.createTable(projectTrackingRecords),
+          );
+          await _createV9ProjectPerformanceIndices();
+
+          final fkViolations =
+              await customSelect('PRAGMA foreign_key_check').get();
+          if (fkViolations.isNotEmpty) {
+            throw LedgerMigrationException(
+              'Schema v9 upgrade aborted due to foreign key violations '
+              '(${fkViolations.length} row(s)).',
+            );
+          }
+        }
       },
       beforeOpen: (details) async {
         // Enforce foreign key constraints in SQLite
@@ -770,7 +817,7 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
-  /// Schema performance indices (including v7 tables and columns)
+  /// Schema performance indices (including v7 and v9 tables/columns)
   Future<void> createPerformanceIndices() async {
     await _createPreV7PerformanceIndices();
     await customStatement(
@@ -780,6 +827,40 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_commitment_settlements_commitment '
       'ON commitment_settlements_table(commitment_id);',
+    );
+    final blockTableRows = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' "
+      "AND name = 'project_tracking_blocks';",
+    ).get();
+    final recordTableRows = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' "
+      "AND name = 'project_tracking_records';",
+    ).get();
+    if (blockTableRows.isNotEmpty && recordTableRows.isNotEmpty) {
+      await _createV9ProjectPerformanceIndices();
+    }
+  }
+
+  Future<void> _createV9ProjectPerformanceIndices() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_project_blocks_project_sort '
+      'ON project_tracking_blocks(project_id, sort_order);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_project_records_project_block '
+      'ON project_tracking_records(project_id, block_id);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_project_records_parent '
+      'ON project_tracking_records(parent_record_id);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_project_records_recorded_date '
+      'ON project_tracking_records(recorded_date);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_project_records_linked_task '
+      'ON project_tracking_records(linked_task_id);',
     );
   }
 

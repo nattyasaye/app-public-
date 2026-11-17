@@ -46,7 +46,7 @@ class EncryptionBackupService {
   static const int _pbkdf2Iterations = 100000;
   static const int _keyLengthBits = 256;
   static const int minSupportedCanonicalSchemaVersion = 4;
-  static const int maxSupportedCanonicalSchemaVersion = 8;
+  static const int maxSupportedCanonicalSchemaVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
   static const String currentAppVersion = '1.0.2+3';
   static const String authenticationFailureMessage =

@@ -6,6 +6,9 @@ import '../../core/date/shared_date.dart';
 import '../../core/interfaces/platform_service_interfaces.dart';
 import '../../core/shared_foundation_core.dart';
 import '../../domain/finance/double_entry_engine.dart';
+import '../../domain/projects/project_models.dart';
+import '../../domain/projects/project_validation_service.dart';
+import '../../domain/tasks/task_models.dart';
 import 'app_database.dart';
 import 'app_settings_policy.dart';
 import 'v6_ledger_migrator.dart';
@@ -22,6 +25,8 @@ class PreparedSnapshotImport {
   final List<PartiesTableCompanion> parties;
   final List<GoalsCompanion> goals;
   final List<ProjectsCompanion> projects;
+  final List<ProjectTrackingBlocksCompanion> projectTrackingBlocks;
+  final List<ProjectTrackingRecordsCompanion> projectTrackingRecords;
   final List<MilestonesCompanion> milestones;
   final List<TasksCompanion> tasks;
   final List<NotesCompanion> notes;
@@ -58,6 +63,8 @@ class PreparedSnapshotImport {
     required this.parties,
     required this.goals,
     required this.projects,
+    this.projectTrackingBlocks = const <ProjectTrackingBlocksCompanion>[],
+    this.projectTrackingRecords = const <ProjectTrackingRecordsCompanion>[],
     required this.milestones,
     required this.tasks,
     required this.notes,
@@ -125,6 +132,10 @@ class DatabasePersistenceCoordinator {
 
     final lifeGoals = await _db.select(_db.goals).get();
     final projects = await _db.select(_db.projects).get();
+    final projectTrackingBlocks =
+        await _db.select(_db.projectTrackingBlocks).get();
+    final projectTrackingRecords =
+        await _db.select(_db.projectTrackingRecords).get();
     final milestones = await _db.select(_db.milestones).get();
     final tasks = await _db.select(_db.tasks).get();
     final notes = await _db.select(_db.notes).get();
@@ -341,7 +352,52 @@ class DatabasePersistenceCoordinator {
                 'description': p.description,
                 'status': p.status,
                 'targetDate': p.targetDate,
+                'isArchived': p.isArchived,
+                'startDate': p.startDate,
+                'customFields': _decodeJsonMap(p.customFieldsJson),
                 'createdAt': EthiopiaClock.toUtcIsoString(p.createdAt),
+                'updatedAt':
+                    EthiopiaClock.toUtcIsoString(p.updatedAt ?? p.createdAt),
+              })
+          .toList(),
+      'projectTrackingBlocks': projectTrackingBlocks
+          .map((b) => {
+                'id': b.id,
+                'projectId': b.projectId,
+                'blockType': b.blockType,
+                'title': b.title,
+                'sortOrder': b.sortOrder,
+                'unitLabel': b.unitLabel,
+                'targetValue': b.targetValue,
+                'dailyTargetValue': b.dailyTargetValue,
+                'config': _decodeJsonMap(b.configJson),
+                'isArchived': b.isArchived,
+                'createdAt': EthiopiaClock.toUtcIsoString(b.createdAt),
+                'updatedAt': EthiopiaClock.toUtcIsoString(b.updatedAt),
+              })
+          .toList(),
+      'projectTrackingRecords': projectTrackingRecords
+          .map((r) => {
+                'id': r.id,
+                'projectId': r.projectId,
+                'blockId': r.blockId,
+                'parentRecordId': r.parentRecordId,
+                'recordType': r.recordType,
+                'title': r.title,
+                'sortOrder': r.sortOrder,
+                'targetValue': r.targetValue,
+                'deltaValue': r.deltaValue,
+                'durationMinutes': r.durationMinutes,
+                'isCompleted': r.isCompleted,
+                'completedAt': r.completedAt != null
+                    ? EthiopiaClock.toUtcIsoString(r.completedAt!)
+                    : null,
+                'recordedDate': r.recordedDate,
+                'scheduledDate': r.scheduledDate,
+                'linkedTaskId': r.linkedTaskId,
+                'metadata': _decodeJsonMap(r.metadataJson),
+                'createdAt': EthiopiaClock.toUtcIsoString(r.createdAt),
+                'updatedAt': EthiopiaClock.toUtcIsoString(r.updatedAt),
               })
           .toList(),
       'milestones': milestones
@@ -445,7 +501,7 @@ class DatabasePersistenceCoordinator {
   }
 
   static const int minSupportedCanonicalSnapshotVersion = 4;
-  static const int maxSupportedCanonicalSnapshotVersion = 8;
+  static const int maxSupportedCanonicalSnapshotVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
 
   static const List<String> _snapshotListFields = <String>[
@@ -464,6 +520,8 @@ class DatabasePersistenceCoordinator {
     'settlementAllocations',
     'goals',
     'projects',
+    'projectTrackingBlocks',
+    'projectTrackingRecords',
     'milestones',
     'tasks',
     'notes',
@@ -507,6 +565,19 @@ class DatabasePersistenceCoordinator {
     'active',
     'completed',
     'on_hold',
+  };
+  static const Set<String> _projectBlockTypes = <String>{
+    'counter',
+    'grouped_list',
+    'checklist',
+    'schedule',
+  };
+  static const Set<String> _projectRecordTypes = <String>{
+    'group',
+    'grouped_item',
+    'checklist_item',
+    'schedule_item',
+    'progress_log',
   };
   static const Set<String> _taskStatuses = <String>{
     'inbox',
@@ -709,6 +780,15 @@ class DatabasePersistenceCoordinator {
     Set<String> existingPartyIds = const <String>{},
     Set<String> existingGoalIds = const <String>{},
     Set<String> existingProjectIds = const <String>{},
+    Set<String> existingProjectBlockIds = const <String>{},
+    Set<String> existingProjectRecordIds = const <String>{},
+    Map<String, String> existingProjectBlockProjectsById =
+        const <String, String>{},
+    Map<String, ProjectTrackingBlockEntity> existingProjectBlocksById =
+        const <String, ProjectTrackingBlockEntity>{},
+    Map<String, List<ProjectTrackingRecordEntity>>
+        existingProjectRecordsByBlockId =
+        const <String, List<ProjectTrackingRecordEntity>>{},
     Set<String> existingMilestoneIds = const <String>{},
     Set<String> existingTransactionIds = const <String>{},
     Set<String> existingEntryIds = const <String>{},
@@ -993,7 +1073,36 @@ class DatabasePersistenceCoordinator {
       }
       final status = _optEnum(p, 'status', _projectStatuses, ctx) ?? 'active';
       final targetDate = _optCanonicalDate(p, 'targetDate', ctx);
+      final isArchived = _optBool(p, 'isArchived', ctx) ?? false;
+      final startDate = _optCanonicalDate(p, 'startDate', ctx);
+      final customFields = _optJsonMapFromKeys(
+        p,
+        const ['customFields', 'customFieldsJson'],
+        ctx,
+        'customFields',
+      );
+      try {
+        ProjectValidationService.validateCustomFieldsMap(customFields);
+      } on ProjectValidationException catch (e) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid "$ctx.customFields": ${e.message}',
+        );
+      }
+      if (startDate != null && targetDate != null) {
+        final parsedStart = CalendarDate.tryParse(startDate);
+        final parsedTarget = CalendarDate.tryParse(targetDate);
+        if (parsedStart != null &&
+            parsedTarget != null &&
+            parsedTarget.isBefore(parsedStart)) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid "$ctx": targetDate ($targetDate) cannot precede startDate ($startDate).',
+          );
+        }
+      }
       final createdAt = _optInstantUtc(p, 'createdAt', ctx) ?? now;
+      final updatedAt = _optInstantUtc(p, 'updatedAt', ctx) ?? createdAt;
       projectCompanions.add(
         ProjectsCompanion.insert(
           id: id,
@@ -1002,7 +1111,11 @@ class DatabasePersistenceCoordinator {
           description: Value(description),
           status: Value(status),
           targetDate: Value(targetDate),
+          isArchived: Value(isArchived),
+          startDate: Value(startDate),
+          customFieldsJson: Value(jsonEncode(customFields)),
           createdAt: createdAt,
+          updatedAt: Value(updatedAt),
         ),
       );
     }

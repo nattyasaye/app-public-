@@ -37,7 +37,63 @@ class Projects extends Table {
   TextColumn get status => text()
       .withDefault(const Constant('active'))(); // active, completed, on_hold
   TextColumn get targetDate => text().nullable()(); // YYYY-MM-DD
+  // Schema v9 additions
+  BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
+  TextColumn get startDate => text().nullable()(); // YYYY-MM-DD
+  TextColumn get customFieldsJson => text().withDefault(const Constant('{}'))();
   DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Tracking Blocks inside a Project (Schema v9)
+class ProjectTrackingBlocks extends Table {
+  TextColumn get id => text()(); // UUID v4
+  TextColumn get projectId =>
+      text().references(Projects, #id, onDelete: KeyAction.cascade)();
+  TextColumn get blockType =>
+      text()(); // counter, grouped_list, checklist, schedule
+  TextColumn get title => text().withLength(min: 1, max: 200)();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  TextColumn get unitLabel => text().nullable()();
+  RealColumn get targetValue => real().nullable()();
+  RealColumn get dailyTargetValue => real().nullable()();
+  TextColumn get configJson => text().withDefault(const Constant('{}'))();
+  BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+/// Structured Tracking Records & Append-Only Progress Logs (Schema v9)
+class ProjectTrackingRecords extends Table {
+  TextColumn get id => text()(); // UUID v4
+  TextColumn get projectId =>
+      text().references(Projects, #id, onDelete: KeyAction.cascade)();
+  TextColumn get blockId => text()
+      .references(ProjectTrackingBlocks, #id, onDelete: KeyAction.cascade)();
+  TextColumn get parentRecordId => text()
+      .nullable()
+      .references(ProjectTrackingRecords, #id, onDelete: KeyAction.restrict)();
+  TextColumn get recordType => text()();
+  TextColumn get title => text().nullable()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  RealColumn get targetValue => real().nullable()();
+  RealColumn get deltaValue => real().nullable()();
+  IntColumn get durationMinutes => integer().nullable()();
+  BoolColumn get isCompleted => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get completedAt => dateTime().nullable()();
+  TextColumn get recordedDate => text().nullable()(); // YYYY-MM-DD
+  TextColumn get scheduledDate => text().nullable()(); // YYYY-MM-DD
+  TextColumn get linkedTaskId =>
+      text().nullable().references(Tasks, #id, onDelete: KeyAction.setNull)();
+  TextColumn get metadataJson => text().withDefault(const Constant('{}'))();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};

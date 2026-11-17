@@ -172,7 +172,11 @@ class ProjectEntity {
   final String status; // 'active', 'completed', 'on_hold'
   final CalendarDate? targetDate;
   final String? goalId;
+  final bool isArchived;
+  final CalendarDate? startDate;
+  final Map<String, dynamic> customFields;
   final DateTime createdAt;
+  final DateTime updatedAt;
 
   ProjectEntity({
     required this.id,
@@ -181,8 +185,16 @@ class ProjectEntity {
     this.status = 'active',
     this.targetDate,
     this.goalId,
+    this.isArchived = false,
+    this.startDate,
+    Map<String, dynamic>? customFields,
     DateTime? createdAt,
-  }) : createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc();
+    DateTime? updatedAt,
+  })  : customFields = Map<String, dynamic>.unmodifiable(
+          customFields ?? const <String, dynamic>{},
+        ),
+        createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc(),
+        updatedAt = (updatedAt ?? createdAt ?? EthiopiaClock.nowUtc()).toUtc();
 
   ProjectEntity copyWith({
     String? title,
@@ -191,6 +203,12 @@ class ProjectEntity {
     CalendarDate? targetDate,
     bool clearTargetDate = false,
     String? goalId,
+    bool clearGoalId = false,
+    bool? isArchived,
+    CalendarDate? startDate,
+    bool clearStartDate = false,
+    Map<String, dynamic>? customFields,
+    DateTime? updatedAt,
   }) {
     return ProjectEntity(
       id: id,
@@ -198,8 +216,12 @@ class ProjectEntity {
       description: description ?? this.description,
       status: status ?? this.status,
       targetDate: clearTargetDate ? null : (targetDate ?? this.targetDate),
-      goalId: goalId ?? this.goalId,
+      goalId: clearGoalId ? null : (goalId ?? this.goalId),
+      isArchived: isArchived ?? this.isArchived,
+      startDate: clearStartDate ? null : (startDate ?? this.startDate),
+      customFields: customFields ?? this.customFields,
       createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 
@@ -210,21 +232,40 @@ class ProjectEntity {
         'status': status,
         'targetDate': targetDate?.toIsoString(),
         'goalId': goalId,
+        'isArchived': isArchived,
+        'startDate': startDate?.toIsoString(),
+        'customFields': customFields,
         'createdAt': EthiopiaClock.toUtcIsoString(createdAt),
+        'updatedAt': EthiopiaClock.toUtcIsoString(updatedAt),
       };
 
-  factory ProjectEntity.fromJson(Map<String, dynamic> json) => ProjectEntity(
-        id: json['id'],
-        title: json['title'] ?? '',
-        description: json['description'],
-        status: json['status'] ?? 'active',
-        targetDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
-          json['targetDate']?.toString(),
-        ),
-        goalId: json['goalId'],
-        createdAt:
-            EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
-      );
+  factory ProjectEntity.fromJson(Map<String, dynamic> json) {
+    final created =
+        EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString());
+    final updated =
+        EthiopiaClock.tryParseInstantUtc(json['updatedAt']?.toString());
+    final rawCustomFields = json['customFields'];
+    final customFieldsMap = rawCustomFields is Map
+        ? rawCustomFields.map((k, v) => MapEntry(k.toString(), v))
+        : const <String, dynamic>{};
+    return ProjectEntity(
+      id: json['id']?.toString() ?? '',
+      title: json['title']?.toString() ?? '',
+      description: json['description']?.toString(),
+      status: json['status']?.toString() ?? 'active',
+      targetDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
+        json['targetDate']?.toString(),
+      ),
+      goalId: json['goalId']?.toString(),
+      isArchived: json['isArchived'] == true,
+      startDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
+        json['startDate']?.toString(),
+      ),
+      customFields: customFieldsMap,
+      createdAt: created,
+      updatedAt: updated ?? created,
+    );
+  }
 }
 
 class MilestoneEntity {

@@ -128,6 +128,14 @@
       "canonicalDateFormat",
       "timeConvention",
       "fixedUtcOffsetMinutes"
+    ],
+    "projects": [
+      "statuses",
+      "blockTypes",
+      "recordTypes",
+      "customFieldTypes",
+      "bounds",
+      "rules"
     ]
   },
   "protectedSchemaContracts": {
@@ -248,7 +256,58 @@
         "description": { "type": "string" },
         "status": { "type": "string", "enum": ["active", "completed", "on_hold"] },
         "targetDate": { "type": "string" },
-        "goalId": { "type": "string" }
+        "goalId": { "type": "string" },
+        "isArchived": { "type": "boolean" },
+        "startDate": { "type": "string" },
+        "customFields": { "type": "object" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "ProjectTrackingBlock": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "projectId": { "type": "string", "required": true },
+        "blockType": {
+          "type": "string",
+          "required": true,
+          "enum": ["counter", "grouped_list", "checklist", "schedule"]
+        },
+        "title": { "type": "string", "required": true },
+        "sortOrder": { "type": "integer" },
+        "unitLabel": { "type": "string" },
+        "targetValue": { "type": "number" },
+        "dailyTargetValue": { "type": "number" },
+        "config": { "type": "object" },
+        "isArchived": { "type": "boolean" },
+        "createdAt": { "type": "string", "required": true },
+        "updatedAt": { "type": "string", "required": true }
+      }
+    },
+    "ProjectTrackingRecord": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "projectId": { "type": "string", "required": true },
+        "blockId": { "type": "string", "required": true },
+        "parentRecordId": { "type": "string" },
+        "recordType": {
+          "type": "string",
+          "required": true,
+          "enum": ["group", "grouped_item", "checklist_item", "schedule_item", "progress_log"]
+        },
+        "title": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "targetValue": { "type": "number" },
+        "deltaValue": { "type": "number" },
+        "durationMinutes": { "type": "integer" },
+        "isCompleted": { "type": "boolean" },
+        "completedAt": { "type": "string" },
+        "recordedDate": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "linkedTaskId": { "type": "string" },
+        "metadata": { "type": "object" },
+        "createdAt": { "type": "string", "required": true },
+        "updatedAt": { "type": "string", "required": true }
       }
     },
     "Goal": {

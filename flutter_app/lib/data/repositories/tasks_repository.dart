@@ -236,36 +236,16 @@ class DriftTasksRepository implements ITasksRepository {
   // IProjectRepositoryContract
   // ==========================================================================
 
-  @override
-  Future<List<ProjectEntity>> getProjects({String? status}) async {
-    final query = _db.select(_db.projects);
-    if (status != null) {
-      query.where((tbl) => tbl.status.equals(status));
+  ProjectEntity _mapProjectRow(Project r) {
+    Map<String, dynamic> customFields = const <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(r.customFieldsJson);
+      if (decoded is Map) {
+        customFields = decoded.map((k, v) => MapEntry(k.toString(), v));
+      }
+    } catch (_) {
+      customFields = const <String, dynamic>{};
     }
-    query.orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)]);
-    final rows = await query.get();
-
-    return rows
-        .map((r) => ProjectEntity(
-              id: r.id,
-              title: r.title,
-              description: r.description,
-              status: r.status,
-              targetDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
-                r.targetDate,
-              ),
-              goalId: r.goalId,
-              createdAt: r.createdAt,
-            ))
-        .toList();
-  }
-
-  @override
-  Future<ProjectEntity?> getProjectById(String id) async {
-    final query = _db.select(_db.projects)..where((tbl) => tbl.id.equals(id));
-    final r = await query.getSingleOrNull();
-    if (r == null) return null;
-
     return ProjectEntity(
       id: r.id,
       title: r.title,
@@ -275,8 +255,33 @@ class DriftTasksRepository implements ITasksRepository {
         r.targetDate,
       ),
       goalId: r.goalId,
+      isArchived: r.isArchived,
+      startDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
+        r.startDate,
+      ),
+      customFields: customFields,
       createdAt: r.createdAt,
+      updatedAt: r.updatedAt ?? r.createdAt,
     );
+  }
+
+  @override
+  Future<List<ProjectEntity>> getProjects({String? status}) async {
+    final query = _db.select(_db.projects);
+    if (status != null) {
+      query.where((tbl) => tbl.status.equals(status));
+    }
+    query.orderBy([(tbl) => OrderingTerm.desc(tbl.createdAt)]);
+    final rows = await query.get();
+    return rows.map(_mapProjectRow).toList();
+  }
+
+  @override
+  Future<ProjectEntity?> getProjectById(String id) async {
+    final query = _db.select(_db.projects)..where((tbl) => tbl.id.equals(id));
+    final r = await query.getSingleOrNull();
+    if (r == null) return null;
+    return _mapProjectRow(r);
   }
 
   @override
@@ -289,7 +294,11 @@ class DriftTasksRepository implements ITasksRepository {
             description: Value(project.description?.trim()),
             targetDate: Value(project.targetDate?.toIsoString()),
             status: Value(project.status),
+            isArchived: Value(project.isArchived),
+            startDate: Value(project.startDate?.toIsoString()),
+            customFieldsJson: Value(jsonEncode(project.customFields)),
             createdAt: project.createdAt,
+            updatedAt: Value(project.updatedAt),
           ),
         );
 
@@ -298,18 +307,23 @@ class DriftTasksRepository implements ITasksRepository {
 
   @override
   Future<ProjectEntity> updateProject(ProjectEntity project) async {
-    await (_db.update(_db.projects)..where((tbl) => tbl.id.equals(project.id)))
+    final updated = project.copyWith(updatedAt: EthiopiaClock.nowUtc());
+    await (_db.update(_db.projects)..where((tbl) => tbl.id.equals(updated.id)))
         .write(
       ProjectsCompanion(
-        title: Value(project.title.trim()),
-        goalId: Value(project.goalId),
-        description: Value(project.description?.trim()),
-        targetDate: Value(project.targetDate?.toIsoString()),
-        status: Value(project.status),
+        title: Value(updated.title.trim()),
+        goalId: Value(updated.goalId),
+        description: Value(updated.description?.trim()),
+        targetDate: Value(updated.targetDate?.toIsoString()),
+        status: Value(updated.status),
+        isArchived: Value(updated.isArchived),
+        startDate: Value(updated.startDate?.toIsoString()),
+        customFieldsJson: Value(jsonEncode(updated.customFields)),
+        updatedAt: Value(updated.updatedAt),
       ),
     );
 
-    return project;
+    return updated;
   }
 
   @override
@@ -319,6 +333,17 @@ class DriftTasksRepository implements ITasksRepository {
           .write(
         const TasksCompanion(projectId: Value(null)),
       );
+      await _db.customStatement(
+        'UPDATE project_tracking_records SET parent_record_id = NULL '
+        'WHERE project_id = ?;',
+        [id],
+      );
+      await (_db.delete(_db.projectTrackingRecords)
+            ..where((tbl) => tbl.projectId.equals(id)))
+          .go();
+      await (_db.delete(_db.projectTrackingBlocks)
+            ..where((tbl) => tbl.projectId.equals(id)))
+          .go();
       await (_db.delete(_db.milestones)
             ..where((tbl) => tbl.projectId.equals(id)))
           .go();

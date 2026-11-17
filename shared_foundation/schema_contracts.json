@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "version": "2.0.0",
-  "schemaVersion": 8,
+  "schemaVersion": 9,
   "timeConvention": {
     "id": "Africa/Addis_Ababa",
     "fixedUtcOffsetMinutes": 180,
@@ -127,7 +127,58 @@
         "description": { "type": "string", "required": false },
         "status": { "type": "string", "enum": ["active", "completed", "on_hold"], "default": "active" },
         "targetDate": { "type": "string", "format": "date", "required": false },
-        "goalId": { "type": "string", "required": false }
+        "goalId": { "type": "string", "required": false },
+        "isArchived": { "type": "boolean", "default": false },
+        "startDate": { "type": "string", "format": "date", "required": false },
+        "customFields": { "type": "object", "default": {} },
+        "createdAt": { "type": "string", "format": "date-time", "required": false },
+        "updatedAt": { "type": "string", "format": "date-time", "required": false }
+      }
+    },
+    "ProjectTrackingBlock": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "projectId": { "type": "string", "required": true },
+        "blockType": {
+          "type": "string",
+          "enum": ["counter", "grouped_list", "checklist", "schedule"],
+          "required": true
+        },
+        "title": { "type": "string", "required": true },
+        "sortOrder": { "type": "integer", "minimum": 0, "default": 0 },
+        "unitLabel": { "type": "string", "required": false },
+        "targetValue": { "type": "number", "minimum": 0, "required": false },
+        "dailyTargetValue": { "type": "number", "minimum": 0, "required": false },
+        "config": { "type": "object", "default": {} },
+        "isArchived": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "ProjectTrackingRecord": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "projectId": { "type": "string", "required": true },
+        "blockId": { "type": "string", "required": true },
+        "parentRecordId": { "type": "string", "required": false },
+        "recordType": {
+          "type": "string",
+          "enum": ["group", "grouped_item", "checklist_item", "schedule_item", "progress_log"],
+          "required": true
+        },
+        "title": { "type": "string", "required": false },
+        "sortOrder": { "type": "integer", "minimum": 0, "default": 0 },
+        "targetValue": { "type": "number", "minimum": 0, "required": false },
+        "deltaValue": { "type": "number", "required": false },
+        "durationMinutes": { "type": "integer", "minimum": 0, "required": false },
+        "isCompleted": { "type": "boolean", "default": false },
+        "completedAt": { "type": "string", "format": "date-time", "required": false },
+        "recordedDate": { "type": "string", "format": "date", "required": false },
+        "scheduledDate": { "type": "string", "format": "date", "required": false },
+        "linkedTaskId": { "type": "string", "required": false },
+        "metadata": { "type": "object", "default": {} },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": true }
       }
     },
     "Goal": {
