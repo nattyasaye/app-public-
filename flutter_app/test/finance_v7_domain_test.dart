@@ -418,7 +418,9 @@ void main() {
       expect(userMissingCurrency.isSystem, isFalse);
       expect(userMissingCurrency.currencyCode, '');
       expect(
-        DoubleEntryEngine.classifyCurrencyCode(userMissingCurrency.currencyCode),
+        DoubleEntryEngine.classifyCurrencyCode(
+          userMissingCurrency.currencyCode,
+        ),
         CurrencyValidationTier.unverified,
       );
 

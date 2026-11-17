@@ -1949,11 +1949,15 @@ void main() {
 
           // AppStateManager quick capture currency parity check
           expect(
-            AppStateManager.detectQuickCaptureUnsupportedCurrency(r'Coffee $15'),
+            AppStateManager.detectQuickCaptureUnsupportedCurrency(
+              r'Coffee $15',
+            ),
             r'USD ($)',
           );
           expect(
-            AppStateManager.detectQuickCaptureUnsupportedCurrency('100 USD lunch'),
+            AppStateManager.detectQuickCaptureUnsupportedCurrency(
+              '100 USD lunch',
+            ),
             'USD',
           );
           expect(

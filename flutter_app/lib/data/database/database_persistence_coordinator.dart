@@ -829,7 +829,12 @@ class DatabasePersistenceCoordinator {
           a.containsKey('currencyCode') && a['currencyCode'] != null;
       late final String currencyCode;
       if (hasCurrencyKey) {
-        final rawCurrency = _reqString(a, 'currencyCode', ctx, allowEmpty: true);
+        final rawCurrency = _reqString(
+          a,
+          'currencyCode',
+          ctx,
+          allowEmpty: true,
+        );
         if (classified.isSystem) {
           if (rawCurrency.trim().isEmpty) {
             currencyCode = 'ETB';
