@@ -1,7 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
-describe('ANDROID IN-PLACE UPDATE AND DATA PRESERVATION (TASKS 01–05)', () => {
+describe('ANDROID IN-PLACE UPDATE AND DATA PRESERVATION (TASKS 01–06)', () => {
   // -------------------------------------------------------------
   // TASK 01: Inspect & Establish Android Update Configuration
   // -------------------------------------------------------------
@@ -244,6 +246,58 @@ describe('ANDROID IN-PLACE UPDATE AND DATA PRESERVATION (TASKS 01–05)', () => 
       // Simulates app restart after update
       const appClosedAndReopened = true;
       assert.equal(appClosedAndReopened, true);
+    });
+  });
+
+  // -------------------------------------------------------------
+  // TASK 06: Live Repository Android Build, Signing & Secret Guards
+  // -------------------------------------------------------------
+  describe('Task 06 — Live Android Gradle, CI & Keystore Exclusion Verification', () => {
+    const repoRoot = process.cwd();
+
+    it('6.1: Android build.gradle preserves stable applicationId and fails closed on missing release signing', () => {
+      const gradlePath = path.join(repoRoot, 'flutter_app', 'android', 'app', 'build.gradle');
+      const gradle = fs.readFileSync(gradlePath, 'utf8');
+
+      assert.match(gradle, /namespace\s*=\s*"com\.example\.personalmanagement"/);
+      assert.match(gradle, /applicationId\s*=\s*"com\.example\.personalmanagement"/);
+      assert.equal(gradle.includes('applicationIdSuffix'), false, 'applicationIdSuffix must not fragment app identity');
+      assert.equal(gradle.includes('productFlavors'), false, 'productFlavors must not fragment app identity');
+      assert.match(gradle, /versionCode\s*=\s*flutter\.versionCode/);
+      assert.match(gradle, /versionName\s*=\s*flutter\.versionName/);
+      assert.match(gradle, /if\s*\(\s*isReleaseTaskRequested\s*\)/);
+      assert.match(gradle, /throw new GradleException/);
+    });
+
+    it('6.2: GitHub Actions Android CI never generates ephemeral release keystores and verifies APK metadata + certs', () => {
+      const workflowPath = path.join(repoRoot, '.github', 'workflows', 'android.yml');
+      const workflow = fs.readFileSync(workflowPath, 'utf8');
+
+      assert.equal(
+        workflow.includes('keytool -genkeypair'),
+        false,
+        'CI must NEVER silently generate an ephemeral keytool -genkeypair release keystore'
+      );
+      assert.match(workflow, /KEYSTORE_BASE64/);
+      assert.match(workflow, /keytool -list -keystore flutter_app\/android\/app\/release\.keystore/);
+      assert.match(workflow, /aapt2/);
+      assert.match(workflow, /apksigner/);
+      assert.match(workflow, /CN=Android Debug\|CN=Daywell CI Release/);
+      assert.match(workflow, /Clean Up Decoded Keystore Material/);
+    });
+
+    it('6.3: pubspec.yaml declares semantic versionName + integer versionCode and .gitignore excludes keystores', () => {
+      const pubspecPath = path.join(repoRoot, 'flutter_app', 'pubspec.yaml');
+      const pubspec = fs.readFileSync(pubspecPath, 'utf8');
+      const versionMatch = pubspec.match(/^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$/m);
+      assert.ok(versionMatch, 'pubspec.yaml must declare version: X.Y.Z+N');
+      assert.ok(parseInt(versionMatch[2], 10) >= 1, 'versionCode must be >= 1');
+
+      const gitignorePath = path.join(repoRoot, '.gitignore');
+      const gitignore = fs.readFileSync(gitignorePath, 'utf8');
+      assert.match(gitignore, /^\*\.keystore$/m);
+      assert.match(gitignore, /^\*\.jks$/m);
+      assert.match(gitignore, /^flutter_app\/android\/key\.properties$/m);
     });
   });
 });

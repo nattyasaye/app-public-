@@ -4,6 +4,33 @@ plugins {
     id "dev.flutter.flutter-gradle-plugin"
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def resolveReleaseKeystoreFile = {
+    def propStoreFile = keystoreProperties.getProperty("storeFile")?.trim()
+    if (propStoreFile) {
+        def candidate = file(propStoreFile)
+        return candidate.exists() ? candidate : rootProject.file(propStoreFile)
+    }
+    return file("release.keystore")
+}
+
+def resolveReleaseStorePassword = {
+    return System.getenv("KEYSTORE_PASSWORD") ?: keystoreProperties.getProperty("storePassword")
+}
+
+def resolveReleaseKeyAlias = {
+    return System.getenv("KEY_ALIAS") ?: keystoreProperties.getProperty("keyAlias")
+}
+
+def resolveReleaseKeyPassword = {
+    return System.getenv("KEY_PASSWORD") ?: keystoreProperties.getProperty("keyPassword") ?: resolveReleaseStorePassword()
+}
+
 android {
     namespace = "com.example.personalmanagement"
     compileSdk = 35
@@ -30,12 +57,15 @@ android {
 
     signingConfigs {
         release {
-            def keystoreFile = file("release.keystore")
-            if (keystoreFile.exists()) {
+            def keystoreFile = resolveReleaseKeystoreFile()
+            def resolvedStorePassword = resolveReleaseStorePassword()
+            def resolvedKeyAlias = resolveReleaseKeyAlias()
+            def resolvedKeyPassword = resolveReleaseKeyPassword()
+            if (keystoreFile.exists() && resolvedStorePassword && resolvedKeyAlias && resolvedKeyPassword) {
                 storeFile = keystoreFile
-                storePassword = System.getenv("KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("KEY_ALIAS")
-                keyPassword = System.getenv("KEY_PASSWORD") ?: storePassword
+                storePassword = resolvedStorePassword
+                keyAlias = resolvedKeyAlias
+                keyPassword = resolvedKeyPassword
             }
         }
     }
@@ -45,7 +75,7 @@ android {
             signingConfig = signingConfigs.debug
         }
         release {
-            def keystoreFile = file("release.keystore")
+            def keystoreFile = resolveReleaseKeystoreFile()
             if (keystoreFile.exists()) {
                 signingConfig = signingConfigs.release
             }
@@ -60,8 +90,21 @@ gradle.taskGraph.whenReady { taskGraph ->
     def isReleaseTaskRequested = taskGraph.allTasks.any { task ->
         task.project == project && task.name.toLowerCase().contains("release")
     }
-    if (isReleaseTaskRequested && !file("release.keystore").exists()) {
-        throw new GradleException("Missing release.keystore! Production release build cannot fall back to debug signing. Configure KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD in repository secrets.")
+    if (isReleaseTaskRequested) {
+        def keystoreFile = resolveReleaseKeystoreFile()
+        def resolvedStorePassword = resolveReleaseStorePassword()
+        def resolvedKeyAlias = resolveReleaseKeyAlias()
+        def resolvedKeyPassword = resolveReleaseKeyPassword()
+        if (!keystoreFile.exists()) {
+            throw new GradleException(
+                "Missing release keystore at ${keystoreFile}! Production release builds cannot fall back to debug signing or generate an ephemeral key. Provide flutter_app/android/app/release.keystore (or flutter_app/android/key.properties) and configure KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD."
+            )
+        }
+        if (!resolvedStorePassword || !resolvedKeyAlias || !resolvedKeyPassword) {
+            throw new GradleException(
+                "Incomplete release signing credentials! Ensure KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD (or flutter_app/android/key.properties) are set so release APKs use a consistent certificate."
+            )
+        }
     }
 }
 

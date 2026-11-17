@@ -6,6 +6,15 @@ on:
   pull_request:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'Optional integer Android versionCode override (must be >= pubspec.yaml build number)'
+        required: false
+        type: string
+      build_name:
+        description: 'Optional Android versionName override (defaults to pubspec.yaml version)'
+        required: false
+        type: string
 
 jobs:
   test:
@@ -110,6 +119,38 @@ jobs:
           channel: 'stable'
           cache: true
 
+      - name: Validate Release Version Configuration
+        env:
+          DISPATCH_BUILD_NUMBER: ${{ github.event.inputs.build_number }}
+          DISPATCH_BUILD_NAME: ${{ github.event.inputs.build_name }}
+        run: |
+          PUBSPEC_VERSION=$(grep -E '^version:[[:space:]]*' flutter_app/pubspec.yaml | head -n 1 | sed -E 's/^version:[[:space:]]*//; s/[[:space:]]*$//')
+          if [[ ! "$PUBSPEC_VERSION" =~ ^([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)$ ]]; then
+            echo "::error::Invalid flutter_app/pubspec.yaml version '$PUBSPEC_VERSION'. Expected semantic version X.Y.Z+N with integer versionCode."
+            exit 1
+          fi
+          PUBSPEC_NAME="${BASH_REMATCH[1]}"
+          PUBSPEC_CODE="${BASH_REMATCH[2]}"
+          if [ "$PUBSPEC_CODE" -lt 1 ]; then
+            echo "::error::Invalid pubspec.yaml versionCode '$PUBSPEC_CODE'. Must be >= 1."
+            exit 1
+          fi
+
+          EXPECTED_VERSION_NAME="${DISPATCH_BUILD_NAME:-$PUBSPEC_NAME}"
+          EXPECTED_VERSION_CODE="${DISPATCH_BUILD_NUMBER:-$PUBSPEC_CODE}"
+
+          if [[ ! "$EXPECTED_VERSION_CODE" =~ ^[0-9]+$ ]] || [ "$EXPECTED_VERSION_CODE" -lt "$PUBSPEC_CODE" ]; then
+            echo "::error::Invalid build_number '$EXPECTED_VERSION_CODE'. Must be an integer >= pubspec.yaml versionCode ($PUBSPEC_CODE)."
+            exit 1
+          fi
+
+          echo "=== Release Version Configuration ==="
+          echo "  - pubspec.yaml version: $PUBSPEC_VERSION"
+          echo "  - Effective versionName: $EXPECTED_VERSION_NAME"
+          echo "  - Effective versionCode: $EXPECTED_VERSION_CODE"
+          echo "EXPECTED_VERSION_NAME=$EXPECTED_VERSION_NAME" >> "$GITHUB_ENV"
+          echo "EXPECTED_VERSION_CODE=$EXPECTED_VERSION_CODE" >> "$GITHUB_ENV"
+
       - name: Validate & Decode Persistent Release Keystore
         env:
           INPUT_SECRET_B64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -129,48 +170,40 @@ jobs:
           KEYSTORE_BASE64="${INPUT_SECRET_B64:-${INPUT_VAR_B64:-$INPUT_LOWER_B64}}"
           KEYSTORE_PASSWORD="${INPUT_SECRET_PASS:-${INPUT_VAR_PASS:-$INPUT_LOWER_PASS}}"
           KEY_ALIAS="${INPUT_SECRET_ALIAS:-${INPUT_VAR_ALIAS:-$INPUT_LOWER_ALIAS}}"
-          KEY_PASSWORD="${INPUT_SECRET_KEYPASS:-${INPUT_VAR_KEYPASS:-$INPUT_LOWER_KEYPASS}}"
+          KEY_PASSWORD="${INPUT_SECRET_KEYPASS:-${INPUT_VAR_KEYPASS:-${INPUT_LOWER_KEYPASS:-$KEYSTORE_PASSWORD}}}"
+
+          [ -n "$KEYSTORE_PASSWORD" ] && echo "::add-mask::$KEYSTORE_PASSWORD" || true
+          [ -n "$KEY_PASSWORD" ] && echo "::add-mask::$KEY_PASSWORD" || true
 
           echo "=== Signing Configuration Diagnostic ==="
-          [ -n "$INPUT_SECRET_B64" ] && echo "  - Found in secrets.KEYSTORE_BASE64 (${#INPUT_SECRET_B64} bytes)" || true
-          [ -n "$INPUT_VAR_B64" ] && echo "  - Found in vars.KEYSTORE_BASE64 (${#INPUT_VAR_B64} bytes)" || true
-          [ -n "$INPUT_LOWER_B64" ] && echo "  - Found in secrets.keystore_base64 (${#INPUT_LOWER_B64} bytes)" || true
-          [ -n "$KEYSTORE_BASE64" ] && echo "  - KEYSTORE_BASE64: [RESOLVED (${#KEYSTORE_BASE64} bytes)]" || echo "  - KEYSTORE_BASE64: [NOT FOUND]"
-          [ -n "$KEYSTORE_PASSWORD" ] && echo "  - KEYSTORE_PASSWORD: [RESOLVED (${#KEYSTORE_PASSWORD} chars)]" || echo "  - KEYSTORE_PASSWORD: [NOT FOUND]"
-          [ -n "$KEY_ALIAS" ] && echo "  - KEY_ALIAS: [RESOLVED ($KEY_ALIAS)]" || echo "  - KEY_ALIAS: [NOT FOUND]"
-          [ -n "$KEY_PASSWORD" ] && echo "  - KEY_PASSWORD: [RESOLVED (${#KEY_PASSWORD} chars)]" || echo "  - KEY_PASSWORD: [NOT FOUND]"
+          [ -n "$KEYSTORE_BASE64" ] && echo "  - KEYSTORE_BASE64: [RESOLVED (${#KEYSTORE_BASE64} bytes)]" || echo "  - KEYSTORE_BASE64: [MISSING]"
+          [ -n "$KEYSTORE_PASSWORD" ] && echo "  - KEYSTORE_PASSWORD: [RESOLVED]" || echo "  - KEYSTORE_PASSWORD: [MISSING]"
+          [ -n "$KEY_ALIAS" ] && echo "  - KEY_ALIAS: [RESOLVED ($KEY_ALIAS)]" || echo "  - KEY_ALIAS: [MISSING]"
+          [ -n "$KEY_PASSWORD" ] && echo "  - KEY_PASSWORD: [RESOLVED]" || echo "  - KEY_PASSWORD: [MISSING]"
 
-          mkdir -p flutter_app/android/app
-          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
-            echo "Configuring release build with repository secrets..."
-            echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > flutter_app/android/app/release.keystore
-            if [ ! -s flutter_app/android/app/release.keystore ]; then
-              echo "::error::Keystore decode failed or resulting release.keystore file is empty."
-              exit 1
-            fi
-            echo "Successfully decoded custom release keystore to flutter_app/android/app/release.keystore"
-          else
-            echo "::warning::Repository signing secrets not configured. Generating self-signed CI release keystore..."
-            KEYSTORE_PASSWORD="daywell_ci_release_pass"
-            KEY_ALIAS="daywell_ci_release_key"
-            KEY_PASSWORD="daywell_ci_release_pass"
-            keytool -genkeypair -v \
-              -keystore flutter_app/android/app/release.keystore \
-              -alias "$KEY_ALIAS" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "$KEYSTORE_PASSWORD" \
-              -keypass "$KEY_PASSWORD" \
-              -dname "CN=Daywell CI Release, OU=Mobile, O=Daywell, L=Addis Ababa, ST=Addis Ababa, C=ET"
-            echo "Successfully generated self-signed CI release keystore at flutter_app/android/app/release.keystore"
-            echo "NOTE: To sign with your own official release certificate, configure KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD under GitHub Repository secrets."
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::Missing persistent release signing secrets (KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and optional KEY_PASSWORD). Ephemeral CI key generation is disabled because rotating certificates causes Android INSTALL_FAILED_UPDATE_INCOMPATIBLE ('App not installed') on existing devices. Upload your existing release keystore to GitHub Repository Secrets before building a release APK."
+            exit 1
           fi
 
+          mkdir -p flutter_app/android/app
+          echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > flutter_app/android/app/release.keystore
+          if [ ! -s flutter_app/android/app/release.keystore ]; then
+            echo "::error::Keystore decode failed or resulting release.keystore file is empty."
+            exit 1
+          fi
+
+          if ! keytool -list -keystore flutter_app/android/app/release.keystore -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+            echo "::error::Decoded release.keystore failed validation against KEY_ALIAS='$KEY_ALIAS' and KEYSTORE_PASSWORD."
+            rm -f flutter_app/android/app/release.keystore
+            exit 1
+          fi
+          echo "Successfully decoded and verified persistent release keystore (alias: $KEY_ALIAS)"
+
           # Export credentials to GITHUB_ENV for the Gradle build step
-          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
-          echo "KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
-          echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+          echo "KEY_ALIAS=$KEY_ALIAS" >> "$GITHUB_ENV"
+          echo "KEY_PASSWORD=$KEY_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Build Standalone ARM64-v8a Production Release APK
         run: |
@@ -178,9 +211,9 @@ jobs:
           rm -rf android/.gradle
           flutter pub get
           dart run build_runner build --delete-conflicting-outputs
-          flutter build apk --release --target-platform android-arm64
+          flutter build apk --release --target-platform android-arm64 --build-name="$EXPECTED_VERSION_NAME" --build-number="$EXPECTED_VERSION_CODE"
 
-      - name: Verify APK Signature & Certificate Fingerprint
+      - name: Verify APK Metadata, Completeness & Signing Certificate
         run: |
           cd flutter_app
           APK_DIR="build/app/outputs/flutter-apk"
@@ -195,24 +228,79 @@ jobs:
             exit 1
           fi
 
-          echo "=== 1. Package File Details ==="
+          echo "=== 1. Package File & Completeness Details ==="
           ls -lh "$APK_FILE"
-          echo "SHA-256 Checksum:"
-          sha256sum "$APK_FILE"
+          APK_SHA256=$(sha256sum "$APK_FILE" | awk '{print $1}')
+          echo "SHA-256 Checksum: $APK_SHA256"
 
-          echo "=== 2. Architecture & Native Libraries (ARM64 only) ==="
-          unzip -l "$APK_FILE" | grep "lib/" || true
+          APK_ENTRIES=$(unzip -Z1 "$APK_FILE")
+          for required_entry in "AndroidManifest.xml" "classes.dex" "resources.arsc"; do
+            if ! echo "$APK_ENTRIES" | grep -qx "$required_entry"; then
+              echo "::error::APK is incomplete (missing $required_entry)"
+              exit 1
+            fi
+          done
 
-          echo "=== 3. apksigner Verification ==="
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
-          if [ -n "$APKSIGNER" ] && [ -x "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --verbose --print-certs "$APK_FILE"
-          else
-            keytool -printcert -jarfile "$APK_FILE"
+          echo "=== 2. Architecture & Native Libraries (ARM64-v8a only) ==="
+          LIB_ENTRIES=$(echo "$APK_ENTRIES" | grep "^lib/" || true)
+          echo "$LIB_ENTRIES"
+          if ! echo "$LIB_ENTRIES" | grep -q "^lib/arm64-v8a/"; then
+            echo "::error::Standalone ARM64 release APK is missing lib/arm64-v8a/ native libraries."
+            exit 1
           fi
 
-          echo "=== 4. Certificate Details & SHA-256 Fingerprint ==="
-          keytool -printcert -jarfile "$APK_FILE" | grep -E "Owner:|Issuer:|SHA256:|Valid from:" || true
+          echo "=== 3. Manifest & Version Verification (aapt2) ==="
+          AAPT2=$(find "$ANDROID_HOME/build-tools" -name aapt2 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$AAPT2" ] || [ ! -x "$AAPT2" ]; then
+            echo "::error::aapt2 tool not found in ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          BADGING=$("$AAPT2" dump badging "$APK_FILE")
+          echo "$BADGING" | grep -E "^(package:|sdkVersion:|targetSdkVersion:|application-debuggable|native-code:)" || true
+
+          if ! echo "$BADGING" | grep -q "package: name='com.example.personalmanagement' versionCode='$EXPECTED_VERSION_CODE' versionName='$EXPECTED_VERSION_NAME'"; then
+            echo "::error::APK package or version mismatch! Expected com.example.personalmanagement versionCode=$EXPECTED_VERSION_CODE versionName=$EXPECTED_VERSION_NAME"
+            exit 1
+          fi
+          if ! echo "$BADGING" | grep -q "sdkVersion:'26'"; then
+            echo "::error::Unexpected minSdkVersion (expected 26)"
+            exit 1
+          fi
+          if echo "$BADGING" | grep -q "application-debuggable"; then
+            echo "::error::Release APK must NOT have android:debuggable='true'!"
+            exit 1
+          fi
+
+          echo "=== 4. apksigner Verification ==="
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ] || [ ! -x "$APKSIGNER" ]; then
+            echo "::error::apksigner tool not found in ANDROID_HOME/build-tools"
+            exit 1
+          fi
+          CERT_OUTPUT=$("$APKSIGNER" verify --verbose --print-certs "$APK_FILE")
+          echo "$CERT_OUTPUT"
+
+          if echo "$CERT_OUTPUT" | grep -qiE "CN=Android Debug|CN=Daywell CI Release"; then
+            echo "::error::Release APK was signed with a debug or ephemeral CI certificate! Aborting."
+            exit 1
+          fi
+
+          CERT_SHA256=$(echo "$CERT_OUTPUT" | grep -m 1 "Signer #1 certificate SHA-256 digest:" | awk -F': ' '{print $2}')
+          CERT_DN=$(echo "$CERT_OUTPUT" | grep -m 1 "Signer #1 certificate DN:" | awk -F': ' '{print $2}')
+
+          {
+            echo "### Daywell Release APK Verification"
+            echo "- **Application ID:** \`com.example.personalmanagement\`"
+            echo "- **Version:** \`$EXPECTED_VERSION_NAME\` (\`versionCode: $EXPECTED_VERSION_CODE\`)"
+            echo "- **Min / Target SDK:** \`26\` / \`34\`"
+            echo "- **APK SHA-256:** \`$APK_SHA256\`"
+            echo "- **Signer DN:** \`$CERT_DN\`"
+            echo "- **Signer Certificate SHA-256:** \`$CERT_SHA256\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean Up Decoded Keystore Material
+        if: always()
+        run: rm -f flutter_app/android/app/release.keystore
 
       - name: Prune Previous APK Artifacts (Best-Effort)
         continue-on-error: true
