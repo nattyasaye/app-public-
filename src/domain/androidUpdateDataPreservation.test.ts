@@ -281,6 +281,8 @@ describe('ANDROID IN-PLACE UPDATE AND DATA PRESERVATION (TASKS 01–06)', () => 
       assert.match(workflow, /KEYSTORE_BASE64/);
       assert.match(workflow, /keytool -list -keystore flutter_app\/android\/app\/release\.keystore/);
       assert.match(workflow, /aapt2/);
+      assert.match(workflow, /\(sdkVersion\|minSdkVersion\):'26'/);
+      assert.match(workflow, /dump xmltree/);
       assert.match(workflow, /apksigner/);
       assert.match(workflow, /CN=Android Debug\|CN=Daywell CI Release/);
       assert.match(workflow, /Clean Up Decoded Keystore Material/);

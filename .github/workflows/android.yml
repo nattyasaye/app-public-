@@ -256,15 +256,26 @@ jobs:
             exit 1
           fi
           BADGING=$("$AAPT2" dump badging "$APK_FILE")
-          echo "$BADGING" | grep -E "^(package:|sdkVersion:|targetSdkVersion:|application-debuggable|native-code:)" || true
+          echo "$BADGING" | grep -E "^(package:|sdkVersion:|minSdkVersion:|targetSdkVersion:|application-debuggable|native-code:)" || true
 
           if ! echo "$BADGING" | grep -q "package: name='com.example.personalmanagement' versionCode='$EXPECTED_VERSION_CODE' versionName='$EXPECTED_VERSION_NAME'"; then
             echo "::error::APK package or version mismatch! Expected com.example.personalmanagement versionCode=$EXPECTED_VERSION_CODE versionName=$EXPECTED_VERSION_NAME"
             exit 1
           fi
-          if ! echo "$BADGING" | grep -q "sdkVersion:'26'"; then
-            echo "::error::Unexpected minSdkVersion (expected 26)"
-            exit 1
+
+          # Older aapt2 prints sdkVersion:'26', while newer AOSP build-tools (e.g. 36+) print minSdkVersion:'26'.
+          if ! echo "$BADGING" | grep -qE "(^|[^[:alnum:]_])(sdkVersion|minSdkVersion):'26'"; then
+            if echo "$BADGING" | grep -qE "(^|[^[:alnum:]_])(sdkVersion|minSdkVersion):"; then
+              echo "::error::Unexpected minSdkVersion (expected 26)"
+              echo "$BADGING" | grep -E "(^|[^[:alnum:]_])(sdkVersion|minSdkVersion):" || true
+              exit 1
+            fi
+            USES_SDK_XML=$("$AAPT2" dump xmltree "$APK_FILE" --file AndroidManifest.xml | grep -A4 -E "uses-sdk" || true)
+            echo "$USES_SDK_XML"
+            if ! echo "$USES_SDK_XML" | grep -qE "minSdkVersion(\([^)]*\))?=(\(type 0x10\)[[:space:]]*)?0x0*1a([^[:xdigit:]]|$)|minSdkVersion(\([^)]*\))?=26([^0-9]|$)"; then
+              echo "::error::Unexpected minSdkVersion (expected 26)"
+              exit 1
+            fi
           fi
           if echo "$BADGING" | grep -q "application-debuggable"; then
             echo "::error::Release APK must NOT have android:debuggable='true'!"
