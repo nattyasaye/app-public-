@@ -1020,8 +1020,9 @@ describe('PROJECTS STAGE 1: DOMAIN VALIDATION, PROGRESS ENGINE, REPOSITORY & BRI
       assert.strictEqual(directReimport.success, true, directReimport.error);
       assert.strictEqual(directReimport.state?.snapshotFormatVersion, 2);
 
+      const { snapshotFormatVersion: _omitFmt, ...exportedLegacyBase } = exported;
       const reorderedPayload = {
-        ...exported,
+        ...exportedLegacyBase,
         schemaVersion: 9,
         projectTrackingRecords: [
           {

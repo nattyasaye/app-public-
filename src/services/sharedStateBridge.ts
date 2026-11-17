@@ -42,6 +42,7 @@ import {
 } from '../domain/doubleEntryFinance';
 import { EthiopiaClock, LocalDateTime, SharedDateFormatter } from '../domain/date';
 import { BackupFailureKind, BackupValidationError } from '../domain/backupTypes';
+import { interpretSnapshotVersions } from '../domain/snapshotVersionPolicy';
 
 export interface SharedMilestone {
   id: string;
@@ -1832,6 +1833,7 @@ export class SharedStateBridge {
     snapshotFormatVersion: number;
     databaseSchemaVersion?: number;
     financeSchemaVersion: number;
+    usesModernFinanceV7Rules: boolean;
   } {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       throw new BackupValidationError(
@@ -1841,149 +1843,7 @@ export class SharedStateBridge {
     }
 
     const record = raw as Record<string, any>;
-    const hasSchemaVersion = Object.prototype.hasOwnProperty.call(record, 'schemaVersion');
-    const hasVersion = Object.prototype.hasOwnProperty.call(record, 'version');
-
-    let parsedSchemaVersion: number | undefined;
-    if (hasSchemaVersion) {
-      const sv = record.schemaVersion;
-      if (typeof sv !== 'number' || !Number.isInteger(sv)) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          'Snapshot schemaVersion must be a valid integer.'
-        );
-      }
-      parsedSchemaVersion = sv;
-    }
-
-    let parsedVersion: number | undefined;
-    if (hasVersion) {
-      const v = record.version;
-      if (typeof v !== 'number' || !Number.isInteger(v)) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          'Snapshot version must be a valid integer.'
-        );
-      }
-      parsedVersion = v;
-    }
-
-    if (
-      parsedSchemaVersion !== undefined &&
-      parsedVersion !== undefined &&
-      parsedSchemaVersion !== parsedVersion
-    ) {
-      throw new BackupValidationError(
-        'invalid_snapshot_version',
-        `Contradictory snapshot versions: schemaVersion=${parsedSchemaVersion} does not match version=${parsedVersion}.`
-      );
-    }
-
-    const resolvedVersion =
-      parsedSchemaVersion ?? parsedVersion ?? this.SUPPORTED_EXCHANGE_SCHEMA_VERSION;
-
-    if (resolvedVersion < 0) {
-      throw new BackupValidationError(
-        'invalid_snapshot_version',
-        `Invalid snapshot version ${resolvedVersion}: cannot be negative.`
-      );
-    }
-    if (resolvedVersion === 3) {
-      throw new BackupValidationError(
-        'invalid_snapshot_version',
-        `Legacy LocalDatabaseState v3 payloads are distinct from SharedStateBridge canonical exchange snapshots (schemaVersion ${this.MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION}..${this.MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION}) and cannot be imported here.`
-      );
-    }
-    if (resolvedVersion > this.MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION) {
-      throw new BackupValidationError(
-        'unsupported_future_schema',
-        `Unsupported future snapshot schemaVersion ${resolvedVersion} (maximum supported canonical version is ${this.MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION}).`
-      );
-    }
-    if (resolvedVersion < this.MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION) {
-      throw new BackupValidationError(
-        'invalid_snapshot_version',
-        `Unsupported snapshot schemaVersion ${resolvedVersion}. Web SharedStateBridge accepts canonical schema versions ${this.MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION}..${this.MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION}.`
-      );
-    }
-
-    let resolvedSnapshotFormatVersion = this.LEGACY_OMITTED_SNAPSHOT_FORMAT_VERSION;
-    if (Object.prototype.hasOwnProperty.call(record, 'snapshotFormatVersion')) {
-      const sfv = record.snapshotFormatVersion;
-      if (typeof sfv !== 'number' || !Number.isInteger(sfv)) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          'Snapshot snapshotFormatVersion must be a valid integer.'
-        );
-      }
-      if (sfv > this.MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION) {
-        throw new BackupValidationError(
-          'unsupported_future_schema',
-          `Unsupported future snapshotFormatVersion ${sfv} (maximum supported is ${this.MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION}).`
-        );
-      }
-      if (sfv < this.MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          `Unsupported snapshotFormatVersion ${sfv}. Accepted values are ${this.MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION}..${this.MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION}.`
-        );
-      }
-      resolvedSnapshotFormatVersion = sfv;
-    }
-
-    let resolvedDatabaseSchemaVersion: number | undefined;
-    if (Object.prototype.hasOwnProperty.call(record, 'databaseSchemaVersion')) {
-      const dsv = record.databaseSchemaVersion;
-      if (typeof dsv !== 'number' || !Number.isInteger(dsv)) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          'Snapshot databaseSchemaVersion must be a valid integer.'
-        );
-      }
-      if (dsv < 1) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          `Invalid databaseSchemaVersion ${dsv}: must be >= 1.`
-        );
-      }
-      if (dsv > this.MAX_SUPPORTED_DATABASE_SCHEMA_VERSION) {
-        throw new BackupValidationError(
-          'unsupported_future_schema',
-          `Unsupported future databaseSchemaVersion ${dsv} (maximum supported is ${this.MAX_SUPPORTED_DATABASE_SCHEMA_VERSION}).`
-        );
-      }
-      resolvedDatabaseSchemaVersion = dsv;
-    }
-
-    let resolvedFinanceVersion = this.SUPPORTED_FINANCE_SCHEMA_VERSION;
-    if (Object.prototype.hasOwnProperty.call(record, 'financeSchemaVersion')) {
-      const fv = record.financeSchemaVersion;
-      if (typeof fv !== 'number' || !Number.isInteger(fv)) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          'Snapshot financeSchemaVersion must be a valid integer.'
-        );
-      }
-      if (fv < 0) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          `Invalid financeSchemaVersion ${fv}: cannot be negative.`
-        );
-      }
-      if (fv > this.SUPPORTED_FINANCE_SCHEMA_VERSION) {
-        throw new BackupValidationError(
-          'unsupported_future_schema',
-          `Unsupported future financeSchemaVersion ${fv} (maximum supported is ${this.SUPPORTED_FINANCE_SCHEMA_VERSION}).`
-        );
-      }
-      if (fv < this.SUPPORTED_FINANCE_SCHEMA_VERSION) {
-        throw new BackupValidationError(
-          'invalid_snapshot_version',
-          `Unsupported financeSchemaVersion ${fv}. Expected ${this.SUPPORTED_FINANCE_SCHEMA_VERSION}.`
-        );
-      }
-      resolvedFinanceVersion = fv;
-    }
+    const versionInfo = interpretSnapshotVersions(record);
 
     if (!Array.isArray(record.accounts) || !Array.isArray(record.transactions)) {
       throw new BackupValidationError(
@@ -2026,12 +1886,14 @@ export class SharedStateBridge {
 
     return {
       record,
-      schemaVersion: resolvedVersion,
-      snapshotFormatVersion: resolvedSnapshotFormatVersion,
-      ...(resolvedDatabaseSchemaVersion !== undefined
-        ? { databaseSchemaVersion: resolvedDatabaseSchemaVersion }
+      schemaVersion: versionInfo.schemaVersion,
+      snapshotFormatVersion: versionInfo.snapshotFormatVersion,
+      ...(versionInfo.databaseSchemaVersion !== undefined
+        ? { databaseSchemaVersion: versionInfo.databaseSchemaVersion }
         : {}),
-      financeSchemaVersion: resolvedFinanceVersion,
+      financeSchemaVersion:
+        versionInfo.financeSchemaVersion ?? this.SUPPORTED_FINANCE_SCHEMA_VERSION,
+      usesModernFinanceV7Rules: versionInfo.usesModernFinanceV7Rules,
     };
   }
 
@@ -2065,6 +1927,7 @@ export class SharedStateBridge {
         snapshotFormatVersion,
         databaseSchemaVersion,
         financeSchemaVersion,
+        usesModernFinanceV7Rules,
       } = this.validateIncomingSnapshot(rawParsed);
 
       const nowIso = EthiopiaClock.nowUtc().toISOString();
@@ -2175,10 +2038,7 @@ export class SharedStateBridge {
 
       // 2. Accounts
       const accountSeenIds = new Set<string>();
-      const requiresExplicitAccountCurrency =
-        schemaVersion >= 7 ||
-        (Object.prototype.hasOwnProperty.call(parsed, 'financeSchemaVersion') &&
-          financeSchemaVersion >= 7);
+      const requiresExplicitAccountCurrency = usesModernFinanceV7Rules;
       const validatedAccounts = (parsed.accounts as Record<string, any>[]).map((a, idx) => {
         const ctx = `accounts[${idx}]`;
         const id = this.requireUniqueId(a, 'accounts', idx, accountSeenIds);
@@ -3077,10 +2937,14 @@ export class SharedStateBridge {
             );
           }
         } else {
-          if (schemaVersion >= 7) {
+          if (usesModernFinanceV7Rules) {
+            const formatLabel =
+              snapshotFormatVersion >= this.SUPPORTED_SNAPSHOT_FORMAT_VERSION
+                ? 'format-2'
+                : `v${schemaVersion}`;
             throw new BackupValidationError(
               'invalid_payload',
-              `Missing required foreign key "${ctx}.categoryId" on v${schemaVersion} ${type} transaction "${id}".`
+              `Missing required foreign key "${ctx}.categoryId" on ${formatLabel} ${type} transaction "${id}".`
             );
           }
           categoryId = type === 'income' ? 'cat-other-inc' : 'cat-other-exp';

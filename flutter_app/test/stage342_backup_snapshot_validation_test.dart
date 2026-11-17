@@ -472,9 +472,9 @@ void main() {
           kind: BackupFailureKind.unsupportedKdf,
         ),
         (
-          name: 'future header schema_version 9',
+          name: 'future header schema_version 10',
           mutate: (m) {
-            (m['header'] as Map<String, dynamic>)['schema_version'] = 9;
+            (m['header'] as Map<String, dynamic>)['schema_version'] = 10;
             return m;
           },
           kind: BackupFailureKind.unsupportedFutureSchema,
@@ -686,6 +686,9 @@ void main() {
           ..['snapshotFormatVersion'] = 2
           ..['databaseSchemaVersion'] = 9,
         _minimalValidSnapshot(schemaVersion: 5)
+          ..['snapshotFormatVersion'] = 2
+          ..['financeSchemaVersion'] = 7,
+        _minimalValidSnapshot(schemaVersion: 5)
           ..['snapshotFormatVersion'] = 1
           ..['databaseSchemaVersion'] = 8,
         _minimalValidSnapshot(schemaVersion: 8), // omitted snapshotFormatVersion -> legacy 1
@@ -765,6 +768,34 @@ void main() {
             ..['databaseSchemaVersion'] = '9',
           kind: BackupFailureKind.invalidSnapshotVersion,
         ),
+        (
+          name: 'format-2 missing explicit schemaVersion',
+          snap: _minimalValidSnapshot(includeSchemaVersion: false)
+            ..['snapshotFormatVersion'] = 2
+            ..['databaseSchemaVersion'] = 9,
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+        (
+          name: 'format-2 with databaseSchemaVersion 8',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 2
+            ..['databaseSchemaVersion'] = 8,
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+        (
+          name: 'format-2 with financeSchemaVersion 6',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 2
+            ..['financeSchemaVersion'] = 6,
+          kind: BackupFailureKind.invalidSnapshotVersion,
+        ),
+        (
+          name: 'format-2 with future financeSchemaVersion 8',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 2
+            ..['financeSchemaVersion'] = 8,
+          kind: BackupFailureKind.unsupportedFutureSchema,
+        ),
       ];
 
       for (final tc in rejectedMetaCases) {
@@ -790,6 +821,30 @@ void main() {
           reason: '${tc.name} must fail encryption service validation',
         );
       }
+
+      // Contradictory format-2 with non-5 schemaVersion (e.g., 9) fails closed
+      final contradictoryFormat2V9 = _minimalValidSnapshot(schemaVersion: 9)
+        ..['snapshotFormatVersion'] = 2
+        ..['databaseSchemaVersion'] = 9;
+      expect(
+        () => DatabasePersistenceCoordinator.validateCanonicalSnapshot(
+          contradictoryFormat2V9,
+          expectedHeaderVersion: 9,
+        ),
+        _throwsValidation(BackupFailureKind.invalidSnapshotVersion),
+      );
+      final envV9 = await service.encryptDatabasePayload(
+        rawDatabaseJson: jsonEncode(contradictoryFormat2V9),
+        passphrase: 'SepPass#11',
+        schemaVersion: 9,
+      );
+      await expectLater(
+        () => service.decryptDatabasePayload(
+          encryptedEnvelopeJson: envV9,
+          passphrase: 'SepPass#11',
+        ),
+        _throwsValidation(BackupFailureKind.invalidSnapshotVersion),
+      );
     });
 
     test(

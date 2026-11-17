@@ -5,6 +5,7 @@ import 'package:drift/drift.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/interfaces/platform_service_interfaces.dart';
 import '../../core/shared_foundation_core.dart';
+import '../../core/snapshot_version_policy.dart';
 import '../../domain/finance/double_entry_engine.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/projects/project_validation_service.dart';
@@ -17,6 +18,7 @@ import 'v7_ledger_hardener.dart';
 /// Validated, normalized snapshot ready for atomic Phase B SQLite persistence.
 class PreparedSnapshotImport {
   final int snapshotVersion;
+  final SnapshotVersionInterpretation versionInterpretation;
   final List<SnapshotImportDiagnostic> preImportDiagnostics;
   final Map<String, int> restoredRecordCounts;
 
@@ -56,6 +58,7 @@ class PreparedSnapshotImport {
 
   const PreparedSnapshotImport({
     required this.snapshotVersion,
+    required this.versionInterpretation,
     required this.preImportDiagnostics,
     required this.restoredRecordCounts,
     required this.categories,
@@ -661,13 +664,9 @@ class DatabasePersistenceCoordinator {
     'custom',
   };
 
-  /// Validates canonical snapshot structure and version bounds before any
-  /// destructive database operation occurs.
-  ///
-  /// Returns the resolved canonical integer version (`4..9`), preserving the
-  /// documented omitted-version legacy default (`5`) only when neither
-  /// `schemaVersion` nor `version` is present in [rawSnapshot].
-  static int validateCanonicalSnapshot(
+  /// Validates and interprets canonical snapshot metadata and top-level collection
+  /// shapes before any destructive database operation occurs.
+  static SnapshotVersionInterpretation validateAndInterpretCanonicalSnapshot(
     dynamic rawSnapshot, {
     int? expectedHeaderVersion,
   }) {
@@ -678,129 +677,10 @@ class DatabasePersistenceCoordinator {
       );
     }
 
-    final hasSchemaVersion = rawSnapshot.containsKey('schemaVersion');
-    final hasVersion = rawSnapshot.containsKey('version');
-
-    int? parsedSchemaVersion;
-    if (hasSchemaVersion) {
-      final rawSv = rawSnapshot['schemaVersion'];
-      if (rawSv is! int) {
-        throw const BackupValidationException(
-          BackupFailureKind.invalidSnapshotVersion,
-          'Snapshot schemaVersion must be a valid integer.',
-        );
-      }
-      parsedSchemaVersion = rawSv;
-    }
-
-    int? parsedVersion;
-    if (hasVersion) {
-      final rawV = rawSnapshot['version'];
-      if (rawV is! int) {
-        throw const BackupValidationException(
-          BackupFailureKind.invalidSnapshotVersion,
-          'Snapshot version must be a valid integer.',
-        );
-      }
-      parsedVersion = rawV;
-    }
-
-    if (parsedSchemaVersion != null &&
-        parsedVersion != null &&
-        parsedSchemaVersion != parsedVersion) {
-      throw BackupValidationException(
-        BackupFailureKind.invalidSnapshotVersion,
-        'Contradictory snapshot version metadata: '
-        'schemaVersion=$parsedSchemaVersion does not match version=$parsedVersion.',
-      );
-    }
-
-    final resolvedVersion =
-        parsedSchemaVersion ?? parsedVersion ?? legacyOmittedSnapshotVersion;
-
-    if (resolvedVersion < 0) {
-      throw BackupValidationException(
-        BackupFailureKind.invalidSnapshotVersion,
-        'Invalid snapshot version $resolvedVersion: version cannot be negative.',
-      );
-    }
-
-    if (resolvedVersion > maxSupportedCanonicalSnapshotVersion) {
-      throw BackupValidationException(
-        BackupFailureKind.unsupportedFutureSchema,
-        'Unsupported future snapshot schemaVersion $resolvedVersion '
-        '(maximum supported version is $maxSupportedCanonicalSnapshotVersion). '
-        'Update Daywell before importing this snapshot.',
-      );
-    }
-
-    if (resolvedVersion < minSupportedCanonicalSnapshotVersion) {
-      throw BackupValidationException(
-        BackupFailureKind.invalidSnapshotVersion,
-        'Unsupported canonical snapshot version $resolvedVersion '
-        '(supported versions are $minSupportedCanonicalSnapshotVersion..'
-        '$maxSupportedCanonicalSnapshotVersion).',
-      );
-    }
-
-    if (expectedHeaderVersion != null &&
-        resolvedVersion != expectedHeaderVersion) {
-      throw BackupValidationException(
-        BackupFailureKind.invalidSnapshotVersion,
-        'Backup header schema_version ($expectedHeaderVersion) does not match '
-        'effective inner snapshot version ($resolvedVersion).',
-      );
-    }
-
-    if (rawSnapshot.containsKey('snapshotFormatVersion')) {
-      final rawFormatVersion = rawSnapshot['snapshotFormatVersion'];
-      if (rawFormatVersion is! int) {
-        throw const BackupValidationException(
-          BackupFailureKind.invalidSnapshotVersion,
-          'Snapshot snapshotFormatVersion must be a valid integer.',
-        );
-      }
-      if (rawFormatVersion > maxSupportedSnapshotFormatVersion) {
-        throw BackupValidationException(
-          BackupFailureKind.unsupportedFutureSchema,
-          'Unsupported future snapshotFormatVersion $rawFormatVersion '
-          '(maximum supported version is $maxSupportedSnapshotFormatVersion). '
-          'Update Daywell before importing this snapshot.',
-        );
-      }
-      if (rawFormatVersion < minSupportedSnapshotFormatVersion) {
-        throw BackupValidationException(
-          BackupFailureKind.invalidSnapshotVersion,
-          'Unsupported snapshotFormatVersion $rawFormatVersion '
-          '(supported versions are $minSupportedSnapshotFormatVersion..'
-          '$maxSupportedSnapshotFormatVersion).',
-        );
-      }
-    }
-
-    if (rawSnapshot.containsKey('databaseSchemaVersion')) {
-      final rawDbVersion = rawSnapshot['databaseSchemaVersion'];
-      if (rawDbVersion is! int) {
-        throw const BackupValidationException(
-          BackupFailureKind.invalidSnapshotVersion,
-          'Snapshot databaseSchemaVersion must be a valid integer.',
-        );
-      }
-      if (rawDbVersion < 1) {
-        throw BackupValidationException(
-          BackupFailureKind.invalidSnapshotVersion,
-          'Invalid databaseSchemaVersion $rawDbVersion: must be >= 1.',
-        );
-      }
-      if (rawDbVersion > maxSupportedDatabaseSchemaVersion) {
-        throw BackupValidationException(
-          BackupFailureKind.unsupportedFutureSchema,
-          'Unsupported future databaseSchemaVersion $rawDbVersion '
-          '(maximum supported version is $maxSupportedDatabaseSchemaVersion). '
-          'Update Daywell before importing this snapshot.',
-        );
-      }
-    }
+    final interpretation = SnapshotVersionPolicy.parseAndValidate(
+      rawSnapshot,
+      expectedHeaderVersion: expectedHeaderVersion,
+    );
 
     for (final field in _snapshotListFields) {
       if (!rawSnapshot.containsKey(field) || rawSnapshot[field] == null) {
@@ -823,7 +703,23 @@ class DatabasePersistenceCoordinator {
       }
     }
 
-    return resolvedVersion;
+    return interpretation;
+  }
+
+  /// Validates canonical snapshot structure and version bounds before any
+  /// destructive database operation occurs.
+  ///
+  /// Returns the resolved canonical integer version (`4..9`), preserving the
+  /// documented omitted-version legacy default (`5`) only when neither
+  /// `schemaVersion` nor `version` is present in [rawSnapshot].
+  static int validateCanonicalSnapshot(
+    dynamic rawSnapshot, {
+    int? expectedHeaderVersion,
+  }) {
+    return validateAndInterpretCanonicalSnapshot(
+      rawSnapshot,
+      expectedHeaderVersion: expectedHeaderVersion,
+    ).schemaVersion;
   }
 
   /// Phase A DB-free unified validation, scalar/date/PK/FK checking, and
@@ -863,10 +759,11 @@ class DatabasePersistenceCoordinator {
     Map<String, String> existingAppSettingKeysByLower =
         const <String, String>{},
   }) {
-    final snapshotVersion = validateCanonicalSnapshot(
+    final versionInterpretation = validateAndInterpretCanonicalSnapshot(
       rawSnapshot,
       expectedHeaderVersion: expectedHeaderVersion,
     );
+    final snapshotVersion = versionInterpretation.schemaVersion;
     final stateMap = rawSnapshot as Map<String, dynamic>;
     final now = (fallbackTimestampUtc ?? EthiopiaClock.nowUtc()).toUtc();
     final diagnostics = <SnapshotImportDiagnostic>[];
@@ -998,10 +895,14 @@ class DatabasePersistenceCoordinator {
         }
       } else if (classified.isSystem) {
         currencyCode = 'ETB';
-      } else if (snapshotVersion >= 7) {
+      } else if (versionInterpretation.usesModernFinanceV7Rules) {
+        final formatLabel = versionInterpretation.snapshotFormatVersion >=
+                SnapshotVersionPolicy.supportedSnapshotFormatVersion
+            ? 'format-2'
+            : 'v$snapshotVersion';
         throw BackupValidationException(
           BackupFailureKind.invalidPayload,
-          'Missing required field "$ctx.currencyCode" on v$snapshotVersion snapshot: first-release Finance requires explicit "ETB" currencyCode on all accounts.',
+          'Missing required field "$ctx.currencyCode" on $formatLabel snapshot: first-release Finance requires explicit "ETB" currencyCode on all accounts.',
         );
       } else {
         currencyCode = '';
@@ -2019,10 +1920,14 @@ class DatabasePersistenceCoordinator {
           createdAt: createdAt,
         ));
       } else {
-        if (snapshotVersion >= 7) {
+        if (versionInterpretation.usesModernFinanceV7Rules) {
+          final formatLabel = versionInterpretation.snapshotFormatVersion >=
+                  SnapshotVersionPolicy.supportedSnapshotFormatVersion
+              ? 'format-2'
+              : 'v$snapshotVersion';
           throw BackupValidationException(
             BackupFailureKind.invalidPayload,
-            'Missing required foreign key "$ctx.categoryId" on v$snapshotVersion $type transaction "$id".',
+            'Missing required foreign key "$ctx.categoryId" on $formatLabel $type transaction "$id".',
           );
         }
         final canonicalId =
@@ -3033,6 +2938,7 @@ class DatabasePersistenceCoordinator {
 
     return PreparedSnapshotImport(
       snapshotVersion: snapshotVersion,
+      versionInterpretation: versionInterpretation,
       preImportDiagnostics:
           List<SnapshotImportDiagnostic>.unmodifiable(diagnostics),
       restoredRecordCounts: Map<String, int>.unmodifiable(restoredCounts),
@@ -3383,8 +3289,10 @@ class DatabasePersistenceCoordinator {
         await _db.into(_db.appSettings).insertOnConflictUpdate(row);
       }
 
-      // 21. Upgrade / normalize v4..v9 snapshots deterministically to v9.
-      if (plan.snapshotVersion < 6) {
+      // 21. Upgrade / normalize legacy snapshots to v9; verify & preserve
+      //     modern Finance v7 (format-2 and legacy v7..v9) without rerunning
+      //     V6/V7 migration.
+      if (plan.versionInterpretation.requiresLegacyPreV6Migration) {
         await V6LedgerMigrator.migrateDataInTransaction(_db);
         final report = await V7LedgerHardener.hardenAndAuditInTransaction(
           _db,
@@ -3396,7 +3304,7 @@ class DatabasePersistenceCoordinator {
             warningStrings.add(w);
           }
         }
-      } else if (plan.snapshotVersion == 6) {
+      } else if (plan.versionInterpretation.requiresLegacyV6Hardening) {
         final report = await V7LedgerHardener.hardenAndAuditInTransaction(
           _db,
           fromVersion: 6,

@@ -299,6 +299,190 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
         );
         assertStoreUnchanged(store, baseline, tc.name);
       }
+
+      // Format-2 valid combinations: Flutter-style (databaseSchemaVersion: 9, no financeSchemaVersion)
+      // and Web-style (financeSchemaVersion: 7, no databaseSchemaVersion), preserving ledgerMigrationReportV7.
+      const validFormat2Payloads = [
+        {
+          name: 'Flutter-style format-2',
+          payload: {
+            ...CANONICAL_SEED_DATABASE,
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            databaseSchemaVersion: 9,
+            ledgerMigrationReportV7: '{"preserved":true,"source":"flutter-fmt2"}',
+          },
+          expectedReport: '{"preserved":true,"source":"flutter-fmt2"}',
+        },
+        {
+          name: 'Web-style format-2',
+          payload: {
+            ...CANONICAL_SEED_DATABASE,
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            financeSchemaVersion: 7,
+            ledgerMigrationReportV7: '{"preserved":true,"source":"web-fmt2"}',
+          },
+          expectedReport: '{"preserved":true,"source":"web-fmt2"}',
+        },
+      ];
+      for (const tc of validFormat2Payloads) {
+        const res = SharedStateBridge.importFromAndroidJson(JSON.stringify(tc.payload));
+        assert.strictEqual(res.success, true, `${tc.name} should succeed: ${res.error}`);
+        assert.strictEqual(res.state?.snapshotFormatVersion, 2);
+        assert.strictEqual(res.state?.schemaVersion, 5);
+        assert.strictEqual(res.state?.financeSchemaVersion, 7);
+        assert.strictEqual(res.state?.ledgerMigrationReportV7, tc.expectedReport);
+      }
+
+      // Reject invalid/contradictory format-2 combinations before mutating localStorage
+      const invalidFormat2Cases: Array<{
+        name: string;
+        payload: Record<string, unknown>;
+        expectedKind: string;
+      }> = [
+        {
+          name: 'format-2 missing explicit schemaVersion',
+          payload: {
+            snapshotFormatVersion: 2,
+            databaseSchemaVersion: 9,
+            accounts: [],
+            transactions: [],
+          },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'format-2 with schemaVersion 8',
+          payload: {
+            schemaVersion: 8,
+            snapshotFormatVersion: 2,
+            databaseSchemaVersion: 9,
+            accounts: [],
+            transactions: [],
+          },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'format-2 with schemaVersion 9',
+          payload: {
+            schemaVersion: 9,
+            snapshotFormatVersion: 2,
+            databaseSchemaVersion: 9,
+            accounts: [],
+            transactions: [],
+          },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'format-2 with databaseSchemaVersion 8',
+          payload: {
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            databaseSchemaVersion: 8,
+            accounts: [],
+            transactions: [],
+          },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'format-2 with financeSchemaVersion 6',
+          payload: {
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            financeSchemaVersion: 6,
+            accounts: [],
+            transactions: [],
+          },
+          expectedKind: 'invalid_snapshot_version',
+        },
+        {
+          name: 'format-2 with future financeSchemaVersion 8',
+          payload: {
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            financeSchemaVersion: 8,
+            accounts: [],
+            transactions: [],
+          },
+          expectedKind: 'unsupported_future_schema',
+        },
+      ];
+      for (const tc of invalidFormat2Cases) {
+        const baseline = seedAllDaywellStores(store);
+        const res = SharedStateBridge.importFromAndroidJson(JSON.stringify(tc.payload));
+        assert.strictEqual(res.success, false, `${tc.name} must be rejected`);
+        assert.strictEqual(res.errorKind, tc.expectedKind, `${tc.name} errorKind mismatch`);
+        assertStoreUnchanged(store, baseline, tc.name);
+      }
+
+      // Format-2 enforces modern Finance v7 rules (explicit currencyCode & categoryId)
+      // even when financeSchemaVersion is omitted (Flutter-exported format-2).
+      for (const extra of [
+        { databaseSchemaVersion: 9 },
+        { financeSchemaVersion: 7 },
+      ]) {
+        const baselineMissingCur = seedAllDaywellStores(store);
+        const missingCurRes = SharedStateBridge.importFromAndroidJson(
+          JSON.stringify({
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            ...extra,
+            accounts: [{ id: 'acc-f2-nocur', name: 'Cash', type: 'asset' }],
+            transactions: [],
+          })
+        );
+        assert.strictEqual(missingCurRes.success, false);
+        assert.strictEqual(missingCurRes.errorKind, 'invalid_payload');
+        assertStoreUnchanged(store, baselineMissingCur, 'format-2 missing currencyCode');
+
+        const baselineMissingCat = seedAllDaywellStores(store);
+        const missingCatRes = SharedStateBridge.importFromAndroidJson(
+          JSON.stringify({
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            ...extra,
+            accounts: [
+              { id: 'acc-f2-etb', name: 'Cash', type: 'asset', currencyCode: 'ETB' },
+            ],
+            transactions: [
+              {
+                id: 'tx-f2-nocat',
+                amountCents: 2500,
+                type: 'expense',
+                transactionDate: '2026-11-16',
+              },
+            ],
+          })
+        );
+        assert.strictEqual(missingCatRes.success, false);
+        assert.strictEqual(missingCatRes.errorKind, 'invalid_payload');
+        assertStoreUnchanged(store, baselineMissingCat, 'format-2 missing categoryId');
+      }
+
+      // Legacy format-1 with databaseSchemaVersion: 9 (and omitted financeSchemaVersion)
+      // must NOT treat databaseSchemaVersion as Finance v7.
+      const legacyFmt1Db9 = SharedStateBridge.importFromAndroidJson(
+        JSON.stringify({
+          schemaVersion: 5,
+          snapshotFormatVersion: 1,
+          databaseSchemaVersion: 9,
+          accounts: [{ id: 'acc-leg-db9', name: 'Legacy Cash', type: 'asset' }],
+          transactions: [
+            {
+              id: 'tx-leg-db9',
+              amountCents: 1500,
+              type: 'expense',
+              transactionDate: '2026-11-16',
+            },
+          ],
+        })
+      );
+      assert.strictEqual(legacyFmt1Db9.success, true, legacyFmt1Db9.error);
+      assert.strictEqual(legacyFmt1Db9.state?.accounts[0].currencyCode, '');
+      assert.strictEqual(
+        legacyFmt1Db9.state?.transactions[0].categoryId,
+        'cat-other-exp'
+      );
     });
   });
 

@@ -1977,6 +1977,203 @@ void main() {
           );
         },
       );
+
+      test(
+        'Stage 1.1.2 format-2 snapshots enforce Finance v7 rules, skip '
+        'legacy V6/V7 migration, preserve ledgerMigrationReportV7, and '
+        'isolate databaseSchemaVersion',
+        () async {
+          Map<String, dynamic> buildFormat2Snapshot({
+            int? databaseSchemaVersion = 9,
+            int? financeSchemaVersion,
+            List<Map<String, dynamic>>? accounts,
+            List<Map<String, dynamic>>? transactions,
+            List<Map<String, dynamic>>? journalEntries,
+            List<Map<String, dynamic>>? postings,
+            String? reportV7,
+          }) {
+            final snap = _baseV7Snapshot(
+              schemaVersion: 5,
+              accounts: accounts,
+              transactions: transactions,
+              journalEntries: journalEntries,
+              postings: postings,
+              ledgerMigrationReportV7: reportV7,
+              includeReport: reportV7 != null,
+            );
+            snap['snapshotFormatVersion'] = 2;
+            if (databaseSchemaVersion != null) {
+              snap['databaseSchemaVersion'] = databaseSchemaVersion;
+            }
+            if (financeSchemaVersion != null) {
+              snap['financeSchemaVersion'] = financeSchemaVersion;
+            }
+            return snap;
+          }
+
+          // Both Flutter-style (databaseSchemaVersion: 9, omitted financeSchemaVersion)
+          // and Web-style (financeSchemaVersion: 7, omitted databaseSchemaVersion)
+          // enforce Finance v7 rules on currencyCode & categoryId.
+          final format2Variants = <Map<String, dynamic> Function({
+            List<Map<String, dynamic>>? accounts,
+            List<Map<String, dynamic>>? transactions,
+            List<Map<String, dynamic>>? journalEntries,
+            List<Map<String, dynamic>>? postings,
+          })>[
+            ({accounts, transactions, journalEntries, postings}) =>
+                buildFormat2Snapshot(
+                  databaseSchemaVersion: 9,
+                  accounts: accounts,
+                  transactions: transactions,
+                  journalEntries: journalEntries,
+                  postings: postings,
+                ),
+            ({accounts, transactions, journalEntries, postings}) =>
+                buildFormat2Snapshot(
+                  databaseSchemaVersion: null,
+                  financeSchemaVersion: 7,
+                  accounts: accounts,
+                  transactions: transactions,
+                  journalEntries: journalEntries,
+                  postings: postings,
+                ),
+          ];
+
+          for (final makeSnap in format2Variants) {
+            expect(
+              () => DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
+                makeSnap(
+                  accounts: const <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'id': 'acc-f2-missing-cur',
+                      'name': 'Wallet Cash',
+                      'type': 'asset',
+                    },
+                  ],
+                  journalEntries: const <Map<String, dynamic>>[],
+                  postings: const <Map<String, dynamic>>[],
+                ),
+              ),
+              _throwsValidationKind(BackupFailureKind.invalidPayload),
+            );
+            expect(
+              () => DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
+                makeSnap(
+                  transactions: const <Map<String, dynamic>>[
+                    <String, dynamic>{
+                      'id': 'tx-f2-missing-cat',
+                      'amountCents': 5000,
+                      'type': 'transfer',
+                      'transactionDate': '2026-11-16',
+                    },
+                  ],
+                ),
+              ),
+              _throwsValidationKind(BackupFailureKind.invalidPayload),
+            );
+          }
+
+          // Valid format-2 snapshot restores without rerunning V6/V7 migration
+          // and preserves ledgerMigrationReportV7 verbatim.
+          const preservedReportJson = '{"preserved":true,"source":"format2"}';
+          final validFormat2 = buildFormat2Snapshot(
+            databaseSchemaVersion: 9,
+            reportV7: preservedReportJson,
+          );
+          final preparedF2 =
+              DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
+            validFormat2,
+          );
+          expect(
+            preparedF2.versionInterpretation.usesModernFinanceV7Rules,
+            isTrue,
+          );
+          expect(
+            preparedF2.versionInterpretation.requiresLegacyPreV6Migration,
+            isFalse,
+          );
+          expect(
+            preparedF2.versionInterpretation.requiresLegacyV6Hardening,
+            isFalse,
+          );
+
+          final targetDb = AppDatabase(NativeDatabase.memory());
+          await targetDb.ensureInitialized();
+          addTearDown(targetDb.close);
+
+          final importResult =
+              await DatabasePersistenceCoordinator(targetDb)
+                  .importSnapshotDetailed(validFormat2);
+          expect(importResult.diagnostics, isEmpty);
+
+          final storedReport = await (targetDb.select(targetDb.appSettings)
+                ..where((t) => t.key.equals(V7LedgerHardener.v7ReportKey)))
+              .getSingleOrNull();
+          expect(storedReport?.value, preservedReportJson);
+
+          final v6Sentinel = await (targetDb.select(targetDb.appSettings)
+                ..where(
+                  (t) => t.key.equals(V6LedgerMigrator.v6MigratedSentinelKey),
+                ))
+              .getSingleOrNull();
+          expect(v6Sentinel, isNull);
+          expect(
+            await targetDb.customSelect('PRAGMA foreign_key_check').get(),
+            isEmpty,
+          );
+
+          // Legacy format-1 (schemaVersion: 5, snapshotFormatVersion: 1, databaseSchemaVersion: 9)
+          // must NOT treat databaseSchemaVersion: 9 as Finance v7.
+          final legacyFmt1WithDb9 = _baseV7Snapshot(
+            schemaVersion: 5,
+            accounts: const <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'acc-legacy-fmt1',
+                'name': 'Legacy Wallet',
+                'type': 'asset',
+              },
+            ],
+            transactions: const <Map<String, dynamic>>[
+              <String, dynamic>{
+                'id': 'tx-legacy-fmt1',
+                'amountCents': 5000,
+                'type': 'transfer',
+                'transactionDate': '2026-11-16',
+              },
+            ],
+            journalEntries: const <Map<String, dynamic>>[],
+            postings: const <Map<String, dynamic>>[],
+          )
+            ..['snapshotFormatVersion'] = 1
+            ..['databaseSchemaVersion'] = 9;
+
+          final preparedFmt1 =
+              DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
+            legacyFmt1WithDb9,
+          );
+          expect(
+            preparedFmt1.versionInterpretation.usesModernFinanceV7Rules,
+            isFalse,
+          );
+          expect(preparedFmt1.accounts.single.currencyCode.value, '');
+          expect(
+            preparedFmt1.transactions.single.categoryId.value,
+            'cat-other-exp',
+          );
+          expect(
+            preparedFmt1.preImportDiagnostics.any(
+              (d) => d.code == 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
+            ),
+            isTrue,
+          );
+          expect(
+            preparedFmt1.preImportDiagnostics.any(
+              (d) => d.code == 'LEGACY_TRANSACTION_DEFAULT_CATEGORY_APPLIED',
+            ),
+            isTrue,
+          );
+        },
+      );
     },
   );
 }

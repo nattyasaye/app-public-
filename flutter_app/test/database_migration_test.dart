@@ -2382,6 +2382,87 @@ void main() {
     );
 
     test(
+      '6b. Real v6 -> v9 upgrade preserves populated Projects, sets v9 '
+      'defaults, reads via DriftProjectsRepository, passes FK check, and '
+      'persists across reopen',
+      () async {
+        final dbFile = File(p.join(tempDir.path, 'real_v6_to_v9.sqlite'));
+        _createRawV6Database(dbFile);
+
+        final migratedDb = AppDatabase(NativeDatabase(dbFile));
+        await migratedDb.ensureInitialized();
+
+        expect(
+          (await migratedDb.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+
+        final projRow = await migratedDb
+            .customSelect(
+              'SELECT id, goal_id, title, description, status, target_date, '
+              'is_archived, start_date, custom_fields_json, created_at, '
+              'updated_at '
+              "FROM projects WHERE id = 'proj-v6';",
+            )
+            .getSingle();
+        expect(projRow.read<String>('id'), 'proj-v6');
+        expect(projRow.readNullable<String>('goal_id'), 'goal-v6');
+        expect(projRow.read<String>('title'), 'v6 Project');
+        expect(projRow.readNullable<String>('description'), 'Legacy v6 roadmap');
+        expect(projRow.read<String>('status'), 'on_hold');
+        expect(projRow.readNullable<String>('target_date'), '2026-12-20');
+        expect(projRow.read<int>('is_archived'), 0);
+        expect(projRow.readNullable<String>('start_date'), isNull);
+        expect(projRow.read<String>('custom_fields_json'), '{}');
+        expect(
+          projRow.read<int>('updated_at'),
+          projRow.read<int>('created_at'),
+        );
+
+        final projectsRepo = DriftProjectsRepository(migratedDb);
+        final v6Project = await projectsRepo.getProjectById('proj-v6');
+        expect(v6Project, isNotNull);
+        expect(v6Project!.goalId, 'goal-v6');
+        expect(v6Project.title, 'v6 Project');
+        expect(v6Project.description, 'Legacy v6 roadmap');
+        expect(v6Project.status, 'on_hold');
+        expect(v6Project.targetDate, '2026-12-20');
+        expect(v6Project.isArchived, isFalse);
+        expect(v6Project.startDate, isNull);
+        expect(v6Project.customFields, const <String, String>{});
+        expect(v6Project.updatedAt, v6Project.createdAt);
+
+        await migratedDb.close();
+
+        final reopened = AppDatabase(NativeDatabase(dbFile));
+        await reopened.ensureInitialized();
+        expect(
+          (await reopened.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          9,
+        );
+        expect(
+          await reopened.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+        final reopenedProject =
+            await DriftProjectsRepository(reopened).getProjectById('proj-v6');
+        expect(reopenedProject, isNotNull);
+        expect(reopenedProject!.title, 'v6 Project');
+        expect(reopenedProject.description, 'Legacy v6 roadmap');
+        expect(reopenedProject.status, 'on_hold');
+        await reopened.close();
+      },
+    );
+
+    test(
       '7. Deliberately failed pre-v5 (v4 -> v9) migration rolls back '
       'atomically leaving v4 projects schema, user_version=4, and data intact',
       () async {
@@ -2936,6 +3017,9 @@ void _createRawV6Database(File dbFile) {
       CREATE TABLE reminders (id TEXT NOT NULL PRIMARY KEY, target_id TEXT NOT NULL, target_type TEXT NOT NULL, trigger_time_utc INTEGER NOT NULL, is_active INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL);
       CREATE TABLE app_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
       INSERT INTO financial_categories (id, name, type) VALUES ('cat-other-exp', 'Other Expense', 'expense');
+      INSERT INTO goals (id, title, status, created_at) VALUES ('goal-v6', 'V6 Goal', 'active', $ts);
+      INSERT INTO projects (id, goal_id, title, description, status, target_date, created_at)
+      VALUES ('proj-v6', 'goal-v6', 'v6 Project', 'Legacy v6 roadmap', 'on_hold', '2026-12-20', $ts);
       INSERT INTO tasks (id, title, created_at, updated_at) VALUES ('task-v6', 'v6 Task', $ts, $ts);
       INSERT INTO reminders (id, target_id, target_type, trigger_time_utc, is_active, created_at)
       VALUES ('rem-v6-1', 'task-v6', 'task', $ts, 1, $ts);
