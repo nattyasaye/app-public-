@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation_core.dart';
+import '../tasks/task_models.dart';
 import 'project_models.dart';
 import 'project_package_codec.dart';
 

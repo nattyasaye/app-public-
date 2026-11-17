@@ -163,8 +163,12 @@ void main() {
       // Rollup counter with allowDirectLogging: true must fail closed
       expect(
         () => ProjectValidationService.validateBlock(
-          validRollup.copyWith(
+          ProjectTrackingBlockEntity(
             id: 'blk-bad-rollup',
+            projectId: validRollup.projectId,
+            blockType: validRollup.blockType,
+            title: validRollup.title,
+            targetValue: validRollup.targetValue,
             config: const {
               'rollupSourceBlockId': 'blk-cities',
               'allowDirectLogging': true,
