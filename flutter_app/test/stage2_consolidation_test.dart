@@ -675,7 +675,7 @@ void main() {
                   createdAt: DateTime.utc(2026, 11, 1),
                 ),
               );
-          await state.financeController.load();
+          await state.financeController.loadAll();
 
           final audit = SharedFoundationBridge.auditConsistency(state);
           expect(audit['isConsistent'], isTrue);
