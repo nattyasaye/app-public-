@@ -17,7 +17,6 @@ import 'package:personal_management_app/data/repositories/inbox_repository.dart'
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
-import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 
 import 'support/sqlite_test_helper.dart';

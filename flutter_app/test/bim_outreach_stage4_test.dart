@@ -189,10 +189,10 @@ void main() {
           reason: 'Bounced test batch adjustment',
         );
         expect(correction, isNotNull);
-        expect(correction!.metadata?['isCorrection'], isTrue);
-        expect(correction.metadata?['compensatesRecordId'], batch1.id);
+        expect(correction!.metadata['isCorrection'], isTrue);
+        expect(correction.metadata['compensatesRecordId'], batch1.id);
         expect(
-          correction.metadata?['correctionReason'],
+          correction.metadata['correctionReason'],
           'Bounced test batch adjustment',
         );
 
@@ -220,7 +220,7 @@ void main() {
         expect(reimported!.project.id, isNot(importedProject.id));
         expect(reimported.project.goalId, isNull);
         expect(
-          reimported.project.customFields?['primaryBlockId'],
+          reimported.project.customFields['primaryBlockId'],
           reimported.trackingBlocks.first.id,
         );
         for (final rec in reimported.trackingRecords) {

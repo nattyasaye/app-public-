@@ -429,7 +429,7 @@ class ProjectValidationService {
         }
         depth += 1;
         if (depth > SharedProjectRules.maxHierarchyDepth) {
-          throw ProjectValidationException(
+          throw const ProjectValidationException(
             'Record hierarchy exceeds maximum depth (${SharedProjectRules.maxHierarchyDepth}).',
           );
         }
@@ -441,7 +441,7 @@ class ProjectValidationService {
     final trimmedTitle = record.title?.trim();
     if (trimmedTitle != null &&
         trimmedTitle.length > SharedProjectRules.maxTrackingRecordTitleLength) {
-      throw ProjectValidationException(
+      throw const ProjectValidationException(
         'Record title cannot exceed ${SharedProjectRules.maxTrackingRecordTitleLength} characters.',
       );
     }
@@ -449,7 +449,7 @@ class ProjectValidationService {
     switch (record.recordType) {
       case ProjectRecordType.group:
         if (block.blockType != ProjectBlockType.groupedList) {
-          throw ProjectValidationException(
+          throw const ProjectValidationException(
             'Record type "group" is only valid in grouped_list blocks.',
           );
         }
@@ -465,7 +465,7 @@ class ProjectValidationService {
         }
       case ProjectRecordType.groupedItem:
         if (block.blockType != ProjectBlockType.groupedList) {
-          throw ProjectValidationException(
+          throw const ProjectValidationException(
             'Record type "grouped_item" is only valid in grouped_list blocks.',
           );
         }
@@ -481,7 +481,7 @@ class ProjectValidationService {
         }
       case ProjectRecordType.checklistItem:
         if (block.blockType != ProjectBlockType.checklist) {
-          throw ProjectValidationException(
+          throw const ProjectValidationException(
             'Record type "checklist_item" is only valid in checklist blocks.',
           );
         }
@@ -497,7 +497,7 @@ class ProjectValidationService {
         }
       case ProjectRecordType.scheduleItem:
         if (block.blockType != ProjectBlockType.schedule) {
-          throw ProjectValidationException(
+          throw const ProjectValidationException(
             'Record type "schedule_item" is only valid in schedule blocks.',
           );
         }

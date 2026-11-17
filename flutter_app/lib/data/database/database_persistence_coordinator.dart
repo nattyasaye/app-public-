@@ -9,7 +9,6 @@ import '../../core/snapshot_version_policy.dart';
 import '../../domain/finance/double_entry_engine.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/projects/project_validation_service.dart';
-import '../../domain/tasks/task_models.dart';
 import 'app_database.dart';
 import 'app_settings_policy.dart';
 import 'v6_ledger_migrator.dart';
