@@ -9,7 +9,7 @@
 - **Current Implementation Reality (Governance Stage 1.1 Audit):**
   - **Recovery Stage 2.1:** **Implemented** and conditionally accepted.
   - **Existing Finance v7 Architecture:** **Partially implemented**, with identified defects and incomplete cross-platform integration.
-  - **Recovery Stage 2.2 ETB Currency Isolation:** Strict ETB-only write enforcement, integer-only decimal cent parsing, Quick Capture FX token rejection, unvoid/restore gating, and snapshot `currencyCode` validation (`v7+` fail-closed; `<7` unverified non-coercion) have been **Implemented** on Web TypeScript (verified via Node tests) and **Implemented** in Flutter Dart source (**Unverified** locally pending CI `flutter analyze` / `flutter test` execution and acceptance).
+  - **Recovery Stage 2.2 ETB Currency Isolation:** Strict ETB-only write enforcement, integer-only decimal cent parsing, Quick Capture FX token rejection, unvoid/`restoreTransaction` legacy/non-ETB gating, `SharedFoundationBridge.auditConsistency` ETB asset scoping, analytical export `EXCLUDED_<CODE>` / `CURRENCY_REVIEW` / `savings_vault` Cash Flow isolation, and snapshot `currencyCode` validation (`v7+` fail-closed; `<7` unverified non-coercion) have been **Implemented** on Web TypeScript (verified via Node tests) and **Implemented** in Flutter Dart source (**Unverified** locally pending CI `flutter analyze` / `flutter test` execution and acceptance).
 
 ---
 
@@ -24,7 +24,7 @@ Earlier single-entry transaction records and floating-point amounts introduced r
 1. **Strict Integer-Cents Representation:** All balances, budgets, debts, goals, and journal lines MUST be stored and calculated strictly in signed/unsigned integer minor units (`cents`, where `1 ETB = 100 cents`). Floating-point monetary storage is prohibited.
 2. **Balanced Double-Entry Accounting (`v6` / `v7`):** Every financial posting generates a `JournalEntry` backed by `JournalLines` inside `DoubleEntryEngine`, constrained by $\sum \text{Debits} == \sum \text{Credits}$ and anchored to immutable system control accounts (`SYS_CTRL_OPENING_EQUITY`, `SYS_CTRL_INCOME`, `SYS_CTRL_EXPENSE`).
 3. **Immutable Correction Chains & Deletion Guards:** Posted financial entries are corrected via void/supersede replacement chains (`isVoided`, `isSuperseded`, `correctedFromEntryId`, `voidReason`)—never silent deletion or fake income entries during opening-balance adjustments. Referenced accounts and categories cannot be hard-deleted and must be archived instead.
-4. **Stage 2.2 ETB First-Release Currency Isolation (Approved Requirement — Pending Completion):** First-release Safe Harbor, Net Worth, Debt totals, and P&L aggregations MUST restrict calculations strictly to `verified_etb` records (`currencyCode == 'ETB'` explicit verified rows). Non-ETB (`verified_non_etb`) and `unverified` entries MUST be explicitly flagged/isolated in UI banners and analytics so they never corrupt ETB totals.
+4. **Stage 2.2 ETB First-Release Currency Isolation (Approved Requirement — Implemented in Code; Android CI Pending):** First-release Safe Harbor, Net Worth, Debt totals, and P&L aggregations MUST restrict calculations strictly to `verified_etb` records (`currencyCode == 'ETB'` explicit verified rows). Non-ETB (`verified_non_etb`) and `unverified` entries MUST be explicitly flagged/isolated in UI banners and analytics so they never corrupt ETB totals.
 
 ---
 

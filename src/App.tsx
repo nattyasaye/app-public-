@@ -585,7 +585,7 @@ export default function App() {
         return;
       }
 
-      const parsed = parseQuickCaptureExpense(text, matchedAccount.name, storedAccounts);
+      const parsed = parseQuickCaptureExpense(text, matchedAccount.id, storedAccounts);
       if (parsed.rejectedCurrency) {
         setIsSubmittingQuickCapture(false);
         setQuickCaptureError(
@@ -599,7 +599,9 @@ export default function App() {
         setQuickCaptureError('Enter a valid expense amount greater than 0.');
         return;
       }
-      const targetAccountId = matchedAccount.id;
+      const targetAccountId =
+        candidateAccounts.find((a) => a.id === parsed.assetAccountId)?.id ||
+        matchedAccount.id;
       try {
         const savedEntries = localStorage.getItem('daywell_journal_entries');
         const entries = savedEntries ? JSON.parse(savedEntries) : [];
@@ -2416,7 +2418,7 @@ export default function App() {
                             etbAccounts[0];
                           const parsed = parseQuickCaptureExpense(
                             text,
-                            matchedAccount?.name || quickCaptureExpenseAccount,
+                            matchedAccount?.id || quickCaptureExpenseAccount,
                             storedAccounts
                           );
                           if (parsed.rejectedCurrency) {
@@ -2426,12 +2428,15 @@ export default function App() {
                             );
                             return;
                           }
+                          const prefillAccountId =
+                            etbAccounts.find((a) => a.id === parsed.assetAccountId)?.id ||
+                            matchedAccount?.id;
                           setFinanceComposerPrefill({
                             nonce: Date.now(),
                             kind: 'expense',
                             amountText: parsed.amountCents > 0 ? formatCentsAsInput(parsed.amountCents) : '',
                             description: parsed.description || text,
-                            accountId: matchedAccount?.id,
+                            accountId: prefillAccountId,
                             categoryId: parsed.categoryId || 'cat-food',
                           });
                           setIsQuickCaptureOpen(false);

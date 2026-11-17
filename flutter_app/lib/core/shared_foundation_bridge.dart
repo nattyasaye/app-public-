@@ -111,7 +111,13 @@ class SharedFoundationBridge {
   /// Verifies mathematical consistency of the state against SharedBusinessRules.
   static Map<String, dynamic> auditConsistency(AppStateManager state) {
     final activeAssetAccs = state.financeController.state.accounts
-        .where((a) => !a.isArchived && a.type == AccountType.asset)
+        .where(
+          (a) =>
+              DoubleEntryEngine.isActiveVerifiedEtbAccount(a) &&
+              a.type == AccountType.asset &&
+              (a.subType.isLiquid || a.subType.isSavingsVault) &&
+              !a.name.toLowerCase().contains('receivable'),
+        )
         .toList();
 
     int computedCombinedCents = 0;

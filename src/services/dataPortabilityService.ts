@@ -23,6 +23,7 @@ import {
   SharedRecurringRule,
   SharedSavingsGoal,
   calculateAvailableToSpendBreakdownV7,
+  getAccountSubType,
 } from '../domain/financeV7Engine';
 import { CalendarDate, EthiopiaClock } from '../domain/date';
 
@@ -297,12 +298,14 @@ export class DataPortabilityService {
           if (!entry || entry.isVoided) return false;
           if (!(classifications.get(entry.id)?.isEligibleEtb ?? false)) return false;
           const acc = accMap.get(p.accountId);
+          if (!acc) return false;
+          const subType = getAccountSubType(acc);
           return (
-            acc &&
             !acc.isSystem &&
             acc.type === 'asset' &&
             isEtbCurrency(acc.currencyCode) &&
-            acc.subType !== 'receivable' &&
+            subType !== 'savings_vault' &&
+            subType !== 'receivable' &&
             !acc.name.toLowerCase().includes('receivable')
           );
         })
@@ -413,7 +416,9 @@ export class DataPortabilityService {
       '    id TEXT PRIMARY KEY,',
       '    name TEXT NOT NULL,',
       '    type TEXT NOT NULL CHECK(type IN (\'asset\', \'liability\', \'equity\', \'income\', \'expense\')),',
-      '    currency_code TEXT NOT NULL DEFAULT \'ETB\',',
+      '    sub_type TEXT NOT NULL DEFAULT \'bank\',',
+      '    is_system INTEGER NOT NULL DEFAULT 0,',
+      '    currency_code TEXT NOT NULL DEFAULT \'\',',
       '    is_archived INTEGER NOT NULL DEFAULT 0,',
       '    created_at TEXT NOT NULL',
       ');',
@@ -560,7 +565,7 @@ export class DataPortabilityService {
       'FROM postings p',
       'JOIN accounts a ON p.account_id = a.id',
       'JOIN journal_entries j ON p.entry_id = j.id',
-      'WHERE a.type = \'asset\' AND LOWER(a.name) NOT LIKE \'%receivable%\' AND j.is_voided = 0',
+      'WHERE a.type = \'asset\' AND a.is_system = 0 AND LOWER(COALESCE(a.sub_type, \'bank\')) NOT IN (\'receivable\', \'savings_vault\') AND LOWER(a.name) NOT LIKE \'%receivable%\' AND j.is_voided = 0',
       '  AND UPPER(TRIM(COALESCE(a.currency_code, \'\'))) = \'ETB\'',
       '  AND (SELECT COUNT(*) FROM postings pc WHERE pc.entry_id = j.id) >= 2',
       '  AND NOT EXISTS (',
@@ -577,8 +582,10 @@ export class DataPortabilityService {
     ];
 
     for (const a of payload.accounts) {
+      const safeCurrency = normalizeCurrencyCode(a.currencyCode).replace(/'/g, "''");
+      const safeSubType = getAccountSubType(a).replace(/'/g, "''");
       lines.push(
-        `INSERT INTO accounts (id, name, type, currency_code, is_archived, created_at) VALUES ('${a.id}', '${a.name.replace(/'/g, "''")}', '${a.type}', '${a.currencyCode}', ${a.isArchived ? 1 : 0}, '${a.createdAt}');`
+        `INSERT INTO accounts (id, name, type, sub_type, is_system, currency_code, is_archived, created_at) VALUES ('${a.id}', '${a.name.replace(/'/g, "''")}', '${a.type}', '${safeSubType}', ${a.isSystem ? 1 : 0}, '${safeCurrency}', ${a.isArchived ? 1 : 0}, '${a.createdAt}');`
       );
     }
 
@@ -677,7 +684,9 @@ An expense incurred on **January 30** and paid/repaid on **February 2**:
 | \`id\` | TEXT | PRIMARY KEY | UUID v4 identifier |
 | \`name\` | TEXT | NOT NULL | Human-readable name (e.g. "CBE Account", "Cash Wallet") |
 | \`type\` | TEXT | NOT NULL | Enum: \`asset\`, \`liability\`, \`equity\`, \`income\`, \`expense\` |
-| \`currency_code\` | TEXT | NOT NULL | Default \`ETB\`. Strict single currency per account |
+| \`sub_type\` | TEXT | NOT NULL | Account sub-type (\`bank\`, \`cash\`, \`mobile_wallet\`, \`savings_vault\`, etc.) |
+| \`is_system\` | INTEGER | NOT NULL | Boolean (0/1) identifying internal double-entry control accounts |
+| \`currency_code\` | TEXT | NOT NULL | Verified ISO-4217 code (\`ETB\` active; foreign or blank isolated) |
 | \`is_archived\` | INTEGER | DEFAULT 0 | 1 if archived, 0 if active |
 | \`created_at\` | TEXT | NOT NULL | ISO 8601 UTC timestamp |
 

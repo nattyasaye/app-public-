@@ -31,16 +31,11 @@ export function formatDualDateLabel(isoDate: string): string {
 
 import {
   formatCentsAsInput,
-  parseBirrToCents,
   parseDecimalToCentsStrict,
 } from '../../domain/financialEngine';
 
 export function centsToInputText(cents: number): string {
   return formatCentsAsInput(cents);
-}
-
-export function parseDecimalToCents(input: string): number {
-  return parseBirrToCents(input);
 }
 
 export function tryParseStrictDecimalToCents(

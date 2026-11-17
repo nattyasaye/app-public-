@@ -1353,27 +1353,50 @@ class DriftFinanceRepository implements IFinanceRepository {
   @override
   Future<void> restoreTransaction(TransactionModel tx) async {
     await _db.transaction(() async {
+      final acctId = tx.accountId?.trim();
+      if (acctId == null || acctId.isEmpty) {
+        throw DoubleEntryValidationError(
+          'Legacy unlinked transactions cannot be restored in ETB mode.',
+        );
+      }
+      final destId = tx.destinationAccountId?.trim();
+      await _assertEtbAccountsInTx([
+        acctId,
+        if (destId != null && destId.isNotEmpty) destId,
+      ]);
+
+      final existingLinked = await (_db.select(_db.journalEntriesTable)
+            ..where((tbl) =>
+                tbl.id.equals(tx.id) |
+                tbl.id.equals('entry-${tx.id}') |
+                tbl.id.equals('entry-tx-${tx.id}') |
+                tbl.legacySourceTxId.equals(tx.id)))
+          .get();
+      for (final linked in existingLinked) {
+        final postings = await getPostings(entryId: linked.id);
+        if (postings
+            .any((p) => p.accountId == SystemControlAccounts.legacyOffset)) {
+          throw DoubleEntryValidationError(
+            'Legacy clearing offset entries cannot be restored in '
+            'first-release ETB mode.',
+          );
+        }
+        await _assertEtbAccountsInTx(postings.map((p) => p.accountId));
+      }
+
       await recordTransaction(tx);
       final linkedEntries = await (_db.select(_db.journalEntriesTable)
             ..where((tbl) =>
                 tbl.id.equals(tx.id) |
                 tbl.id.equals('entry-${tx.id}') |
+                tbl.id.equals('entry-tx-${tx.id}') |
                 tbl.legacySourceTxId.equals(tx.id)))
           .get();
-      for (final linked in linkedEntries) {
-        final postings = await getPostings(entryId: linked.id);
-        if (postings
-            .any((p) => p.accountId == SystemControlAccounts.legacyOffset)) {
-          throw DoubleEntryValidationError(
-            'Legacy clearing offset entries cannot be restored in first-release ETB mode.',
-          );
-        }
-        await _assertEtbAccountsInTx(postings.map((p) => p.accountId));
-      }
       await (_db.update(_db.journalEntriesTable)
             ..where((tbl) =>
                 tbl.id.equals(tx.id) |
                 tbl.id.equals('entry-${tx.id}') |
+                tbl.id.equals('entry-tx-${tx.id}') |
                 tbl.legacySourceTxId.equals(tx.id)))
           .write(
         const JournalEntriesTableCompanion(
@@ -1388,7 +1411,8 @@ class DriftFinanceRepository implements IFinanceRepository {
           if (cls == null || !cls.isEligibleEtb) {
             throw DoubleEntryValidationError(
               cls?.reason ??
-                  'Restored transaction entry must be verified ETB in first-release mode.',
+                  'Restored transaction entry must be verified ETB in '
+                      'first-release mode.',
             );
           }
         }

@@ -1628,4 +1628,112 @@ describe('Recovery Stage 2.2: Strict ETB Currency Isolation (Cases #1-#25)', () 
       { valid: true, cents: -1025 }
     );
   });
+
+  it('Case #28: DataPortabilityService excludes savings_vault from Cash_Flow_Ledger and view_cash_flow while tagging non-ETB and unverified records cleanly', async () => {
+    const accounts = ensureSystemControlAccounts([
+      makeAccount('acc-cbe', 'CBE', 'ETB', 100_000, { subType: 'bank' }),
+      makeAccount('acc-vault', 'Emergency Vault', 'ETB', 50_000, {
+        subType: 'savings_vault',
+      }),
+      makeAccount('acc-usd', 'USD Wallet', 'USD', 20_000, { subType: 'bank' }),
+      {
+        id: 'acc-unverified',
+        name: 'Legacy Unknown',
+        type: 'asset',
+        subType: 'cash',
+        currencyCode: undefined as unknown as string,
+        openingBalanceCents: 15_000,
+        isArchived: false,
+        createdAt: '2026-11-01T00:00:00.000Z',
+      },
+    ]);
+
+    const etbExp = buildDirectExpense({
+      id: 'e-etb-groceries',
+      assetAccountId: 'acc-cbe',
+      expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      amountCents: 12_000,
+      occurrenceDate: '2026-11-10',
+      movementDate: '2026-11-10',
+      description: 'ETB Groceries',
+    });
+    const vaultTransfer = buildTransfer({
+      id: 'e-etb-vault-xfer',
+      fromAssetAccountId: 'acc-cbe',
+      toAssetAccountId: 'acc-vault',
+      amountCents: 25_000,
+      date: '2026-11-11',
+      description: 'Fund Emergency Vault',
+    });
+    const usdExp = buildDirectExpense({
+      id: 'e-usd-saas',
+      assetAccountId: 'acc-usd',
+      expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      amountCents: 3_000,
+      occurrenceDate: '2026-11-12',
+      movementDate: '2026-11-12',
+      description: 'USD SaaS',
+    });
+    const unverifiedExp = buildDirectExpense({
+      id: 'e-unverified-taxi',
+      assetAccountId: 'acc-unverified',
+      expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      amountCents: 5_000,
+      occurrenceDate: '2026-11-13',
+      movementDate: '2026-11-13',
+      description: 'Unverified Taxi',
+    });
+
+    const payload = {
+      accounts,
+      parties: [],
+      entries: [etbExp.entry, vaultTransfer.entry, usdExp.entry, unverifiedExp.entry],
+      postings: [
+        ...etbExp.postings,
+        ...vaultTransfer.postings,
+        ...usdExp.postings,
+        ...unverifiedExp.postings,
+      ],
+      debts: [],
+      settlementAllocations: [],
+      categories: [],
+      reservedSavingsCents: 0,
+      commitments: [],
+      planningPeriodEndIso: '2026-11-30',
+    };
+
+    const excelBytes = DataPortabilityService.generateExcelWorkbook(payload);
+    const wb = XLSX.read(excelBytes, { type: 'array' });
+
+    const cashFlowRows = XLSX.utils.sheet_to_json<any[]>(wb.Sheets['Cash_Flow_Ledger'], {
+      header: 1,
+    });
+    const cashFlowAccounts = cashFlowRows.slice(1).map((r) => String(r[1]));
+    assert.ok(cashFlowAccounts.includes('CBE'));
+    assert.ok(!cashFlowAccounts.includes('Emergency Vault'));
+    assert.ok(!cashFlowAccounts.includes('USD Wallet'));
+    assert.ok(!cashFlowAccounts.includes('Legacy Unknown'));
+
+    const accountRows = XLSX.utils.sheet_to_json<any[]>(
+      wb.Sheets['Accounts_and_Balances'],
+      { header: 1 }
+    );
+    const usdAccRow = accountRows.find((r) => r[0] === 'acc-usd');
+    const unvAccRow = accountRows.find((r) => r[0] === 'acc-unverified');
+    assert.equal(usdAccRow?.[4], 'EXCLUDED_USD');
+    assert.equal(unvAccRow?.[3], 'UNVERIFIED');
+    assert.equal(unvAccRow?.[4], 'CURRENCY_REVIEW');
+
+    const { blob } = await DataPortabilityService.createExportZipBundle(payload);
+    const zip = await JSZip.loadAsync(await blob.arrayBuffer());
+    const accountsCsv = await zip.file('csv/accounts.csv')!.async('string');
+    assert.ok(accountsCsv.includes('ELIGIBLE_ETB'));
+    assert.ok(accountsCsv.includes('EXCLUDED_USD'));
+    assert.ok(accountsCsv.includes('CURRENCY_REVIEW'));
+
+    const sqlText = await zip.file('sqlite/finance_export.sql')!.async('string');
+    assert.ok(!sqlText.includes("'undefined'"));
+    assert.ok(sqlText.includes("('acc-unverified', 'Legacy Unknown', 'asset', 'cash', 0, '',"));
+    assert.ok(sqlText.includes("NOT IN ('receivable', 'savings_vault')"));
+  });
 });

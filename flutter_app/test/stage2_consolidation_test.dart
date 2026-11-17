@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:personal_management_app/application/calendar/calendar_controller.dart';
 import 'package:personal_management_app/application/tasks/tasks_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
+import 'package:personal_management_app/core/shared_foundation_bridge.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/domain/calendar/calendar_contracts.dart';
 import 'package:personal_management_app/domain/calendar/calendar_models.dart';
@@ -627,6 +628,63 @@ void main() {
           state.notesController.notifyListeners();
           state.inboxController.notifyListeners();
           state.calendarController.notifyListeners();
+        },
+      );
+
+      test(
+        '5. SharedFoundationBridge.auditConsistency excludes non-ETB, '
+        'unverified, and receivable asset accounts',
+        () async {
+          final db = AppDatabase(NativeDatabase.memory());
+          final state = AppStateManager(db: db);
+          await state.initialize();
+
+          await state.financeController.addAccount(
+            name: 'CBE Bank',
+            type: AccountType.asset,
+            subType: AccountSubType.bank,
+            openingBalanceCents: 100000,
+            openingBalanceDate: '2026-11-01',
+          );
+          await state.financeController.addAccount(
+            name: 'Emergency Vault',
+            type: AccountType.asset,
+            subType: AccountSubType.savingsVault,
+            openingBalanceCents: 50000,
+            openingBalanceDate: '2026-11-01',
+          );
+          await db.into(db.accountsTable).insert(
+                AccountsTableCompanion.insert(
+                  id: 'acc-usd-audit',
+                  name: 'USD Travel',
+                  type: 'asset',
+                  subType: const Value('bank'),
+                  currencyCode: const Value('USD'),
+                  openingBalanceCents: const Value(25000),
+                  createdAt: DateTime.utc(2026, 11, 1),
+                ),
+              );
+          await db.into(db.accountsTable).insert(
+                AccountsTableCompanion.insert(
+                  id: 'acc-unv-audit',
+                  name: 'Legacy Unknown',
+                  type: 'asset',
+                  subType: const Value('cash'),
+                  currencyCode: const Value(''),
+                  openingBalanceCents: const Value(12000),
+                  createdAt: DateTime.utc(2026, 11, 1),
+                ),
+              );
+          await state.financeController.load();
+
+          final audit = SharedFoundationBridge.auditConsistency(state);
+          expect(audit['isConsistent'], isTrue);
+          expect(audit['activeAccountsCount'], 2);
+          expect(audit['combinedBalanceCents'], 150000);
+          expect(audit['computedCombinedCents'], 150000);
+          expect(audit['currency'], 'ETB');
+
+          await state.disposeAsync();
         },
       );
     },

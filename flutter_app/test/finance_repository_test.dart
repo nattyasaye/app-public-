@@ -645,5 +645,132 @@ void main() {
         expect(settled.length, 1);
       },
     );
+
+    test(
+      '9. Stage 2.2 restoreTransaction rejects unlinked, non-ETB, and '
+      'legacy clearing-offset records before writing',
+      () async {
+        await seedStandardAccounts();
+        await db.into(db.accountsTable).insert(
+              AccountsTableCompanion.insert(
+                id: 'acc-usd-legacy',
+                name: 'Legacy USD',
+                type: 'asset',
+                subType: const Value('bank'),
+                currencyCode: const Value('USD'),
+                createdAt: DateTime.utc(2026, 11, 1),
+              ),
+            );
+        final categories = await repo.getCategories();
+        final expCat = categories.firstWhere((c) => c.type == 'expense');
+
+        // 1) Unlinked pre-v7 transaction (accountId == null) must fail closed
+        // without creating a fallback ETB transaction or journal entry.
+        await expectLater(
+          repo.restoreTransaction(
+            TransactionModel(
+              id: 'tx-unlinked-restore',
+              categoryId: expCat.id,
+              categoryName: expCat.name,
+              amountCents: 4500,
+              type: 'expense',
+              transactionDate: CalendarDate(year: 2026, month: 11, day: 12),
+              note: 'Unlinked legacy',
+            ),
+          ),
+          throwsA(isA<DoubleEntryValidationError>()),
+        );
+        final unlinkedRow = await (db.select(db.financialTransactions)
+              ..where((t) => t.id.equals('tx-unlinked-restore')))
+            .getSingleOrNull();
+        expect(unlinkedRow, isNull);
+
+        // 2) Non-ETB account transaction must fail closed.
+        await expectLater(
+          repo.restoreTransaction(
+            TransactionModel(
+              id: 'tx-usd-restore',
+              categoryId: expCat.id,
+              categoryName: expCat.name,
+              amountCents: 3000,
+              type: 'expense',
+              transactionDate: CalendarDate(year: 2026, month: 11, day: 12),
+              accountId: 'acc-usd-legacy',
+              note: 'USD expense',
+            ),
+          ),
+          throwsA(isA<DoubleEntryValidationError>()),
+        );
+
+        // 3) Existing voided entry touching acc-sys-legacy-offset must fail.
+        await repo.recordJournalEntry(
+          entry: JournalEntryModel(
+            id: 'entry-tx-clearing-restore',
+            entryType: EntryType.standard,
+            description: 'Legacy clearing entry',
+            occurrenceDate: '2026-11-12',
+            isVoided: true,
+            voidReason: 'Deleted',
+            legacySourceTxId: 'tx-clearing-restore',
+          ),
+          postings: [
+            PostingModel(
+              id: 'p-clr-1',
+              entryId: 'entry-tx-clearing-restore',
+              accountId: SystemControlAccounts.legacyOffset,
+              amountCents: 2000,
+              direction: PostingDirection.debit,
+              accountMovementDate: '2026-11-12',
+            ),
+            PostingModel(
+              id: 'p-clr-2',
+              entryId: 'entry-tx-clearing-restore',
+              accountId: 'acc-bank',
+              amountCents: 2000,
+              direction: PostingDirection.credit,
+              accountMovementDate: '2026-11-12',
+            ),
+          ],
+        );
+        await expectLater(
+          repo.restoreTransaction(
+            TransactionModel(
+              id: 'tx-clearing-restore',
+              categoryId: expCat.id,
+              categoryName: expCat.name,
+              amountCents: 2000,
+              type: 'expense',
+              transactionDate: CalendarDate(year: 2026, month: 11, day: 12),
+              accountId: 'acc-bank',
+              note: 'Cleared item',
+            ),
+          ),
+          throwsA(isA<DoubleEntryValidationError>()),
+        );
+
+        // 4) Valid deleted ETB transaction restores cleanly and unvoids entry.
+        final validTx = TransactionModel(
+          id: 'tx-etb-restore',
+          categoryId: expCat.id,
+          categoryName: expCat.name,
+          amountCents: 5000,
+          type: 'expense',
+          transactionDate: CalendarDate(year: 2026, month: 11, day: 12),
+          accountId: 'acc-bank',
+          note: 'Groceries',
+        );
+        await repo.recordTransaction(validTx);
+        await repo.deleteTransaction('tx-etb-restore');
+        await repo.restoreTransaction(validTx);
+        final restoredRow = await (db.select(db.financialTransactions)
+              ..where((t) => t.id.equals('tx-etb-restore')))
+            .getSingleOrNull();
+        expect(restoredRow, isNotNull);
+        final restoredEntry = await (db.select(db.journalEntriesTable)
+              ..where((e) => e.legacySourceTxId.equals('tx-etb-restore')))
+            .getSingle();
+        expect(restoredEntry.isVoided, isFalse);
+      },
+    );
   });
 }
