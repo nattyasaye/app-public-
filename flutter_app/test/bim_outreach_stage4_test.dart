@@ -1,13 +1,16 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:personal_management_app/application/projects/projects_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/domain/projects/bim_outreach_template.dart';
 import 'package:personal_management_app/domain/projects/progress_engine.dart';
+import 'package:personal_management_app/domain/projects/project_models.dart';
 import 'package:personal_management_app/domain/projects/project_package_codec.dart';
 
 import 'support/sqlite_test_helper.dart';
@@ -96,9 +99,12 @@ void main() {
     test(
       'imports shared .daywellproject fixture into Drift, caps city over-targets while preserving actual sent counts, and round-trips export',
       () async {
-        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
         addTearDown(db.close);
-        final repo = ProjectsRepository(db);
+        final repo = DriftProjectsRepository(db);
+        final controller = ProjectsController(repository: repo);
+        addTearDown(controller.dispose);
 
         final fixtureJson = readBimFixtureJson();
         final parsed = ProjectPackageCodec.parseAndValidate(fixtureJson);
@@ -106,14 +112,17 @@ void main() {
         expect(parsed.trackingBlocks.length, 1);
         expect(parsed.trackingRecords.length, 104);
 
-        final imported = await repo.importProjectPackage(fixtureJson);
-        expect(imported.project.title, BimOutreachTemplate.projectTitle);
-        expect(imported.project.startDate?.toIsoString(), '2026-11-18');
-        expect(imported.project.targetDate?.toIsoString(), '2026-12-09');
+        final imported = await controller.importProjectPackageJson(fixtureJson);
+        expect(imported, isNotNull);
+        final importedProject = imported!.project;
+        expect(importedProject.title, BimOutreachTemplate.projectTitle);
+        expect(importedProject.startDate?.toIsoString(), '2026-11-18');
+        expect(importedProject.targetDate?.toIsoString(), '2026-12-09');
+        expect(importedProject.goalId, isNull);
 
         final span = ProgressEngine.computeScheduleSpan(
-          startDate: imported.project.startDate,
-          targetDate: imported.project.targetDate,
+          startDate: importedProject.startDate,
+          targetDate: importedProject.targetDate,
           asOfDate: CalendarDate.parse('2026-11-18'),
         );
         expect(span.totalDays, 22);
@@ -128,32 +137,34 @@ void main() {
           (r) => r.title == 'Boston, MA',
         );
 
-        final batch1 = await repo.appendProgressLog(
-          projectId: imported.project.id,
+        final batch1 = await controller.appendProgressLog(
+          projectId: importedProject.id,
           blockId: block.id,
           parentRecordId: nyc.id,
           deltaValue: 20,
           recordedDate: CalendarDate.parse('2026-11-18'),
         );
-        await repo.appendProgressLog(
-          projectId: imported.project.id,
+        expect(batch1, isNotNull);
+        await controller.appendProgressLog(
+          projectId: importedProject.id,
           blockId: block.id,
           parentRecordId: nyc.id,
           deltaValue: 15,
           recordedDate: CalendarDate.parse('2026-11-18'),
         );
-        await repo.appendProgressLog(
-          projectId: imported.project.id,
+        await controller.appendProgressLog(
+          projectId: importedProject.id,
           blockId: block.id,
           parentRecordId: boston.id,
           deltaValue: 12,
           recordedDate: CalendarDate.parse('2026-11-19'),
         );
 
-        final summary = await repo.getProjectProgressSummary(
-          imported.project.id,
+        final summary = await controller.loadProjectSummary(
+          importedProject.id,
           asOfDate: CalendarDate.parse('2026-11-19'),
         );
+        expect(summary, isNotNull);
         final pm = summary!.primaryMetric!;
         expect(pm.loggedTotal, 47);
         expect(pm.targetCompletedTotal, 42);
@@ -171,32 +182,75 @@ void main() {
         expect(northeast.overTargetAmount, 5);
         expect(northeast.overTargetItemCount, 1);
 
-        await repo.appendProgressCorrection(
-          targetLogId: batch1.id,
+        final correction = await controller.appendProgressCorrection(
+          targetLogId: batch1!.id,
           correctionDelta: -8,
           recordedDate: CalendarDate.parse('2026-11-19'),
           reason: 'Bounced test batch adjustment',
         );
+        expect(correction, isNotNull);
+        expect(correction!.metadata?['isCorrection'], isTrue);
+        expect(correction.metadata?['compensatesRecordId'], batch1.id);
+        expect(
+          correction.metadata?['correctionReason'],
+          'Bounced test batch adjustment',
+        );
 
-        final corrected = await repo.getProjectProgressSummary(
-          imported.project.id,
+        final corrected = await controller.loadProjectSummary(
+          importedProject.id,
           asOfDate: CalendarDate.parse('2026-11-19'),
         );
-        expect(corrected!.primaryMetric!.loggedTotal, 39);
-        expect(corrected.primaryMetric!.targetCompletedTotal, 39);
-        expect(corrected.primaryMetric!.overTargetAmount, 0);
+        expect(corrected, isNotNull);
+        final correctedPm = corrected!.primaryMetric!;
+        expect(correctedPm.loggedTotal, 39);
+        expect(correctedPm.targetCompletedTotal, 39);
+        expect(correctedPm.overTargetAmount, 0);
         expect(corrected.overallPercentage, closeTo(3.9, 1e-6));
 
-        final exportedJson = await repo.exportProjectPackageJson(
-          imported.project.id,
+        final exportedJson = await controller.exportProjectPackageJson(
+          importedProject.id,
         );
-        final reimported = await repo.importProjectPackage(exportedJson);
-        final reimportedSummary = await repo.getProjectProgressSummary(
+        expect(exportedJson, isNotNull);
+        final exportedMap = jsonDecode(exportedJson!) as Map<String, dynamic>;
+        expect(exportedMap['sourcePlatform'], 'android');
+
+        final reimported =
+            await controller.importProjectPackageJson(exportedJson);
+        expect(reimported, isNotNull);
+        expect(reimported!.project.id, isNot(importedProject.id));
+        expect(reimported.project.goalId, isNull);
+        expect(
+          reimported.project.customFields?['primaryBlockId'],
+          reimported.trackingBlocks.first.id,
+        );
+        for (final rec in reimported.trackingRecords) {
+          expect(rec.projectId, reimported.project.id);
+          expect(rec.linkedTaskId, isNull);
+          expect(rec.blockId, reimported.trackingBlocks.first.id);
+        }
+
+        final reimportedSummary = await controller.loadProjectSummary(
           reimported.project.id,
           asOfDate: CalendarDate.parse('2026-11-19'),
         );
+        expect(reimportedSummary, isNotNull);
         expect(reimportedSummary!.primaryMetric!.loggedTotal, 39);
         expect(reimportedSummary.primaryMetric!.targetCompletedTotal, 39);
+
+        final reimportedEdit = await controller.appendProgressLog(
+          projectId: reimported.project.id,
+          blockId: reimported.trackingBlocks.first.id,
+          parentRecordId: reimported.trackingRecords
+              .firstWhere((r) => r.title == 'Boston, MA')
+              .id,
+          deltaValue: 3,
+          recordedDate: CalendarDate.parse('2026-11-20'),
+        );
+        expect(reimportedEdit, isNotNull);
+        expect(
+          reimportedEdit!.recordType,
+          ProjectRecordType.progressLog,
+        );
       },
     );
   });
