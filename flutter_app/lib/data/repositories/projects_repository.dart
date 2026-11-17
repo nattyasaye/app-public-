@@ -6,6 +6,7 @@ import '../../core/date/shared_date.dart';
 import '../../domain/projects/progress_engine.dart';
 import '../../domain/projects/project_contracts.dart';
 import '../../domain/projects/project_models.dart';
+import '../../domain/projects/project_package_codec.dart';
 import '../../domain/projects/project_validation_service.dart';
 import '../../domain/tasks/task_models.dart';
 import '../database/app_database.dart';
@@ -747,5 +748,110 @@ class DriftProjectsRepository implements IProjectsRepository {
       milestones: milestoneRows.map(_mapMilestone).toList(),
       asOfDate: asOfDate,
     );
+  }
+
+  @override
+  Future<String> exportProjectPackageJson(String projectId) async {
+    final project = await getProjectById(projectId);
+    if (project == null) {
+      throw ProjectPackageException(
+        ProjectPackageErrorKind.validationFailed,
+        'Cannot export missing project "$projectId".',
+      );
+    }
+    final blocks = await getBlocksForProject(
+      projectId,
+      includeArchived: true,
+    );
+    final records = await getRecordsForProject(projectId);
+    return ProjectPackageCodec.serialize(
+      project: project,
+      blocks: blocks,
+      records: records,
+      sourcePlatform: 'android',
+    );
+  }
+
+  @override
+  Future<PreparedProjectPackageImport> importProjectPackageJson(
+    String rawJson,
+  ) async {
+    return _db.transaction(() async {
+      final existingProjectRows = await _db.select(_db.projects).get();
+      final existingBlockRows =
+          await _db.select(_db.projectTrackingBlocks).get();
+      final existingRecordRows =
+          await _db.select(_db.projectTrackingRecords).get();
+
+      final prepared = ProjectPackageCodec.prepareForImport(
+        rawJson,
+        existingProjectIds: existingProjectRows.map((r) => r.id),
+        existingBlockIds: existingBlockRows.map((r) => r.id),
+        existingRecordIds: existingRecordRows.map((r) => r.id),
+      );
+
+      final proj = prepared.project;
+      await _db.into(_db.projects).insert(
+            ProjectsCompanion.insert(
+              id: proj.id,
+              goalId: const Value(null),
+              title: proj.title,
+              description: Value(proj.description?.trim()),
+              status: Value(proj.status),
+              targetDate: Value(proj.targetDate?.toIsoString()),
+              isArchived: Value(proj.isArchived),
+              startDate: Value(proj.startDate?.toIsoString()),
+              customFieldsJson: Value(jsonEncode(proj.customFields)),
+              createdAt: proj.createdAt,
+              updatedAt: Value(proj.updatedAt),
+            ),
+          );
+
+      for (final block in prepared.trackingBlocks) {
+        await _db.into(_db.projectTrackingBlocks).insert(
+              ProjectTrackingBlocksCompanion.insert(
+                id: block.id,
+                projectId: block.projectId,
+                blockType: block.blockType.wireValue,
+                title: block.title,
+                sortOrder: Value(block.sortOrder),
+                unitLabel: Value(block.unitLabel),
+                targetValue: Value(block.targetValue),
+                dailyTargetValue: Value(block.dailyTargetValue),
+                configJson: Value(jsonEncode(block.config)),
+                isArchived: Value(block.isArchived),
+                createdAt: block.createdAt,
+                updatedAt: block.updatedAt,
+              ),
+            );
+      }
+
+      for (final record in prepared.trackingRecords) {
+        await _db.into(_db.projectTrackingRecords).insert(
+              ProjectTrackingRecordsCompanion.insert(
+                id: record.id,
+                projectId: record.projectId,
+                blockId: record.blockId,
+                parentRecordId: Value(record.parentRecordId),
+                recordType: record.recordType.wireValue,
+                title: Value(record.title),
+                sortOrder: Value(record.sortOrder),
+                targetValue: Value(record.targetValue),
+                deltaValue: Value(record.deltaValue),
+                durationMinutes: Value(record.durationMinutes),
+                isCompleted: Value(record.isCompleted),
+                completedAt: Value(record.completedAt),
+                recordedDate: Value(record.recordedDate?.toIsoString()),
+                scheduledDate: Value(record.scheduledDate?.toIsoString()),
+                linkedTaskId: const Value(null),
+                metadataJson: Value(jsonEncode(record.metadata)),
+                createdAt: record.createdAt,
+                updatedAt: record.updatedAt,
+              ),
+            );
+      }
+
+      return prepared;
+    });
   }
 }

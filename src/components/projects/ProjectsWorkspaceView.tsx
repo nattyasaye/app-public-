@@ -2,8 +2,20 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ProjectProgressSummary } from '../../domain/projectsEngine';
 import { SharedProject } from '../../domain/sharedFoundation';
 import { SharedStateBridge } from '../../services/sharedStateBridge';
-import { projectsService } from '../../services/projectsService';
-import { Archive, ChevronRight, Layers, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import {
+  PreparedProjectPackageImport,
+  projectsService,
+} from '../../services/projectsService';
+import {
+  Archive,
+  ChevronRight,
+  Download,
+  Layers,
+  Plus,
+  RotateCcw,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import {
   DaywellButton,
   DaywellCard,
@@ -13,9 +25,11 @@ import {
   DaywellProgressBar,
   DaywellSearchField,
   DaywellStatusBadge,
+  DaywellStatusBanner,
   DaywellStatusTone,
 } from '../ui';
 import { ProjectFormModal } from './ProjectFormModal';
+import { ProjectImportModal } from './ProjectImportModal';
 import { ProjectDetailView } from './ProjectDetailView';
 
 export type ProjectWorkspaceFilter = 'active' | 'on_hold' | 'completed' | 'archived';
@@ -65,6 +79,13 @@ export function ProjectsWorkspaceView({
   const [filter, setFilter] = useState<ProjectWorkspaceFilter>('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isImportOpen, setIsImportOpen] = useState(false);
+  const [statusNotice, setStatusNotice] = useState<{
+    tone: 'success' | 'error';
+    title?: string;
+    message: string;
+    actionProjectId?: string;
+  } | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<SharedProject | null>(
     null
   );
@@ -154,9 +175,45 @@ export function ProjectsWorkspaceView({
     );
   }
 
+  const handleExportProject = (project: SharedProject) => {
+    try {
+      const { filename } = projectsService.downloadProjectPackage(project.id);
+      setStatusNotice({
+        tone: 'success',
+        title: 'Project exported',
+        message: `Downloaded "${filename}" (${project.title}).`,
+      });
+    } catch (err) {
+      setStatusNotice({
+        tone: 'error',
+        title: 'Export failed',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'Unable to export project package.',
+      });
+    }
+  };
+
+  const handleImported = (result: PreparedProjectPackageImport) => {
+    setIsImportOpen(false);
+    setFilter(result.project.isArchived ? 'archived' : result.project.status);
+    reload();
+    setStatusNotice({
+      tone: 'success',
+      title: 'Project imported',
+      message: `Imported "${result.project.title}" (${result.trackingBlocks.length} ${
+        result.trackingBlocks.length === 1 ? 'block' : 'blocks'
+      }, ${result.trackingRecords.length} ${
+        result.trackingRecords.length === 1 ? 'record' : 'records'
+      }).`,
+      actionProjectId: result.project.id,
+    });
+  };
+
   return (
     <div className="space-y-4">
-      {/* Search + Primary Action */}
+      {/* Search + Primary Actions */}
       <div className="flex items-center gap-2">
         <DaywellSearchField
           value={searchQuery}
@@ -166,6 +223,13 @@ export function ProjectsWorkspaceView({
           className="flex-1"
         />
         <DaywellButton
+          label="Import"
+          variant="outlined"
+          size="compact"
+          leadingIcon={<Upload className="w-4 h-4" />}
+          onClick={() => setIsImportOpen(true)}
+        />
+        <DaywellButton
           label="New Project"
           variant="primary"
           size="compact"
@@ -173,6 +237,26 @@ export function ProjectsWorkspaceView({
           onClick={() => setIsCreateOpen(true)}
         />
       </div>
+
+      {statusNotice && (
+        <DaywellStatusBanner
+          tone={statusNotice.tone}
+          title={statusNotice.title}
+          message={statusNotice.message}
+          actionLabel={statusNotice.actionProjectId ? 'Open' : undefined}
+          onActionPressed={
+            statusNotice.actionProjectId
+              ? () => {
+                  const id = statusNotice.actionProjectId!;
+                  setStatusNotice(null);
+                  selectProject(id);
+                }
+              : undefined
+          }
+          onDismiss={() => setStatusNotice(null)}
+          liveRegion
+        />
+      )}
 
       {/* Filter Tabs */}
       <div
@@ -284,6 +368,13 @@ export function ProjectsWorkspaceView({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <DaywellIconButton
+                      label={`Export ${project.title} (.daywellproject)`}
+                      size="compact"
+                      tone="muted"
+                      onClick={() => handleExportProject(project)}
+                      icon={<Download className="w-3.5 h-3.5" />}
+                    />
+                    <DaywellIconButton
                       label={
                         project.isArchived
                           ? `Restore ${project.title}`
@@ -381,6 +472,12 @@ export function ProjectsWorkspaceView({
           reload();
           selectProject(created.id);
         }}
+      />
+
+      <ProjectImportModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImported={handleImported}
       />
 
       <DaywellConfirmationDialog

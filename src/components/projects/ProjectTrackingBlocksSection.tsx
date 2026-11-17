@@ -17,6 +17,8 @@ import {
 import {
   Archive,
   Check,
+  ChevronDown,
+  ChevronRight,
   Edit3,
   FolderPlus,
   Plus,
@@ -32,6 +34,7 @@ import {
   DaywellEmptyState,
   DaywellIconButton,
   DaywellProgressBar,
+  DaywellSearchField,
   DaywellSectionHeader,
   DaywellSelectField,
   DaywellStatusBadge,
@@ -1164,8 +1167,13 @@ function GroupedListBlockBody(props: {
     onError,
   } = props;
 
+  const [itemSearch, setItemSearch] = useState('');
+  const [itemFilter, setItemFilter] = useState<'all' | 'remaining' | 'done' | 'over'>('all');
+  const [collapsedGroupIds, setCollapsedGroupIds] = useState<Record<string, boolean>>({});
+
   const cfg = block.config ?? {};
   const showGroupTotals = cfg.showGroupTotals !== false;
+  const showDailyTotals = cfg.showDailyTotals !== false;
   const groupNoun =
     typeof cfg.groupLabel === 'string' && cfg.groupLabel.trim()
       ? cfg.groupLabel.trim()
@@ -1174,21 +1182,72 @@ function GroupedListBlockBody(props: {
     typeof cfg.itemLabel === 'string' && cfg.itemLabel.trim()
       ? cfg.itemLabel.trim()
       : 'Item';
+  const unit = block.unitLabel ?? metric?.unitLabel;
 
   const groups = records.filter((r) => r.recordType === 'group');
   const items = records.filter((r) => r.recordType === 'grouped_item');
-  const ungroupedItems = items.filter((i) => !i.parentRecordId);
   const groupMetricMap = new Map(
     (metric?.groupMetrics ?? []).map((g) => [g.groupId, g])
   );
   const itemTotals = metric?.itemTotals ?? {};
+  const showFilterToolbar = items.length > 6 || groups.length > 2;
+  const normalizedQuery = itemSearch.trim().toLowerCase();
+  const hasOverItems = (metric?.overTargetItemCount ?? 0) > 0;
+
+  const itemMatchesFilter = (item: SharedProjectTrackingRecord): boolean => {
+    const logged = itemTotals[item.id] ?? 0;
+    const target = item.targetValue;
+    const isOver = target !== undefined && target > 0 && logged > target;
+    const isDone =
+      item.isCompleted || (target !== undefined && target > 0 && logged >= target);
+
+    if (itemFilter === 'remaining' && isDone) return false;
+    if (itemFilter === 'done' && !isDone) return false;
+    if (itemFilter === 'over' && !isOver) return false;
+    return true;
+  };
+
+  const ungroupedItems = items.filter((i) => {
+    if (i.parentRecordId) return false;
+    if (!itemMatchesFilter(i)) return false;
+    if (normalizedQuery) {
+      return (i.title ?? '').toLowerCase().includes(normalizedQuery);
+    }
+    return true;
+  });
+
+  const allCollapsed =
+    groups.length > 0 && groups.every((g) => Boolean(collapsedGroupIds[g.id]));
+
+  const toggleAllGroups = () => {
+    if (allCollapsed) {
+      setCollapsedGroupIds({});
+    } else {
+      const next: Record<string, boolean> = {};
+      for (const g of groups) next[g.id] = true;
+      setCollapsedGroupIds(next);
+    }
+  };
 
   const renderItemRow = (item: SharedProjectTrackingRecord) => {
     const logged = itemTotals[item.id] ?? 0;
     const target = item.targetValue;
+    const overAmount =
+      target !== undefined && target > 0 && logged > target ? logged - target : 0;
+    const remainingAmount =
+      target !== undefined && target > 0 ? Math.max(0, target - logged) : undefined;
     const isLogging = loggingItemId === item.id;
     const done =
       item.isCompleted || (target !== undefined && target > 0 && logged >= target);
+    const parsedDelta = Number(itemLogDelta);
+    const willExceedTarget =
+      isLogging &&
+      target !== undefined &&
+      target > 0 &&
+      Number.isFinite(parsedDelta) &&
+      parsedDelta > 0 &&
+      logged + parsedDelta > target;
+    const parsedLogDate = CalendarDate.tryParse(itemLogDate);
 
     return (
       <div
@@ -1223,16 +1282,21 @@ function GroupedListBlockBody(props: {
             </span>
           </button>
 
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {overAmount > 0 && (
+              <DaywellStatusBadge
+                tone="warning"
+                showIcon={false}
+                label={`Over +${formatNumber(overAmount)}`}
+              />
+            )}
             <span className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
               {target !== undefined
                 ? `${formatNumber(logged)}/${formatNumber(target)}${
-                    block.unitLabel ? ` ${block.unitLabel}` : ''
+                    unit ? ` ${unit}` : ''
                   }`
                 : logged > 0
-                ? `${formatNumber(logged)}${
-                    block.unitLabel ? ` ${block.unitLabel}` : ''
-                  }`
+                ? `${formatNumber(logged)}${unit ? ` ${unit}` : ''}`
                 : ''}
             </span>
             <DaywellButton
@@ -1257,57 +1321,226 @@ function GroupedListBlockBody(props: {
         </div>
 
         {isLogging && (
-          <div className="pl-6 flex flex-wrap items-center gap-1.5">
-            <input
-              type="number"
-              min="0.01"
-              step="any"
-              aria-label={`Progress delta for ${item.title}`}
-              value={itemLogDelta}
-              onChange={(e) => setItemLogDelta(e.target.value)}
-              className="w-20 min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
-            />
-            <input
-              type="date"
-              value={itemLogDate}
-              onChange={(e) => setItemLogDate(e.target.value)}
-              className="min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
-            />
-            <DaywellButton
-              label="Save"
-              variant="primary"
-              size="compact"
-              onClick={() => {
-                const delta = Number(itemLogDelta);
-                if (!Number.isFinite(delta) || delta <= 0) {
-                  onError('Logged progress must be greater than 0.');
-                  return;
-                }
-                onRunAction(() => {
-                  projectsService.logProgress({
-                    projectId,
-                    blockId: block.id,
-                    parentRecordId: item.id,
-                    deltaValue: delta,
-                    recordedDate:
-                      itemLogDate || CalendarDate.today().toIsoString(),
+          <div className="pl-6 space-y-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <input
+                type="number"
+                min="0.01"
+                step="any"
+                aria-label={`Progress delta for ${item.title}`}
+                value={itemLogDelta}
+                onChange={(e) => setItemLogDelta(e.target.value)}
+                className="w-20 min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-primary)] dw-type-numeric-body"
+              />
+              <DaywellButton
+                label="+5"
+                variant="outlined"
+                size="compact"
+                onClick={() => setItemLogDelta('5')}
+              />
+              <DaywellButton
+                label="+10"
+                variant="outlined"
+                size="compact"
+                onClick={() => setItemLogDelta('10')}
+              />
+              {remainingAmount !== undefined && remainingAmount > 0 && (
+                <DaywellButton
+                  label={`Left (${formatNumber(remainingAmount)})`}
+                  variant="tonal"
+                  size="compact"
+                  onClick={() => setItemLogDelta(String(remainingAmount))}
+                />
+              )}
+              <input
+                type="date"
+                aria-label={`Log date for ${item.title}`}
+                value={itemLogDate}
+                onChange={(e) => setItemLogDate(e.target.value)}
+                className="min-h-[34px] px-2 py-1 text-xs rounded-[var(--dw-radius-sm)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-primary)]"
+              />
+              <DaywellButton
+                label="Save"
+                variant="primary"
+                size="compact"
+                onClick={() => {
+                  const delta = Number(itemLogDelta);
+                  if (!Number.isFinite(delta) || delta <= 0) {
+                    onError('Logged progress must be greater than 0.');
+                    return;
+                  }
+                  onRunAction(() => {
+                    projectsService.logProgress({
+                      projectId,
+                      blockId: block.id,
+                      parentRecordId: item.id,
+                      deltaValue: delta,
+                      recordedDate:
+                        itemLogDate || CalendarDate.today().toIsoString(),
+                    });
+                    setLoggingItemId(null);
                   });
-                  setLoggingItemId(null);
-                });
-              }}
-            />
+                }}
+              />
+            </div>
+            {parsedLogDate && (
+              <p className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                {SharedDateFormatter.formatDual(parsedLogDate)}
+              </p>
+            )}
+            {willExceedTarget && target !== undefined && (
+              <p className="text-[11px] text-[var(--dw-warning)] dw-type-numeric-body">
+                Exceeds city target by +
+                {formatNumber(logged + parsedDelta - target)}: actual sent count
+                is saved, excess does not inflate target completion.
+              </p>
+            )}
           </div>
         )}
       </div>
     );
   };
 
+  const completedTowardTarget =
+    metric?.targetCompletedTotal ?? metric?.loggedTotal ?? 0;
+  const remainingBlockTotal =
+    metric?.targetValue !== undefined && metric.targetValue > 0
+      ? Math.max(0, metric.targetValue - completedTowardTarget)
+      : undefined;
+
   return (
     <div className="space-y-3">
+      {(showDailyTotals &&
+        (metric?.dailyTargetValue !== undefined ||
+          (metric?.todayTotal ?? 0) > 0 ||
+          metric?.paceNeededPerDay !== undefined)) ||
+      (metric?.overTargetAmount ?? 0) > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--dw-text-secondary)] dw-type-numeric-body">
+          {showDailyTotals &&
+            (metric?.dailyTargetValue !== undefined ||
+              (metric?.todayTotal ?? 0) > 0) && (
+              <span>
+                Today:{' '}
+                <strong className="text-[var(--dw-text-primary)]">
+                  {formatNumber(metric?.todayTotal ?? 0)}
+                  {unit ? ` ${unit}` : ''}
+                </strong>
+                {metric?.dailyTargetValue !== undefined
+                  ? ` / ${formatNumber(metric.dailyTargetValue)}`
+                  : ''}
+              </span>
+            )}
+          {remainingBlockTotal !== undefined && (
+            <span>
+              Remaining:{' '}
+              <strong className="text-[var(--dw-text-primary)]">
+                {formatNumber(remainingBlockTotal)}
+                {unit ? ` ${unit}` : ''}
+              </strong>
+            </span>
+          )}
+          {showDailyTotals &&
+            metric?.paceNeededPerDay !== undefined &&
+            metric.paceNeededPerDay > 0 && (
+              <span>
+                Pace needed:{' '}
+                <strong className="text-[var(--dw-text-primary)]">
+                  {formatNumber(Number(metric.paceNeededPerDay.toFixed(1)))}/day
+                </strong>
+              </span>
+            )}
+          {(metric?.overTargetAmount ?? 0) > 0 && (
+            <span className="text-[var(--dw-warning)] font-medium">
+              Actual sent: {formatNumber(metric?.loggedTotal ?? 0)} (+
+              {formatNumber(metric?.overTargetAmount ?? 0)} over target)
+            </span>
+          )}
+        </div>
+      ) : null}
+
+      {showFilterToolbar && (
+        <div className="space-y-2 p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)]">
+          <div className="flex flex-wrap items-center gap-2">
+            <DaywellSearchField
+              value={itemSearch}
+              onChange={setItemSearch}
+              placeholder={`Search ${itemNoun.toLowerCase()}s or ${groupNoun.toLowerCase()}s...`}
+              ariaLabel={`Search ${block.title}`}
+              className="flex-1 min-w-[180px]"
+            />
+            {groups.length > 0 && !normalizedQuery && (
+              <DaywellButton
+                label={allCollapsed ? 'Expand all' : 'Collapse all'}
+                variant="outlined"
+                size="compact"
+                onClick={toggleAllGroups}
+              />
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(
+              [
+                { key: 'all', label: `All (${items.length})` },
+                { key: 'remaining', label: 'Remaining' },
+                { key: 'done', label: 'Done' },
+                ...(hasOverItems
+                  ? [
+                      {
+                        key: 'over' as const,
+                        label: `Over target (${metric?.overTargetItemCount ?? 0})`,
+                      },
+                    ]
+                  : []),
+              ] as const
+            ).map((opt) => {
+              const selected = itemFilter === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setItemFilter(opt.key)}
+                  className={`min-h-[30px] px-2.5 py-1 rounded-[var(--dw-radius-full)] text-[11px] font-semibold transition-colors cursor-pointer ${
+                    selected
+                      ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                      : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {groups.map((grp) => {
         const gm = groupMetricMap.get(grp.id);
-        const children = items.filter((i) => i.parentRecordId === grp.id);
+        const rawChildren = items.filter((i) => i.parentRecordId === grp.id);
+        const groupMatchesQuery =
+          Boolean(normalizedQuery) &&
+          (grp.title ?? '').toLowerCase().includes(normalizedQuery);
+        const filteredChildren = rawChildren.filter((child) => {
+          if (!itemMatchesFilter(child)) return false;
+          if (!normalizedQuery || groupMatchesQuery) return true;
+          return (child.title ?? '').toLowerCase().includes(normalizedQuery);
+        });
+
+        if (
+          (normalizedQuery || itemFilter !== 'all') &&
+          filteredChildren.length === 0 &&
+          !(groupMatchesQuery && itemFilter === 'all')
+        ) {
+          return null;
+        }
+
         const isAddingHere = addingItemGroupId === grp.id;
+        const isCollapsed =
+          !normalizedQuery &&
+          itemFilter === 'all' &&
+          !isAddingHere &&
+          Boolean(collapsedGroupIds[grp.id]);
+        const groupCompleted = gm?.targetCompletedTotal ?? gm?.loggedTotal ?? 0;
+        const groupOver = gm?.overTargetAmount ?? 0;
 
         return (
           <div
@@ -1315,25 +1548,56 @@ function GroupedListBlockBody(props: {
             className="p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] space-y-2"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
-                  {grp.title}
-                </p>
-                {showGroupTotals && gm && (
-                  <p className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
-                    {gm.targetValue !== undefined
-                      ? `${formatNumber(gm.loggedTotal)} / ${formatNumber(
-                          gm.targetValue
-                        )}${block.unitLabel ? ` ${block.unitLabel}` : ''} · `
-                      : gm.loggedTotal > 0
-                      ? `${formatNumber(gm.loggedTotal)}${
-                          block.unitLabel ? ` ${block.unitLabel}` : ''
-                        } · `
-                      : ''}
-                    {gm.completedItemCount}/{gm.itemCount} {itemNoun.toLowerCase()}s
-                  </p>
+              <button
+                type="button"
+                onClick={() =>
+                  setCollapsedGroupIds((prev) => ({
+                    ...prev,
+                    [grp.id]: !prev[grp.id],
+                  }))
+                }
+                className="flex items-center gap-1.5 min-w-0 flex-1 text-left cursor-pointer"
+                aria-expanded={!isCollapsed}
+              >
+                {isCollapsed ? (
+                  <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)] shrink-0" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 text-[var(--dw-text-muted)] shrink-0" />
                 )}
-              </div>
+                <div className="min-w-0">
+                  <div className="flex items-center flex-wrap gap-1.5">
+                    <p className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                      {grp.title}
+                    </p>
+                    {groupOver > 0 && gm && (
+                      <DaywellStatusBadge
+                        tone="warning"
+                        showIcon={false}
+                        label={`${formatNumber(gm.loggedTotal)} sent (+${formatNumber(
+                          groupOver
+                        )})`}
+                      />
+                    )}
+                  </div>
+                  {showGroupTotals && gm && (
+                    <p className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                      {gm.targetValue !== undefined
+                        ? `${formatNumber(groupCompleted)} / ${formatNumber(
+                            gm.targetValue
+                          )}${unit ? ` ${unit}` : ''} (${Math.round(
+                            gm.progressPercent ?? 0
+                          )}%) · `
+                        : gm.loggedTotal > 0
+                        ? `${formatNumber(gm.loggedTotal)}${
+                            unit ? ` ${unit}` : ''
+                          } · `
+                        : ''}
+                      {gm.completedItemCount}/{gm.itemCount}{' '}
+                      {itemNoun.toLowerCase()}s
+                    </p>
+                  )}
+                </div>
+              </button>
               <div className="flex items-center gap-1 shrink-0">
                 <DaywellButton
                   label={`+ ${itemNoun}`}
@@ -1357,8 +1621,15 @@ function GroupedListBlockBody(props: {
               </div>
             </div>
 
-            {children.length > 0 && (
-              <div className="pl-1">{children.map(renderItemRow)}</div>
+            {showGroupTotals && gm?.progressPercent !== undefined && (
+              <DaywellProgressBar
+                value={gm.progressPercent}
+                label={`${grp.title} progress`}
+              />
+            )}
+
+            {!isCollapsed && filteredChildren.length > 0 && (
+              <div className="pl-1">{filteredChildren.map(renderItemRow)}</div>
             )}
 
             {isAddingHere && (

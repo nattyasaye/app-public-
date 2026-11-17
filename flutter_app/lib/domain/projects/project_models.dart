@@ -567,6 +567,9 @@ class ProjectGroupMetric {
   final String title;
   final double? targetValue;
   final double loggedTotal;
+  final double targetCompletedTotal;
+  final double overTargetAmount;
+  final int overTargetItemCount;
   final int itemCount;
   final int completedItemCount;
   final double? progressPercent;
@@ -576,10 +579,13 @@ class ProjectGroupMetric {
     required this.title,
     this.targetValue,
     required this.loggedTotal,
+    double? targetCompletedTotal,
+    this.overTargetAmount = 0,
+    this.overTargetItemCount = 0,
     required this.itemCount,
     required this.completedItemCount,
     this.progressPercent,
-  });
+  }) : targetCompletedTotal = targetCompletedTotal ?? loggedTotal;
 }
 
 class ProjectBlockProgressMetric {
@@ -589,6 +595,9 @@ class ProjectBlockProgressMetric {
   final String? unitLabel;
   final bool isArchived;
   final double loggedTotal;
+  final double? targetCompletedTotal;
+  final double? overTargetAmount;
+  final int? overTargetItemCount;
   final double? targetValue;
   final double? progressPercent;
   final double? dailyTargetValue;
@@ -611,6 +620,9 @@ class ProjectBlockProgressMetric {
     this.unitLabel,
     this.isArchived = false,
     this.loggedTotal = 0,
+    this.targetCompletedTotal,
+    this.overTargetAmount,
+    this.overTargetItemCount,
     this.targetValue,
     this.progressPercent,
     this.dailyTargetValue,

@@ -5,8 +5,11 @@ import '../../../application/tasks/tasks_controller.dart';
 import '../../../core/date/shared_date.dart';
 import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
+import '../../../domain/projects/progress_engine.dart';
 import '../../../domain/projects/project_models.dart';
+import '../../../domain/projects/project_package_codec.dart';
 import '../../../domain/tasks/task_models.dart';
+import '../../../services/export/project_package_io_service.dart';
 import '../../widgets/shared_ui_widgets.dart';
 import 'project_form_sheet.dart';
 import 'project_progress_history_widget.dart';
@@ -67,6 +70,39 @@ class ProjectDetailScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _exportPackage(
+    BuildContext context,
+    ProjectEntity project,
+  ) async {
+    final json = await projectsController.exportProjectPackageJson(project.id);
+    if (!context.mounted) return;
+    if (json == null) {
+      final err = projectsController.state.errorMessage ??
+          'Unable to export project.';
+      projectsController.clearError();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: $err')),
+      );
+      return;
+    }
+    final filename = ProjectPackageCodec.buildFilename(project.title);
+    try {
+      await ProjectPackageIoService.exportPackageFile(
+        filename: filename,
+        jsonContent: json,
+      );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Prepared "$filename" for export.')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to share "$filename": $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final listenable = tasksController != null
@@ -110,6 +146,11 @@ class ProjectDetailScreen extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
             actions: [
+              DaywellIconButton(
+                icon: Icons.file_download_outlined,
+                tooltip: 'Export .daywellproject',
+                onPressed: () => _exportPackage(context, project),
+              ),
               DaywellIconButton(
                 icon: Icons.edit_outlined,
                 tooltip: 'Edit project',
@@ -195,6 +236,27 @@ class ProjectDetailScreen extends StatelessWidget {
                                     color: semantic.textSecondary,
                                   ),
                                 ),
+                              if (project.startDate != null &&
+                                  project.targetDate != null) ...[
+                                Builder(
+                                  builder: (context) {
+                                    final span =
+                                        ProgressEngine.computeScheduleSpan(
+                                      startDate: project.startDate,
+                                      targetDate: project.targetDate,
+                                    );
+                                    if (span.totalDays == null) {
+                                      return const SizedBox.shrink();
+                                    }
+                                    return Text(
+                                      '${span.totalDays} days',
+                                      style: DaywellTypography.numericBody(
+                                        color: semantic.textSecondary,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ],
                             ],
                           ),
                           if (project.description != null &&
@@ -300,6 +362,19 @@ class ProjectDetailScreen extends StatelessWidget {
     }
 
     final pct = summary.overallPercentage ?? primaryMetric.progressPercent;
+    final unit = primaryMetric.unitLabel?.trim().isNotEmpty == true
+        ? ' ${primaryMetric.unitLabel!.trim()}'
+        : '';
+    final cappedCompleted =
+        primaryMetric.targetCompletedTotal ?? primaryMetric.loggedTotal;
+    final overAmount = primaryMetric.overTargetAmount ?? 0.0;
+    final overItems = primaryMetric.overTargetItemCount ?? 0;
+    final remaining = (primaryMetric.targetValue != null &&
+            primaryMetric.targetValue! > 0)
+        ? (primaryMetric.targetValue! - cappedCompleted)
+            .clamp(0.0, double.infinity)
+        : null;
+
     return DaywellCard(
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
       child: Column(
@@ -325,6 +400,16 @@ class ProjectDetailScreen extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
+                    if (primaryMetric.targetValue != null &&
+                        primaryMetric.targetValue! > 0) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingXs),
+                      Text(
+                        '${formatProjectNumber(cappedCompleted)} / ${formatProjectNumber(primaryMetric.targetValue!)}$unit · ${primaryMetric.completedCount}/${primaryMetric.totalCount} items',
+                        style: DaywellTypography.numericBody(
+                          color: semantic.textSecondary,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -342,6 +427,36 @@ class ProjectDetailScreen extends StatelessWidget {
             DaywellProgressBar(
               value: pct / 100.0,
               semanticLabel: 'Overall project progress',
+            ),
+          ],
+          if (remaining != null ||
+              primaryMetric.dailyTargetValue != null ||
+              primaryMetric.todayTotal > 0 ||
+              (primaryMetric.paceNeededPerDay ?? 0) > 0) ...[
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            Text(
+              [
+                if (remaining != null)
+                  'Remaining: ${formatProjectNumber(remaining)}$unit',
+                if (primaryMetric.dailyTargetValue != null ||
+                    primaryMetric.todayTotal > 0)
+                  'Today: ${formatProjectNumber(primaryMetric.todayTotal)}${primaryMetric.dailyTargetValue != null ? ' / ${formatProjectNumber(primaryMetric.dailyTargetValue!)}$unit' : unit}',
+                if (primaryMetric.paceNeededPerDay != null &&
+                    primaryMetric.paceNeededPerDay! > 0)
+                  'Pace needed: ${formatProjectNumber(primaryMetric.paceNeededPerDay!)}/day',
+              ].join(' · '),
+              style: DaywellTypography.numericBody(
+                color: semantic.textSecondary,
+              ),
+            ),
+          ],
+          if (overAmount > 0) ...[
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            Text(
+              'Actual sent: ${formatProjectNumber(primaryMetric.loggedTotal)}$unit (+${formatProjectNumber(overAmount)} beyond ${overItems > 0 ? "$overItems item target${overItems == 1 ? '' : 's'}" : "target"}, excluded from target completion)',
+              style: DaywellTypography.numericBody(
+                color: semantic.warning,
+              ),
             ),
           ],
         ],

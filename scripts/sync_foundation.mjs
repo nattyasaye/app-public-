@@ -466,6 +466,33 @@ export function validateBusinessRules(rules) {
     assertFieldBoolean(rules.projects.rules[flagKey], fileLabel, `projects.rules.${flagKey}`);
   }
 
+  if (!isPlainObject(rules.projectPackage)) {
+    throw new Error(`Missing or invalid "projectPackage" object in ${fileLabel}.`);
+  }
+  assertFieldNonEmptyString(rules.projectPackage.formatId, fileLabel, 'projectPackage.formatId');
+  assertFieldInteger(
+    rules.projectPackage.currentFormatVersion,
+    fileLabel,
+    'projectPackage.currentFormatVersion',
+    { min: 1 }
+  );
+  assertFieldInteger(
+    rules.projectPackage.minSupportedFormatVersion,
+    fileLabel,
+    'projectPackage.minSupportedFormatVersion',
+    { min: 1, max: rules.projectPackage.currentFormatVersion }
+  );
+  assertFieldNonEmptyString(
+    rules.projectPackage.fileExtension,
+    fileLabel,
+    'projectPackage.fileExtension'
+  );
+  if (!rules.projectPackage.fileExtension.startsWith('.')) {
+    throw new Error(
+      `Invalid ${fileLabel} field "projectPackage.fileExtension": must start with ".".`
+    );
+  }
+
   return rules;
 }
 
@@ -768,6 +795,8 @@ export const SHARED_DESIGN_TOKENS = ${JSON.stringify(tokens, null, 2)} as const;
 export type DaywellDesignTokens = typeof SHARED_DESIGN_TOKENS;
 
 export const SHARED_BUSINESS_RULES = ${JSON.stringify(rules, null, 2)} as const;
+
+export const SHARED_PROJECT_PACKAGE_SPEC = SHARED_BUSINESS_RULES.projectPackage;
 
 export const CANONICAL_SEED_DATABASE = ${JSON.stringify(seedDb, null, 2)} as const;
 
@@ -1580,6 +1609,13 @@ class SharedProjectRules {
   static const bool requirePositiveProgressLogDelta = true;
   static const bool preventDuplicateRollupLogging = true;
   static const bool enforceParentChildOwnership = true;
+}
+
+class SharedProjectPackageSpec {
+  static const String formatId = '${escapeDartString(rules.projectPackage.formatId)}';
+  static const int currentFormatVersion = ${rules.projectPackage.currentFormatVersion};
+  static const int minSupportedFormatVersion = ${rules.projectPackage.minSupportedFormatVersion};
+  static const String fileExtension = '${escapeDartString(rules.projectPackage.fileExtension)}';
 }
 
 class KnownSeedIds {

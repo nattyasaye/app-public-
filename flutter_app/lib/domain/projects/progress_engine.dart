@@ -149,14 +149,15 @@ class ProgressEngine {
           ? rawMetricsById[cfg.rollupSourceBlockId!]
           : null;
       final logged = sourceMetric?.loggedTotal ?? 0.0;
+      final effectiveCompleted = sourceMetric?.targetCompletedTotal ?? logged;
       final effectiveTarget = block.targetValue ?? sourceMetric?.targetValue;
       final percent = (effectiveTarget != null && effectiveTarget > 0)
-          ? (logged / effectiveTarget * 100.0).clamp(0.0, 100.0)
+          ? (effectiveCompleted / effectiveTarget * 100.0).clamp(0.0, 100.0)
           : null;
       final pace = (effectiveTarget != null &&
               effectiveTarget > 0 &&
               daysRemaining != null)
-          ? ((effectiveTarget - logged).clamp(0.0, double.infinity)) /
+          ? ((effectiveTarget - effectiveCompleted).clamp(0.0, double.infinity)) /
               (daysRemaining > 0 ? daysRemaining : 1)
           : null;
 
@@ -167,6 +168,9 @@ class ProgressEngine {
         unitLabel: block.unitLabel ?? sourceMetric?.unitLabel,
         isArchived: block.isArchived,
         loggedTotal: logged,
+        targetCompletedTotal: sourceMetric?.targetCompletedTotal,
+        overTargetAmount: sourceMetric?.overTargetAmount,
+        overTargetItemCount: sourceMetric?.overTargetItemCount,
         targetValue: effectiveTarget,
         progressPercent: percent,
         dailyTargetValue:
@@ -293,8 +297,13 @@ class ProgressEngine {
         var summedItemTargets = 0.0;
         var hasAnyItemTarget = false;
         var completedItems = 0;
+        var blockTargetCompletedTotal = 0.0;
+        var blockOverTargetAmount = 0.0;
+        var blockOverTargetItemCount = 0;
+        final itemIds = <String>{};
 
         for (final item in items) {
+          itemIds.add(item.id);
           if (item.parentRecordId != null) {
             itemsByGroup.putIfAbsent(item.parentRecordId!, () => []).add(item);
           }
@@ -303,6 +312,15 @@ class ProgressEngine {
           if (itemTarget != null && itemTarget > 0) {
             hasAnyItemTarget = true;
             summedItemTargets += itemTarget;
+            final capped = itemTotal < itemTarget ? itemTotal : itemTarget;
+            final over = itemTotal > itemTarget ? itemTotal - itemTarget : 0.0;
+            blockTargetCompletedTotal += capped;
+            blockOverTargetAmount += over;
+            if (over > 0) {
+              blockOverTargetItemCount += 1;
+            }
+          } else {
+            blockTargetCompletedTotal += itemTotal;
           }
           if (item.isCompleted ||
               (itemTarget != null && itemTarget > 0 && itemTotal >= itemTarget)) {
@@ -310,29 +328,49 @@ class ProgressEngine {
           }
         }
 
+        for (final entry in itemTotals.entries) {
+          if (!itemIds.contains(entry.key)) {
+            blockTargetCompletedTotal += entry.value;
+          }
+        }
+
         final groupMetrics = <ProjectGroupMetric>[];
         for (final group in groups) {
           final children = itemsByGroup[group.id] ?? const [];
           var groupTotal = 0.0;
+          var groupCappedTotal = 0.0;
+          var groupOverTargetAmount = 0.0;
+          var groupOverTargetItemCount = 0;
           var childTargetsSum = 0.0;
           var childCompleted = 0;
           for (final child in children) {
             final childTotal = itemTotals[child.id] ?? 0.0;
             groupTotal += childTotal;
-            if (child.targetValue != null && child.targetValue! > 0) {
-              childTargetsSum += child.targetValue!;
+            final childTarget = child.targetValue;
+            if (childTarget != null && childTarget > 0) {
+              childTargetsSum += childTarget;
+              final capped = childTotal < childTarget ? childTotal : childTarget;
+              final over =
+                  childTotal > childTarget ? childTotal - childTarget : 0.0;
+              groupCappedTotal += capped;
+              groupOverTargetAmount += over;
+              if (over > 0) {
+                groupOverTargetItemCount += 1;
+              }
+            } else {
+              groupCappedTotal += childTotal;
             }
             if (child.isCompleted ||
-                (child.targetValue != null &&
-                    child.targetValue! > 0 &&
-                    childTotal >= child.targetValue!)) {
+                (childTarget != null &&
+                    childTarget > 0 &&
+                    childTotal >= childTarget)) {
               childCompleted += 1;
             }
           }
           final groupTarget = group.targetValue ??
               (childTargetsSum > 0 ? childTargetsSum : null);
           final groupPercent = (groupTarget != null && groupTarget > 0)
-              ? (groupTotal / groupTarget * 100.0).clamp(0.0, 100.0)
+              ? (groupCappedTotal / groupTarget * 100.0).clamp(0.0, 100.0)
               : null;
           groupMetrics.add(
             ProjectGroupMetric(
@@ -340,6 +378,9 @@ class ProgressEngine {
               title: group.title ?? '',
               targetValue: groupTarget,
               loggedTotal: groupTotal,
+              targetCompletedTotal: groupCappedTotal,
+              overTargetAmount: groupOverTargetAmount,
+              overTargetItemCount: groupOverTargetItemCount,
               itemCount: children.length,
               completedItemCount: childCompleted,
               progressPercent: groupPercent,
@@ -349,13 +390,23 @@ class ProgressEngine {
 
         final effectiveTarget =
             block.targetValue ?? (hasAnyItemTarget ? summedItemTargets : null);
+        final effectiveCompleted =
+            hasAnyItemTarget ? blockTargetCompletedTotal : loggedTotal;
+        final effectiveOverTarget = hasAnyItemTarget
+            ? blockOverTargetAmount
+            : (effectiveTarget != null &&
+                    effectiveTarget > 0 &&
+                    loggedTotal > effectiveTarget
+                ? loggedTotal - effectiveTarget
+                : 0.0);
         final percent = (effectiveTarget != null && effectiveTarget > 0)
-            ? (loggedTotal / effectiveTarget * 100.0).clamp(0.0, 100.0)
+            ? (effectiveCompleted / effectiveTarget * 100.0).clamp(0.0, 100.0)
             : null;
         final pace = (effectiveTarget != null &&
                 effectiveTarget > 0 &&
                 daysRemaining != null)
-            ? ((effectiveTarget - loggedTotal).clamp(0.0, double.infinity)) /
+            ? ((effectiveTarget - effectiveCompleted)
+                    .clamp(0.0, double.infinity)) /
                 (daysRemaining > 0 ? daysRemaining : 1)
             : null;
 
@@ -366,6 +417,9 @@ class ProgressEngine {
           unitLabel: block.unitLabel,
           isArchived: block.isArchived,
           loggedTotal: loggedTotal,
+          targetCompletedTotal: effectiveCompleted,
+          overTargetAmount: effectiveOverTarget,
+          overTargetItemCount: blockOverTargetItemCount,
           targetValue: effectiveTarget,
           progressPercent: percent,
           dailyTargetValue: block.dailyTargetValue,
@@ -448,5 +502,38 @@ class ProgressEngine {
           daysRemaining: daysRemaining,
         );
     }
+  }
+
+  static ({int? totalDays, int? remainingDays, int? elapsedDays})
+      computeScheduleSpan({
+    required CalendarDate? startDate,
+    required CalendarDate? targetDate,
+    CalendarDate? asOfDate,
+  }) {
+    final reference = asOfDate ?? CalendarDate.today();
+    int? totalDays;
+    if (startDate != null &&
+        targetDate != null &&
+        !targetDate.isBefore(startDate)) {
+      totalDays = targetDate.differenceInDays(startDate) + 1;
+    }
+
+    int? remainingDays;
+    if (targetDate != null) {
+      final diff = targetDate.differenceInDays(reference);
+      remainingDays = diff >= 0 ? diff + 1 : 0;
+    }
+
+    int? elapsedDays;
+    if (startDate != null) {
+      final diff = reference.differenceInDays(startDate);
+      elapsedDays = diff >= 0 ? diff + 1 : 0;
+    }
+
+    return (
+      totalDays: totalDays,
+      remainingDays: remainingDays,
+      elapsedDays: elapsedDays,
+    );
   }
 }

@@ -4,12 +4,15 @@ import { SharedProject } from '../../domain/sharedFoundation';
 import {
   EnrichedProgressLogEntry,
   ProjectDetailSnapshot,
+  formatNumber,
+  getProjectScheduleSpan,
   projectsService,
 } from '../../services/projectsService';
 import {
   Archive,
   ArrowLeft,
   Calendar,
+  Download,
   Edit3,
   RotateCcw,
   Target,
@@ -70,6 +73,10 @@ export function ProjectDetailView({
   );
   const [history, setHistory] = useState<EnrichedProgressLogEntry[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [exportNotice, setExportNotice] = useState<{
+    tone: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
@@ -103,6 +110,7 @@ export function ProjectDetailView({
 
   const startLabel = formatDualDateLabel(project?.startDate);
   const targetLabel = formatDualDateLabel(project?.targetDate);
+  const scheduleSpan = project ? getProjectScheduleSpan(project) : undefined;
 
   const handleToggleArchive = () => {
     if (!project) return;
@@ -127,6 +135,25 @@ export function ProjectDetailView({
       setErrorMsg(
         err instanceof Error ? err.message : 'Unable to delete project.'
       );
+    }
+  };
+
+  const handleExport = () => {
+    if (!project) return;
+    try {
+      const { filename } = projectsService.downloadProjectPackage(project.id);
+      setExportNotice({
+        tone: 'success',
+        message: `Exported "${filename}".`,
+      });
+    } catch (err) {
+      setExportNotice({
+        tone: 'error',
+        message:
+          err instanceof Error
+            ? err.message
+            : 'Unable to export project package.',
+      });
     }
   };
 
@@ -157,6 +184,12 @@ export function ProjectDetailView({
         {project && (
           <div className="flex items-center gap-1 shrink-0">
             <DaywellIconButton
+              label="Export .daywellproject"
+              tone="muted"
+              onClick={handleExport}
+              icon={<Download className="w-4 h-4" />}
+            />
+            <DaywellIconButton
               label="Edit project"
               tone="muted"
               onClick={() => setIsEditOpen(true)}
@@ -185,6 +218,15 @@ export function ProjectDetailView({
           </div>
         )}
       </div>
+
+      {exportNotice && (
+        <DaywellStatusBanner
+          tone={exportNotice.tone}
+          message={exportNotice.message}
+          onDismiss={() => setExportNotice(null)}
+          liveRegion
+        />
+      )}
 
       <DaywellContentState
         error={errorMsg}
@@ -239,6 +281,9 @@ export function ProjectDetailView({
                         {[
                           startLabel ? `Start: ${startLabel}` : null,
                           targetLabel ? `Target: ${targetLabel}` : null,
+                          scheduleSpan?.totalDays !== undefined
+                            ? `${scheduleSpan.totalDays} days`
+                            : null,
                         ]
                           .filter(Boolean)
                           .join(' · ')}
@@ -265,29 +310,91 @@ export function ProjectDetailView({
                 message="The block configured for overall progress was archived or removed. Star an active block below or restore the archived block."
               />
             ) : summary.primaryMetric ? (
-              <DaywellCard variant="primaryContainer" padding="md" radius="lg" className="space-y-2">
-                <div className="flex items-baseline justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-on-primary-container)] opacity-80">
-                      OVERALL PROGRESS · {summary.primaryMetric.title}
+              (() => {
+                const pm = summary.primaryMetric;
+                const unit = pm.unitLabel ? ` ${pm.unitLabel}` : '';
+                const cappedCompleted =
+                  pm.targetCompletedTotal ?? pm.loggedTotal;
+                const remaining =
+                  pm.targetValue !== undefined && pm.targetValue > 0
+                    ? Math.max(0, pm.targetValue - cappedCompleted)
+                    : undefined;
+                const overAmount = pm.overTargetAmount ?? 0;
+                const overItems = pm.overTargetItemCount ?? 0;
+
+                return (
+                  <DaywellCard
+                    variant="primaryContainer"
+                    padding="md"
+                    radius="lg"
+                    className="space-y-2"
+                  >
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-on-primary-container)] opacity-80">
+                          OVERALL PROGRESS · {pm.title}
+                        </div>
+                        <p className="text-xs font-semibold text-[var(--dw-on-primary-container)] dw-type-numeric-body">
+                          {projectsService.formatBlockMetricSummary(pm)}
+                        </p>
+                      </div>
+                      {summary.overallPercentage !== undefined && (
+                        <span className="dw-type-numeric-hero text-[var(--dw-on-primary-container)] shrink-0">
+                          {Math.round(summary.overallPercentage)}%
+                        </span>
+                      )}
                     </div>
-                    <p className="text-xs font-semibold text-[var(--dw-on-primary-container)] dw-type-numeric-body">
-                      {projectsService.formatBlockMetricSummary(summary.primaryMetric)}
-                    </p>
-                  </div>
-                  {summary.overallPercentage !== undefined && (
-                    <span className="dw-type-numeric-hero text-[var(--dw-on-primary-container)] shrink-0">
-                      {Math.round(summary.overallPercentage)}%
-                    </span>
-                  )}
-                </div>
-                {summary.overallPercentage !== undefined && (
-                  <DaywellProgressBar
-                    value={summary.overallPercentage}
-                    label={`${project.title} overall progress`}
-                  />
-                )}
-              </DaywellCard>
+                    {summary.overallPercentage !== undefined && (
+                      <DaywellProgressBar
+                        value={summary.overallPercentage}
+                        label={`${project.title} overall progress`}
+                      />
+                    )}
+                    {(remaining !== undefined ||
+                      pm.dailyTargetValue !== undefined ||
+                      pm.todayTotal > 0 ||
+                      pm.paceNeededPerDay !== undefined) && (
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--dw-on-primary-container)] opacity-90 dw-type-numeric-body">
+                        {remaining !== undefined && (
+                          <span>
+                            Remaining: {formatNumber(remaining)}
+                            {unit}
+                          </span>
+                        )}
+                        {(pm.dailyTargetValue !== undefined ||
+                          pm.todayTotal > 0) && (
+                          <span>
+                            Today: {formatNumber(pm.todayTotal)}
+                            {pm.dailyTargetValue !== undefined
+                              ? ` / ${formatNumber(pm.dailyTargetValue)}${unit}`
+                              : unit}
+                          </span>
+                        )}
+                        {pm.paceNeededPerDay !== undefined &&
+                          pm.paceNeededPerDay > 0 && (
+                            <span>
+                              Pace needed:{' '}
+                              {formatNumber(
+                                Number(pm.paceNeededPerDay.toFixed(1))
+                              )}
+                              /day
+                            </span>
+                          )}
+                      </div>
+                    )}
+                    {overAmount > 0 && (
+                      <p className="text-[11px] text-[var(--dw-on-primary-container)] opacity-90 dw-type-numeric-body">
+                        Actual sent: {formatNumber(pm.loggedTotal)}
+                        {unit} (+{formatNumber(overAmount)} beyond{' '}
+                        {overItems > 0
+                          ? `${overItems} item target${overItems === 1 ? '' : 's'}`
+                          : 'target'}
+                        , excluded from target completion)
+                      </p>
+                    )}
+                  </DaywellCard>
+                );
+              })()
             ) : activeBlockCount > 0 ? (
               <DaywellCard variant="subtle" padding="compact" radius="lg">
                 <p className="text-[11px] text-[var(--dw-text-secondary)]">

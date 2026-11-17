@@ -136,6 +136,12 @@
       "customFieldTypes",
       "bounds",
       "rules"
+    ],
+    "projectPackage": [
+      "formatId",
+      "currentFormatVersion",
+      "minSupportedFormatVersion",
+      "fileExtension"
     ]
   },
   "protectedSchemaContracts": {

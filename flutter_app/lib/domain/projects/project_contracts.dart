@@ -1,6 +1,7 @@
 import '../../core/date/shared_date.dart';
 import '../tasks/task_models.dart';
 import 'project_models.dart';
+import 'project_package_codec.dart';
 
 /// Repository contract for the Stage 1 Projects tracking foundation.
 abstract class IProjectsRepository {
@@ -70,4 +71,8 @@ abstract class IProjectsRepository {
     String projectId, {
     CalendarDate? asOfDate,
   });
+
+  Future<String> exportProjectPackageJson(String projectId);
+
+  Future<PreparedProjectPackageImport> importProjectPackageJson(String rawJson);
 }

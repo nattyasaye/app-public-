@@ -6,13 +6,19 @@ import {
   ScheduleBlockConfig,
   ProjectBlockProgressMetric,
   ProjectProgressSummary,
+  ProjectScheduleSpan,
   ProjectValidationError,
+  getProjectScheduleSpan,
   meetsScheduleDurationRule,
   parseCounterBlockConfig,
   parseScheduleBlockConfig,
   validateBlock,
   validateProject,
 } from '../domain/projectsEngine';
+import {
+  BIM_OUTREACH_CAMPAIGN_TITLE,
+  serializeBimOutreachTemplateJson,
+} from '../domain/bimOutreachTemplate';
 import {
   SharedGoal,
   SharedProject,
@@ -22,6 +28,11 @@ import {
   SharedTask,
 } from '../domain/sharedFoundation';
 import { WebProjectsRepository } from '../data/projectsRepository';
+import {
+  buildProjectPackageFilename,
+  PreparedProjectPackageImport,
+  ProjectPackageError,
+} from '../domain/projectPackage';
 import { SharedStateBridge } from './sharedStateBridge';
 
 export interface InlineBlockDraft {
@@ -773,23 +784,87 @@ class ProjectsService {
     return created;
   }
 
+  public exportProjectPackage(projectId: string): {
+    filename: string;
+    json: string;
+    project: SharedProject;
+  } {
+    const project = this.repo.getProjectById(projectId);
+    if (!project) {
+      throw new ProjectPackageError(
+        'validation_failed',
+        `Cannot export missing project "${projectId}".`
+      );
+    }
+    const json = this.repo.exportProjectPackage(projectId, {
+      sourcePlatform: 'web',
+    });
+    return {
+      filename: buildProjectPackageFilename(project.title),
+      json,
+      project,
+    };
+  }
+
+  public downloadProjectPackage(projectId: string): {
+    filename: string;
+    json: string;
+    project: SharedProject;
+  } {
+    const bundle = this.exportProjectPackage(projectId);
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      const blob = new Blob([bundle.json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = bundle.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+    return bundle;
+  }
+
+  public importProjectPackage(rawJson: string): PreparedProjectPackageImport {
+    const imported = this.repo.importProjectPackage(rawJson);
+    broadcastSync();
+    return imported;
+  }
+
   public formatBlockMetricSummary(metric: ProjectBlockProgressMetric): string {
     const unit = metric.unitLabel ? ` ${metric.unitLabel}` : '';
+    const completedTowardTarget =
+      metric.targetCompletedTotal ?? metric.loggedTotal;
+    const overAmount = metric.overTargetAmount ?? 0;
+
     switch (metric.blockType) {
       case 'counter': {
         if (metric.targetValue !== undefined && metric.targetValue > 0) {
           const pct = Math.round(metric.progressPercent ?? 0);
-          return `${formatNumber(metric.loggedTotal)} / ${formatNumber(
+          const overNote =
+            overAmount > 0
+              ? ` (${formatNumber(metric.loggedTotal)} sent, +${formatNumber(
+                  overAmount
+                )} over)`
+              : '';
+          return `${formatNumber(completedTowardTarget)} / ${formatNumber(
             metric.targetValue
-          )}${unit} (${pct}%)`;
+          )}${unit} (${pct}%)${overNote}`;
         }
         return `${formatNumber(metric.loggedTotal)}${unit} logged`;
       }
       case 'grouped_list': {
         if (metric.targetValue !== undefined && metric.targetValue > 0) {
-          return `${formatNumber(metric.loggedTotal)} / ${formatNumber(
+          const overNote =
+            overAmount > 0
+              ? ` (${formatNumber(metric.loggedTotal)} sent, +${formatNumber(
+                  overAmount
+                )} over)`
+              : '';
+          return `${formatNumber(completedTowardTarget)} / ${formatNumber(
             metric.targetValue
-          )}${unit} · ${metric.completedCount}/${metric.totalCount} items`;
+          )}${unit}${overNote} · ${metric.completedCount}/${metric.totalCount} items`;
         }
         return `${metric.completedCount}/${metric.totalCount} items complete`;
       }
@@ -817,5 +892,16 @@ export type {
   GroupedListBlockConfig,
   ChecklistBlockConfig,
   ScheduleBlockConfig,
+  PreparedProjectPackageImport,
+  ProjectScheduleSpan,
 };
-export { parseCounterBlockConfig, parseScheduleBlockConfig, ProjectValidationError };
+export {
+  BIM_OUTREACH_CAMPAIGN_TITLE,
+  buildProjectPackageFilename,
+  getProjectScheduleSpan,
+  parseCounterBlockConfig,
+  parseScheduleBlockConfig,
+  ProjectPackageError,
+  ProjectValidationError,
+  serializeBimOutreachTemplateJson,
+};

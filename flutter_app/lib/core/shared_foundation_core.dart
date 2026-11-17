@@ -285,6 +285,13 @@ class SharedProjectRules {
   static const bool enforceParentChildOwnership = true;
 }
 
+class SharedProjectPackageSpec {
+  static const String formatId = 'daywell_project_package';
+  static const int currentFormatVersion = 1;
+  static const int minSupportedFormatVersion = 1;
+  static const String fileExtension = '.daywellproject';
+}
+
 class KnownSeedIds {
   static const Set<String> accounts = {
     'acc-cbe',

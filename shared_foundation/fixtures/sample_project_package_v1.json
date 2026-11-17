@@ -1,0 +1,287 @@
+{
+  "formatId": "daywell_project_package",
+  "formatVersion": 1,
+  "exportedAt": "2026-11-17T10:00:00.000Z",
+  "sourcePlatform": "web",
+  "project": {
+    "id": "fx-proj-studio",
+    "title": "Home Studio Build & Curriculum",
+    "description": "Portable project package covering all 4 block types, rollup, archive history, and corrections.",
+    "status": "active",
+    "startDate": "2026-11-01",
+    "targetDate": "2026-12-15",
+    "isArchived": false,
+    "customFields": {
+      "primaryBlockId": "fx-blk-rollup",
+      "definitions": [
+        {
+          "id": "studio_lead",
+          "label": "Lead",
+          "type": "text",
+          "required": true
+        },
+        {
+          "id": "phase",
+          "label": "Phase",
+          "type": "select",
+          "required": false,
+          "options": ["Prep", "Build"]
+        }
+      ],
+      "values": {
+        "studio_lead": "Samira",
+        "phase": "Build"
+      }
+    },
+    "createdAt": "2026-11-01T08:00:00.000Z",
+    "updatedAt": "2026-11-12T14:00:00.000Z"
+  },
+  "trackingBlocks": [
+    {
+      "id": "fx-blk-counter",
+      "projectId": "fx-proj-studio",
+      "blockType": "counter",
+      "title": "Acoustic Panels Installed",
+      "sortOrder": 0,
+      "unitLabel": "panels",
+      "targetValue": 12,
+      "dailyTargetValue": 2,
+      "config": {
+        "allowDirectLogging": true
+      },
+      "isArchived": false,
+      "createdAt": "2026-11-01T08:05:00.000Z",
+      "updatedAt": "2026-11-11T10:00:00.000Z"
+    },
+    {
+      "id": "fx-blk-grouped",
+      "projectId": "fx-proj-studio",
+      "blockType": "grouped_list",
+      "title": "Studio Zones & Fixtures",
+      "sortOrder": 1,
+      "unitLabel": "hours",
+      "targetValue": 30,
+      "config": {
+        "showGroupTotals": true,
+        "showDailyTotals": true
+      },
+      "isArchived": false,
+      "createdAt": "2026-11-01T08:06:00.000Z",
+      "updatedAt": "2026-11-12T10:00:00.000Z"
+    },
+    {
+      "id": "fx-blk-checklist",
+      "projectId": "fx-proj-studio",
+      "blockType": "checklist",
+      "title": "Safety & Wiring Checklist",
+      "sortOrder": 2,
+      "config": {},
+      "isArchived": false,
+      "createdAt": "2026-11-01T08:07:00.000Z",
+      "updatedAt": "2026-11-10T09:00:00.000Z"
+    },
+    {
+      "id": "fx-blk-schedule",
+      "projectId": "fx-proj-studio",
+      "blockType": "schedule",
+      "title": "Calibration & Tutorials",
+      "sortOrder": 3,
+      "unitLabel": "minutes",
+      "config": {
+        "completionRule": "threshold_percent",
+        "autoCompleteThresholdRatio": 0.8,
+        "trackActualDuration": true
+      },
+      "isArchived": false,
+      "createdAt": "2026-11-01T08:08:00.000Z",
+      "updatedAt": "2026-11-12T14:00:00.000Z"
+    },
+    {
+      "id": "fx-blk-archived",
+      "projectId": "fx-proj-studio",
+      "blockType": "counter",
+      "title": "Legacy Draft Notes",
+      "sortOrder": 4,
+      "unitLabel": "pages",
+      "targetValue": 10,
+      "config": {
+        "allowDirectLogging": true
+      },
+      "isArchived": true,
+      "createdAt": "2026-11-01T08:09:00.000Z",
+      "updatedAt": "2026-11-05T12:00:00.000Z"
+    },
+    {
+      "id": "fx-blk-rollup",
+      "projectId": "fx-proj-studio",
+      "blockType": "counter",
+      "title": "Total Fixture Hours (Rollup)",
+      "sortOrder": 5,
+      "unitLabel": "hours",
+      "targetValue": 30,
+      "config": {
+        "rollupSourceBlockId": "fx-blk-grouped",
+        "allowDirectLogging": false
+      },
+      "isArchived": false,
+      "createdAt": "2026-11-01T08:10:00.000Z",
+      "updatedAt": "2026-11-12T10:00:00.000Z"
+    }
+  ],
+  "trackingRecords": [
+    {
+      "id": "fx-rec-grp-1",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-grouped",
+      "recordType": "group",
+      "title": "Desk Wall",
+      "sortOrder": 0,
+      "isCompleted": false,
+      "metadata": {},
+      "createdAt": "2026-11-01T08:15:00.000Z",
+      "updatedAt": "2026-11-01T08:15:00.000Z"
+    },
+    {
+      "id": "fx-rec-item-1",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-grouped",
+      "parentRecordId": "fx-rec-grp-1",
+      "recordType": "grouped_item",
+      "title": "Bass Traps",
+      "sortOrder": 0,
+      "targetValue": 10,
+      "isCompleted": false,
+      "metadata": {},
+      "createdAt": "2026-11-01T08:16:00.000Z",
+      "updatedAt": "2026-11-01T08:16:00.000Z"
+    },
+    {
+      "id": "fx-rec-item-2",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-grouped",
+      "parentRecordId": "fx-rec-grp-1",
+      "recordType": "grouped_item",
+      "title": "Monitor Stands",
+      "sortOrder": 1,
+      "targetValue": 5,
+      "isCompleted": false,
+      "metadata": {},
+      "createdAt": "2026-11-01T08:17:00.000Z",
+      "updatedAt": "2026-11-01T08:17:00.000Z"
+    },
+    {
+      "id": "fx-rec-chk-1",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-checklist",
+      "recordType": "checklist_item",
+      "title": "Mount surge protector",
+      "sortOrder": 0,
+      "isCompleted": true,
+      "completedAt": "2026-11-10T09:00:00.000Z",
+      "metadata": {},
+      "createdAt": "2026-11-01T08:18:00.000Z",
+      "updatedAt": "2026-11-10T09:00:00.000Z"
+    },
+    {
+      "id": "fx-rec-chk-2",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-checklist",
+      "recordType": "checklist_item",
+      "title": "Verify ground loop",
+      "sortOrder": 1,
+      "isCompleted": false,
+      "metadata": {},
+      "createdAt": "2026-11-01T08:19:00.000Z",
+      "updatedAt": "2026-11-01T08:19:00.000Z"
+    },
+    {
+      "id": "fx-rec-sch-1",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-schedule",
+      "recordType": "schedule_item",
+      "title": "Room EQ Wizard Intro",
+      "sortOrder": 0,
+      "durationMinutes": 60,
+      "isCompleted": true,
+      "completedAt": "2026-11-12T14:00:00.000Z",
+      "scheduledDate": "2026-11-12",
+      "metadata": {},
+      "createdAt": "2026-11-01T08:20:00.000Z",
+      "updatedAt": "2026-11-12T14:00:00.000Z"
+    },
+    {
+      "id": "fx-rec-log-cnt",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-counter",
+      "recordType": "progress_log",
+      "title": "Front wall batch",
+      "sortOrder": 0,
+      "deltaValue": 4,
+      "isCompleted": false,
+      "recordedDate": "2026-11-11",
+      "metadata": {},
+      "createdAt": "2026-11-11T10:00:00.000Z",
+      "updatedAt": "2026-11-11T10:00:00.000Z"
+    },
+    {
+      "id": "fx-rec-log-grp1",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-grouped",
+      "parentRecordId": "fx-rec-item-1",
+      "recordType": "progress_log",
+      "sortOrder": 0,
+      "deltaValue": 12,
+      "isCompleted": false,
+      "recordedDate": "2026-11-11",
+      "metadata": {},
+      "createdAt": "2026-11-11T11:00:00.000Z",
+      "updatedAt": "2026-11-11T11:00:00.000Z"
+    },
+    {
+      "id": "fx-rec-log-sch1",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-schedule",
+      "parentRecordId": "fx-rec-sch-1",
+      "recordType": "progress_log",
+      "sortOrder": 0,
+      "deltaValue": 50,
+      "isCompleted": false,
+      "recordedDate": "2026-11-12",
+      "metadata": {},
+      "createdAt": "2026-11-12T13:50:00.000Z",
+      "updatedAt": "2026-11-12T13:50:00.000Z"
+    },
+    {
+      "id": "fx-rec-log-arch",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-archived",
+      "recordType": "progress_log",
+      "title": "Early rough draft",
+      "sortOrder": 0,
+      "deltaValue": 3,
+      "isCompleted": false,
+      "recordedDate": "2026-11-05",
+      "metadata": {},
+      "createdAt": "2026-11-05T12:00:00.000Z",
+      "updatedAt": "2026-11-05T12:00:00.000Z"
+    },
+    {
+      "id": "fx-rec-corr-grp1",
+      "projectId": "fx-proj-studio",
+      "blockId": "fx-blk-grouped",
+      "parentRecordId": "fx-rec-item-1",
+      "recordType": "progress_log",
+      "sortOrder": 0,
+      "deltaValue": -2,
+      "isCompleted": false,
+      "recordedDate": "2026-11-12",
+      "metadata": {
+        "isCorrection": true,
+        "compensatesRecordId": "fx-rec-log-grp1",
+        "correctionReason": "Logged 2 extra hours by mistake"
+      },
+      "createdAt": "2026-11-12T15:00:00.000Z",
+      "updatedAt": "2026-11-12T15:00:00.000Z"
+    }
+  ]
+}

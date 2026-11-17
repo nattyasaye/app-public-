@@ -34,6 +34,10 @@ class ProjectTrackingBlocksWidget extends StatefulWidget {
 class _ProjectTrackingBlocksWidgetState
     extends State<ProjectTrackingBlocksWidget> {
   final Map<String, TextEditingController> _checklistAddCtrls = {};
+  final Map<String, TextEditingController> _groupedSearchCtrls = {};
+  final Map<String, String> _groupedQueries = {};
+  final Map<String, String> _groupedFilters = {};
+  final Map<String, Set<String>> _collapsedGroupsByBlock = {};
   bool _showArchivedBlocks = false;
 
   @override
@@ -41,11 +45,21 @@ class _ProjectTrackingBlocksWidgetState
     for (final ctrl in _checklistAddCtrls.values) {
       ctrl.dispose();
     }
+    for (final ctrl in _groupedSearchCtrls.values) {
+      ctrl.dispose();
+    }
     super.dispose();
   }
 
   TextEditingController _checklistControllerFor(String blockId) {
     return _checklistAddCtrls.putIfAbsent(
+      blockId,
+      () => TextEditingController(),
+    );
+  }
+
+  TextEditingController _groupedSearchControllerFor(String blockId) {
+    return _groupedSearchCtrls.putIfAbsent(
       blockId,
       () => TextEditingController(),
     );
@@ -701,6 +715,13 @@ class _ProjectTrackingBlocksWidgetState
   ) {
     final semantic = context.daywellColors;
     final textTheme = Theme.of(context).textTheme;
+    final cfg = GroupedListBlockConfig.fromMap(block.config);
+    final groupNoun = (cfg.groupLabel?.trim().isNotEmpty == true)
+        ? cfg.groupLabel!.trim()
+        : 'Group';
+    final itemNoun = (cfg.itemLabel?.trim().isNotEmpty == true)
+        ? cfg.itemLabel!.trim()
+        : 'Item';
     final blockRecords = widget.records
         .where((r) => r.blockId == block.id)
         .toList()
@@ -715,6 +736,44 @@ class _ProjectTrackingBlocksWidgetState
     final unit = block.unitLabel?.trim().isNotEmpty == true
         ? ' ${block.unitLabel!.trim()}'
         : '';
+    final cappedCompleted =
+        metric?.targetCompletedTotal ?? metric?.loggedTotal ?? 0.0;
+    final blockOver = metric?.overTargetAmount ?? 0.0;
+    final blockOverItems = metric?.overTargetItemCount ?? 0;
+    final remainingTotal = (metric?.targetValue != null &&
+            metric!.targetValue! > 0)
+        ? (metric.targetValue! - cappedCompleted).clamp(0.0, double.infinity)
+        : null;
+
+    final showToolbar = items.length > 6 || groups.length > 2;
+    final searchCtrl = _groupedSearchControllerFor(block.id);
+    final query = (_groupedQueries[block.id] ?? '').trim().toLowerCase();
+    final statusFilter = _groupedFilters[block.id] ?? 'all';
+    final collapsedSet = _collapsedGroupsByBlock.putIfAbsent(
+      block.id,
+      () => <String>{},
+    );
+    final allCollapsed =
+        groups.isNotEmpty && groups.every((g) => collapsedSet.contains(g.id));
+
+    bool matchesFilter(ProjectTrackingRecordEntity item) {
+      final logged = metric?.itemTotals[item.id] ?? 0.0;
+      final target = item.targetValue;
+      final isOver = target != null && target > 0 && logged > target;
+      final isDone =
+          item.isCompleted || (target != null && target > 0 && logged >= target);
+      switch (statusFilter) {
+        case 'remaining':
+          return !isDone;
+        case 'done':
+          return isDone;
+        case 'over':
+          return isOver;
+        case 'all':
+        default:
+          return true;
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -723,15 +782,99 @@ class _ProjectTrackingBlocksWidgetState
           DaywellProgressBar(
             value: pct / 100.0,
             label:
-                '${formatProjectNumber(metric?.loggedTotal ?? 0)} / ${formatProjectNumber(metric?.targetValue ?? 0)}$unit',
+                '${formatProjectNumber(cappedCompleted)} / ${formatProjectNumber(metric?.targetValue ?? 0)}$unit',
             valueText: '${pct.round()}%',
+          ),
+          const SizedBox(height: SharedDesignTokens.spacingSm),
+        ],
+        if ((cfg.showDailyTotals &&
+                ((metric?.todayTotal ?? 0) > 0 ||
+                    block.dailyTargetValue != null ||
+                    metric?.paceNeededPerDay != null)) ||
+            remainingTotal != null ||
+            blockOver > 0) ...[
+          Text(
+            [
+              if (cfg.showDailyTotals &&
+                  (block.dailyTargetValue != null ||
+                      (metric?.todayTotal ?? 0) > 0))
+                'Today: ${formatProjectNumber(metric?.todayTotal ?? 0)}${block.dailyTargetValue != null ? ' / ${formatProjectNumber(block.dailyTargetValue!)}$unit' : unit}',
+              if (remainingTotal != null)
+                'Remaining: ${formatProjectNumber(remainingTotal)}$unit',
+              if (cfg.showDailyTotals &&
+                  metric?.paceNeededPerDay != null &&
+                  metric!.paceNeededPerDay! > 0)
+                'Pace needed: ${formatProjectNumber(metric.paceNeededPerDay!)}/day',
+            ].join(' · '),
+            style: DaywellTypography.numericBody(color: semantic.textSecondary),
+          ),
+          if (blockOver > 0) ...[
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            Text(
+              'Actual sent: ${formatProjectNumber(metric?.loggedTotal ?? 0)}$unit (+${formatProjectNumber(blockOver)} over target)',
+              style: DaywellTypography.numericBody(color: semantic.warning),
+            ),
+          ],
+          const SizedBox(height: SharedDesignTokens.spacingCompact),
+        ],
+        if (showToolbar) ...[
+          Row(
+            children: [
+              Expanded(
+                child: DaywellSearchField(
+                  controller: searchCtrl,
+                  hintText:
+                      'Search ${itemNoun.toLowerCase()}s or ${groupNoun.toLowerCase()}s...',
+                  onChanged: (v) =>
+                      setState(() => _groupedQueries[block.id] = v),
+                  onCleared: () =>
+                      setState(() => _groupedQueries[block.id] = ''),
+                ),
+              ),
+              if (groups.isNotEmpty && query.isEmpty) ...[
+                const SizedBox(width: SharedDesignTokens.spacingSm),
+                DaywellButton(
+                  label: allCollapsed ? 'Expand all' : 'Collapse all',
+                  variant: DaywellButtonVariant.outlined,
+                  size: DaywellButtonSize.compact,
+                  onPressed: () {
+                    setState(() {
+                      if (allCollapsed) {
+                        collapsedSet.clear();
+                      } else {
+                        collapsedSet.addAll(groups.map((g) => g.id));
+                      }
+                    });
+                  },
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: SharedDesignTokens.spacingSm),
+          Wrap(
+            spacing: SharedDesignTokens.spacingXs,
+            runSpacing: SharedDesignTokens.spacingXs,
+            children: [
+              for (final f in <(String, String)>[
+                ('all', 'All (${items.length})'),
+                ('remaining', 'Remaining'),
+                ('done', 'Done'),
+                if (blockOverItems > 0) ('over', 'Over target ($blockOverItems)'),
+              ])
+                ChoiceChip(
+                  label: Text(f.$2),
+                  selected: statusFilter == f.$1,
+                  onSelected: (_) =>
+                      setState(() => _groupedFilters[block.id] = f.$1),
+                ),
+            ],
           ),
           const SizedBox(height: SharedDesignTokens.spacingCompact),
         ],
         Align(
           alignment: AlignmentDirectional.centerStart,
           child: DaywellButton(
-            label: 'Add Group',
+            label: 'Add $groupNoun',
             leadingIcon: Icons.create_new_folder_outlined,
             variant: DaywellButtonVariant.outlined,
             size: DaywellButtonSize.compact,
@@ -749,9 +892,23 @@ class _ProjectTrackingBlocksWidgetState
           for (final group in groups) ...[
             Builder(
               builder: (context) {
-                final childItems = items
+                final rawChildren = items
                     .where((it) => it.parentRecordId == group.id)
                     .toList();
+                final groupMatchesQuery = query.isNotEmpty &&
+                    (group.title ?? '').toLowerCase().contains(query);
+                final childItems = rawChildren.where((it) {
+                  if (!matchesFilter(it)) return false;
+                  if (query.isEmpty || groupMatchesQuery) return true;
+                  return (it.title ?? '').toLowerCase().contains(query);
+                }).toList();
+
+                if ((query.isNotEmpty || statusFilter != 'all') &&
+                    childItems.isEmpty &&
+                    !(groupMatchesQuery && statusFilter == 'all')) {
+                  return const SizedBox.shrink();
+                }
+
                 ProjectGroupMetric? groupMetric;
                 for (final gm in metric?.groupMetrics ?? const []) {
                   if (gm.groupId == group.id) {
@@ -759,8 +916,14 @@ class _ProjectTrackingBlocksWidgetState
                     break;
                   }
                 }
-                final groupTotal = groupMetric?.loggedTotal ?? 0.0;
+                final groupCompleted = groupMetric?.targetCompletedTotal ??
+                    groupMetric?.loggedTotal ??
+                    0.0;
+                final groupOver = groupMetric?.overTargetAmount ?? 0.0;
                 final groupTarget = groupMetric?.targetValue ?? group.targetValue;
+                final isCollapsed = query.isEmpty &&
+                    statusFilter == 'all' &&
+                    collapsedSet.contains(group.id);
 
                 return Container(
                   margin: const EdgeInsets.only(
@@ -781,32 +944,75 @@ class _ProjectTrackingBlocksWidgetState
                     children: [
                       Row(
                         children: [
+                          DaywellIconButton(
+                            icon: isCollapsed
+                                ? Icons.chevron_right
+                                : Icons.expand_more,
+                            tooltip: isCollapsed
+                                ? 'Expand ${group.title ?? groupNoun}'
+                                : 'Collapse ${group.title ?? groupNoun}',
+                            onPressed: () {
+                              setState(() {
+                                if (collapsedSet.contains(group.id)) {
+                                  collapsedSet.remove(group.id);
+                                } else {
+                                  collapsedSet.add(group.id);
+                                }
+                              });
+                            },
+                          ),
                           Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  group.title ?? 'Group',
-                                  style: textTheme.titleSmall?.copyWith(
-                                    fontWeight: FontWeight.w600,
+                            child: InkWell(
+                              onTap: () {
+                                setState(() {
+                                  if (collapsedSet.contains(group.id)) {
+                                    collapsedSet.remove(group.id);
+                                  } else {
+                                    collapsedSet.add(group.id);
+                                  }
+                                });
+                              },
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Wrap(
+                                    spacing: SharedDesignTokens.spacingXs,
+                                    runSpacing: SharedDesignTokens.spacingXs,
+                                    crossAxisAlignment:
+                                        WrapCrossAlignment.center,
+                                    children: [
+                                      Text(
+                                        group.title ?? groupNoun,
+                                        style: textTheme.titleSmall?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                      ),
+                                      if (groupOver > 0 && groupMetric != null)
+                                        DaywellStatusBadge(
+                                          label:
+                                              '${formatProjectNumber(groupMetric.loggedTotal)} sent (+${formatProjectNumber(groupOver)})',
+                                          tone: DaywellStatusTone.warning,
+                                        ),
+                                    ],
                                   ),
-                                ),
-                                Text(
-                                  groupTarget != null
-                                      ? '${formatProjectNumber(groupTotal)} / ${formatProjectNumber(groupTarget)}$unit'
-                                      : '${formatProjectNumber(groupTotal)}$unit logged',
-                                  style: DaywellTypography.numericBody(
-                                    color: semantic.textSecondary,
-                                  ).copyWith(
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                ),
-                              ],
+                                  if (cfg.showGroupTotals)
+                                    Text(
+                                      groupTarget != null
+                                          ? '${formatProjectNumber(groupCompleted)} / ${formatProjectNumber(groupTarget)}$unit · ${groupMetric?.completedItemCount ?? 0}/${groupMetric?.itemCount ?? rawChildren.length} ${itemNoun.toLowerCase()}s'
+                                          : '${formatProjectNumber(groupMetric?.loggedTotal ?? 0)}$unit logged',
+                                      style: DaywellTypography.numericBody(
+                                        color: semantic.textSecondary,
+                                      ).copyWith(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
                           DaywellButton(
-                            label: '+ Item',
+                            label: '+ $itemNoun',
                             variant: DaywellButtonVariant.text,
                             size: DaywellButtonSize.compact,
                             onPressed: () => _openAddGroupOrItemDialog(
@@ -822,9 +1028,9 @@ class _ProjectTrackingBlocksWidgetState
                               final confirmed =
                                   await DaywellConfirmationDialog.show(
                                 context,
-                                title: 'Delete Group?',
+                                title: 'Delete $groupNoun?',
                                 message:
-                                    'Delete "${group.title ?? "Group"}" and its items?',
+                                    'Delete "${group.title ?? groupNoun}" and its items?',
                                 confirmLabel: 'Delete',
                                 isDestructive: true,
                               );
@@ -837,81 +1043,113 @@ class _ProjectTrackingBlocksWidgetState
                           ),
                         ],
                       ),
-                      if (groupMetric?.progressPercent != null) ...[
+                      if (cfg.showGroupTotals &&
+                          groupMetric?.progressPercent != null) ...[
                         const SizedBox(height: SharedDesignTokens.spacingXs),
                         DaywellProgressBar(
                           value: groupMetric!.progressPercent! / 100.0,
                           minHeight: 6,
                         ),
                       ],
-                      if (childItems.isNotEmpty) ...[
+                      if (!isCollapsed && childItems.isNotEmpty) ...[
                         const SizedBox(height: SharedDesignTokens.spacingSm),
                         for (final item in childItems)
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              top: SharedDesignTokens.spacingXs,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        item.title ?? 'Item',
-                                        style: textTheme.bodyMedium,
+                          Builder(
+                            builder: (context) {
+                              final itemLogged =
+                                  metric?.itemTotals[item.id] ?? 0.0;
+                              final itemTarget = item.targetValue;
+                              final itemOver = (itemTarget != null &&
+                                      itemTarget > 0 &&
+                                      itemLogged > itemTarget)
+                                  ? itemLogged - itemTarget
+                                  : 0.0;
+                              return Padding(
+                                padding: const EdgeInsets.only(
+                                  top: SharedDesignTokens.spacingXs,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Wrap(
+                                            spacing:
+                                                SharedDesignTokens.spacingXs,
+                                            runSpacing:
+                                                SharedDesignTokens.spacingXs,
+                                            crossAxisAlignment:
+                                                WrapCrossAlignment.center,
+                                            children: [
+                                              Text(
+                                                item.title ?? itemNoun,
+                                                style: textTheme.bodyMedium,
+                                              ),
+                                              if (itemOver > 0)
+                                                DaywellStatusBadge(
+                                                  label:
+                                                      'Over +${formatProjectNumber(itemOver)}',
+                                                  tone:
+                                                      DaywellStatusTone.warning,
+                                                ),
+                                            ],
+                                          ),
+                                          Text(
+                                            itemTarget != null
+                                                ? '${formatProjectNumber(itemLogged)} / ${formatProjectNumber(itemTarget)}$unit'
+                                                : '${formatProjectNumber(itemLogged)}$unit',
+                                            style:
+                                                DaywellTypography.numericBody(
+                                              color: semantic.textMuted,
+                                            ).copyWith(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                      Text(
-                                        item.targetValue != null
-                                            ? '${formatProjectNumber(metric?.itemTotals[item.id] ?? 0)} / ${formatProjectNumber(item.targetValue!)}$unit'
-                                            : '${formatProjectNumber(metric?.itemTotals[item.id] ?? 0)}$unit',
-                                        style: DaywellTypography.numericBody(
-                                          color: semantic.textMuted,
-                                        ).copyWith(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w500,
-                                        ),
+                                    ),
+                                    DaywellButton(
+                                      label: '+1',
+                                      variant: DaywellButtonVariant.secondary,
+                                      size: DaywellButtonSize.compact,
+                                      onPressed: () => widget.projectsController
+                                          .appendProgressLog(
+                                        projectId: widget.project.id,
+                                        blockId: block.id,
+                                        parentRecordId: item.id,
+                                        deltaValue: 1,
+                                        recordedDate: CalendarDate.today(),
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                    const SizedBox(
+                                      width: SharedDesignTokens.spacingXs,
+                                    ),
+                                    DaywellIconButton(
+                                      icon: Icons.edit_note_outlined,
+                                      tooltip: 'Log amount for item',
+                                      onPressed: () => _openLogAmountDialog(
+                                        block: block,
+                                        targetItem: item,
+                                      ),
+                                    ),
+                                    DaywellIconButton(
+                                      icon: Icons.delete_outline,
+                                      tooltip: 'Delete item',
+                                      isDestructive: true,
+                                      onPressed: () => widget
+                                          .projectsController
+                                          .deleteRecord(
+                                        widget.project.id,
+                                        item.id,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                                DaywellButton(
-                                  label: '+1',
-                                  variant: DaywellButtonVariant.secondary,
-                                  size: DaywellButtonSize.compact,
-                                  onPressed: () => widget.projectsController
-                                      .appendProgressLog(
-                                    projectId: widget.project.id,
-                                    blockId: block.id,
-                                    parentRecordId: item.id,
-                                    deltaValue: 1,
-                                    recordedDate: CalendarDate.today(),
-                                  ),
-                                ),
-                                const SizedBox(
-                                  width: SharedDesignTokens.spacingXs,
-                                ),
-                                DaywellIconButton(
-                                  icon: Icons.edit_note_outlined,
-                                  tooltip: 'Log amount for item',
-                                  onPressed: () => _openLogAmountDialog(
-                                    block: block,
-                                    targetItem: item,
-                                  ),
-                                ),
-                                DaywellIconButton(
-                                  icon: Icons.delete_outline,
-                                  tooltip: 'Delete item',
-                                  isDestructive: true,
-                                  onPressed: () =>
-                                      widget.projectsController.deleteRecord(
-                                    widget.project.id,
-                                    item.id,
-                                  ),
-                                ),
-                              ],
-                            ),
+                              );
+                            },
                           ),
                       ],
                     ],
@@ -1305,6 +1543,30 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
             ? widget.block.unitLabel!.trim()
             : 'units');
 
+    final alreadyLogged = widget.targetItem != null
+        ? widget.allBlockRecords
+            .where(
+              (r) =>
+                  r.recordType == ProjectRecordType.progressLog &&
+                  r.parentRecordId == widget.targetItem!.id,
+            )
+            .fold<double>(0.0, (sum, r) => sum + (r.deltaValue ?? 0.0))
+        : null;
+    final itemTarget = widget.targetItem?.targetValue;
+    final remaining = (alreadyLogged != null &&
+            itemTarget != null &&
+            itemTarget > 0)
+        ? (itemTarget - alreadyLogged).clamp(0.0, double.infinity)
+        : null;
+    final enteredAmount = double.tryParse(_amountCtrl.text.trim());
+    final willExceedTarget = !widget.isScheduleDuration &&
+        alreadyLogged != null &&
+        itemTarget != null &&
+        itemTarget > 0 &&
+        enteredAmount != null &&
+        enteredAmount > 0 &&
+        alreadyLogged + enteredAmount > itemTarget;
+
     return AlertDialog(
       scrollable: true,
       title: Text(
@@ -1323,6 +1585,18 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
             ),
             const SizedBox(height: SharedDesignTokens.spacingSm),
           ],
+          if (!widget.isScheduleDuration &&
+              alreadyLogged != null &&
+              itemTarget != null &&
+              itemTarget > 0) ...[
+            Text(
+              'Logged: ${formatProjectNumber(alreadyLogged)} / ${formatProjectNumber(itemTarget)} $unitSuffix · Remaining: ${formatProjectNumber(remaining ?? 0)}',
+              style: DaywellTypography.numericBody(
+                color: semantic.textSecondary,
+              ),
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+          ],
           DaywellTextField(
             controller: _amountCtrl,
             label: widget.isScheduleDuration
@@ -1331,13 +1605,54 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
             isRequired: true,
             autofocus: true,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: SharedDesignTokens.spacingCompact),
-          DaywellTextField(
-            controller: _noteCtrl,
-            label: 'Note (Optional)',
-            hintText: 'What did you finish?',
-          ),
+          if (!widget.isScheduleDuration) ...[
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            Wrap(
+              spacing: SharedDesignTokens.spacingXs,
+              runSpacing: SharedDesignTokens.spacingXs,
+              children: [
+                DaywellButton(
+                  label: '+5',
+                  variant: DaywellButtonVariant.outlined,
+                  size: DaywellButtonSize.compact,
+                  onPressed: () => setState(() => _amountCtrl.text = '5'),
+                ),
+                DaywellButton(
+                  label: '+10',
+                  variant: DaywellButtonVariant.outlined,
+                  size: DaywellButtonSize.compact,
+                  onPressed: () => setState(() => _amountCtrl.text = '10'),
+                ),
+                if (remaining != null && remaining > 0)
+                  DaywellButton(
+                    label: 'Left (${formatProjectNumber(remaining)})',
+                    variant: DaywellButtonVariant.secondary,
+                    size: DaywellButtonSize.compact,
+                    onPressed: () => setState(
+                      () => _amountCtrl.text = formatProjectNumber(remaining),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          if (willExceedTarget) ...[
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            DaywellStatusBanner(
+              tone: DaywellStatusTone.warning,
+              message:
+                  'Exceeds target by +${formatProjectNumber(alreadyLogged + enteredAmount - itemTarget)}: actual sent count is saved, while excess does not inflate campaign completion.',
+            ),
+          ],
+          if (widget.block.blockType != ProjectBlockType.groupedList) ...[
+            const SizedBox(height: SharedDesignTokens.spacingCompact),
+            DaywellTextField(
+              controller: _noteCtrl,
+              label: 'Note (Optional)',
+              hintText: 'What did you finish?',
+            ),
+          ],
           const SizedBox(height: SharedDesignTokens.spacingCompact),
           DaywellCard(
             onTap: () async {

@@ -16,6 +16,12 @@ import {
   validateProject,
   validateRecord,
 } from '../domain/projectsEngine';
+import {
+  PreparedProjectPackageImport,
+  prepareProjectPackageForImport,
+  ProjectPackageError,
+  serializeProjectPackage,
+} from '../domain/projectPackage';
 
 export interface IWebProjectsRepository {
   getProjects(options?: {
@@ -59,6 +65,13 @@ export interface IWebProjectsRepository {
     projectId: string,
     options?: { asOfDate?: CalendarDate }
   ): ProjectProgressSummary;
+
+  exportProjectPackage(
+    projectId: string,
+    options?: { exportedAt?: string; sourcePlatform?: 'web' | 'android' }
+  ): string;
+
+  importProjectPackage(rawJson: string): PreparedProjectPackageImport;
 }
 
 /**
@@ -609,5 +622,88 @@ export class WebProjectsRepository implements IWebProjectsRepository {
       milestones,
       asOfDate: options.asOfDate,
     });
+  }
+
+  public exportProjectPackage(
+    projectId: string,
+    options: { exportedAt?: string; sourcePlatform?: 'web' | 'android' } = {}
+  ): string {
+    const project = this.getProjectById(projectId);
+    if (!project) {
+      throw new ProjectPackageError(
+        'validation_failed',
+        `Cannot export missing project "${projectId}".`
+      );
+    }
+    const blocks = this.getBlocksForProject(projectId, { includeArchived: true });
+    const records = this.getRecordsForProject(projectId);
+    return serializeProjectPackage({
+      project,
+      blocks,
+      records,
+      exportedAt: options.exportedAt,
+      sourcePlatform: options.sourcePlatform ?? 'web',
+    });
+  }
+
+  public importProjectPackage(rawJson: string): PreparedProjectPackageImport {
+    const existingProjects = this.readArray<SharedProject>(
+      WebProjectsRepository.PROJECTS_KEY
+    );
+    const existingBlocks = this.readArray<SharedProjectTrackingBlock>(
+      WebProjectsRepository.BLOCKS_KEY
+    );
+    const existingRecords = this.readArray<SharedProjectTrackingRecord>(
+      WebProjectsRepository.RECORDS_KEY
+    );
+
+    // Validates fail-closed before mutating any persisted data.
+    const prepared = prepareProjectPackageForImport(rawJson, {
+      existingProjectIds: existingProjects.map((p) => p.id),
+      existingBlockIds: existingBlocks.map((b) => b.id),
+      existingRecordIds: existingRecords.map((r) => r.id),
+    });
+
+    const hasStorage = typeof localStorage !== 'undefined';
+    const prevProjectsRaw = hasStorage
+      ? localStorage.getItem(WebProjectsRepository.PROJECTS_KEY)
+      : null;
+    const prevBlocksRaw = hasStorage
+      ? localStorage.getItem(WebProjectsRepository.BLOCKS_KEY)
+      : null;
+    const prevRecordsRaw = hasStorage
+      ? localStorage.getItem(WebProjectsRepository.RECORDS_KEY)
+      : null;
+
+    try {
+      this.writeArray(WebProjectsRepository.PROJECTS_KEY, [
+        prepared.project,
+        ...existingProjects,
+      ]);
+      this.writeArray(WebProjectsRepository.BLOCKS_KEY, [
+        ...existingBlocks,
+        ...prepared.trackingBlocks,
+      ]);
+      this.writeArray(WebProjectsRepository.RECORDS_KEY, [
+        ...existingRecords,
+        ...prepared.trackingRecords,
+      ]);
+    } catch (err) {
+      if (hasStorage) {
+        const restoreKey = (key: string, prev: string | null) => {
+          if (prev === null) {
+            localStorage.removeItem(key);
+          } else {
+            localStorage.setItem(key, prev);
+          }
+        };
+        restoreKey(WebProjectsRepository.PROJECTS_KEY, prevProjectsRaw);
+        restoreKey(WebProjectsRepository.BLOCKS_KEY, prevBlocksRaw);
+        restoreKey(WebProjectsRepository.RECORDS_KEY, prevRecordsRaw);
+      }
+      throw err;
+    }
+
+    return prepared;
   }
 }

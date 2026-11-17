@@ -59,6 +59,9 @@ export interface ProjectGroupMetric {
   title: string;
   targetValue?: number;
   loggedTotal: number;
+  targetCompletedTotal: number;
+  overTargetAmount: number;
+  overTargetItemCount: number;
   itemCount: number;
   completedItemCount: number;
   progressPercent?: number;
@@ -71,6 +74,9 @@ export interface ProjectBlockProgressMetric {
   unitLabel?: string;
   isArchived: boolean;
   loggedTotal: number;
+  targetCompletedTotal?: number;
+  overTargetAmount?: number;
+  overTargetItemCount?: number;
   targetValue?: number;
   progressPercent?: number;
   dailyTargetValue?: number;
@@ -85,6 +91,12 @@ export interface ProjectBlockProgressMetric {
   rollupSourceBlockId?: string;
   paceNeededPerDay?: number;
   daysRemaining?: number;
+}
+
+export interface ProjectScheduleSpan {
+  totalDays?: number;
+  remainingDays?: number;
+  elapsedDays?: number;
 }
 
 export interface ProjectProgressSummary {
@@ -1033,8 +1045,13 @@ function computeSingleBlockMetric(params: {
       let summedItemTargets = 0;
       let hasAnyItemTarget = false;
       let completedItems = 0;
+      let blockTargetCompletedTotal = 0;
+      let blockOverTargetAmount = 0;
+      let blockOverTargetItemCount = 0;
+      const itemIds = new Set<string>();
 
       for (const item of items) {
+        itemIds.add(item.id);
         if (item.parentRecordId) {
           const arr = itemsByGroup.get(item.parentRecordId) ?? [];
           arr.push(item);
@@ -1045,6 +1062,15 @@ function computeSingleBlockMetric(params: {
         if (itemTarget !== undefined && itemTarget > 0) {
           hasAnyItemTarget = true;
           summedItemTargets += itemTarget;
+          const capped = Math.min(itemTotal, itemTarget);
+          const over = Math.max(0, itemTotal - itemTarget);
+          blockTargetCompletedTotal += capped;
+          blockOverTargetAmount += over;
+          if (over > 0) {
+            blockOverTargetItemCount += 1;
+          }
+        } else {
+          blockTargetCompletedTotal += itemTotal;
         }
         if (
           item.isCompleted ||
@@ -1054,9 +1080,19 @@ function computeSingleBlockMetric(params: {
         }
       }
 
+      // Preserve any direct logs without a valid grouped_item parent if present
+      for (const [parentId, val] of Object.entries(itemTotals)) {
+        if (!itemIds.has(parentId)) {
+          blockTargetCompletedTotal += val;
+        }
+      }
+
       const groupMetrics: ProjectGroupMetric[] = groups.map((group) => {
         const children = itemsByGroup.get(group.id) ?? [];
         let groupTotal = 0;
+        let groupCappedTotal = 0;
+        let groupOverTargetAmount = 0;
+        let groupOverTargetItemCount = 0;
         let childTargetsSum = 0;
         let childCompleted = 0;
         for (const child of children) {
@@ -1064,6 +1100,15 @@ function computeSingleBlockMetric(params: {
           groupTotal += childTotal;
           if (child.targetValue !== undefined && child.targetValue > 0) {
             childTargetsSum += child.targetValue;
+            const capped = Math.min(childTotal, child.targetValue);
+            const over = Math.max(0, childTotal - child.targetValue);
+            groupCappedTotal += capped;
+            groupOverTargetAmount += over;
+            if (over > 0) {
+              groupOverTargetItemCount += 1;
+            }
+          } else {
+            groupCappedTotal += childTotal;
           }
           if (
             child.isCompleted ||
@@ -1078,13 +1123,16 @@ function computeSingleBlockMetric(params: {
           group.targetValue ?? (childTargetsSum > 0 ? childTargetsSum : undefined);
         const groupPercent =
           groupTarget !== undefined && groupTarget > 0
-            ? clampPercent((groupTotal / groupTarget) * 100)
+            ? clampPercent((groupCappedTotal / groupTarget) * 100)
             : undefined;
         return {
           groupId: group.id,
           title: group.title ?? '',
           targetValue: groupTarget,
           loggedTotal: groupTotal,
+          targetCompletedTotal: groupCappedTotal,
+          overTargetAmount: groupOverTargetAmount,
+          overTargetItemCount: groupOverTargetItemCount,
           itemCount: children.length,
           completedItemCount: childCompleted,
           progressPercent: groupPercent,
@@ -1093,15 +1141,23 @@ function computeSingleBlockMetric(params: {
 
       const effectiveTarget =
         block.targetValue ?? (hasAnyItemTarget ? summedItemTargets : undefined);
+      const effectiveCompleted = hasAnyItemTarget
+        ? blockTargetCompletedTotal
+        : loggedTotal;
+      const effectiveOverTarget = hasAnyItemTarget
+        ? blockOverTargetAmount
+        : effectiveTarget !== undefined && effectiveTarget > 0
+        ? Math.max(0, loggedTotal - effectiveTarget)
+        : 0;
       const progressPercent =
         effectiveTarget !== undefined && effectiveTarget > 0
-          ? clampPercent((loggedTotal / effectiveTarget) * 100)
+          ? clampPercent((effectiveCompleted / effectiveTarget) * 100)
           : undefined;
       const paceNeededPerDay =
         effectiveTarget !== undefined &&
         effectiveTarget > 0 &&
         daysRemaining !== undefined
-          ? Math.max(0, effectiveTarget - loggedTotal) /
+          ? Math.max(0, effectiveTarget - effectiveCompleted) /
             (daysRemaining > 0 ? daysRemaining : 1)
           : undefined;
 
@@ -1112,6 +1168,9 @@ function computeSingleBlockMetric(params: {
         unitLabel: block.unitLabel,
         isArchived: block.isArchived,
         loggedTotal,
+        targetCompletedTotal: effectiveCompleted,
+        overTargetAmount: effectiveOverTarget,
+        overTargetItemCount: blockOverTargetItemCount,
         targetValue: effectiveTarget,
         progressPercent,
         dailyTargetValue: block.dailyTargetValue,
@@ -1291,16 +1350,17 @@ export function calculateProjectProgressSummary(params: {
       ? rawMetricsById.get(cfg.rollupSourceBlockId)
       : undefined;
     const logged = sourceMetric?.loggedTotal ?? 0;
+    const effectiveCompleted = sourceMetric?.targetCompletedTotal ?? logged;
     const effectiveTarget = block.targetValue ?? sourceMetric?.targetValue;
     const progressPercent =
       effectiveTarget !== undefined && effectiveTarget > 0
-        ? clampPercent((logged / effectiveTarget) * 100)
+        ? clampPercent((effectiveCompleted / effectiveTarget) * 100)
         : undefined;
     const paceNeededPerDay =
       effectiveTarget !== undefined &&
       effectiveTarget > 0 &&
       daysRemaining !== undefined
-        ? Math.max(0, effectiveTarget - logged) /
+        ? Math.max(0, effectiveTarget - effectiveCompleted) /
           (daysRemaining > 0 ? daysRemaining : 1)
         : undefined;
 
@@ -1311,6 +1371,9 @@ export function calculateProjectProgressSummary(params: {
       unitLabel: block.unitLabel ?? sourceMetric?.unitLabel,
       isArchived: block.isArchived,
       loggedTotal: logged,
+      targetCompletedTotal: sourceMetric?.targetCompletedTotal,
+      overTargetAmount: sourceMetric?.overTargetAmount,
+      overTargetItemCount: sourceMetric?.overTargetItemCount,
       targetValue: effectiveTarget,
       progressPercent,
       dailyTargetValue: block.dailyTargetValue ?? sourceMetric?.dailyTargetValue,
@@ -1363,5 +1426,37 @@ export function calculateProjectProgressSummary(params: {
     linkedTasksTotal,
     milestonesCompleted,
     milestonesTotal,
+  };
+}
+
+export function getProjectScheduleSpan(
+  project: Pick<SharedProject, 'startDate' | 'targetDate'>,
+  asOfDate?: CalendarDate
+): ProjectScheduleSpan {
+  const reference = asOfDate ?? CalendarDate.today();
+  const start = project.startDate ? CalendarDate.tryParse(project.startDate) : undefined;
+  const target = project.targetDate ? CalendarDate.tryParse(project.targetDate) : undefined;
+
+  let totalDays: number | undefined;
+  if (start && target && !target.isBefore(start)) {
+    totalDays = target.differenceInDays(start) + 1;
+  }
+
+  let remainingDays: number | undefined;
+  if (target) {
+    const diff = target.differenceInDays(reference);
+    remainingDays = diff >= 0 ? diff + 1 : 0;
+  }
+
+  let elapsedDays: number | undefined;
+  if (start) {
+    const diff = reference.differenceInDays(start);
+    elapsedDays = diff >= 0 ? diff + 1 : 0;
+  }
+
+  return {
+    totalDays,
+    remainingDays,
+    elapsedDays,
   };
 }

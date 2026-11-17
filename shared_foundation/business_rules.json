@@ -61,5 +61,11 @@
       "preventDuplicateRollupLogging": true,
       "enforceParentChildOwnership": true
     }
+  },
+  "projectPackage": {
+    "formatId": "daywell_project_package",
+    "currentFormatVersion": 1,
+    "minSupportedFormatVersion": 1,
+    "fileExtension": ".daywellproject"
   }
 }

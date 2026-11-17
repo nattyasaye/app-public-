@@ -296,8 +296,16 @@ export const SHARED_BUSINESS_RULES = {
       "preventDuplicateRollupLogging": true,
       "enforceParentChildOwnership": true
     }
+  },
+  "projectPackage": {
+    "formatId": "daywell_project_package",
+    "currentFormatVersion": 1,
+    "minSupportedFormatVersion": 1,
+    "fileExtension": ".daywellproject"
   }
 } as const;
+
+export const SHARED_PROJECT_PACKAGE_SPEC = SHARED_BUSINESS_RULES.projectPackage;
 
 export const CANONICAL_SEED_DATABASE = {
   "schemaVersion": 5,

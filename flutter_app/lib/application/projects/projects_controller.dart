@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/date/shared_date.dart';
 import '../../domain/projects/project_contracts.dart';
 import '../../domain/projects/project_models.dart';
+import '../../domain/projects/project_package_codec.dart';
 import '../../domain/tasks/task_models.dart';
 import 'projects_state.dart';
 
@@ -490,6 +491,44 @@ class ProjectsController extends ChangeNotifier {
       _state = _state.copyWith(errorMessage: e.toString());
       notifyListeners();
       return null;
+    }
+  }
+
+  // --- Portable .daywellproject Package Export & Import ---
+
+  Future<String?> exportProjectPackageJson(String projectId) async {
+    try {
+      final json = await _repository.exportProjectPackageJson(projectId);
+      if (_state.errorMessage != null) {
+        _state = _state.copyWith(clearError: true);
+        notifyListeners();
+      }
+      return json;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<PreparedProjectPackageImport?> importProjectPackageJson(
+    String rawJson,
+  ) async {
+    try {
+      final imported = await _repository.importProjectPackageJson(rawJson);
+      await refreshProject(imported.project.id);
+      return imported;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  void clearError() {
+    if (_state.errorMessage != null) {
+      _state = _state.copyWith(clearError: true);
+      notifyListeners();
     }
   }
 

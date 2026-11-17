@@ -8,10 +8,13 @@ import '../../../core/date/shared_date.dart';
 import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
 import '../../../domain/projects/project_models.dart';
+import '../../../domain/projects/project_package_codec.dart';
 import '../../../domain/tasks/task_models.dart';
+import '../../../services/export/project_package_io_service.dart';
 import '../../widgets/shared_ui_widgets.dart';
 import 'project_detail_screen.dart';
 import 'project_form_sheet.dart';
+import 'project_import_dialog.dart';
 import 'project_ui_helpers.dart';
 
 class ProjectsWorkspaceTab extends StatefulWidget {
@@ -130,6 +133,64 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
     );
   }
 
+  Future<void> _exportProject(
+    ProjectsController ctrl,
+    ProjectEntity project,
+  ) async {
+    final json = await ctrl.exportProjectPackageJson(project.id);
+    if (!mounted) return;
+    if (json == null) {
+      final err = ctrl.state.errorMessage ?? 'Unable to export project.';
+      ctrl.clearError();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Export failed: $err')),
+      );
+      return;
+    }
+    final filename = ProjectPackageCodec.buildFilename(project.title);
+    try {
+      await ProjectPackageIoService.exportPackageFile(
+        filename: filename,
+        jsonContent: json,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Prepared "$filename" for export.')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Unable to share "$filename": $e')),
+      );
+    }
+  }
+
+  Future<void> _importProject(ProjectsController ctrl) async {
+    final imported = await ProjectImportDialog.show(
+      context,
+      projectsController: ctrl,
+    );
+    if (imported == null || !mounted) return;
+    setState(() {
+      if (imported.project.isArchived) {
+        _filter = 'archived';
+      } else if (_filter != 'all' && _filter != imported.project.status) {
+        _filter = imported.project.status;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Imported "${imported.project.title}" (${imported.trackingBlocks.length} blocks, ${imported.trackingRecords.length} records).',
+        ),
+        action: SnackBarAction(
+          label: 'Open',
+          onPressed: () => _openDetail(ctrl, imported.project),
+        ),
+      ),
+    );
+  }
+
   String _compactMetricSummary(ProjectProgressSummary? summary) {
     if (summary == null || summary.blockMetrics.isEmpty) {
       return 'No tracking blocks configured';
@@ -143,14 +204,19 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
     final unit = first.unitLabel?.trim().isNotEmpty == true
         ? ' ${first.unitLabel!.trim()}'
         : '';
+    final capped = first.targetCompletedTotal ?? first.loggedTotal;
+    final over = first.overTargetAmount ?? 0.0;
     final String firstPart;
     if (first.blockType == ProjectBlockType.checklist ||
         first.blockType == ProjectBlockType.schedule) {
       firstPart =
           '${first.title}: ${first.completedCount}/${first.totalCount}';
     } else if (first.targetValue != null) {
+      final overNote = over > 0
+          ? ' (${formatProjectNumber(first.loggedTotal)} sent, +${formatProjectNumber(over)} over)'
+          : '';
       firstPart =
-          '${first.title}: ${formatProjectNumber(first.loggedTotal)}/${formatProjectNumber(first.targetValue!)}$unit';
+          '${first.title}: ${formatProjectNumber(capped)}/${formatProjectNumber(first.targetValue!)}$unit$overNote';
     } else {
       firstPart =
           '${first.title}: ${formatProjectNumber(first.loggedTotal)}$unit';
@@ -202,10 +268,25 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                 SharedDesignTokens.spacingMd,
                 SharedDesignTokens.spacingSm,
               ),
-              child: DaywellSearchField(
-                controller: _searchCtrl,
-                hintText: 'Search projects...',
-                onChanged: (v) => setState(() => _query = v),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: DaywellSearchField(
+                      controller: _searchCtrl,
+                      hintText: 'Search projects...',
+                      onChanged: (v) => setState(() => _query = v),
+                    ),
+                  ),
+                  const SizedBox(width: SharedDesignTokens.spacingSm),
+                  DaywellButton(
+                    label: 'Import',
+                    variant: DaywellButtonVariant.outlined,
+                    size: DaywellButtonSize.compact,
+                    leadingIcon: Icons.file_upload_outlined,
+                    tooltip: 'Import .daywellproject file',
+                    onPressed: () => _importProject(ctrl),
+                  ),
+                ],
               ),
             ),
             SizedBox(
@@ -369,6 +450,11 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                                     color: semantic.textMuted,
                                   ),
                                 ),
+                              ),
+                              DaywellIconButton(
+                                icon: Icons.file_download_outlined,
+                                tooltip: 'Export .daywellproject',
+                                onPressed: () => _exportProject(ctrl, project),
                               ),
                               DaywellButton(
                                 label:
