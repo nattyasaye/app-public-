@@ -415,7 +415,7 @@ void main() {
     test(
       '2. Stage 2.2 strict ETB-only controller guards block non-ETB account creation and addDoubleEntryDirectExpense',
       () async {
-        await controller.completeOnboarding([
+        await controller.completeSetup([
           AccountModel(
             id: 'acc-etb',
             name: 'ETB Bank',

@@ -4,7 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
-import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
 
 import 'support/sqlite_test_helper.dart';
 
