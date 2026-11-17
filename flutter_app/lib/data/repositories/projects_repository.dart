@@ -92,6 +92,64 @@ class DriftProjectsRepository implements IProjectsRepository {
     }
   }
 
+  Future<void> _ensureGoalExists(String? goalId) async {
+    final trimmed = goalId?.trim();
+    if (trimmed == null || trimmed.isEmpty) return;
+    final goalRow = await (_db.select(_db.goals)
+          ..where((tbl) => tbl.id.equals(trimmed)))
+        .getSingleOrNull();
+    if (goalRow == null) {
+      throw ProjectValidationException(
+        'Cannot link project to missing goal "$trimmed".',
+      );
+    }
+  }
+
+  Future<void> _ensureTaskExists(String? linkedTaskId) async {
+    final trimmed = linkedTaskId?.trim();
+    if (trimmed == null || trimmed.isEmpty) return;
+    final taskRow = await (_db.select(_db.tasks)
+          ..where((tbl) => tbl.id.equals(trimmed)))
+        .getSingleOrNull();
+    if (taskRow == null) {
+      throw ProjectValidationException(
+        'Cannot link tracking record to missing task "$trimmed".',
+      );
+    }
+  }
+
+  TaskEntity _mapTask(Task r) {
+    return TaskEntity(
+      id: r.id,
+      title: r.title,
+      description: r.description,
+      status: r.status,
+      priority: r.priority,
+      dueDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.dueDate),
+      scheduledDate:
+          SharedDateFormatter.tryParseFlexibleToCalendarDate(r.scheduledDate),
+      estimatedDurationMinutes: r.estimatedDurationMinutes,
+      projectId: r.projectId,
+      milestoneId: r.milestoneId,
+      isPinned: r.isPinned,
+      isMyDay: r.isMyDay,
+      recurrenceRule: r.recurrenceRule,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    );
+  }
+
+  MilestoneEntity _mapMilestone(Milestone r) {
+    return MilestoneEntity(
+      id: r.id,
+      projectId: r.projectId,
+      title: r.title,
+      dueDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.dueDate),
+      isCompleted: r.isCompleted,
+      createdAt: r.createdAt,
+    );
+  }
+
   @override
   Future<List<ProjectEntity>> getProjects({
     String? status,
@@ -120,7 +178,13 @@ class DriftProjectsRepository implements IProjectsRepository {
   @override
   Future<ProjectEntity> createProject(ProjectEntity project) async {
     ProjectValidationService.validateProject(project);
-    final normalized = project.copyWith(title: project.title.trim());
+    final normalized = project.copyWith(
+      title: project.title.trim(),
+      goalId: (project.goalId?.trim().isEmpty ?? true)
+          ? null
+          : project.goalId!.trim(),
+      clearGoalId: project.goalId?.trim().isEmpty ?? false,
+    );
 
     await _db.transaction(() async {
       final existing = await getProjectById(normalized.id);
@@ -129,6 +193,7 @@ class DriftProjectsRepository implements IProjectsRepository {
           'Duplicate project id "${normalized.id}".',
         );
       }
+      await _ensureGoalExists(normalized.goalId);
       await _db.into(_db.projects).insert(
             ProjectsCompanion.insert(
               id: normalized.id,
@@ -154,6 +219,10 @@ class DriftProjectsRepository implements IProjectsRepository {
     final now = EthiopiaClock.nowUtc();
     final updated = project.copyWith(
       title: project.title.trim(),
+      goalId: (project.goalId?.trim().isEmpty ?? true)
+          ? null
+          : project.goalId!.trim(),
+      clearGoalId: project.goalId?.trim().isEmpty ?? false,
       updatedAt: now,
     );
 
@@ -164,6 +233,7 @@ class DriftProjectsRepository implements IProjectsRepository {
           'Cannot update missing project "${updated.id}".',
         );
       }
+      await _ensureGoalExists(updated.goalId);
       await (_db.update(_db.projects)
             ..where((tbl) => tbl.id.equals(updated.id)))
           .write(
@@ -435,40 +505,48 @@ class DriftProjectsRepository implements IProjectsRepository {
         );
       }
       final block = _mapBlock(blockRow);
+      final normalized = record.copyWith(
+        title: record.title?.trim(),
+        linkedTaskId: (record.linkedTaskId?.trim().isEmpty ?? true)
+            ? null
+            : record.linkedTaskId!.trim(),
+        clearLinkedTaskId: record.linkedTaskId?.trim().isEmpty ?? false,
+      );
       final existingRecords = await getRecordsForProject(
         block.projectId,
         blockId: block.id,
       );
       ProjectValidationService.validateRecord(
-        record,
+        normalized,
         block: block,
         existingBlockRecords: existingRecords,
         isNew: true,
       );
+      await _ensureTaskExists(normalized.linkedTaskId);
 
       await _db.into(_db.projectTrackingRecords).insert(
             ProjectTrackingRecordsCompanion.insert(
-              id: record.id,
-              projectId: record.projectId,
-              blockId: record.blockId,
-              parentRecordId: Value(record.parentRecordId),
-              recordType: record.recordType.wireValue,
-              title: Value(record.title?.trim()),
-              sortOrder: Value(record.sortOrder),
-              targetValue: Value(record.targetValue),
-              deltaValue: Value(record.deltaValue),
-              durationMinutes: Value(record.durationMinutes),
-              isCompleted: Value(record.isCompleted),
-              completedAt: Value(record.completedAt),
-              recordedDate: Value(record.recordedDate?.toIsoString()),
-              scheduledDate: Value(record.scheduledDate?.toIsoString()),
-              linkedTaskId: Value(record.linkedTaskId),
-              metadataJson: Value(jsonEncode(record.metadata)),
-              createdAt: record.createdAt,
-              updatedAt: record.updatedAt,
+              id: normalized.id,
+              projectId: normalized.projectId,
+              blockId: normalized.blockId,
+              parentRecordId: Value(normalized.parentRecordId),
+              recordType: normalized.recordType.wireValue,
+              title: Value(normalized.title),
+              sortOrder: Value(normalized.sortOrder),
+              targetValue: Value(normalized.targetValue),
+              deltaValue: Value(normalized.deltaValue),
+              durationMinutes: Value(normalized.durationMinutes),
+              isCompleted: Value(normalized.isCompleted),
+              completedAt: Value(normalized.completedAt),
+              recordedDate: Value(normalized.recordedDate?.toIsoString()),
+              scheduledDate: Value(normalized.scheduledDate?.toIsoString()),
+              linkedTaskId: Value(normalized.linkedTaskId),
+              metadataJson: Value(jsonEncode(normalized.metadata)),
+              createdAt: normalized.createdAt,
+              updatedAt: normalized.updatedAt,
             ),
           );
-      return record;
+      return normalized;
     });
   }
 
@@ -513,6 +591,10 @@ class DriftProjectsRepository implements IProjectsRepository {
       );
       final updated = record.copyWith(
         title: record.title?.trim(),
+        linkedTaskId: (record.linkedTaskId?.trim().isEmpty ?? true)
+            ? null
+            : record.linkedTaskId!.trim(),
+        clearLinkedTaskId: record.linkedTaskId?.trim().isEmpty ?? false,
         updatedAt: EthiopiaClock.nowUtc(),
       );
       ProjectValidationService.validateRecord(
@@ -521,6 +603,7 @@ class DriftProjectsRepository implements IProjectsRepository {
         existingBlockRecords: existingRecords,
         isNew: false,
       );
+      await _ensureTaskExists(updated.linkedTaskId);
 
       await (_db.update(_db.projectTrackingRecords)
             ..where((tbl) => tbl.id.equals(updated.id)))
@@ -649,10 +732,19 @@ class DriftProjectsRepository implements IProjectsRepository {
     }
     final blocks = await getBlocksForProject(projectId);
     final records = await getRecordsForProject(projectId);
+    final taskRows = await (_db.select(_db.tasks)
+          ..where((tbl) => tbl.projectId.equals(projectId)))
+        .get();
+    final milestoneRows = await (_db.select(_db.milestones)
+          ..where((tbl) => tbl.projectId.equals(projectId)))
+        .get();
+
     return ProgressEngine.calculateProjectProgressSummary(
       project: project,
       blocks: blocks,
       records: records,
+      linkedTasks: taskRows.map(_mapTask).toList(),
+      milestones: milestoneRows.map(_mapMilestone).toList(),
       asOfDate: asOfDate,
     );
   }

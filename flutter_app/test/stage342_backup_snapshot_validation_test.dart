@@ -733,6 +733,12 @@ void main() {
           innerPayload: _minimalValidSnapshot(schemaVersion: 8),
           expectedResolved: 8,
         ),
+        (
+          name: '(9, 9)',
+          headerVersion: 9,
+          innerPayload: _minimalValidSnapshot(schemaVersion: 9),
+          expectedResolved: 9,
+        ),
       ];
 
       for (final tc in acceptedCases) {
@@ -795,9 +801,9 @@ void main() {
           kind: BackupFailureKind.invalidSnapshotVersion,
         ),
         (
-          name: '(9, 9)',
-          headerVersion: 9,
-          innerPayload: _minimalValidSnapshot(schemaVersion: 9),
+          name: '(10, 10)',
+          headerVersion: 10,
+          innerPayload: _minimalValidSnapshot(schemaVersion: 10),
           kind: BackupFailureKind.unsupportedFutureSchema,
         ),
         (
@@ -994,19 +1000,25 @@ void main() {
 
       final r2 = await SharedFoundationBridge.importFromCanonicalJsonDetailed(
         manager,
-        jsonEncode(_minimalValidSnapshot(schemaVersion: 9)),
+        jsonEncode(_minimalValidSnapshot(schemaVersion: 10)),
       );
       expect(r2.success, isFalse);
       expect(r2.failureKind, BackupFailureKind.unsupportedFutureSchema);
       expect(manager.liquidCashCents, 330000);
 
-      // 4. SharedFoundationBridge detailed import accepts v8 snapshot
+      // 4. SharedFoundationBridge detailed import accepts v8 & v9 snapshots
       final r3 = await SharedFoundationBridge.importFromCanonicalJsonDetailed(
         manager,
         jsonEncode(_minimalValidSnapshot(schemaVersion: 8)),
       );
       expect(r3.success, isTrue);
       expect(manager.accounts.any((a) => a.id == 'acc-snap-1'), isTrue);
+
+      final r4 = await SharedFoundationBridge.importFromCanonicalJsonDetailed(
+        manager,
+        jsonEncode(_minimalValidSnapshot(schemaVersion: 9)),
+      );
+      expect(r4.success, isTrue);
 
       await manager.disposeAsync();
     });
@@ -1067,7 +1079,7 @@ void main() {
       expect(canonicalInput, findsOneWidget);
       await tester.enterText(
         canonicalInput,
-        jsonEncode(_minimalValidSnapshot(schemaVersion: 9)),
+        jsonEncode(_minimalValidSnapshot(schemaVersion: 10)),
       );
       await tester.tap(find.text('Import Pasted JSON'));
       await tester.pumpAndSettle();

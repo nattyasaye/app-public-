@@ -167,9 +167,9 @@ function makeSampleLocalDbState(version = 3): LocalDatabaseState {
 }
 
 describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Validation', () => {
-  it('1. SharedStateBridge accepts canonical schemaVersion 4..8 (+ financeSchemaVersion 7) and omitted legacy default 5', () => {
+  it('1. SharedStateBridge accepts canonical schemaVersion 4..9 (+ financeSchemaVersion 7) and omitted legacy default 5', () => {
     withMockBrowserStorage(() => {
-      for (const version of [4, 5, 6, 7, 8]) {
+      for (const version of [4, 5, 6, 7, 8, 9]) {
         const res = SharedStateBridge.importFromAndroidJson(
           JSON.stringify({
             schemaVersion: version,
@@ -194,15 +194,15 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
     });
   });
 
-  it('2. SharedStateBridge rejects unsupported future (> 8), legacy v3 (< 4), contradictory, invalid, and malformed payloads before mutating localStorage', () => {
+  it('2. SharedStateBridge rejects unsupported future (> 9), legacy v3 (< 4), contradictory, invalid, and malformed payloads before mutating localStorage', () => {
     const rejectedCases: Array<{
       name: string;
       payload: string;
       expectedKind: string;
     }> = [
       {
-        name: 'future schemaVersion 9',
-        payload: JSON.stringify({ ...CANONICAL_SEED_DATABASE, schemaVersion: 9 }),
+        name: 'future schemaVersion 10',
+        payload: JSON.stringify({ ...CANONICAL_SEED_DATABASE, schemaVersion: 10 }),
         expectedKind: 'unsupported_future_schema',
       },
       {

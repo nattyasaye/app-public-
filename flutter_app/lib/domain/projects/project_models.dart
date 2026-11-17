@@ -643,6 +643,10 @@ class ProjectProgressSummary {
   final ProjectBlockProgressMetric? primaryMetric;
   final double? overallPercentage;
   final bool hasInvalidPrimaryBlockReference;
+  final int linkedTasksCompleted;
+  final int linkedTasksTotal;
+  final int milestonesCompleted;
+  final int milestonesTotal;
 
   ProjectProgressSummary({
     required this.projectId,
@@ -651,6 +655,10 @@ class ProjectProgressSummary {
     this.primaryMetric,
     this.overallPercentage,
     this.hasInvalidPrimaryBlockReference = false,
+    this.linkedTasksCompleted = 0,
+    this.linkedTasksTotal = 0,
+    this.milestonesCompleted = 0,
+    this.milestonesTotal = 0,
   }) : blockMetrics = List<ProjectBlockProgressMetric>.unmodifiable(
           blockMetrics,
         );

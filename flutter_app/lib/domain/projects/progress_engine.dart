@@ -68,17 +68,32 @@ class ProgressEngine {
 
   /// Computes deterministic independent metrics for all tracking blocks of [project].
   ///
-  /// - Never implicitly averages metrics across blocks.
+  /// - Never implicitly averages metrics across blocks, tasks, or milestones.
   /// - Only populates `overallPercentage` when `customFields['primaryBlockId']`
   ///   references an existing, non-archived block belonging to [project].
   static ProjectProgressSummary calculateProjectProgressSummary({
     required ProjectEntity project,
     required List<ProjectTrackingBlockEntity> blocks,
     required List<ProjectTrackingRecordEntity> records,
+    List<TaskEntity> linkedTasks = const [],
+    List<MilestoneEntity> milestones = const [],
     CalendarDate? asOfDate,
   }) {
     final referenceDate = asOfDate ?? CalendarDate.today();
     final todayIso = referenceDate.toIsoString();
+
+    final projectTasks = linkedTasks
+        .where((t) => t.projectId == project.id && t.status != 'cancelled')
+        .toList();
+    final linkedTasksTotal = projectTasks.length;
+    final linkedTasksCompleted =
+        projectTasks.where((t) => t.isCompleted || t.status == 'completed').length;
+
+    final projectMilestones =
+        milestones.where((m) => m.projectId == project.id).toList();
+    final milestonesTotal = projectMilestones.length;
+    final milestonesCompleted =
+        projectMilestones.where((m) => m.isCompleted).length;
 
     final projectBlocks = blocks
         .where((b) => b.projectId == project.id)
@@ -97,7 +112,7 @@ class ProgressEngine {
 
     int? daysRemaining;
     if (project.targetDate != null) {
-      final diff = referenceDate.daysBetween(project.targetDate!);
+      final diff = project.targetDate!.differenceInDays(referenceDate);
       daysRemaining = diff >= 0 ? diff + 1 : 0;
     }
 
@@ -199,6 +214,10 @@ class ProgressEngine {
       primaryMetric: primaryMetric,
       overallPercentage: primaryMetric?.progressPercent,
       hasInvalidPrimaryBlockReference: hasInvalidPrimary,
+      linkedTasksCompleted: linkedTasksCompleted,
+      linkedTasksTotal: linkedTasksTotal,
+      milestonesCompleted: milestonesCompleted,
+      milestonesTotal: milestonesTotal,
     );
   }
 

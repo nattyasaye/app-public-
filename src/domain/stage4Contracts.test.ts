@@ -20,7 +20,7 @@ describe('STAGE 4.1: CANONICAL V6 FINANCE SCHEMA CONTRACTS & CONTROL ACCOUNTS', 
     );
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 
-    assert.strictEqual(schema.schemaVersion, 8);
+    assert.strictEqual(schema.schemaVersion, 9);
     assert.ok(schema.entities.Account.fields.subType);
     assert.ok(schema.entities.Account.fields.isSystem);
     assert.strictEqual(schema.entities.Account.fields.openingBalanceCents.minimum, undefined);
@@ -35,6 +35,11 @@ describe('STAGE 4.1: CANONICAL V6 FINANCE SCHEMA CONTRACTS & CONTROL ACCOUNTS', 
     assert.ok(schema.entities.SavingsGoal.fields.status);
     assert.ok(schema.entities.Budget);
     assert.ok(schema.entities.RecurringRule);
+    assert.ok(schema.entities.Project.fields.isArchived);
+    assert.ok(schema.entities.Project.fields.startDate);
+    assert.ok(schema.entities.Project.fields.customFields);
+    assert.ok(schema.entities.ProjectTrackingBlock);
+    assert.ok(schema.entities.ProjectTrackingRecord);
 
     const subTypeEnum: string[] = schema.entities.Account.fields.subType.enum;
     for (const requiredSubType of [

@@ -7,6 +7,7 @@ import '../application/calendar/calendar_controller.dart';
 import '../application/finance/finance_controller.dart';
 import '../application/inbox/inbox_controller.dart';
 import '../application/notes/notes_controller.dart';
+import '../application/projects/projects_controller.dart';
 import '../application/tasks/tasks_controller.dart';
 import '../core/date/shared_date.dart';
 import '../core/interfaces/platform_service_interfaces.dart';
@@ -17,6 +18,7 @@ import '../data/repositories/calendar_repository.dart';
 import '../data/repositories/finance_repository.dart';
 import '../data/repositories/inbox_repository.dart';
 import '../data/repositories/notes_repository.dart';
+import '../data/repositories/projects_repository.dart';
 import '../data/repositories/search_repository.dart';
 import '../data/repositories/tasks_repository.dart';
 import '../services/backup/encryption_backup_service.dart';
@@ -229,6 +231,7 @@ class AppStateManager extends ChangeNotifier {
 
   late FinanceController financeController;
   late TasksController tasksController;
+  late ProjectsController projectsController;
   late NotesController notesController;
   late InboxController inboxController;
   late CalendarController calendarController;
@@ -281,6 +284,9 @@ class AppStateManager extends ChangeNotifier {
     tasksController = TasksController(
       repository: DriftTasksRepository(db),
     );
+    projectsController = ProjectsController(
+      repository: DriftProjectsRepository(db),
+    );
     notesController = NotesController(
       repository: DriftNotesRepository(db),
     );
@@ -295,6 +301,7 @@ class AppStateManager extends ChangeNotifier {
 
     financeController.addListener(_onFinanceStateChanged);
     tasksController.addListener(notifyListeners);
+    projectsController.addListener(notifyListeners);
     notesController.addListener(notifyListeners);
     inboxController.addListener(notifyListeners);
     calendarController.addListener(notifyListeners);
@@ -504,6 +511,7 @@ class AppStateManager extends ChangeNotifier {
     await Future.wait([
       financeController.loadAll(),
       tasksController.loadAll(),
+      projectsController.loadAll(),
       notesController.loadNotes(),
       inboxController.loadItems(includeProcessed: true),
       calendarController.loadAll(),
@@ -519,6 +527,9 @@ class AppStateManager extends ChangeNotifier {
       if (tasksController.state.errorMessage != null &&
           tasksController.state.errorMessage!.isNotEmpty)
         'tasks: ${tasksController.state.errorMessage}',
+      if (projectsController.state.errorMessage != null &&
+          projectsController.state.errorMessage!.isNotEmpty)
+        'projects: ${projectsController.state.errorMessage}',
       if (notesController.state.errorMessage != null &&
           notesController.state.errorMessage!.isNotEmpty)
         'notes: ${notesController.state.errorMessage}',
@@ -696,12 +707,14 @@ class AppStateManager extends ChangeNotifier {
 
     financeController.removeListener(_onFinanceStateChanged);
     tasksController.removeListener(notifyListeners);
+    projectsController.removeListener(notifyListeners);
     notesController.removeListener(notifyListeners);
     inboxController.removeListener(notifyListeners);
     calendarController.removeListener(notifyListeners);
 
     financeController.dispose();
     tasksController.dispose();
+    projectsController.dispose();
     notesController.dispose();
     inboxController.dispose();
     calendarController.dispose();

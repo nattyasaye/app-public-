@@ -250,6 +250,51 @@ export const SHARED_BUSINESS_RULES = {
     "canonicalDateFormat": "YYYY-MM-DD",
     "timeConvention": "UTC+3",
     "fixedUtcOffsetMinutes": 180
+  },
+  "projects": {
+    "statuses": [
+      "active",
+      "completed",
+      "on_hold"
+    ],
+    "blockTypes": [
+      "counter",
+      "grouped_list",
+      "checklist",
+      "schedule"
+    ],
+    "recordTypes": [
+      "group",
+      "grouped_item",
+      "checklist_item",
+      "schedule_item",
+      "progress_log"
+    ],
+    "customFieldTypes": [
+      "text",
+      "number",
+      "date",
+      "boolean",
+      "select"
+    ],
+    "bounds": {
+      "maxBlocksPerProject": 32,
+      "maxCustomFieldDefinitions": 24,
+      "maxCustomFieldSelectOptions": 50,
+      "maxCustomFieldIdLength": 64,
+      "maxCustomFieldTextLength": 1000,
+      "maxHierarchyDepth": 3
+    },
+    "rules": {
+      "appendOnlyProgressLogs": true,
+      "allowCompensatingCorrections": true,
+      "allowMultipleIndependentMetrics": true,
+      "disallowImplicitMetricAveraging": true,
+      "requiresExplicitPrimaryBlockForOverallPercent": true,
+      "requirePositiveProgressLogDelta": true,
+      "preventDuplicateRollupLogging": true,
+      "enforceParentChildOwnership": true
+    }
   }
 } as const;
 
@@ -534,6 +579,33 @@ export interface SharedRecurringRule {
   createdAt: string;
 }
 
+export type SharedProjectBlockType = 'counter' | 'grouped_list' | 'checklist' | 'schedule';
+
+export type SharedProjectRecordType =
+  | 'group'
+  | 'grouped_item'
+  | 'checklist_item'
+  | 'schedule_item'
+  | 'progress_log';
+
+export type SharedProjectCustomFieldType = 'text' | 'number' | 'date' | 'boolean' | 'select';
+
+export type SharedProjectCustomFieldValue = string | number | boolean | null;
+
+export interface SharedProjectCustomFieldDefinition {
+  id: string;
+  label: string;
+  type: SharedProjectCustomFieldType;
+  required?: boolean;
+  options?: string[];
+}
+
+export interface SharedProjectCustomFieldsPayload {
+  definitions?: SharedProjectCustomFieldDefinition[];
+  values?: Record<string, SharedProjectCustomFieldValue>;
+  primaryBlockId?: string;
+}
+
 export interface SharedProject {
   id: string;
   title: string;
@@ -541,6 +613,47 @@ export interface SharedProject {
   status: 'active' | 'completed' | 'on_hold';
   targetDate?: string;
   goalId?: string;
+  isArchived?: boolean;
+  startDate?: string;
+  customFields?: SharedProjectCustomFieldsPayload | Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface SharedProjectTrackingBlock {
+  id: string;
+  projectId: string;
+  blockType: SharedProjectBlockType;
+  title: string;
+  sortOrder: number;
+  unitLabel?: string;
+  targetValue?: number;
+  dailyTargetValue?: number;
+  config?: Record<string, unknown>;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SharedProjectTrackingRecord {
+  id: string;
+  projectId: string;
+  blockId: string;
+  parentRecordId?: string;
+  recordType: SharedProjectRecordType;
+  title?: string;
+  sortOrder: number;
+  targetValue?: number;
+  deltaValue?: number;
+  durationMinutes?: number;
+  isCompleted: boolean;
+  completedAt?: string;
+  recordedDate?: string;
+  scheduledDate?: string;
+  linkedTaskId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface SharedGoal {
@@ -593,6 +706,8 @@ export interface SharedDatabaseState {
   tasks: SharedTask[];
   notes: SharedNote[];
   projects: SharedProject[];
+  projectTrackingBlocks?: SharedProjectTrackingBlock[];
+  projectTrackingRecords?: SharedProjectTrackingRecord[];
   goals: SharedGoal[];
   inboxItems: SharedInboxItem[];
   calendarEvents?: SharedCalendarEvent[];

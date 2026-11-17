@@ -1,0 +1,872 @@
+# Daywell — Projects Module: Final Stage 1 Implementation Plan
+## Architecture, Shared Contracts, and Persistence Foundation
+
+### 1. What We Have Done So Far
+
+Daywell is an offline-first Flutter Android personal management application with a separate React/TypeScript Web Preview.
+
+Its initial modules are:
+- Tasks / To-Do
+- Finance
+- Notes
+- Calendar
+
+The application uses:
+- Drift SQLite as Flutter's persistent authority.
+- Browser storage for the Web Preview.
+- Shared Foundation JSON contracts as canonical shared definitions.
+- `scripts/sync_foundation.mjs` to generate platform-specific consumers.
+- A canonical design system shared between Flutter and Web.
+
+The project already has an established architecture constitution, backward-compatibility policy, migration safeguards, UI governance, and testing requirements.
+
+We have decided to introduce a Projects workspace within the Tasks module.
+
+Projects are independent user-created records, not hardcoded developer features and not ordinary Tasks.
+
+Two initial use cases define the required flexibility:
+
+**BIM Company Outreach**
+- 1,000 emails across 100 US cities.
+- Cities organized into 10 groups.
+- Each city has an individual target.
+- Progress is recorded in batches using city, number of emails sent, and date.
+- No individual company or recipient tracking.
+- A project deadline and daily target.
+
+**Video Learning Plan**
+- Approximately 100 videos.
+- Each video has a planned duration.
+- Videos can have planned dates, completion status, and optional Task relationships.
+- Progress can be measured by videos completed and actual minutes watched.
+
+These must work through reusable tracking capabilities, not separate hardcoded project implementations.
+
+### 2. Our Overall Aim
+
+Build a lightweight, extensible Projects foundation that allows users to create different types of projects using reusable tracking blocks.
+
+The architecture must support:
+- Different project structures and measurements.
+- Independent project definitions and progress records.
+- Multiple progress measurements without misleading summaries.
+- Safe offline persistence.
+- Flutter and Web contract parity.
+- Future PC-to-Android project import/export.
+- Future integration with Tasks and Calendar without duplicating their functionality.
+
+We want a maintainable foundation, not a general-purpose project-management platform.
+
+### 3. What This Prompt Is Trying to Achieve
+
+This is the final Stage 1 implementation specification.
+
+Your responsibilities are to:
+
+1. Audit the actual existing architecture and relevant relationships.
+2. Implement the agreed Projects architecture.
+3. Define canonical Shared Foundation contracts.
+4. Implement Flutter domain models, persistence, repository, and controller.
+5. Implement corresponding Web contracts and persistence.
+6. Protect existing database, snapshot, backup, and migration compatibility.
+7. Establish deterministic progress calculations.
+8. Add focused tests and update relevant documentation.
+
+Do not implement the Projects UI, BIM campaign screens, video-learning screens, or actual project package import/export.
+
+Do not begin Stage 2.
+
+---
+
+# 4. Mandatory Repository Audit
+
+Before modifying files, inspect the actual repository.
+
+Read:
+- `PROJECT_CONSTITUTION.md`
+- `AGENTS.md`
+- `GEMINI.md`
+- Relevant architecture documentation.
+- Accepted ADRs, especially ADR-003, ADR-005, ADR-007, and ADR-008 where applicable.
+- Shared Foundation contracts.
+- Database, snapshot, backup, and migration documentation.
+
+Inspect the actual implementations of:
+
+**Flutter**
+- Projects, Tasks, and Milestones domain models.
+- Existing Projects table and relationships.
+- Tasks and Notes foreign keys referencing Projects.
+- Repositories and controllers.
+- Drift database and migrations.
+- AppStateManager composition and recovery.
+- DatabasePersistenceCoordinator.
+- Snapshot validation and restore.
+- Calendar and date utilities.
+
+**Web**
+- Existing Projects and Tasks data structures.
+- Existing project-related UI and prototype data.
+- Browser persistence.
+- SharedStateBridge.
+- Generated Shared Foundation consumers.
+- Current application-state composition.
+
+**Shared Foundation**
+- Existing entity contracts.
+- Schema and compatibility versioning.
+- Generation scripts.
+- Validation and compatibility checks.
+
+### Audit requirements
+
+Identify:
+1. What existing Projects functionality can be reused.
+2. Whether the current Projects table already contains user data.
+3. Existing foreign-key relationships and deletion behavior.
+4. Existing backup and restore handling for Projects.
+5. Current versioning boundaries.
+6. The safest migration and persistence integration points.
+7. Any existing functionality that must remain unchanged.
+
+Do not assume earlier architectural descriptions are still accurate.
+
+Use the actual source as the authority.
+
+If an important relationship differs from the proposal, adapt the implementation to preserve the real existing architecture rather than blindly applying the proposed schema.
+
+If a critical destructive or compatibility decision genuinely cannot be resolved safely, stop before that affected change and explain why. Otherwise, complete the audit and proceed with implementation.
+
+---
+
+# 5. Confirmed Architectural Decisions
+
+The following decisions are approved and should not be reopened without a genuine technical blocker.
+
+## 5.1 Projects remain within the Tasks workspace
+
+Projects are a distinct entity managed through:
+- A dedicated Projects repository interface.
+- A dedicated Projects repository implementation.
+- A dedicated Projects application controller.
+
+Projects must remain distinct from ordinary Tasks.
+
+Existing Task, Milestone, and Note relationships must be preserved.
+
+Task–Project orchestration must remain decoupled. Do not move existing Task business logic into the Projects controller.
+
+## 5.2 Three-table relational persistence model
+
+Use the following pragmatic model, adapting it only where actual existing schema requirements demand it:
+
+1. Existing `Projects` table, extended additively.
+2. New `ProjectTrackingBlocks` table.
+3. New `ProjectTrackingRecords` table.
+
+Do not create six or more separate tables for every tracking-block subtype.
+
+Do not store all mutable tracking records and progress history inside one opaque project JSON field.
+
+Use JSON only for bounded, typed configuration or custom metadata where appropriate.
+
+## 5.3 Explicit archive lifecycle
+
+Add an explicit `isArchived` boolean.
+
+Keep it separate from existing project statuses:
+- `active`
+- `completed`
+- `on_hold`
+
+Archiving is a lifecycle operation, not another project status.
+
+Preserve existing status meanings and persisted records.
+
+---
+
+# 6. Final Data Model
+
+## 6.1 Project entity
+
+Extend the existing Projects entity rather than creating an unrelated replacement.
+
+Preserve all existing fields and relationships.
+
+The proposed additional fields are:
+
+- `isArchived`: boolean, default false.
+- `startDate`: optional canonical date-only value.
+- `customFieldsJson`: bounded serialized typed metadata, default empty object.
+- `updatedAt`: timestamp, backfilled from the existing creation timestamp when migrating old rows.
+
+Retain existing identity, title, description, status, goal relationship, target date, and creation timestamp as appropriate to the actual schema.
+
+Do not rename or remove existing fields merely to match this proposal.
+
+## 6.2 ProjectTrackingBlocks
+
+Each block belongs to one Project.
+
+Supported initial block types:
+
+- `counter`
+- `grouped_list`
+- `checklist`
+- `schedule`
+
+Suggested fields:
+
+- `id`
+- `projectId`
+- `blockType`
+- `title`
+- `unit`
+- `targetValue`
+- `dailyTargetValue`
+- `sortOrder`
+- `isArchived`
+- `configJson`
+- `createdAt`
+- `updatedAt`
+
+Configuration must be typed and validated according to the block type.
+
+Do not introduce arbitrary expressions, executable formulas, scripts, or plugin definitions.
+
+## 6.3 ProjectTrackingRecords
+
+Use a unified tracking-record model for the initial record types:
+
+- `group`
+- `grouped_item`
+- `checklist_item`
+- `schedule_item`
+- `progress_log`
+
+Suggested fields:
+
+- `id`
+- `projectId`
+- `blockId`
+- `parentRecordId`
+- `linkedTaskId`
+- `title`
+- `isCompleted`
+- `targetValue`
+- `deltaValue`
+- `durationMinutes`
+- `scheduledDate`
+- `recordedDate`
+- `sortOrder`
+- `metadataJson`
+- `createdAt`
+- `updatedAt`
+
+Use optional fields only when meaningful for the record type.
+
+Add indexes appropriate to actual query patterns.
+
+### Required ownership and hierarchy integrity
+
+The domain and persistence layers must prevent:
+
+- A record belonging to Project A referencing a block from Project B.
+- A record referencing a parent record belonging to another project.
+- A record referencing a parent from another tracking block.
+- Invalid parent-child combinations.
+- A progress log attached to an incompatible record type.
+- Cyclic parent relationships.
+- Orphaned required records.
+
+Validate these rules before writes.
+
+Use database constraints where practical, and transactional domain validation for rules that cannot be represented safely by ordinary foreign keys.
+
+Where necessary, use composite constraints or equivalent transactional checks to enforce project/block/parent ownership consistency.
+
+Do not rely solely on UI validation.
+
+### Deletion behavior
+
+Define and document deletion behavior for:
+- Projects.
+- Tracking blocks.
+- Groups.
+- Grouped items.
+- Checklist items.
+- Schedule items.
+- Progress logs.
+
+Use cascading deletion only where it is intentional and safe.
+
+Do not silently erase historical progress when editing or archiving a project.
+
+Archive should not destroy records.
+
+---
+
+# 7. Progress History and Corrections
+
+Progress logs are intended to preserve historical changes.
+
+They must behave as append-only records during normal operation.
+
+Rules:
+
+1. Normal progress operations create new log records.
+2. A historical progress log must not be silently edited to change past activity.
+3. Corrections should use a compensating entry or another explicitly documented correction mechanism.
+4. Deletion must not silently erase historical progress.
+5. Import, export preparation, and database restore must preserve the original log history.
+6. Any exceptional administrative correction mechanism must be explicit and tested.
+
+For the BIM example, a user records:
+
+- City: New York.
+- Emails sent: 12.
+- Date: selected calendar date.
+
+A later batch creates another record rather than overwriting the first.
+
+This allows historical and daily progress to be derived reliably.
+
+---
+
+# 8. Progress Calculation Rules
+
+Progress calculations must be deterministic, testable, and based on authoritative persisted records.
+
+Do not maintain independently editable totals that can drift from the underlying records.
+
+## 8.1 Counter
+
+A counter exposes:
+- Target.
+- Current value.
+- Remaining amount.
+- Completion percentage where applicable.
+
+Current value must be derived from its authoritative progress records.
+
+## 8.2 Grouped list
+
+A grouped list supports:
+- Parent groups.
+- Items within groups.
+- Individual item targets.
+- Progress logs attached to appropriate items.
+- Group-level rollups.
+- Overall rollups.
+
+For the BIM example:
+
+- Each city has its own target.
+- Each city has dated progress logs.
+- Group totals derive from the cities.
+- Campaign totals derive from the groups or their underlying city records.
+
+Do not create a second independent set of campaign-level progress logs.
+
+**One source of truth:** campaign, group, city, and daily totals must derive from the underlying city-level progress logs.
+
+Define a simple explicit rollup/source relationship in block configuration so that a counter can derive its progress from the relevant grouped-list data without duplicating progress records.
+
+Avoid building a general-purpose formula engine.
+
+## 8.3 Checklist
+
+A checklist exposes:
+- Total items.
+- Completed items.
+- Remaining items.
+- Completion percentage.
+
+Completion state must be persisted in the corresponding tracking record.
+
+## 8.4 Schedule
+
+A schedule supports:
+- Planned dates.
+- Duration.
+- Completion status.
+- Planned versus completed measurements.
+- Progress relative to a reference date.
+
+Use the existing Daywell calendar architecture.
+
+## 8.5 Multiple independent measurements
+
+A Project can have multiple progress measurements.
+
+Examples:
+- Emails sent / email target.
+- Videos completed / total videos.
+- Actual minutes watched / total planned minutes.
+- Scheduled lessons completed / planned lessons.
+- Linked Tasks completed / total linked Tasks.
+
+Do not collapse unrelated measurements into one automatically averaged percentage.
+
+Each measurement must remain independently available.
+
+### Primary progress measurement
+
+Allow a Project to identify an optional primary progress measurement or primary tracking block.
+
+Rules:
+
+- The primary percentage is derived from that explicitly selected measurement.
+- Other measurements remain available separately.
+- Do not average all percentages together.
+- If no primary measurement is configured, do not invent an overall percentage.
+- Invalid or archived primary references must be handled safely.
+
+The project-level progress model should support multiple measurements without requiring every project to have a single percentage.
+
+---
+
+# 9. Video Duration Tracking
+
+Clearly distinguish:
+
+- Planned duration.
+- Actual watched duration.
+
+For example, a video may have a planned duration of 60 minutes and actual watched progress of 20 minutes.
+
+Use an appropriate numeric progress-log mechanism to record actual watched minutes.
+
+Do not treat `isCompleted = true` as equivalent to recording actual watched duration.
+
+A video may be completed after its actual watched duration reaches or exceeds its planned duration, but completion rules must remain explicit and validated.
+
+Avoid adding a separate video-specific database table.
+
+---
+
+# 10. Typed Custom Fields
+
+Support the following initial custom field types:
+
+- Text.
+- Number.
+- Date.
+- Boolean.
+- Select.
+
+Define typed field definitions separately from their values where appropriate.
+
+Validate:
+- Field identifiers.
+- Field types.
+- Required values.
+- Select options.
+- Value/type compatibility.
+- Unknown field references.
+- Invalid values.
+
+Do not introduce unrestricted form-building, arbitrary nested schemas, scripts, or dynamic expression evaluation.
+
+Keep custom fields bounded and portable.
+
+---
+
+# 11. Date and Time Handling
+
+Reuse the existing Daywell Ethiopian/Gregorian calendar and date utilities.
+
+Do not introduce a second date system.
+
+Requirements:
+
+- Date-only values use the existing canonical date representation.
+- Timestamps remain distinct from date-only values.
+- Do not derive a user's intended calendar date by accidentally converting through UTC.
+- Ethiopian/Gregorian conversion remains centralized in existing utilities.
+- Daily progress calculations use the stored canonical date.
+- Schedule calculations use the existing date conventions.
+
+The BIM outreach daily totals must be correct regardless of whether the user views dates in Ethiopian or Gregorian format.
+
+---
+
+# 12. Versioning and Backward Compatibility — Critical
+
+Do not conflate versioning domains.
+
+Daywell has separate version boundaries, including:
+
+- Drift database schema version.
+- Shared Foundation contract schema version.
+- Canonical exchange schema version.
+- Finance exchange contract version.
+- Snapshot compatibility version.
+- Encrypted backup format version.
+- Legacy Web encrypted backup version.
+
+These versions have different responsibilities.
+
+### Required behavior
+
+1. Increment the authoritative Drift database schema from v8 to v9 if the actual database change requires it.
+2. Update the Shared Foundation contract version only according to its existing compatibility rules.
+3. Do not automatically increment the canonical exchange schema version.
+4. Do not increment the Finance exchange contract version.
+5. Do not increment encrypted backup format version 1 merely because Projects tables were added.
+6. Do not change the legacy Web encrypted backup v3 contract.
+7. Do not automatically change snapshot compatibility bounds from 4..8 to 4..9 simply because Drift becomes v9.
+
+Inspect the actual snapshot implementation and existing accepted versioning decisions before changing any bounds.
+
+If the snapshot contract needs a version change to represent the new project data, make that change deliberately and document it.
+
+Preserve the previously supported v4..v8 snapshot restore paths.
+
+Older supported snapshots that do not contain Projects tracking collections should restore with safe empty/default project tracking collections, without altering unrelated data.
+
+Unsupported future versions must fail closed before any destructive mutation.
+
+Do not change existing Finance or backup semantics unnecessarily.
+
+### Migration requirements
+
+Implement a safe, transactional v8 → v9 migration where required.
+
+The migration should:
+
+- Preserve all existing Projects rows.
+- Preserve existing Task, Milestone, and Notes relationships.
+- Preserve Finance and unrelated tables.
+- Add new columns with safe defaults.
+- Backfill `updatedAt` from the existing creation timestamp.
+- Create the tracking tables and required indexes.
+- Preserve existing user data.
+- Validate foreign-key integrity.
+- Roll back fully on failure.
+- Support idempotent behavior only where compatible with the existing migration framework.
+
+Test actual migration behavior from the existing v8 schema.
+
+Do not weaken migration compatibility checks.
+
+---
+
+# 13. Flutter Architecture
+
+Implement:
+
+1. Project domain models.
+2. Typed tracking-block and tracking-record models.
+3. Validation and progress-calculation services.
+4. Dedicated Projects repository interface.
+5. Drift-backed repository implementation.
+6. Dedicated Projects application controller.
+7. Appropriate AppStateManager composition and recovery integration.
+
+The controller must not become a replacement for the existing TasksController.
+
+Support:
+- Create project.
+- Retrieve projects.
+- Update project metadata.
+- Archive/unarchive project.
+- Create/update/archive tracking blocks where appropriate.
+- Create and retrieve tracking records.
+- Record progress.
+- Retrieve derived progress summaries.
+
+Use transactions for related multi-record writes.
+
+Ensure all data survives database close and reopen.
+
+Avoid putting business logic in widgets or expanding AppStateManager into the primary Projects business-logic layer.
+
+---
+
+# 14. Backup, Snapshot, and Restore Integration
+
+Projects are user-owned data and must not disappear during existing backup/restore workflows.
+
+Inspect all relevant snapshot export/import paths.
+
+Where the existing canonical snapshot format supports the required data, integrate:
+
+- Project metadata.
+- Tracking-block definitions.
+- Tracking records.
+- Parent-child relationships.
+- Linked Task references.
+
+Requirements:
+
+- Export parent records before child records where necessary.
+- Restore in a safe transactional order.
+- Reject orphaned required relationships before destructive mutation.
+- Handle optional dangling references using the existing established compatibility policy.
+- Preserve progress history.
+- Preserve existing backup formats and supported snapshot behavior.
+- Ensure older snapshots without tracking data remain valid.
+
+Do not implement the new `.daywellproject` package format in Stage 1.
+
+The normal full-database backup and the future portable project package are separate concerns.
+
+---
+
+# 15. Web Preview Foundation
+
+Implement the minimum corresponding Web foundation.
+
+Requirements:
+
+- Use generated Shared Foundation contracts.
+- Implement typed Web domain validation and progress calculations.
+- Add a dedicated Web Projects repository or equivalent existing architectural abstraction.
+- Persist Projects using existing browser-storage conventions.
+- Hydrate project data correctly.
+- Preserve unrelated module data during project updates.
+- Integrate with SharedStateBridge where appropriate.
+- Preserve existing Tasks, Notes, Calendar, and Finance behavior.
+- Keep version and snapshot semantics aligned with the actual canonical contracts.
+
+Do not build the Projects UI.
+
+Do not silently replace existing Web prototype screens or cards in this stage.
+
+The actual live UI migration and cross-platform visual parity work belongs to a later UI stage.
+
+---
+
+# 16. PC-to-Android Import/Export Readiness
+
+Actual project package implementation belongs to Stage 3.
+
+However, the data model must support a future portable package containing:
+
+- Project metadata.
+- Tracking-block definitions.
+- Initial tracking records.
+- Groups and grouped items.
+- Checklist items.
+- Schedule items.
+- Progress history when explicitly included.
+- Relevant relationships.
+- Package version information.
+
+Keep package-specific versioning separate from database and snapshot versions.
+
+Avoid coupling project persistence to the future file format.
+
+Document the intended portable data boundary and any known conversion requirements.
+
+Do not implement:
+- `.daywellproject` serialization.
+- File picker.
+- Import preview.
+- Export UI.
+- Android file handling.
+
+---
+
+# 17. UI Governance and Stage Boundary
+
+No substantial Projects UI changes are permitted in Stage 1.
+
+Preserve the existing Flutter and Web UI.
+
+Future UI work must follow the permanent Daywell UI governance requirements:
+
+- One canonical design system.
+- Shared specifications and reusable primitives.
+- Documented intentional platform differences.
+- Inspect both implementations before replacing or redesigning existing UI.
+- Preserve valuable existing work.
+- Verify parity after UI changes.
+
+Do not introduce new design tokens or an alternative design system.
+
+### Strict exclusions
+
+Do not implement:
+- Projects dashboard or workspace UI.
+- BIM outreach screens or dataset.
+- Video-learning screens.
+- Actual project import/export.
+- Notifications or automated reminders.
+- New general-purpose Task features.
+- Finance changes.
+- Unrelated refactoring.
+- A plugin or scripting system.
+- A general-purpose workflow/formula engine.
+
+---
+
+# 18. Required Tests
+
+Add focused tests covering the actual implemented behavior.
+
+### Domain and validation tests
+
+- Project creation and validation.
+- Project lifecycle and archive behavior.
+- Tracking-block configuration validation.
+- Supported and unsupported block types.
+- Record-type compatibility.
+- Project/block/parent ownership validation.
+- Cyclic relationship rejection.
+- Identifier uniqueness.
+- Custom field type validation.
+- Progress-log append-only behavior and corrections.
+- Counter and grouped-list rollups.
+- Checklist progress.
+- Schedule progress.
+- Multiple independent measurements.
+- Explicit primary progress measurement.
+- No automatic averaging of unrelated percentages.
+- Planned versus actual video duration.
+- Invalid configuration rejection.
+
+### Flutter persistence tests
+
+- Create and retrieve Project.
+- Update metadata.
+- Archive and unarchive.
+- Create and retrieve tracking blocks.
+- Create and retrieve tracking records.
+- Record multiple progress batches.
+- Derive correct totals.
+- Preserve relationships.
+- Close and reopen database.
+- Verify v8 → v9 migration.
+- Verify old Projects rows and existing foreign keys remain intact.
+- Verify migration rollback on deliberate failure.
+- Verify snapshot export and restore behavior.
+- Verify old supported snapshots without tracking collections.
+
+### Web tests
+
+- Create and persist Projects.
+- Hydrate Projects after reload.
+- Update Projects without overwriting unrelated module data.
+- Validate tracking definitions and records.
+- Verify matching progress calculations.
+- Verify compatibility with existing Web state.
+- Verify snapshot bridge behavior.
+
+### Shared Foundation tests
+
+- Canonical contract validation.
+- Generated Flutter and TypeScript synchronization.
+- Compatibility checks.
+- Existing unrelated shared contracts remain unchanged.
+- No accidental version-domain coupling.
+
+Use representative test fixtures for:
+- BIM outreach: groups, cities, targets, and multiple dated email batches.
+- Video learning: videos, planned durations, schedules, completion, and actual watched minutes.
+
+Do not introduce the complete 100-city dataset in this stage.
+
+---
+
+# 19. Verification
+
+Run all available checks:
+
+- Foundation synchronization and validation.
+- Architecture boundary checks.
+- Migration compatibility checks.
+- UI consistency checks.
+- Full relevant TypeScript tests.
+- Lint.
+- TypeScript compilation.
+- Web production build.
+- Flutter formatting.
+- Flutter analysis.
+- Flutter unit and repository tests.
+- Android build.
+
+Report exact commands and results.
+
+Clearly distinguish:
+- Checks actually executed.
+- Checks not executed due to unavailable tooling.
+- Checks assumed successful through CI, if explicitly confirmed.
+
+Never claim a test passed merely because its source code was added.
+
+Do not weaken CI or alter test expectations just to obtain a green result.
+
+---
+
+# 20. Documentation
+
+Update the relevant existing architecture documentation.
+
+Explain:
+
+- What a Project represents.
+- How Projects differ from Tasks.
+- The three-table data model.
+- Tracking-block types.
+- Tracking-record types and ownership rules.
+- Append-only progress history and corrections.
+- Project definition versus progress data.
+- Derived progress calculations and primary measurement.
+- Planned versus actual duration.
+- Date handling.
+- Flutter and Web shared contracts.
+- Migration and compatibility behavior.
+- Backup and snapshot integration.
+- Future portable project-package boundary.
+
+Create an ADR only if a genuine architectural decision requires one.
+
+Do not create unnecessary documents or duplicate existing documentation.
+
+---
+
+# 21. Mandatory Final Report
+
+Return a detailed report with these sections:
+
+1. **Implementation verdict:** Complete, partially complete, or blocked.
+2. **Initial audit:** Actual existing architecture and components reused.
+3. **Final architecture:** Explain the design simply.
+4. **Data model:** Projects, blocks, records, relationships, and constraints.
+5. **Progress engine:** Rollups, primary measurement, and independent metrics.
+6. **Flutter implementation:** Files changed and persistence architecture.
+7. **Web implementation:** Files changed and browser persistence.
+8. **Shared Foundation:** Canonical contracts and generated consumers.
+9. **Versioning:** Explain each version domain and what changed or remained unchanged.
+10. **Migration:** v8 → v9 behavior, compatibility, and rollback testing.
+11. **Backup and snapshot behavior:** What was integrated and what remains deferred.
+12. **Import/export readiness:** Explain the future package boundary without claiming implementation.
+13. **Tests and verification:** Exact commands and actual results.
+14. **Unresolved issues:** Known limitations and outstanding risks.
+15. **Stage boundary confirmation:** Confirm that no Projects UI, BIM campaign, video-learning UI, or actual portable package workflow was implemented.
+
+### Final acceptance criteria
+
+Stage 1 is complete only when:
+
+- Projects are independent user-created records.
+- Existing Tasks, Milestones, Notes, and Finance behavior remains intact.
+- The three-table model is implemented safely.
+- Tracking records enforce correct ownership and hierarchy.
+- Progress history is protected against silent historical modification.
+- Counter and grouped progress derive from one authoritative source.
+- Multiple measurements remain independent.
+- Primary progress is explicit rather than arbitrarily averaged.
+- Planned and actual video duration are distinguishable.
+- Flutter and Web use canonical shared contracts.
+- Flutter persistence survives restart.
+- Web persistence follows the shared contracts.
+- Existing supported migrations, snapshots, and backups remain compatible.
+- Tests cover the implemented foundation.
+- No unrelated module or UI redesign has been introduced.
+
+**Do not begin Stage 2 until the Stage 1 implementation report has been reviewed and explicitly approved.**
+
+Do not start another planning phase. Audit the repository, implement this approved scope, run the available checks, and return the mandatory report.

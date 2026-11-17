@@ -26,6 +26,7 @@ This directory holds Daywell's permanent record of significant architectural, da
 | [ADR-006](./ADR-006-unresolved-cross-platform-parity-and-sync.md) | Unresolved Cross-Platform Parity Gaps, Backup Alignment, Calendar UI & R8 Shrinking | **proposed** | Governance Stage 1 | Pending Future Stages |
 | [ADR-007](./ADR-007-mandatory-backward-compatibility.md) | Mandatory Forward-Going Backward Compatibility Policy *(Supersedes [ADR-004](./ADR-004-backward-compatibility-deferred.md))* | **accepted** | Governance Amendment (2026-11-15) | Schemas, Backups, Snapshots, Contracts |
 | [ADR-008](./ADR-008-retire-account-isactive-and-schema-v8.md) | Retire `Account.isActive` in Favor of `isArchived` and Advance Schema to Version 8 | **accepted** | Governance Stage 3.4.4.1 (2026-11-16) | Schemas, Accounts, Reminders, Migrations |
+| [ADR-009](./ADR-009-projects-stage1-tracking-foundation-and-schema-v9.md) | Projects Stage 1 Composable Tracking Foundation and Schema v9 | **accepted** | Projects Stage 1 (2026-11-17) | Projects, Schemas, Persistence, Parity |
 
 ---
 

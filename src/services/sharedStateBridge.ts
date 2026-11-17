@@ -7,6 +7,10 @@ import {
   SharedNote,
   SharedCalendarEvent,
   SharedProject,
+  SharedProjectBlockType,
+  SharedProjectRecordType,
+  SharedProjectTrackingBlock,
+  SharedProjectTrackingRecord,
   SharedGoal,
   SharedInboxItem,
   SharedCommitment,
@@ -20,6 +24,12 @@ import {
   KNOWN_SEED_IDS,
   SYSTEM_CONTROL_ACCOUNT_IDS,
 } from '../domain/sharedFoundation';
+import {
+  ProjectValidationError,
+  validateBlock,
+  validateCustomFieldsMap,
+  validateRecord,
+} from '../domain/projectsEngine';
 import {
   Debt,
   isEtbCurrency,
@@ -72,12 +82,33 @@ export class SharedStateBridge {
   public static readonly STORAGE_KEY = 'daywell_canonical_database_v3';
   public static readonly SYNC_EVENT_NAME = 'daywell:canonical-synced';
   public static readonly PROJECTS_STORAGE_KEY = 'daywell_projects';
+  public static readonly PROJECT_TRACKING_BLOCKS_STORAGE_KEY =
+    'daywell_project_tracking_blocks';
+  public static readonly PROJECT_TRACKING_RECORDS_STORAGE_KEY =
+    'daywell_project_tracking_records';
   public static readonly GOALS_STORAGE_KEY = 'daywell_goals';
   public static readonly MILESTONES_STORAGE_KEY = 'daywell_milestones';
   public static readonly INBOX_STORAGE_KEY = 'daywell_inbox_items';
   public static readonly LEGACY_INBOX_STORAGE_KEY = 'daywell_inbox';
   public static readonly REMINDERS_STORAGE_KEY = 'daywell_reminders';
   public static readonly APP_SETTINGS_STORAGE_KEY = 'daywell_app_settings';
+
+  private static readonly VALID_PROJECT_BLOCK_TYPES =
+    new Set<SharedProjectBlockType>([
+      'counter',
+      'grouped_list',
+      'checklist',
+      'schedule',
+    ]);
+
+  private static readonly VALID_PROJECT_RECORD_TYPES =
+    new Set<SharedProjectRecordType>([
+      'group',
+      'grouped_item',
+      'checklist_item',
+      'schedule_item',
+      'progress_log',
+    ]);
 
   private static readonly VALID_REMINDER_TARGET_TYPES = new Set<
     SharedReminder['targetType']
@@ -690,6 +721,68 @@ export class SharedStateBridge {
     }
   }
 
+  private static tryParseOptionalJsonObject(
+    raw: unknown
+  ): Record<string, unknown> | undefined {
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw === 'string') {
+      const trimmed = raw.trim();
+      if (!trimmed) return undefined;
+      try {
+        const parsed = JSON.parse(trimmed);
+        return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+          ? (parsed as Record<string, unknown>)
+          : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    if (typeof raw === 'object' && !Array.isArray(raw)) {
+      return raw as Record<string, unknown>;
+    }
+    return undefined;
+  }
+
+  private static parseStrictJsonObject(
+    record: Record<string, any>,
+    keys: string[],
+    ctx: string
+  ): Record<string, unknown> | undefined {
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(record, key)) continue;
+      const val = record[key];
+      if (val === undefined || val === null) continue;
+      if (typeof val === 'string') {
+        const trimmed = val.trim();
+        if (!trimmed) return {};
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(trimmed);
+        } catch {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid JSON in "${ctx}.${key}": expected a JSON object.`
+          );
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid field "${ctx}.${key}": expected a JSON object.`
+          );
+        }
+        return parsed as Record<string, unknown>;
+      }
+      if (typeof val !== 'object' || Array.isArray(val)) {
+        throw new BackupValidationError(
+          'invalid_payload',
+          `Invalid field "${ctx}.${key}": expected an object.`
+        );
+      }
+      return val as Record<string, unknown>;
+    }
+    return undefined;
+  }
+
   private static normalizeProjects(raw: unknown[]): SharedProject[] {
     const mapped: SharedProject[] = [];
     for (const entry of raw) {
@@ -705,14 +798,167 @@ export class SharedStateBridge {
         p.status === 'completed' || p.status === 'on_hold' || p.status === 'active'
           ? p.status
           : 'active';
+      const customFields = this.tryParseOptionalJsonObject(
+        p.customFields ?? p.customFieldsJson
+      );
+      const { customFieldsJson: _droppedCfJson, ...rest } = p;
       mapped.push({
-        ...(p as SharedProject),
+        ...(rest as SharedProject),
         id,
         title: typeof p.title === 'string' ? p.title : String(p.title ?? ''),
         ...(description !== undefined ? { description } : {}),
         status,
         ...(p.targetDate ? { targetDate: p.targetDate } : {}),
         ...(p.goalId ? { goalId: p.goalId } : {}),
+        ...(typeof p.isArchived === 'boolean' ? { isArchived: p.isArchived } : {}),
+        ...(typeof p.startDate === 'string' && p.startDate.trim()
+          ? { startDate: p.startDate.trim() }
+          : {}),
+        ...(customFields !== undefined ? { customFields } : {}),
+        ...(typeof p.createdAt === 'string' && p.createdAt.trim()
+          ? { createdAt: p.createdAt.trim() }
+          : {}),
+        ...(typeof p.updatedAt === 'string' && p.updatedAt.trim()
+          ? { updatedAt: p.updatedAt.trim() }
+          : {}),
+      });
+    }
+    return this.dedupeById(mapped);
+  }
+
+  private static normalizeProjectTrackingBlocks(
+    raw: unknown[]
+  ): SharedProjectTrackingBlock[] {
+    const mapped: SharedProjectTrackingBlock[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const b = entry as Record<string, any>;
+      const id = typeof b.id === 'string' ? b.id.trim() : '';
+      const projectId =
+        typeof b.projectId === 'string' ? b.projectId.trim() : '';
+      const blockTypeRaw =
+        typeof b.blockType === 'string' ? b.blockType.trim() : '';
+      if (
+        !id ||
+        !projectId ||
+        !this.VALID_PROJECT_BLOCK_TYPES.has(
+          blockTypeRaw as SharedProjectBlockType
+        )
+      ) {
+        continue;
+      }
+      const createdAt =
+        typeof b.createdAt === 'string' && b.createdAt.trim()
+          ? b.createdAt.trim()
+          : EthiopiaClock.nowUtc().toISOString();
+      const updatedAt =
+        typeof b.updatedAt === 'string' && b.updatedAt.trim()
+          ? b.updatedAt.trim()
+          : createdAt;
+      const config = this.tryParseOptionalJsonObject(b.config ?? b.configJson);
+      mapped.push({
+        id,
+        projectId,
+        blockType: blockTypeRaw as SharedProjectBlockType,
+        title: typeof b.title === 'string' ? b.title.trim() : String(b.title ?? ''),
+        sortOrder:
+          typeof b.sortOrder === 'number' && Number.isInteger(b.sortOrder)
+            ? b.sortOrder
+            : 0,
+        ...(typeof b.unitLabel === 'string' && b.unitLabel.trim()
+          ? { unitLabel: b.unitLabel.trim() }
+          : {}),
+        ...(typeof b.targetValue === 'number' && Number.isFinite(b.targetValue)
+          ? { targetValue: b.targetValue }
+          : {}),
+        ...(typeof b.dailyTargetValue === 'number' &&
+        Number.isFinite(b.dailyTargetValue)
+          ? { dailyTargetValue: b.dailyTargetValue }
+          : {}),
+        ...(config !== undefined ? { config } : {}),
+        isArchived: Boolean(b.isArchived),
+        createdAt,
+        updatedAt,
+      });
+    }
+    return this.dedupeById(mapped);
+  }
+
+  private static normalizeProjectTrackingRecords(
+    raw: unknown[]
+  ): SharedProjectTrackingRecord[] {
+    const mapped: SharedProjectTrackingRecord[] = [];
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) continue;
+      const r = entry as Record<string, any>;
+      const id = typeof r.id === 'string' ? r.id.trim() : '';
+      const projectId =
+        typeof r.projectId === 'string' ? r.projectId.trim() : '';
+      const blockId = typeof r.blockId === 'string' ? r.blockId.trim() : '';
+      const recordTypeRaw =
+        typeof r.recordType === 'string' ? r.recordType.trim() : '';
+      if (
+        !id ||
+        !projectId ||
+        !blockId ||
+        !this.VALID_PROJECT_RECORD_TYPES.has(
+          recordTypeRaw as SharedProjectRecordType
+        )
+      ) {
+        continue;
+      }
+      const createdAt =
+        typeof r.createdAt === 'string' && r.createdAt.trim()
+          ? r.createdAt.trim()
+          : EthiopiaClock.nowUtc().toISOString();
+      const updatedAt =
+        typeof r.updatedAt === 'string' && r.updatedAt.trim()
+          ? r.updatedAt.trim()
+          : createdAt;
+      const metadata = this.tryParseOptionalJsonObject(
+        r.metadata ?? r.metadataJson
+      );
+      mapped.push({
+        id,
+        projectId,
+        blockId,
+        ...(typeof r.parentRecordId === 'string' && r.parentRecordId.trim()
+          ? { parentRecordId: r.parentRecordId.trim() }
+          : {}),
+        recordType: recordTypeRaw as SharedProjectRecordType,
+        ...(typeof r.title === 'string' && r.title.trim()
+          ? { title: r.title.trim() }
+          : {}),
+        sortOrder:
+          typeof r.sortOrder === 'number' && Number.isInteger(r.sortOrder)
+            ? r.sortOrder
+            : 0,
+        ...(typeof r.targetValue === 'number' && Number.isFinite(r.targetValue)
+          ? { targetValue: r.targetValue }
+          : {}),
+        ...(typeof r.deltaValue === 'number' && Number.isFinite(r.deltaValue)
+          ? { deltaValue: r.deltaValue }
+          : {}),
+        ...(typeof r.durationMinutes === 'number' &&
+        Number.isInteger(r.durationMinutes)
+          ? { durationMinutes: r.durationMinutes }
+          : {}),
+        isCompleted: Boolean(r.isCompleted),
+        ...(typeof r.completedAt === 'string' && r.completedAt.trim()
+          ? { completedAt: r.completedAt.trim() }
+          : {}),
+        ...(typeof r.recordedDate === 'string' && r.recordedDate.trim()
+          ? { recordedDate: r.recordedDate.trim() }
+          : {}),
+        ...(typeof r.scheduledDate === 'string' && r.scheduledDate.trim()
+          ? { scheduledDate: r.scheduledDate.trim() }
+          : {}),
+        ...(typeof r.linkedTaskId === 'string' && r.linkedTaskId.trim()
+          ? { linkedTaskId: r.linkedTaskId.trim() }
+          : {}),
+        ...(metadata !== undefined ? { metadata } : {}),
+        createdAt,
+        updatedAt,
       });
     }
     return this.dedupeById(mapped);
@@ -785,6 +1031,8 @@ export class SharedStateBridge {
         ...(JSON.parse(JSON.stringify(CANONICAL_SEED_DATABASE)) as SharedDatabaseStateV7),
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         milestones: [],
+        projectTrackingBlocks: [],
+        projectTrackingRecords: [],
       };
     }
 
@@ -918,6 +1166,30 @@ export class SharedStateBridge {
           ? this.normalizeProjects(canonicalStored.projects)
           : JSON.parse(JSON.stringify(CANONICAL_SEED_DATABASE.projects));
 
+      const explicitProjectBlocks = this.readExplicitJsonArray(
+        this.PROJECT_TRACKING_BLOCKS_STORAGE_KEY
+      );
+      const projectTrackingBlocks: SharedProjectTrackingBlock[] =
+        explicitProjectBlocks.exists
+          ? this.normalizeProjectTrackingBlocks(explicitProjectBlocks.items)
+          : Array.isArray(canonicalStored?.projectTrackingBlocks)
+            ? this.normalizeProjectTrackingBlocks(
+                canonicalStored.projectTrackingBlocks
+              )
+            : [];
+
+      const explicitProjectRecords = this.readExplicitJsonArray(
+        this.PROJECT_TRACKING_RECORDS_STORAGE_KEY
+      );
+      const projectTrackingRecords: SharedProjectTrackingRecord[] =
+        explicitProjectRecords.exists
+          ? this.normalizeProjectTrackingRecords(explicitProjectRecords.items)
+          : Array.isArray(canonicalStored?.projectTrackingRecords)
+            ? this.normalizeProjectTrackingRecords(
+                canonicalStored.projectTrackingRecords
+              )
+            : [];
+
       const explicitGoals = this.readExplicitJsonArray(this.GOALS_STORAGE_KEY);
       const goals: SharedGoal[] = explicitGoals.exists
         ? this.normalizeGoals(explicitGoals.items)
@@ -1002,6 +1274,8 @@ export class SharedStateBridge {
         tasks,
         notes,
         projects,
+        projectTrackingBlocks,
+        projectTrackingRecords,
         goals,
         inboxItems,
         calendarEvents,
@@ -1014,6 +1288,8 @@ export class SharedStateBridge {
         ...(JSON.parse(JSON.stringify(CANONICAL_SEED_DATABASE)) as SharedDatabaseStateV7),
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         milestones: [],
+        projectTrackingBlocks: [],
+        projectTrackingRecords: [],
       };
     }
   }
@@ -1042,6 +1318,16 @@ export class SharedStateBridge {
       const tasks = Array.isArray(state.tasks) ? this.normalizeTasks(state.tasks) : [];
       const notes = Array.isArray(state.notes) ? this.normalizeNotes(state.notes) : [];
       const projects = this.normalizeProjects(Array.isArray(state.projects) ? state.projects : []);
+      const projectTrackingBlocks = this.normalizeProjectTrackingBlocks(
+        Array.isArray(state.projectTrackingBlocks)
+          ? state.projectTrackingBlocks
+          : []
+      );
+      const projectTrackingRecords = this.normalizeProjectTrackingRecords(
+        Array.isArray(state.projectTrackingRecords)
+          ? state.projectTrackingRecords
+          : []
+      );
       const goals = this.normalizeGoals(Array.isArray(state.goals) ? state.goals : []);
       const milestones = this.normalizeMilestones(
         Array.isArray(state.milestones) ? state.milestones : []
@@ -1073,6 +1359,8 @@ export class SharedStateBridge {
         tasks,
         notes,
         projects,
+        projectTrackingBlocks,
+        projectTrackingRecords,
         goals,
         milestones,
         inboxItems,
@@ -1178,6 +1466,14 @@ export class SharedStateBridge {
       }));
       localStorage.setItem('daywell_notes', JSON.stringify(daywellNotes));
       localStorage.setItem(this.PROJECTS_STORAGE_KEY, JSON.stringify(projects));
+      localStorage.setItem(
+        this.PROJECT_TRACKING_BLOCKS_STORAGE_KEY,
+        JSON.stringify(projectTrackingBlocks)
+      );
+      localStorage.setItem(
+        this.PROJECT_TRACKING_RECORDS_STORAGE_KEY,
+        JSON.stringify(projectTrackingRecords)
+      );
       localStorage.setItem(this.GOALS_STORAGE_KEY, JSON.stringify(goals));
       localStorage.setItem(this.MILESTONES_STORAGE_KEY, JSON.stringify(milestones));
       localStorage.setItem(this.INBOX_STORAGE_KEY, JSON.stringify(inboxItems));
@@ -1426,7 +1722,7 @@ export class SharedStateBridge {
 
   public static readonly SUPPORTED_EXCHANGE_SCHEMA_VERSION = 5;
   public static readonly MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION = 4;
-  public static readonly MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION = 8;
+  public static readonly MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION = 9;
   public static readonly SUPPORTED_FINANCE_SCHEMA_VERSION = 7;
 
   private static readonly OPTIONAL_ARRAY_COLLECTIONS = [
@@ -1445,6 +1741,8 @@ export class SharedStateBridge {
     'tasks',
     'notes',
     'projects',
+    'projectTrackingBlocks',
+    'projectTrackingRecords',
     'goals',
     'inboxItems',
     'calendarEvents',
@@ -1582,7 +1880,7 @@ export class SharedStateBridge {
     if (resolvedVersion === 3) {
       throw new BackupValidationError(
         'invalid_snapshot_version',
-        'Legacy LocalDatabaseState v3 payloads are distinct from SharedStateBridge canonical exchange snapshots (schemaVersion 4..8) and cannot be imported here.'
+        `Legacy LocalDatabaseState v3 payloads are distinct from SharedStateBridge canonical exchange snapshots (schemaVersion ${this.MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION}..${this.MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION}) and cannot be imported here.`
       );
     }
     if (resolvedVersion > this.MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION) {
@@ -1949,7 +2247,7 @@ export class SharedStateBridge {
       );
       const targetGoalIds = new Set<string>(validatedGoals.map((g) => g.id));
 
-      // 5. Projects (preserve Test #8 dedupe; clear dangling Tier-2 goalId)
+      // 5. Projects (preserve Test #8 dedupe; clear dangling Tier-2 goalId; validate Stage 1 fields)
       const validatedProjects = this.normalizeProjects(
         ((parsed.projects || []) as Record<string, any>[]).map((p, idx) => {
           const ctx = `projects[${idx}]`;
@@ -1961,21 +2259,55 @@ export class SharedStateBridge {
             this.optionalString(p, 'subtitle', ctx, { allowEmpty: true });
           const status =
             this.optionalEnum(p, 'status', this.VALID_PROJECT_STATUSES, ctx) ?? 'active';
+          const isArchived = this.optionalBool(p, 'isArchived', ctx);
+          const startDate = normalizeOptionalDate(p.startDate, `${ctx}.startDate`);
           const targetDate = normalizeOptionalDate(p.targetDate, `${ctx}.targetDate`);
+          if (startDate && targetDate && targetDate < startDate) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Project "${id}" targetDate (${targetDate}) cannot precede startDate (${startDate}).`
+            );
+          }
+          const customFields = this.parseStrictJsonObject(
+            p,
+            ['customFields', 'customFieldsJson'],
+            ctx
+          );
+          if (customFields !== undefined) {
+            try {
+              validateCustomFieldsMap(customFields);
+            } catch (err) {
+              throw new BackupValidationError(
+                'invalid_payload',
+                err instanceof ProjectValidationError
+                  ? err.message
+                  : `Invalid customFields on ${ctx}.`
+              );
+            }
+          }
           const rawGoalId = this.optionalString(p, 'goalId', ctx);
           const safeGoalId =
             rawGoalId && targetGoalIds.has(rawGoalId) ? rawGoalId : undefined;
           const createdAt = normalizeOptionalInstant(p.createdAt, `${ctx}.createdAt`);
-          const { goalId: _droppedGoal, ...rest } = p;
+          const updatedAt = normalizeOptionalInstant(p.updatedAt, `${ctx}.updatedAt`);
+          const {
+            goalId: _droppedGoal,
+            customFieldsJson: _droppedCfJson,
+            ...rest
+          } = p;
           return {
             ...rest,
             id,
             title,
             ...(description !== undefined ? { description } : {}),
             status,
+            ...(isArchived !== undefined ? { isArchived } : {}),
+            ...(startDate !== undefined ? { startDate } : {}),
             ...(targetDate !== undefined ? { targetDate } : {}),
+            ...(customFields !== undefined ? { customFields } : {}),
             ...(safeGoalId !== undefined ? { goalId: safeGoalId } : {}),
             ...(createdAt !== undefined ? { createdAt } : {}),
+            ...(updatedAt !== undefined ? { updatedAt } : {}),
           };
         })
       );
@@ -2106,6 +2438,389 @@ export class SharedStateBridge {
           };
         }
       );
+
+      // 7b. Project Tracking Blocks (two-pass validation: non-rollup first, then rollup counters)
+      const optionalNumberMin = (
+        record: Record<string, any>,
+        field: string,
+        ctx: string,
+        min: number
+      ): number | undefined => {
+        if (
+          !Object.prototype.hasOwnProperty.call(record, field) ||
+          record[field] === undefined ||
+          record[field] === null
+        ) {
+          return undefined;
+        }
+        const val = record[field];
+        if (typeof val !== 'number' || !Number.isFinite(val)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid field "${ctx}.${field}": expected a finite number.`
+          );
+        }
+        if (val < min) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid field "${ctx}.${field}": value ${val} must be >= ${min}.`
+          );
+        }
+        return val;
+      };
+
+      const blockSeenIds = new Set<string>();
+      const stagedBlocks: SharedProjectTrackingBlock[] = (
+        (parsed.projectTrackingBlocks || []) as Record<string, any>[]
+      ).map((b, idx) => {
+        const ctx = `projectTrackingBlocks[${idx}]`;
+        const id = this.requireUniqueId(
+          b,
+          'projectTrackingBlocks',
+          idx,
+          blockSeenIds
+        );
+        const projectId = this.requireBoundedString(b, 'projectId', ctx, 200);
+        if (!targetProjectIds.has(projectId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.projectId": project "${projectId}" does not exist.`
+          );
+        }
+        const blockType = this.optionalEnum(
+          b,
+          'blockType',
+          this.VALID_PROJECT_BLOCK_TYPES,
+          ctx
+        );
+        if (!blockType) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Missing or invalid field "${ctx}.blockType".`
+          );
+        }
+        const title = this.requireBoundedString(b, 'title', ctx, 200);
+        const sortOrder = this.optionalIntMin(b, 'sortOrder', ctx, 0) ?? 0;
+        const unitLabel = this.optionalString(b, 'unitLabel', ctx);
+        if (unitLabel !== undefined && unitLabel.length > 64) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid field "${ctx}.unitLabel": exceeds 64 characters.`
+          );
+        }
+        const targetValue = optionalNumberMin(b, 'targetValue', ctx, 0);
+        const dailyTargetValue = optionalNumberMin(
+          b,
+          'dailyTargetValue',
+          ctx,
+          0
+        );
+        const config =
+          this.parseStrictJsonObject(b, ['config', 'configJson'], ctx) ?? {};
+        const isArchived = this.optionalBool(b, 'isArchived', ctx) ?? false;
+        const createdAt =
+          normalizeOptionalInstant(b.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        const updatedAt =
+          normalizeOptionalInstant(b.updatedAt, `${ctx}.updatedAt`) ?? createdAt;
+        return {
+          id,
+          projectId,
+          blockType,
+          title,
+          sortOrder,
+          ...(unitLabel !== undefined ? { unitLabel } : {}),
+          ...(targetValue !== undefined ? { targetValue } : {}),
+          ...(dailyTargetValue !== undefined ? { dailyTargetValue } : {}),
+          config,
+          isArchived,
+          createdAt,
+          updatedAt,
+        };
+      });
+
+      const stagedBlocksById = new Map<string, SharedProjectTrackingBlock>(
+        stagedBlocks.map((b) => [b.id, b])
+      );
+      const acceptedBlocksByProject = new Map<
+        string,
+        SharedProjectTrackingBlock[]
+      >();
+      const nonRollupBlocks: SharedProjectTrackingBlock[] = [];
+      const rollupBlocks: SharedProjectTrackingBlock[] = [];
+      for (const blk of stagedBlocks) {
+        const hasRollupSource =
+          blk.blockType === 'counter' &&
+          typeof blk.config?.rollupSourceBlockId === 'string' &&
+          blk.config.rollupSourceBlockId.trim().length > 0;
+        if (hasRollupSource) {
+          rollupBlocks.push(blk);
+        } else {
+          nonRollupBlocks.push(blk);
+        }
+      }
+      for (const passBlocks of [nonRollupBlocks, rollupBlocks]) {
+        for (const blk of passBlocks) {
+          const siblingBlocks =
+            acceptedBlocksByProject.get(blk.projectId) ?? [];
+          try {
+            validateBlock(blk, {
+              expectedProjectId: blk.projectId,
+              projectBlocks: siblingBlocks,
+              isNew: true,
+            });
+          } catch (err) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              err instanceof ProjectValidationError
+                ? err.message
+                : `Invalid tracking block "${blk.id}".`
+            );
+          }
+          siblingBlocks.push(blk);
+          acceptedBlocksByProject.set(blk.projectId, siblingBlocks);
+        }
+      }
+      const validatedProjectTrackingBlocks = stagedBlocks;
+
+      // 7c. Project Tracking Records (hierarchical parent-before-child + non-correction-before-correction validation)
+      const recordSeenIds = new Set<string>();
+      const stagedRecords: SharedProjectTrackingRecord[] = (
+        (parsed.projectTrackingRecords || []) as Record<string, any>[]
+      ).map((r, idx) => {
+        const ctx = `projectTrackingRecords[${idx}]`;
+        const id = this.requireUniqueId(
+          r,
+          'projectTrackingRecords',
+          idx,
+          recordSeenIds
+        );
+        const projectId = this.requireBoundedString(r, 'projectId', ctx, 200);
+        if (!targetProjectIds.has(projectId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.projectId": project "${projectId}" does not exist.`
+          );
+        }
+        const blockId = this.requireBoundedString(r, 'blockId', ctx, 200);
+        const targetBlock = stagedBlocksById.get(blockId);
+        if (!targetBlock) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.blockId": block "${blockId}" does not exist.`
+          );
+        }
+        if (targetBlock.projectId !== projectId) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}": block "${blockId}" belongs to project "${targetBlock.projectId}", not "${projectId}".`
+          );
+        }
+        const recordType = this.optionalEnum(
+          r,
+          'recordType',
+          this.VALID_PROJECT_RECORD_TYPES,
+          ctx
+        );
+        if (!recordType) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Missing or invalid field "${ctx}.recordType".`
+          );
+        }
+        const parentRecordId = this.optionalString(r, 'parentRecordId', ctx);
+        const title = this.optionalString(r, 'title', ctx, { allowEmpty: true });
+        if (title !== undefined && title.trim().length > 200) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid field "${ctx}.title": exceeds 200 characters.`
+          );
+        }
+        const sortOrder = this.optionalIntMin(r, 'sortOrder', ctx, 0) ?? 0;
+        const targetValue = optionalNumberMin(r, 'targetValue', ctx, 0);
+        let deltaValue: number | undefined;
+        if (
+          Object.prototype.hasOwnProperty.call(r, 'deltaValue') &&
+          r.deltaValue !== undefined &&
+          r.deltaValue !== null
+        ) {
+          if (typeof r.deltaValue !== 'number' || !Number.isFinite(r.deltaValue)) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid field "${ctx}.deltaValue": expected a finite number.`
+            );
+          }
+          deltaValue = r.deltaValue;
+        }
+        const durationMinutes = this.optionalIntMin(
+          r,
+          'durationMinutes',
+          ctx,
+          0
+        );
+        const isCompleted = this.optionalBool(r, 'isCompleted', ctx) ?? false;
+        const completedAt = normalizeOptionalInstant(
+          r.completedAt,
+          `${ctx}.completedAt`
+        );
+        const recordedDate = normalizeOptionalDate(
+          r.recordedDate,
+          `${ctx}.recordedDate`
+        );
+        const scheduledDate = normalizeOptionalDate(
+          r.scheduledDate,
+          `${ctx}.scheduledDate`
+        );
+        const rawLinkedTaskId = this.optionalString(r, 'linkedTaskId', ctx);
+        const safeLinkedTaskId =
+          rawLinkedTaskId && taskSeenIds.has(rawLinkedTaskId)
+            ? rawLinkedTaskId
+            : undefined;
+        const metadata =
+          this.parseStrictJsonObject(r, ['metadata', 'metadataJson'], ctx) ?? {};
+        const createdAt =
+          normalizeOptionalInstant(r.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        const updatedAt =
+          normalizeOptionalInstant(r.updatedAt, `${ctx}.updatedAt`) ?? createdAt;
+
+        return {
+          id,
+          projectId,
+          blockId,
+          ...(parentRecordId !== undefined ? { parentRecordId } : {}),
+          recordType,
+          ...(title !== undefined && title.trim() ? { title: title.trim() } : {}),
+          sortOrder,
+          ...(targetValue !== undefined ? { targetValue } : {}),
+          ...(deltaValue !== undefined ? { deltaValue } : {}),
+          ...(durationMinutes !== undefined ? { durationMinutes } : {}),
+          isCompleted,
+          ...(completedAt !== undefined ? { completedAt } : {}),
+          ...(recordedDate !== undefined ? { recordedDate } : {}),
+          ...(scheduledDate !== undefined ? { scheduledDate } : {}),
+          ...(safeLinkedTaskId !== undefined
+            ? { linkedTaskId: safeLinkedTaskId }
+            : {}),
+          metadata,
+          createdAt,
+          updatedAt,
+        };
+      });
+
+      const stagedRecordsById = new Map<string, SharedProjectTrackingRecord>(
+        stagedRecords.map((r) => [r.id, r])
+      );
+      for (const rec of stagedRecords) {
+        if (rec.parentRecordId !== undefined) {
+          if (rec.parentRecordId === rec.id) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Project tracking record "${rec.id}" cannot set itself as parentRecordId.`
+            );
+          }
+          const parent = stagedRecordsById.get(rec.parentRecordId);
+          if (!parent) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid foreign key "projectTrackingRecords[${rec.id}].parentRecordId": parent "${rec.parentRecordId}" does not exist.`
+            );
+          }
+          if (
+            parent.projectId !== rec.projectId ||
+            parent.blockId !== rec.blockId
+          ) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid hierarchy "projectTrackingRecords[${rec.id}]": parentRecordId "${parent.id}" belongs to a different block or project.`
+            );
+          }
+        }
+        if (rec.metadata?.isCorrection === true) {
+          const targetLogId =
+            typeof rec.metadata.compensatesRecordId === 'string'
+              ? rec.metadata.compensatesRecordId.trim()
+              : '';
+          if (targetLogId && targetLogId === rec.id) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Compensating correction "${rec.id}" cannot reference itself.`
+            );
+          }
+          if (targetLogId) {
+            const targetLog = stagedRecordsById.get(targetLogId);
+            if (
+              !targetLog ||
+              targetLog.projectId !== rec.projectId ||
+              targetLog.blockId !== rec.blockId
+            ) {
+              throw new BackupValidationError(
+                'invalid_payload',
+                `Compensating correction "${rec.id}" references missing or cross-block log "${targetLogId}".`
+              );
+            }
+          }
+        }
+      }
+
+      // Cycle detection & topological ordering (parents before children, target logs before corrections)
+      const visitState = new Map<string, 'visiting' | 'visited'>();
+      const orderedRecords: SharedProjectTrackingRecord[] = [];
+      const visitRecord = (rec: SharedProjectTrackingRecord): void => {
+        const state = visitState.get(rec.id);
+        if (state === 'visited') return;
+        if (state === 'visiting') {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Cycle detected in projectTrackingRecords hierarchy involving "${rec.id}".`
+          );
+        }
+        visitState.set(rec.id, 'visiting');
+        if (rec.parentRecordId !== undefined) {
+          const parent = stagedRecordsById.get(rec.parentRecordId);
+          if (parent) visitRecord(parent);
+        }
+        if (rec.metadata?.isCorrection === true) {
+          const targetId =
+            typeof rec.metadata.compensatesRecordId === 'string'
+              ? rec.metadata.compensatesRecordId.trim()
+              : '';
+          if (targetId) {
+            const targetLog = stagedRecordsById.get(targetId);
+            if (targetLog) visitRecord(targetLog);
+          }
+        }
+        visitState.set(rec.id, 'visited');
+        orderedRecords.push(rec);
+      };
+      for (const rec of stagedRecords) {
+        visitRecord(rec);
+      }
+
+      const acceptedRecordsByBlock = new Map<
+        string,
+        SharedProjectTrackingRecord[]
+      >();
+      for (const rec of orderedRecords) {
+        const blk = stagedBlocksById.get(rec.blockId)!;
+        const existingBlockRecords =
+          acceptedRecordsByBlock.get(rec.blockId) ?? [];
+        try {
+          validateRecord(rec, {
+            block: blk,
+            existingBlockRecords,
+            isNew: true,
+          });
+        } catch (err) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            err instanceof ProjectValidationError
+              ? err.message
+              : `Invalid project tracking record "${rec.id}".`
+          );
+        }
+        existingBlockRecords.push(rec);
+        acceptedRecordsByBlock.set(rec.blockId, existingBlockRecords);
+      }
+      const validatedProjectTrackingRecords = stagedRecords;
 
       // 8. Notes (preserve full canonical + Web/Flutter metadata; clear dangling Tier-2 projectId/goalId)
       const noteSeenIds = new Set<string>();
@@ -2942,6 +3657,8 @@ export class SharedStateBridge {
         tasks: validatedTasks,
         notes: validatedNotes,
         projects: validatedProjects,
+        projectTrackingBlocks: validatedProjectTrackingBlocks,
+        projectTrackingRecords: validatedProjectTrackingRecords,
         goals: validatedGoals,
         inboxItems: validatedInboxItems,
         calendarEvents: validatedCalendarEvents,
@@ -3098,7 +3815,7 @@ export class SharedStateBridge {
         localStorage.setItem('daywell_parties', JSON.stringify(partyRes.cleaned));
       }
 
-      // 7. Projects, Goals & Inbox Items
+      // 7. Projects, ProjectTrackingBlocks, ProjectTrackingRecords, Goals & Inbox Items
       let projectsCount = 0;
       const savedProjects = localStorage.getItem(this.PROJECTS_STORAGE_KEY);
       const projectRes = filterSeedArray<any>(savedProjects, KNOWN_SEED_IDS.projects);
@@ -3106,6 +3823,51 @@ export class SharedStateBridge {
         purgedCount += projectRes.removed;
         projectsCount = projectRes.cleaned.length;
         localStorage.setItem(this.PROJECTS_STORAGE_KEY, JSON.stringify(projectRes.cleaned));
+      }
+
+      const seedProjectIds = KNOWN_SEED_IDS.projects as readonly string[];
+      const savedProjectRecords = localStorage.getItem(
+        this.PROJECT_TRACKING_RECORDS_STORAGE_KEY
+      );
+      let projectRecordsExist = false;
+      let cleanedProjectRecords: any[] = [];
+      if (savedProjectRecords !== null) {
+        try {
+          const parsedRecs = JSON.parse(savedProjectRecords);
+          if (Array.isArray(parsedRecs)) {
+            projectRecordsExist = true;
+            cleanedProjectRecords = parsedRecs.filter(
+              (r: any) => !seedProjectIds.includes(r?.projectId)
+            );
+            purgedCount += parsedRecs.length - cleanedProjectRecords.length;
+            localStorage.setItem(
+              this.PROJECT_TRACKING_RECORDS_STORAGE_KEY,
+              JSON.stringify(cleanedProjectRecords)
+            );
+          }
+        } catch {}
+      }
+
+      const savedProjectBlocks = localStorage.getItem(
+        this.PROJECT_TRACKING_BLOCKS_STORAGE_KEY
+      );
+      let projectBlocksExist = false;
+      let cleanedProjectBlocks: any[] = [];
+      if (savedProjectBlocks !== null) {
+        try {
+          const parsedBlocks = JSON.parse(savedProjectBlocks);
+          if (Array.isArray(parsedBlocks)) {
+            projectBlocksExist = true;
+            cleanedProjectBlocks = parsedBlocks.filter(
+              (b: any) => !seedProjectIds.includes(b?.projectId)
+            );
+            purgedCount += parsedBlocks.length - cleanedProjectBlocks.length;
+            localStorage.setItem(
+              this.PROJECT_TRACKING_BLOCKS_STORAGE_KEY,
+              JSON.stringify(cleanedProjectBlocks)
+            );
+          }
+        } catch {}
       }
 
       let goalsCount = 0;
@@ -3267,6 +4029,28 @@ export class SharedStateBridge {
                 projectsCount = cleanedProjects.length;
               }
               parsed.projects = projectRes.exists ? projectRes.cleaned : cleanedProjects;
+            }
+            if (Array.isArray(parsed.projectTrackingRecords)) {
+              const cRecs = parsed.projectTrackingRecords.filter(
+                (r: any) => !seedProjectIds.includes(r?.projectId)
+              );
+              if (!projectRecordsExist) {
+                purgedCount += parsed.projectTrackingRecords.length - cRecs.length;
+              }
+              parsed.projectTrackingRecords = projectRecordsExist
+                ? cleanedProjectRecords
+                : cRecs;
+            }
+            if (Array.isArray(parsed.projectTrackingBlocks)) {
+              const cBlocks = parsed.projectTrackingBlocks.filter(
+                (b: any) => !seedProjectIds.includes(b?.projectId)
+              );
+              if (!projectBlocksExist) {
+                purgedCount += parsed.projectTrackingBlocks.length - cBlocks.length;
+              }
+              parsed.projectTrackingBlocks = projectBlocksExist
+                ? cleanedProjectBlocks
+                : cBlocks;
             }
             if (Array.isArray(parsed.goals)) {
               const cleanedGoals = parsed.goals.filter(

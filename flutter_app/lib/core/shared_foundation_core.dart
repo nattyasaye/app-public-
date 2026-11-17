@@ -245,6 +245,44 @@ class SharedBusinessRules {
   }
 }
 
+class SharedProjectRules {
+  static const List<String> statuses = ['active', 'completed', 'on_hold'];
+  static const List<String> blockTypes = [
+    'counter',
+    'grouped_list',
+    'checklist',
+    'schedule',
+  ];
+  static const List<String> recordTypes = [
+    'group',
+    'grouped_item',
+    'checklist_item',
+    'schedule_item',
+    'progress_log',
+  ];
+  static const List<String> customFieldTypes = [
+    'text',
+    'number',
+    'date',
+    'boolean',
+    'select',
+  ];
+  static const int maxBlocksPerProject = 32;
+  static const int maxCustomFieldDefinitions = 24;
+  static const int maxCustomFieldSelectOptions = 50;
+  static const int maxCustomFieldIdLength = 64;
+  static const int maxCustomFieldTextLength = 1000;
+  static const int maxHierarchyDepth = 3;
+  static const bool appendOnlyProgressLogs = true;
+  static const bool allowCompensatingCorrections = true;
+  static const bool allowMultipleIndependentMetrics = true;
+  static const bool disallowImplicitMetricAveraging = true;
+  static const bool requiresExplicitPrimaryBlockForOverallPercent = true;
+  static const bool requirePositiveProgressLogDelta = true;
+  static const bool preventDuplicateRollupLogging = true;
+  static const bool enforceParentChildOwnership = true;
+}
+
 class KnownSeedIds {
   static const Set<String> accounts = {
     'acc-cbe',

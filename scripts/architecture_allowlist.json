@@ -75,6 +75,14 @@
       "adrOrDoc": "docs/architecture/module-boundaries.md"
     },
     {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/repositories/projects_repository.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager instantiates DriftProjectsRepository for ProjectsController.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
       "source": "flutter_app/lib/ui/shell/daywell_shell_status_view.dart",
       "target": "flutter_app/lib/data/database/raw_database_recovery_exporter.dart",
       "rule": "flutter-ui-no-data",

@@ -23,14 +23,14 @@ Daywell maintains two test harnesses (`npm` / `tsx` for Shared Foundation & Web 
 - **Runner:** `npm test` → `tsx --test src/domain/*.test.ts src/domain/date/*.test.ts` ([`package.json`](../../package.json))
 - **Foundation Freshness & Contract Gate:** `npm run check-foundation` → `node scripts/sync_foundation.mjs --check` (non-mutating freshness, 5-file JSON schema validation, Git-diffed `ADR-007` baseline non-regression + accepted-ADR validation, and `AppDatabase.schemaVersion` guard)
 - **Architecture Boundary Gate:** `npm run check-architecture` → `node scripts/check_architecture_boundaries.mjs` (TS/Dart layer imports, narrow allowlist manifest, `pubspec.yaml` asset isolation, and direct Web domain browser-global checks)
-- **Migration Compatibility Gate:** `npm run check-migrations` → `node scripts/check_migration_compatibility.mjs` (static verification of `AppDatabase.schemaVersion >= 7`, explicit fail-closed `if (from > to) { throw ...; }` guard at the top of `onUpgrade`, absence of nonexistent Drift `onDowngrade`, ascending `from < 2..7` + sequential upgrade steps, forbidden `fallbackToDestructiveMigration`, and required delegates)
+- **Migration Compatibility Gate:** `npm run check-migrations` → `node scripts/check_migration_compatibility.mjs` (static verification of `AppDatabase.schemaVersion >= 9`, explicit fail-closed `if (from > to) { throw ...; }` guard at the top of `onUpgrade`, absence of nonexistent Drift `onDowngrade`, ascending `from < 2..9` + sequential upgrade steps, forbidden `fallbackToDestructiveMigration`, and required delegates)
 - **UI Consistency & Design-Token Gate:** `npm run check-ui` → `node scripts/check_ui_consistency.mjs` (verifies `design_tokens.json` parity across `src/styles/daywellTokens.css`, `src/domain/sharedFoundation.ts`, `flutter_app/lib/core/shared_foundation.dart`, and `src/index.css`; enforces zero hardcoded hex literals in Web UI; blocks raw `Color(0x...)` and unallowlisted/expanding `Colors.*` in Flutter UI via `scripts/ui_consistency_allowlist.json`; verifies 16-family shared UI primitive parity between `flutter_app/lib/ui/widgets/` and `src/components/ui/`)
 - **Typecheck & Verification Lint:** `npm run lint` → `npm run check-foundation && npm run check-architecture && npm run check-migrations && npm run check-ui && tsc --noEmit` (or `npx tsc --noEmit` for TypeScript-only check)
-- **Last Locally Verified Run (Android APK Release Signing & Update Hardening):**
-  - `npm test`: **252 / 252 tests passing** across **37 suites** (`0` failures, `0` skipped)
-  - `npm run lint`: **0 errors** (`check-foundation` + `check-architecture` + `check-migrations` + `check-ui` + `tsc --noEmit`, exit code `0`)
+- **Last Locally Verified Run (Pre-Stage-1 Android APK Release Signing & Update Hardening; re-run in Projects Stage 1):**
+  - `npm test`: Previously **252 / 252 tests passing** across **37 suites**; expanded in Projects Stage 1 with `src/domain/projectsStage1.test.ts` (**25** TS test files total).
+  - `npm run lint`: **0 errors** (`check-foundation` + `check-architecture` + `check-migrations` + `check-ui` + `tsc --noEmit`, exit code `0`).
 
-### Inventory of 24 TypeScript Test Files (`src/domain/` & `src/domain/date/`)
+### Inventory of 25 TypeScript Test Files (`src/domain/` & `src/domain/date/`)
 
 | Focus Area | Verified Test Files |
 | :--- | :--- |
@@ -38,7 +38,7 @@ Daywell maintains two test harnesses (`npm` / `tsx` for Shared Foundation & Web 
 | **SQLite Schema & Migration Contracts** | `src/domain/date/sqliteMigrationVerification.test.ts`, `src/domain/androidUpdateDataPreservation.test.ts`, `src/domain/stage2CleanInitialization.test.ts`, `src/domain/stage3BuildBoundarySeparation.test.ts`, `src/domain/stage4Contracts.test.ts` |
 | **Shared Foundation, UI Governance & Portability Parity** | `src/domain/sharedFoundationParity.test.ts`, `src/domain/uiConsistencyGovernance.test.ts`, `src/domain/stage32FoundationGovernance.test.ts`, `src/domain/stage33GovernanceEnforcement.test.ts`, `src/domain/stage342BackupValidation.test.ts`, `src/domain/sharedStateBridge.test.ts`, `src/domain/coreModulesIntegration.test.ts` |
 | **Finance v6/v7 Double-Entry & Stage 2.2** | `src/domain/doubleEntryFinance.test.ts`, `src/domain/financeV7WebParity.test.ts`, `src/domain/stage22CurrencyIsolation.test.ts`, `src/domain/batch5FinanceFoundation.test.ts`, `src/domain/batch6FinanceIntegrity.test.ts`, `src/domain/batch7FinanceArchitecture.test.ts` |
-| **Navigation, Tasks, Notes & Inbox Architecture** | `src/domain/batch1NavigationFoundation.test.ts`, `src/domain/batch2FormsInputsNavigation.test.ts`, `src/domain/batch8TasksArchitecture.test.ts`, `src/domain/batch9NotesInboxArchitecture.test.ts`, `src/domain/batch10Stage2Consolidation.test.ts` |
+| **Navigation, Tasks, Projects, Notes & Inbox Architecture** | `src/domain/batch1NavigationFoundation.test.ts`, `src/domain/batch2FormsInputsNavigation.test.ts`, `src/domain/batch8TasksArchitecture.test.ts`, `src/domain/projectsStage1.test.ts`, `src/domain/batch9NotesInboxArchitecture.test.ts`, `src/domain/batch10Stage2Consolidation.test.ts` |
 
 ---
 
@@ -53,7 +53,7 @@ Because Flutter/Dart is not installed in the local workspace container, Dart tes
   4. `flutter analyze`
   5. `flutter test`
 
-### Inventory of 29 Flutter Test Files (`flutter_app/test/`)
+### Inventory of 30 Flutter Test Files (`flutter_app/test/`)
 
 | Focus Area | Verified Test Files (`*_test.dart`) |
 | :--- | :--- |
@@ -61,7 +61,7 @@ Because Flutter/Dart is not installed in the local workspace container, Dart tes
 | **Theme, Shell & Shared UI Widgets** | `daywell_theme_test.dart`, `daywell_shared_primitives_test.dart`, `daywell_shared_patterns_test.dart`, `daywell_shell_test.dart`, `dashboard_view_test.dart` |
 | **Database Migrations & Consolidation** | `database_migration_test.dart`, `stage2_consolidation_test.dart` |
 | **Finance v6 / v7 / Stage 4 / Stage 2.2** | `financial_engine_test.dart`, `double_entry_finance_test.dart`, `finance_contracts_v6_test.dart`, `finance_engine_v6_test.dart`, `finance_v6_migration_test.dart`, `finance_repository_test.dart`, `finance_controller_test.dart`, `finance_v7_domain_test.dart`, `finance_v7_migration_test.dart`, `finance_v7_stage416_test.dart`, `stage4_finance_test.dart` |
-| **Tasks, Projects, Notes, Inbox, Search, Notifications & Calendar** | `task_and_project_test.dart`, `inbox_repository_test.dart`, `notes_inbox_architecture_test.dart`, `local_search_test.dart`, `stage5_notes_notifications_calendar_test.dart` |
+| **Tasks, Projects, Notes, Inbox, Search, Notifications & Calendar** | `task_and_project_test.dart`, `projects_stage1_test.dart`, `inbox_repository_test.dart`, `notes_inbox_architecture_test.dart`, `local_search_test.dart`, `stage5_notes_notifications_calendar_test.dart` |
 | **Encrypted Backup, Version Bounds & Restore** | `stage6_backup_restore_test.dart`, `stage342_backup_snapshot_validation_test.dart`, `stage344_snapshot_fidelity_restore_test.dart` |
 | **Test Helpers** | `flutter_app/test/support/` |
 

@@ -656,7 +656,7 @@ class DatabasePersistenceCoordinator {
   /// Validates canonical snapshot structure and version bounds before any
   /// destructive database operation occurs.
   ///
-  /// Returns the resolved canonical integer version (`4..8`), preserving the
+  /// Returns the resolved canonical integer version (`4..9`), preserving the
   /// documented omitted-version legacy default (`5`) only when neither
   /// `schemaVersion` nor `version` is present in [rawSnapshot].
   static int validateCanonicalSnapshot(
@@ -1245,6 +1245,431 @@ class DatabasePersistenceCoordinator {
         ),
       );
     }
+    final targetTaskIds = <String>{...existingTaskIds, ...taskSeenIds};
+
+    // 7b. ProjectTrackingBlocks (Tier 1 required FK: projectId, two-pass rollup check)
+    final rawProjectBlocks = listOf('projectTrackingBlocks');
+    final blockSeenIds = <String>{};
+    final stagedBlocks = <({
+      int index,
+      ProjectTrackingBlockEntity entity,
+      bool isNew,
+    })>[];
+    final targetBlockProjectsById = <String, String>{
+      ...existingProjectBlockProjectsById,
+    };
+    final combinedBlocksById = <String, ProjectTrackingBlockEntity>{
+      ...existingProjectBlocksById,
+    };
+
+    for (var i = 0; i < rawProjectBlocks.length; i++) {
+      final b = rawProjectBlocks[i];
+      final ctx = 'projectTrackingBlocks[$i]';
+      final id = _reqUniqueId(b, 'projectTrackingBlocks', i, blockSeenIds);
+      final projectId = _reqString(b, 'projectId', ctx).trim();
+      if (!targetProjectIds.contains(projectId)) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid foreign key "$ctx.projectId": project "$projectId" does not exist.',
+        );
+      }
+      final existingOwnerProject = existingProjectBlockProjectsById[id];
+      if (!clearExisting &&
+          existingOwnerProject != null &&
+          existingOwnerProject != projectId) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Cannot move tracking block "$id" from project "$existingOwnerProject" to "$projectId" during snapshot merge.',
+        );
+      }
+      final blockTypeWire = _reqEnum(b, 'blockType', _projectBlockTypes, ctx);
+      final existingBlock = existingProjectBlocksById[id];
+      if (!clearExisting &&
+          existingBlock != null &&
+          existingBlock.blockType.wireValue != blockTypeWire) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Cannot change blockType on existing tracking block "$id" during snapshot merge.',
+        );
+      }
+      final title = _reqString(b, 'title', ctx, maxLength: 200).trim();
+      final sortOrder = _optInt(b, 'sortOrder', ctx, min: 0) ?? 0;
+      final unitLabel = _optString(b, 'unitLabel', ctx, allowEmpty: false);
+      if (unitLabel != null && unitLabel.length > 64) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid field "$ctx.unitLabel": length exceeds maximum of 64 characters.',
+        );
+      }
+      final targetValue = _optDouble(b, 'targetValue', ctx, min: 0);
+      final dailyTargetValue = _optDouble(b, 'dailyTargetValue', ctx, min: 0);
+      final config = _optJsonMapFromKeys(
+        b,
+        const ['config', 'configJson'],
+        ctx,
+        'config',
+      );
+      final isArchived = _optBool(b, 'isArchived', ctx) ?? false;
+      final createdAt = _optInstantUtc(b, 'createdAt', ctx) ?? now;
+      final updatedAt = _optInstantUtc(b, 'updatedAt', ctx) ?? createdAt;
+
+      final entity = ProjectTrackingBlockEntity(
+        id: id,
+        projectId: projectId,
+        blockType: ProjectBlockType.fromWire(blockTypeWire),
+        title: title,
+        sortOrder: sortOrder,
+        unitLabel: unitLabel,
+        targetValue: targetValue,
+        dailyTargetValue: dailyTargetValue,
+        config: config,
+        isArchived: isArchived,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+      );
+      stagedBlocks.add((
+        index: i,
+        entity: entity,
+        isNew: !existingProjectBlockIds.contains(id),
+      ));
+      targetBlockProjectsById[id] = projectId;
+      combinedBlocksById[id] = entity;
+    }
+
+    bool isRollupCounterBlock(ProjectTrackingBlockEntity b) {
+      return b.blockType == ProjectBlockType.counter &&
+          CounterBlockConfig.fromMap(b.config).rollupSourceBlockId != null;
+    }
+
+    final combinedBlocksByProject =
+        <String, List<ProjectTrackingBlockEntity>>{};
+    for (final b in combinedBlocksById.values) {
+      combinedBlocksByProject.putIfAbsent(b.projectId, () => []).add(b);
+    }
+
+    void validateStagedBlock(
+      ({int index, ProjectTrackingBlockEntity entity, bool isNew}) item,
+    ) {
+      final b = item.entity;
+      final siblings = (combinedBlocksByProject[b.projectId] ??
+              const <ProjectTrackingBlockEntity>[])
+          .where((candidate) => candidate.id != b.id || !item.isNew)
+          .toList();
+      try {
+        ProjectValidationService.validateBlock(
+          b,
+          expectedProjectId: b.projectId,
+          projectBlocks: siblings,
+          isNew: item.isNew,
+        );
+      } on ProjectValidationException catch (e) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid "projectTrackingBlocks[${item.index}]": ${e.message}',
+        );
+      }
+    }
+
+    for (final item in stagedBlocks) {
+      if (!isRollupCounterBlock(item.entity)) {
+        validateStagedBlock(item);
+      }
+    }
+    for (final item in stagedBlocks) {
+      if (isRollupCounterBlock(item.entity)) {
+        validateStagedBlock(item);
+      }
+    }
+
+    final blockCompanions = <ProjectTrackingBlocksCompanion>[
+      for (final item in stagedBlocks)
+        ProjectTrackingBlocksCompanion.insert(
+          id: item.entity.id,
+          projectId: item.entity.projectId,
+          blockType: item.entity.blockType.wireValue,
+          title: item.entity.title,
+          sortOrder: Value(item.entity.sortOrder),
+          unitLabel: Value(item.entity.unitLabel),
+          targetValue: Value(item.entity.targetValue),
+          dailyTargetValue: Value(item.entity.dailyTargetValue),
+          configJson: Value(jsonEncode(item.entity.config)),
+          isArchived: Value(item.entity.isArchived),
+          createdAt: item.entity.createdAt,
+          updatedAt: item.entity.updatedAt,
+        ),
+    ];
+
+    // 7c. ProjectTrackingRecords (Tier 1: projectId/blockId/parentRecordId; Tier 2: linkedTaskId)
+    final rawProjectRecords = listOf('projectTrackingRecords');
+    final recordSeenIds = <String>{};
+    final existingRecordsById = <String, ProjectTrackingRecordEntity>{
+      for (final list in existingProjectRecordsByBlockId.values)
+        for (final rec in list) rec.id: rec,
+    };
+    final stagedRecords = <({
+      int index,
+      ProjectTrackingRecordEntity entity,
+      bool isNew,
+    })>[];
+
+    for (var i = 0; i < rawProjectRecords.length; i++) {
+      final r = rawProjectRecords[i];
+      final ctx = 'projectTrackingRecords[$i]';
+      final id = _reqUniqueId(r, 'projectTrackingRecords', i, recordSeenIds);
+      final projectId = _reqString(r, 'projectId', ctx).trim();
+      if (!targetProjectIds.contains(projectId)) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid foreign key "$ctx.projectId": project "$projectId" does not exist.',
+        );
+      }
+      final blockId = _reqString(r, 'blockId', ctx).trim();
+      final blockOwnerProjectId = targetBlockProjectsById[blockId];
+      if (blockOwnerProjectId == null) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid foreign key "$ctx.blockId": tracking block "$blockId" does not exist.',
+        );
+      }
+      if (blockOwnerProjectId != projectId) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid foreign key "$ctx.blockId": block "$blockId" belongs to project "$blockOwnerProjectId", not "$projectId".',
+        );
+      }
+
+      final recordTypeWire =
+          _reqEnum(r, 'recordType', _projectRecordTypes, ctx);
+      final recordType = ProjectRecordType.fromWire(recordTypeWire);
+      final parentRecordId =
+          _optString(r, 'parentRecordId', ctx, allowEmpty: false);
+      final rawTitle = _optString(r, 'title', ctx, allowEmpty: true)?.trim();
+      final title = (rawTitle != null && rawTitle.isNotEmpty) ? rawTitle : null;
+      if (title != null && title.length > 300) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid field "$ctx.title": length ${title.length} exceeds maximum of 300 characters.',
+        );
+      }
+      final sortOrder = _optInt(r, 'sortOrder', ctx, min: 0) ?? 0;
+      final targetValue = _optDouble(r, 'targetValue', ctx, min: 0);
+      final deltaValue = _optDouble(r, 'deltaValue', ctx);
+      final durationMinutes =
+          _optInt(r, 'durationMinutes', ctx, min: 0);
+      final isCompleted = _optBool(r, 'isCompleted', ctx) ?? false;
+      final completedAt = _optInstantUtc(r, 'completedAt', ctx);
+      final recordedDateIso = _optCanonicalDate(r, 'recordedDate', ctx);
+      final scheduledDateIso = _optCanonicalDate(r, 'scheduledDate', ctx);
+
+      final rawLinkedTaskId =
+          _optString(r, 'linkedTaskId', ctx, allowEmpty: false);
+      String? safeLinkedTaskId;
+      if (rawLinkedTaskId != null) {
+        if (targetTaskIds.contains(rawLinkedTaskId)) {
+          safeLinkedTaskId = rawLinkedTaskId;
+        } else {
+          diagnostics.add(
+            SnapshotImportDiagnostic(
+              code: 'ORPHANED_RECORD_TASK_CLEARED',
+              message:
+                  'Cleared missing linkedTaskId "$rawLinkedTaskId" on tracking record "$id".',
+              table: 'projectTrackingRecords',
+              recordId: id,
+              field: 'linkedTaskId',
+              severity: SnapshotDiagnosticSeverity.warning,
+            ),
+          );
+        }
+      }
+
+      final metadata = _optJsonMapFromKeys(
+        r,
+        const ['metadata', 'metadataJson'],
+        ctx,
+        'metadata',
+      );
+      final createdAt = _optInstantUtc(r, 'createdAt', ctx) ?? now;
+      final updatedAt = _optInstantUtc(r, 'updatedAt', ctx) ?? createdAt;
+
+      final entity = ProjectTrackingRecordEntity(
+        id: id,
+        projectId: projectId,
+        blockId: blockId,
+        parentRecordId: parentRecordId,
+        recordType: recordType,
+        title: title,
+        sortOrder: sortOrder,
+        targetValue: targetValue,
+        deltaValue: deltaValue,
+        durationMinutes: durationMinutes,
+        isCompleted: isCompleted,
+        completedAt: completedAt,
+        recordedDate: recordedDateIso != null
+            ? CalendarDate.tryParse(recordedDateIso)
+            : null,
+        scheduledDate: scheduledDateIso != null
+            ? CalendarDate.tryParse(scheduledDateIso)
+            : null,
+        linkedTaskId: safeLinkedTaskId,
+        metadata: metadata,
+        createdAt: createdAt,
+        updatedAt: updatedAt,
+      );
+
+      final existingRecord = existingRecordsById[id];
+      if (!clearExisting && existingRecord != null) {
+        if (existingRecord.projectId != entity.projectId ||
+            existingRecord.blockId != entity.blockId ||
+            existingRecord.recordType != entity.recordType) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Cannot change projectId, blockId, or recordType on existing tracking record "$id" during snapshot merge.',
+          );
+        }
+        if (existingRecord.recordType == ProjectRecordType.progressLog) {
+          final isSameLog = existingRecord.parentRecordId ==
+                  entity.parentRecordId &&
+              existingRecord.deltaValue == entity.deltaValue &&
+              existingRecord.recordedDate?.toIsoString() ==
+                  entity.recordedDate?.toIsoString() &&
+              jsonEncode(existingRecord.metadata) ==
+                  jsonEncode(entity.metadata);
+          if (!isSameLog) {
+            throw BackupValidationException(
+              BackupFailureKind.invalidPayload,
+              'Cannot mutate append-only progress_log "$id" during snapshot merge.',
+            );
+          }
+        }
+      }
+
+      stagedRecords.add((
+        index: i,
+        entity: entity,
+        isNew: !existingProjectRecordIds.contains(id),
+      ));
+    }
+
+    final stagedRecordsByBlock = <String,
+        List<({int index, ProjectTrackingRecordEntity entity, bool isNew})>>{};
+    for (final item in stagedRecords) {
+      stagedRecordsByBlock
+          .putIfAbsent(item.entity.blockId, () => [])
+          .add(item);
+    }
+
+    final orderedRecordEntities = <ProjectTrackingRecordEntity>[];
+    for (final entry in stagedRecordsByBlock.entries) {
+      final blockId = entry.key;
+      final blockEntity = combinedBlocksById[blockId]!;
+      final blockStaged = entry.value;
+
+      final combinedBlockRecordMap = <String, ProjectTrackingRecordEntity>{
+        for (final r
+            in (existingProjectRecordsByBlockId[blockId] ??
+                const <ProjectTrackingRecordEntity>[]))
+          r.id: r,
+        for (final item in blockStaged) item.entity.id: item.entity,
+      };
+
+      // Fail closed on missing/cross-block parentRecordId or parent cycles BEFORE topological sort.
+      for (final item in blockStaged) {
+        final rec = item.entity;
+        final visited = <String>{rec.id};
+        var parentId = rec.parentRecordId;
+        while (parentId != null) {
+          if (parentId == rec.id) {
+            throw BackupValidationException(
+              BackupFailureKind.invalidPayload,
+              'Tracking record "${rec.id}" cannot reference itself as parentRecordId.',
+            );
+          }
+          final parent = combinedBlockRecordMap[parentId];
+          if (parent == null) {
+            throw BackupValidationException(
+              BackupFailureKind.invalidPayload,
+              'Tracking record "${rec.id}" references missing or cross-block parentRecordId "$parentId".',
+            );
+          }
+          if (!visited.add(parent.id)) {
+            throw BackupValidationException(
+              BackupFailureKind.invalidPayload,
+              'Cycle detected in projectTrackingRecords parentRecordId hierarchy involving "${rec.id}".',
+            );
+          }
+          parentId = parent.parentRecordId;
+        }
+      }
+
+      final structural = _topologicalSortByParent<
+          ({int index, ProjectTrackingRecordEntity entity, bool isNew})>(
+        items: blockStaged
+            .where((x) => x.entity.recordType != ProjectRecordType.progressLog)
+            .toList(),
+        getId: (x) => x.entity.id,
+        getParentId: (x) => x.entity.parentRecordId,
+      );
+      final directLogs = blockStaged
+          .where((x) =>
+              x.entity.recordType == ProjectRecordType.progressLog &&
+              !x.entity.isCorrection)
+          .toList();
+      final correctionLogs = blockStaged
+          .where((x) =>
+              x.entity.recordType == ProjectRecordType.progressLog &&
+              x.entity.isCorrection)
+          .toList();
+
+      final runningRecordsMap = <String, ProjectTrackingRecordEntity>{
+        for (final r
+            in (existingProjectRecordsByBlockId[blockId] ??
+                const <ProjectTrackingRecordEntity>[]))
+          if (!blockStaged.any((s) => s.entity.id == r.id)) r.id: r,
+      };
+
+      for (final item in [...structural, ...directLogs, ...correctionLogs]) {
+        final rec = item.entity;
+        try {
+          ProjectValidationService.validateRecord(
+            rec,
+            block: blockEntity,
+            existingBlockRecords: runningRecordsMap.values.toList(),
+            isNew: item.isNew,
+          );
+        } on ProjectValidationException catch (e) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid "projectTrackingRecords[${item.index}]": ${e.message}',
+          );
+        }
+        runningRecordsMap[rec.id] = rec;
+        orderedRecordEntities.add(rec);
+      }
+    }
+
+    final recordCompanions = <ProjectTrackingRecordsCompanion>[
+      for (final r in orderedRecordEntities)
+        ProjectTrackingRecordsCompanion.insert(
+          id: r.id,
+          projectId: r.projectId,
+          blockId: r.blockId,
+          parentRecordId: Value(r.parentRecordId),
+          recordType: r.recordType.wireValue,
+          title: Value(r.title),
+          sortOrder: Value(r.sortOrder),
+          targetValue: Value(r.targetValue),
+          deltaValue: Value(r.deltaValue),
+          durationMinutes: Value(r.durationMinutes),
+          isCompleted: Value(r.isCompleted),
+          completedAt: Value(r.completedAt),
+          recordedDate: Value(r.recordedDate?.toIsoString()),
+          scheduledDate: Value(r.scheduledDate?.toIsoString()),
+          linkedTaskId: Value(r.linkedTaskId),
+          metadataJson: Value(jsonEncode(r.metadata)),
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+        ),
+    ];
 
     // 8. Notes (Tier 2: projectId, goalId)
     final rawNotes = listOf('notes');
@@ -2373,7 +2798,6 @@ class DatabasePersistenceCoordinator {
       );
     } else {
       final rawReminders = listOf('reminders');
-      final targetTaskIds = <String>{...existingTaskIds, ...taskSeenIds};
       final targetEventIds = <String>{
         ...existingCalendarEventIds,
         ...eventSeenIds,
@@ -2527,6 +2951,8 @@ class DatabasePersistenceCoordinator {
       'parties': partyCompanions.length,
       'goals': goalCompanions.length,
       'projects': projectCompanions.length,
+      'projectTrackingBlocks': blockCompanions.length,
+      'projectTrackingRecords': recordCompanions.length,
       'milestones': milestoneCompanions.length,
       'tasks': taskCompanions.length,
       'notes': noteCompanions.length,
@@ -2556,6 +2982,8 @@ class DatabasePersistenceCoordinator {
       parties: partyCompanions,
       goals: goalCompanions,
       projects: projectCompanions,
+      projectTrackingBlocks: blockCompanions,
+      projectTrackingRecords: recordCompanions,
       milestones: milestoneCompanions,
       tasks: taskCompanions,
       notes: noteCompanions,
@@ -2635,6 +3063,10 @@ class DatabasePersistenceCoordinator {
       final liveParties = await _db.select(_db.partiesTable).get();
       final liveGoals = await _db.select(_db.goals).get();
       final liveProjects = await _db.select(_db.projects).get();
+      final liveProjectBlocks =
+          await _db.select(_db.projectTrackingBlocks).get();
+      final liveProjectRecords =
+          await _db.select(_db.projectTrackingRecords).get();
       final liveMilestones = await _db.select(_db.milestones).get();
       final liveTransactions =
           await _db.select(_db.financialTransactions).get();
@@ -2648,6 +3080,55 @@ class DatabasePersistenceCoordinator {
       final liveBudgets = await _db.select(_db.budgetsTable).get();
       final liveSettings = await _db.select(_db.appSettings).get();
 
+      final liveBlockEntitiesById = <String, ProjectTrackingBlockEntity>{};
+      final liveBlockProjectsById = <String, String>{};
+      for (final row in liveProjectBlocks) {
+        liveBlockProjectsById[row.id] = row.projectId;
+        liveBlockEntitiesById[row.id] = ProjectTrackingBlockEntity(
+          id: row.id,
+          projectId: row.projectId,
+          blockType: ProjectBlockType.fromWire(row.blockType),
+          title: row.title,
+          sortOrder: row.sortOrder,
+          unitLabel: row.unitLabel,
+          targetValue: row.targetValue,
+          dailyTargetValue: row.dailyTargetValue,
+          config: _decodeJsonMap(row.configJson),
+          isArchived: row.isArchived,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        );
+      }
+
+      final liveRecordsByBlockId = <String, List<ProjectTrackingRecordEntity>>{};
+      for (final row in liveProjectRecords) {
+        final rec = ProjectTrackingRecordEntity(
+          id: row.id,
+          projectId: row.projectId,
+          blockId: row.blockId,
+          parentRecordId: row.parentRecordId,
+          recordType: ProjectRecordType.fromWire(row.recordType),
+          title: row.title,
+          sortOrder: row.sortOrder,
+          targetValue: row.targetValue,
+          deltaValue: row.deltaValue,
+          durationMinutes: row.durationMinutes,
+          isCompleted: row.isCompleted,
+          completedAt: row.completedAt,
+          recordedDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
+            row.recordedDate,
+          ),
+          scheduledDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
+            row.scheduledDate,
+          ),
+          linkedTaskId: row.linkedTaskId,
+          metadata: _decodeJsonMap(row.metadataJson),
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        );
+        liveRecordsByBlockId.putIfAbsent(row.blockId, () => []).add(rec);
+      }
+
       plan = validateAndPrepareSnapshot(
         stateMap,
         fallbackTimestampUtc: now,
@@ -2657,6 +3138,11 @@ class DatabasePersistenceCoordinator {
         existingPartyIds: {for (final p in liveParties) p.id},
         existingGoalIds: {for (final g in liveGoals) g.id},
         existingProjectIds: {for (final p in liveProjects) p.id},
+        existingProjectBlockIds: {for (final b in liveProjectBlocks) b.id},
+        existingProjectRecordIds: {for (final r in liveProjectRecords) r.id},
+        existingProjectBlockProjectsById: liveBlockProjectsById,
+        existingProjectBlocksById: liveBlockEntitiesById,
+        existingProjectRecordsByBlockId: liveRecordsByBlockId,
         existingMilestoneIds: {for (final m in liveMilestones) m.id},
         existingTransactionIds: {for (final t in liveTransactions) t.id},
         existingEntryIds: {for (final e in liveEntries) e.id},
@@ -2702,6 +3188,9 @@ class DatabasePersistenceCoordinator {
         await _db.customStatement(
           'UPDATE debts_table SET write_off_entry_id = NULL;',
         );
+        await _db.customStatement(
+          'UPDATE project_tracking_records SET parent_record_id = NULL;',
+        );
 
         await _db.delete(_db.commitmentSettlementsTable).go();
         await _db.delete(_db.recurringRulesTable).go();
@@ -2714,6 +3203,8 @@ class DatabasePersistenceCoordinator {
         await _db.delete(_db.journalEntriesTable).go();
         await _db.delete(_db.financialTransactions).go();
         await _db.delete(_db.reminders).go();
+        await _db.delete(_db.projectTrackingRecords).go();
+        await _db.delete(_db.projectTrackingBlocks).go();
         await _db.delete(_db.tasks).go();
         await _db.delete(_db.milestones).go();
         await _db.delete(_db.notes).go();
@@ -2746,7 +3237,7 @@ class DatabasePersistenceCoordinator {
         }
       }
 
-      // 1..20. Insert normalized entities in FK dependency order.
+      // 1..22. Insert normalized entities in FK dependency order.
       for (final row in plan.categories) {
         await _db.into(_db.financialCategories).insertOnConflictUpdate(row);
       }
@@ -2766,11 +3257,17 @@ class DatabasePersistenceCoordinator {
       for (final row in plan.projects) {
         await _db.into(_db.projects).insertOnConflictUpdate(row);
       }
+      for (final row in plan.projectTrackingBlocks) {
+        await _db.into(_db.projectTrackingBlocks).insertOnConflictUpdate(row);
+      }
       for (final row in plan.milestones) {
         await _db.into(_db.milestones).insertOnConflictUpdate(row);
       }
       for (final row in plan.tasks) {
         await _db.into(_db.tasks).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.projectTrackingRecords) {
+        await _db.into(_db.projectTrackingRecords).insertOnConflictUpdate(row);
       }
       for (final row in plan.notes) {
         await _db.into(_db.notes).insertOnConflictUpdate(row);
@@ -2827,7 +3324,7 @@ class DatabasePersistenceCoordinator {
         await _db.into(_db.appSettings).insertOnConflictUpdate(row);
       }
 
-      // 21. Upgrade / normalize v4..v8 snapshots deterministically to v8.
+      // 21. Upgrade / normalize v4..v9 snapshots deterministically to v9.
       if (plan.snapshotVersion < 6) {
         await V6LedgerMigrator.migrateDataInTransaction(_db);
         final report = await V7LedgerHardener.hardenAndAuditInTransaction(
@@ -3003,8 +3500,23 @@ class DatabasePersistenceCoordinator {
             ..where((tbl) => tbl.id.isIn(KnownSeedIds.events.toList())))
           .go();
 
+      final seedProjectIds = KnownSeedIds.projects.toList();
+      if (seedProjectIds.isNotEmpty) {
+        await (_db.update(_db.projectTrackingRecords)
+              ..where((tbl) => tbl.projectId.isIn(seedProjectIds)))
+            .write(
+          const ProjectTrackingRecordsCompanion(parentRecordId: Value(null)),
+        );
+        purgedCount += await (_db.delete(_db.projectTrackingRecords)
+              ..where((tbl) => tbl.projectId.isIn(seedProjectIds)))
+            .go();
+        purgedCount += await (_db.delete(_db.projectTrackingBlocks)
+              ..where((tbl) => tbl.projectId.isIn(seedProjectIds)))
+            .go();
+      }
+
       purgedCount += await (_db.delete(_db.projects)
-            ..where((tbl) => tbl.id.isIn(KnownSeedIds.projects.toList())))
+            ..where((tbl) => tbl.id.isIn(seedProjectIds)))
           .go();
 
       // Update setup state based on remaining non-system user accounts
@@ -3447,6 +3959,60 @@ class DatabasePersistenceCoordinator {
     return result;
   }
 
+  static double? _optDouble(
+    Map<String, dynamic> map,
+    String field,
+    String ctx, {
+    double? min,
+  }) {
+    if (!map.containsKey(field) || map[field] == null) return null;
+    final val = map[field];
+    if (val is! num || !val.isFinite) {
+      throw BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Invalid field "$ctx.$field": expected a finite number or null.',
+      );
+    }
+    final result = val.toDouble();
+    if (min != null && result < min) {
+      throw BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Invalid field "$ctx.$field": value $result must be >= $min.',
+      );
+    }
+    return result;
+  }
+
+  static Map<String, dynamic> _optJsonMapFromKeys(
+    Map<String, dynamic> map,
+    List<String> keys,
+    String ctx,
+    String canonicalFieldName,
+  ) {
+    for (final key in keys) {
+      if (!map.containsKey(key) || map[key] == null) continue;
+      final val = map[key];
+      if (val is Map) {
+        return val.map((k, v) => MapEntry(k.toString(), v));
+      }
+      if (val is String) {
+        final trimmed = val.trim();
+        if (trimmed.isEmpty) return const <String, dynamic>{};
+        try {
+          final decoded = jsonDecode(trimmed);
+          if (decoded is Map) {
+            return decoded.map((k, v) => MapEntry(k.toString(), v));
+          }
+        } catch (_) {}
+      }
+      throw BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Invalid field "$ctx.$key": expected an object or JSON object string for "$canonicalFieldName".',
+      );
+    }
+    return const <String, dynamic>{};
+  }
+
   static List<dynamic> _decodeJsonList(String raw) {
     try {
       final decoded = jsonDecode(raw);
@@ -3458,5 +4024,17 @@ class DatabasePersistenceCoordinator {
 
   static List<String> _decodeStringList(String raw) {
     return _decodeJsonList(raw).map((e) => e.toString()).toList();
+  }
+
+  static Map<String, dynamic> _decodeJsonMap(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return decoded.map((k, v) => MapEntry(k.toString(), v));
+      }
+      return const <String, dynamic>{};
+    } catch (_) {
+      return const <String, dynamic>{};
+    }
   }
 }
