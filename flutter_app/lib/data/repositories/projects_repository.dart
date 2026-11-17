@@ -270,8 +270,7 @@ class DriftProjectsRepository implements IProjectsRepository {
         isArchived: isArchived,
         updatedAt: EthiopiaClock.nowUtc(),
       );
-      await (_db.update(_db.projects)
-            ..where((tbl) => tbl.id.equals(projectId)))
+      await (_db.update(_db.projects)..where((tbl) => tbl.id.equals(projectId)))
           .write(
         ProjectsCompanion(
           isArchived: Value(isArchived),
@@ -297,8 +296,7 @@ class DriftProjectsRepository implements IProjectsRepository {
       await (_db.delete(_db.milestones)
             ..where((tbl) => tbl.projectId.equals(projectId)))
           .go();
-      await (_db.delete(_db.projects)
-            ..where((tbl) => tbl.id.equals(projectId)))
+      await (_db.delete(_db.projects)..where((tbl) => tbl.id.equals(projectId)))
           .go();
     });
   }

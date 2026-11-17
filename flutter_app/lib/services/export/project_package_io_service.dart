@@ -65,7 +65,8 @@ class ProjectPackageIoService {
           'Unexpected response from Android file picker.',
         );
       }
-      final filename = result['filename']?.toString() ?? 'project.daywellproject';
+      final filename =
+          result['filename']?.toString() ?? 'project.daywellproject';
       final content = result['content']?.toString();
       if (content == null) {
         throw const FormatException('Selected file returned no content.');

@@ -805,5 +805,4 @@ class _TasksViewState extends State<TasksView>
       ),
     );
   }
-
 }

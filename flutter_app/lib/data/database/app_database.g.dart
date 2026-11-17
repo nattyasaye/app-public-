@@ -9044,10 +9044,8 @@ class $RemindersTable extends Reminders
           _titleMeta, title.isAcceptableOrUnknown(data['title']!, _titleMeta));
     }
     if (data.containsKey('channel_id')) {
-      context.handle(
-          _channelIdMeta,
-          channelId.isAcceptableOrUnknown(
-              data['channel_id']!, _channelIdMeta));
+      context.handle(_channelIdMeta,
+          channelId.isAcceptableOrUnknown(data['channel_id']!, _channelIdMeta));
     }
     if (data.containsKey('trigger_time_utc')) {
       context.handle(
@@ -9142,7 +9140,8 @@ class Reminder extends DataClass implements Insertable<Reminder> {
       id: Value(id),
       targetId: Value(targetId),
       targetType: Value(targetType),
-      title: title == null && nullToAbsent ? const Value.absent() : Value(title),
+      title:
+          title == null && nullToAbsent ? const Value.absent() : Value(title),
       channelId: channelId == null && nullToAbsent
           ? const Value.absent()
           : Value(channelId),

@@ -77,8 +77,8 @@ class ProjectDetailScreen extends StatelessWidget {
     final json = await projectsController.exportProjectPackageJson(project.id);
     if (!context.mounted) return;
     if (json == null) {
-      final err = projectsController.state.errorMessage ??
-          'Unable to export project.';
+      final err =
+          projectsController.state.errorMessage ?? 'Unable to export project.';
       projectsController.clearError();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Export failed: $err')),
@@ -128,10 +128,12 @@ class ProjectDetailScreen extends StatelessWidget {
           );
         }
 
-        final blocks = state.blocksForProject(project.id, includeArchived: true);
+        final blocks =
+            state.blocksForProject(project.id, includeArchived: true);
         final records = state.recordsForProject(project.id);
         final summary = state.summaryForProject(project.id);
-        final linkedTasks = (tasksController?.state.tasks ?? const <TaskEntity>[])
+        final linkedTasks = (tasksController?.state.tasks ??
+                const <TaskEntity>[])
             .where((t) => t.projectId == project.id && t.status != 'cancelled')
             .toList(growable: false);
 
@@ -209,7 +211,8 @@ class ProjectDetailScreen extends StatelessWidget {
                       const SizedBox(height: SharedDesignTokens.spacingCompact),
                     ],
                     DaywellCard(
-                      padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
+                      padding:
+                          const EdgeInsets.all(SharedDesignTokens.spacingMd),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -273,7 +276,8 @@ class ProjectDetailScreen extends StatelessWidget {
                           ],
                           if (project.goalId != null &&
                               project.goalId!.trim().isNotEmpty) ...[
-                            const SizedBox(height: SharedDesignTokens.spacingSm),
+                            const SizedBox(
+                                height: SharedDesignTokens.spacingSm),
                             Text(
                               'Linked Goal: ${project.goalId!}',
                               style: textTheme.bodySmall?.copyWith(
@@ -369,11 +373,11 @@ class ProjectDetailScreen extends StatelessWidget {
         primaryMetric.targetCompletedTotal ?? primaryMetric.loggedTotal;
     final overAmount = primaryMetric.overTargetAmount ?? 0.0;
     final overItems = primaryMetric.overTargetItemCount ?? 0;
-    final remaining = (primaryMetric.targetValue != null &&
-            primaryMetric.targetValue! > 0)
-        ? (primaryMetric.targetValue! - cappedCompleted)
-            .clamp(0.0, double.infinity)
-        : null;
+    final remaining =
+        (primaryMetric.targetValue != null && primaryMetric.targetValue! > 0)
+            ? (primaryMetric.targetValue! - cappedCompleted)
+                .clamp(0.0, double.infinity)
+            : null;
 
     return DaywellCard(
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),

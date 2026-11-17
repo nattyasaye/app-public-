@@ -209,8 +209,7 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
     final String firstPart;
     if (first.blockType == ProjectBlockType.checklist ||
         first.blockType == ProjectBlockType.schedule) {
-      firstPart =
-          '${first.title}: ${first.completedCount}/${first.totalCount}';
+      firstPart = '${first.title}: ${first.completedCount}/${first.totalCount}';
     } else if (first.targetValue != null) {
       final overNote = over > 0
           ? ' (${formatProjectNumber(first.loggedTotal)} sent, +${formatProjectNumber(over)} over)'
@@ -362,16 +361,16 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                       project.id,
                       includeArchived: false,
                     );
-                    final linkedActiveTasks = (widget
-                                .tasksController?.state.tasks ??
-                            const <TaskEntity>[])
-                        .where(
-                          (t) =>
-                              t.projectId == project.id &&
-                              !t.isCompleted &&
-                              t.status != 'cancelled',
-                        )
-                        .length;
+                    final linkedActiveTasks =
+                        (widget.tasksController?.state.tasks ??
+                                const <TaskEntity>[])
+                            .where(
+                              (t) =>
+                                  t.projectId == project.id &&
+                                  !t.isCompleted &&
+                                  t.status != 'cancelled',
+                            )
+                            .length;
                     final primaryPct = summary?.overallPercentage;
 
                     return DaywellCard(
@@ -404,7 +403,8 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                           ),
                           if (project.description != null &&
                               project.description!.trim().isNotEmpty) ...[
-                            const SizedBox(height: SharedDesignTokens.spacingXs),
+                            const SizedBox(
+                                height: SharedDesignTokens.spacingXs),
                             Text(
                               project.description!.trim(),
                               maxLines: 2,

@@ -13,7 +13,8 @@ enum ProjectBlockType {
     for (final value in values) {
       if (value.wireValue == raw) return value;
     }
-    throw ArgumentError.value(raw, 'blockType', 'Unsupported project block type');
+    throw ArgumentError.value(
+        raw, 'blockType', 'Unsupported project block type');
   }
 
   static ProjectBlockType? tryFromWire(String? raw) {
@@ -124,7 +125,8 @@ class ProjectCustomFieldsPayload {
     List<ProjectCustomFieldDefinition> definitions = const [],
     Map<String, Object?> values = const {},
     this.primaryBlockId,
-  })  : definitions = List<ProjectCustomFieldDefinition>.unmodifiable(definitions),
+  })  : definitions =
+            List<ProjectCustomFieldDefinition>.unmodifiable(definitions),
         values = Map<String, Object?>.unmodifiable(values);
 
   Map<String, dynamic> toJson() => {
@@ -190,8 +192,7 @@ class CounterBlockConfig {
   const CounterBlockConfig({
     this.rollupSourceBlockId,
     bool? allowDirectLogging,
-  }) : allowDirectLogging =
-            allowDirectLogging ?? (rollupSourceBlockId == null);
+  }) : allowDirectLogging = allowDirectLogging ?? (rollupSourceBlockId == null);
 
   Map<String, dynamic> toJson() => {
         if (rollupSourceBlockId != null)
@@ -234,10 +235,12 @@ class GroupedListBlockConfig {
 
   static GroupedListBlockConfig fromMap(Map<String, dynamic> raw) {
     return GroupedListBlockConfig(
-      showGroupTotals:
-          raw['showGroupTotals'] is bool ? raw['showGroupTotals'] as bool : true,
-      showDailyTotals:
-          raw['showDailyTotals'] is bool ? raw['showDailyTotals'] as bool : true,
+      showGroupTotals: raw['showGroupTotals'] is bool
+          ? raw['showGroupTotals'] as bool
+          : true,
+      showDailyTotals: raw['showDailyTotals'] is bool
+          ? raw['showDailyTotals'] as bool
+          : true,
       groupLabel: raw['groupLabel']?.toString(),
       itemLabel: raw['itemLabel']?.toString(),
     );
@@ -488,8 +491,7 @@ class ProjectTrackingRecordEntity {
           ? null
           : (durationMinutes ?? this.durationMinutes),
       isCompleted: isCompleted ?? this.isCompleted,
-      completedAt:
-          clearCompletedAt ? null : (completedAt ?? this.completedAt),
+      completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       recordedDate:
           clearRecordedDate ? null : (recordedDate ?? this.recordedDate),
       scheduledDate:

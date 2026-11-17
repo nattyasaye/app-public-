@@ -327,8 +327,8 @@ class ProjectValidationService {
           }
           final sourceBlock = sourceMatches.first;
           if (sourceBlock.blockType == ProjectBlockType.counter) {
-            final nested =
-                CounterBlockConfig.fromMap(sourceBlock.config).rollupSourceBlockId;
+            final nested = CounterBlockConfig.fromMap(sourceBlock.config)
+                .rollupSourceBlockId;
             if (nested != null) {
               throw ProjectValidationException(
                 'Counter block "${block.id}" cannot chain rollups through another rollup counter "$sourceId".',

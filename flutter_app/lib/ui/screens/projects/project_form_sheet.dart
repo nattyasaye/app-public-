@@ -425,10 +425,10 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
     final semantic = context.daywellColors;
     final textTheme = Theme.of(context).textTheme;
     final colorScheme = Theme.of(context).colorScheme;
-    final validPrimaryValue =
-        (_primaryDraftId != null && _blocks.any((b) => b.tempId == _primaryDraftId))
-            ? _primaryDraftId
-            : null;
+    final validPrimaryValue = (_primaryDraftId != null &&
+            _blocks.any((b) => b.tempId == _primaryDraftId))
+        ? _primaryDraftId
+        : null;
 
     return Padding(
       padding: EdgeInsets.only(
@@ -565,7 +565,8 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
             const SizedBox(height: SharedDesignTokens.spacingSm),
             if (_blocks.isEmpty)
               DaywellCard(
-                padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+                padding:
+                    const EdgeInsets.all(SharedDesignTokens.spacingCompact),
                 child: Row(
                   children: [
                     Icon(
@@ -622,7 +623,10 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
                                       if (_blocks[i].isRollup) 'Rollup',
                                       if (_blocks[i].targetValue != null)
                                         'Target ${formatProjectNumber(_blocks[i].targetValue!)}',
-                                      if (_blocks[i].unitLabel.trim().isNotEmpty)
+                                      if (_blocks[i]
+                                          .unitLabel
+                                          .trim()
+                                          .isNotEmpty)
                                         _blocks[i].unitLabel.trim(),
                                     ].join(' · '),
                                     style: textTheme.bodySmall?.copyWith(
@@ -675,7 +679,8 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
                       for (final b in _blocks)
                         DropdownMenuItem<String?>(
                           value: b.tempId,
-                          child: Text('${b.title} (${blockTypeLabel(b.blockType)})'),
+                          child: Text(
+                              '${b.title} (${blockTypeLabel(b.blockType)})'),
                         ),
                     ],
                     onChanged: (v) => setState(() => _primaryDraftId = v),
@@ -758,7 +763,8 @@ class _DatePickerTile extends StatelessWidget {
                 child: Text(
                   date == null
                       ? 'Not set'
-                      : SharedDateFormatter.formatDual(date!, useAmharic: false),
+                      : SharedDateFormatter.formatDual(date!,
+                          useAmharic: false),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: textTheme.bodySmall?.copyWith(
@@ -831,7 +837,8 @@ class _InlineBlockEditorDialogState extends State<_InlineBlockEditorDialog> {
   String? _rollupSourceTempId;
   bool _showGroupTotals = true;
   bool _showDailyTotals = true;
-  ScheduleItemCompletionRule _completionRule = ScheduleItemCompletionRule.manual;
+  ScheduleItemCompletionRule _completionRule =
+      ScheduleItemCompletionRule.manual;
   bool _trackActualDuration = true;
   String? _error;
 
@@ -912,7 +919,8 @@ class _InlineBlockEditorDialogState extends State<_InlineBlockEditorDialog> {
         _isRollup &&
         (_rollupSourceTempId == null ||
             !eligibleSources.any((s) => s.tempId == _rollupSourceTempId))) {
-      setState(() => _error = 'Select a source tracking block for this rollup.');
+      setState(
+          () => _error = 'Select a source tracking block for this rollup.');
       return;
     }
 

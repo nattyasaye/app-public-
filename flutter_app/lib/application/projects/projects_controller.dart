@@ -31,7 +31,8 @@ class ProjectsController extends ChangeNotifier {
     _state = _state.copyWith(isLoading: true, clearError: true);
     notifyListeners();
     try {
-      final loadedProjects = await _repository.getProjects(includeArchived: true);
+      final loadedProjects =
+          await _repository.getProjects(includeArchived: true);
       final nextBlocks = <String, List<ProjectTrackingBlockEntity>>{};
       final nextRecords = <String, List<ProjectTrackingRecordEntity>>{};
       final nextSummaries = <String, ProjectProgressSummary>{};
@@ -55,7 +56,8 @@ class ProjectsController extends ChangeNotifier {
 
       _state = _state.copyWith(
         projects: List<ProjectEntity>.unmodifiable(loadedProjects),
-        blocksByProject: Map<String, List<ProjectTrackingBlockEntity>>.unmodifiable(
+        blocksByProject:
+            Map<String, List<ProjectTrackingBlockEntity>>.unmodifiable(
           nextBlocks,
         ),
         recordsByProject:
@@ -82,7 +84,8 @@ class ProjectsController extends ChangeNotifier {
     CalendarDate? asOfDate,
   }) async {
     try {
-      final loadedProjects = await _repository.getProjects(includeArchived: true);
+      final loadedProjects =
+          await _repository.getProjects(includeArchived: true);
       final blocks = await _repository.getBlocksForProject(
         projectId,
         includeArchived: true,
@@ -93,12 +96,10 @@ class ProjectsController extends ChangeNotifier {
         asOfDate: asOfDate,
       );
 
-      final nextBlocks =
-          Map<String, List<ProjectTrackingBlockEntity>>.from(
+      final nextBlocks = Map<String, List<ProjectTrackingBlockEntity>>.from(
         _state.blocksByProject,
       )..[projectId] = List<ProjectTrackingBlockEntity>.unmodifiable(blocks);
-      final nextRecords =
-          Map<String, List<ProjectTrackingRecordEntity>>.from(
+      final nextRecords = Map<String, List<ProjectTrackingRecordEntity>>.from(
         _state.recordsByProject,
       )..[projectId] = List<ProjectTrackingRecordEntity>.unmodifiable(records);
       final nextSummaries =
@@ -211,13 +212,12 @@ class ProjectsController extends ChangeNotifier {
   Future<bool> deleteProject(String projectId) async {
     try {
       await _repository.deleteProject(projectId);
-      final loadedProjects = await _repository.getProjects(includeArchived: true);
-      final nextBlocks =
-          Map<String, List<ProjectTrackingBlockEntity>>.from(
+      final loadedProjects =
+          await _repository.getProjects(includeArchived: true);
+      final nextBlocks = Map<String, List<ProjectTrackingBlockEntity>>.from(
         _state.blocksByProject,
       )..remove(projectId);
-      final nextRecords =
-          Map<String, List<ProjectTrackingRecordEntity>>.from(
+      final nextRecords = Map<String, List<ProjectTrackingRecordEntity>>.from(
         _state.recordsByProject,
       )..remove(projectId);
       final nextSummaries =

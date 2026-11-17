@@ -1248,7 +1248,8 @@ void main() {
     );
   });
 
-  group('Stage 3.4.3 / Projects Stage 1 Forward Database Migration Safety (v9 Baseline)',
+  group(
+      'Stage 3.4.3 / Projects Stage 1 Forward Database Migration Safety (v9 Baseline)',
       () {
     late Directory tempDir;
 
@@ -2239,7 +2240,8 @@ void main() {
           isNotNull,
         );
         expect(
-          await DriftProjectsRepository(reopened).getProjectById('proj-post-v1'),
+          await DriftProjectsRepository(reopened)
+              .getProjectById('proj-post-v1'),
           isNotNull,
         );
         expect(
@@ -2316,7 +2318,8 @@ void main() {
           isNotNull,
         );
         expect(
-          await DriftProjectsRepository(reopened).getProjectById('proj-post-v2'),
+          await DriftProjectsRepository(reopened)
+              .getProjectById('proj-post-v2'),
           isNotNull,
         );
         await reopened.close();
@@ -2386,7 +2389,8 @@ void main() {
           isNotNull,
         );
         expect(
-          await DriftProjectsRepository(reopened).getProjectById('proj-post-v5'),
+          await DriftProjectsRepository(reopened)
+              .getProjectById('proj-post-v5'),
           isNotNull,
         );
         await reopened.close();
@@ -2426,7 +2430,8 @@ void main() {
         expect(projRow.read<String>('id'), 'proj-v6');
         expect(projRow.readNullable<String>('goal_id'), 'goal-v6');
         expect(projRow.read<String>('title'), 'v6 Project');
-        expect(projRow.readNullable<String>('description'), 'Legacy v6 roadmap');
+        expect(
+            projRow.readNullable<String>('description'), 'Legacy v6 roadmap');
         expect(projRow.read<String>('status'), 'on_hold');
         expect(projRow.readNullable<String>('target_date'), '2026-12-20');
         expect(projRow.read<int>('is_archived'), 0);

@@ -77,7 +77,8 @@ void main() {
         expect(newBlockIds.contains('fx-blk-counter'), isFalse);
 
         final rollup = prepared.trackingBlocks.firstWhere(
-          (b) => b.blockType == ProjectBlockType.counter &&
+          (b) =>
+              b.blockType == ProjectBlockType.counter &&
               b.config['rollupSourceBlockId'] != null,
         );
         final grouped = prepared.trackingBlocks.firstWhere(
@@ -136,7 +137,8 @@ void main() {
         final wrongFormatMap = Map<String, dynamic>.from(validMap)
           ..['formatId'] = 'not_a_project_pkg';
         expect(
-          () => ProjectPackageCodec.parseAndValidate(jsonEncode(wrongFormatMap)),
+          () =>
+              ProjectPackageCodec.parseAndValidate(jsonEncode(wrongFormatMap)),
           throwsA(
             isA<ProjectPackageException>().having(
               (e) => e.kind,
@@ -191,8 +193,10 @@ void main() {
           final controller = ProjectsController(repository: repo);
 
           final fixtureJson = readSharedFixtureJson();
-          final import1 = await controller.importProjectPackageJson(fixtureJson);
-          final import2 = await controller.importProjectPackageJson(fixtureJson);
+          final import1 =
+              await controller.importProjectPackageJson(fixtureJson);
+          final import2 =
+              await controller.importProjectPackageJson(fixtureJson);
 
           expect(import1, isNotNull);
           expect(import2, isNotNull);
@@ -280,9 +284,8 @@ void main() {
             ),
             isFalse,
           );
-          final exportedRec =
-              (refExportMap['trackingRecords'] as List).single
-                  as Map<String, dynamic>;
+          final exportedRec = (refExportMap['trackingRecords'] as List).single
+              as Map<String, dynamic>;
           expect(exportedRec.containsKey('linkedTaskId'), isFalse);
 
           controller.dispose();

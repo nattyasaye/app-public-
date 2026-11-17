@@ -740,8 +740,7 @@ class DatabasePersistenceCoordinator {
         const <String, String>{},
     Map<String, ProjectTrackingBlockEntity> existingProjectBlocksById =
         const <String, ProjectTrackingBlockEntity>{},
-    Map<String, List<ProjectTrackingRecordEntity>>
-        existingProjectRecordsByBlockId =
+    Map<String, List<ProjectTrackingRecordEntity>> existingProjectRecordsByBlockId =
         const <String, List<ProjectTrackingRecordEntity>>{},
     Set<String> existingMilestoneIds = const <String>{},
     Set<String> existingTransactionIds = const <String>{},
@@ -1414,8 +1413,7 @@ class DatabasePersistenceCoordinator {
       final sortOrder = _optInt(r, 'sortOrder', ctx, min: 0) ?? 0;
       final targetValue = _optDouble(r, 'targetValue', ctx, min: 0);
       final deltaValue = _optDouble(r, 'deltaValue', ctx);
-      final durationMinutes =
-          _optInt(r, 'durationMinutes', ctx, min: 0);
+      final durationMinutes = _optInt(r, 'durationMinutes', ctx, min: 0);
       final isCompleted = _optBool(r, 'isCompleted', ctx) ?? false;
       final completedAt = _optInstantUtc(r, 'completedAt', ctx);
       final recordedDateIso = _optCanonicalDate(r, 'recordedDate', ctx);
@@ -1487,13 +1485,13 @@ class DatabasePersistenceCoordinator {
           );
         }
         if (existingRecord.recordType == ProjectRecordType.progressLog) {
-          final isSameLog = existingRecord.parentRecordId ==
-                  entity.parentRecordId &&
-              existingRecord.deltaValue == entity.deltaValue &&
-              existingRecord.recordedDate?.toIsoString() ==
-                  entity.recordedDate?.toIsoString() &&
-              jsonEncode(existingRecord.metadata) ==
-                  jsonEncode(entity.metadata);
+          final isSameLog =
+              existingRecord.parentRecordId == entity.parentRecordId &&
+                  existingRecord.deltaValue == entity.deltaValue &&
+                  existingRecord.recordedDate?.toIsoString() ==
+                      entity.recordedDate?.toIsoString() &&
+                  jsonEncode(existingRecord.metadata) ==
+                      jsonEncode(entity.metadata);
           if (!isSameLog) {
             throw BackupValidationException(
               BackupFailureKind.invalidPayload,
@@ -1513,9 +1511,7 @@ class DatabasePersistenceCoordinator {
     final stagedRecordsByBlock = <String,
         List<({int index, ProjectTrackingRecordEntity entity, bool isNew})>>{};
     for (final item in stagedRecords) {
-      stagedRecordsByBlock
-          .putIfAbsent(item.entity.blockId, () => [])
-          .add(item);
+      stagedRecordsByBlock.putIfAbsent(item.entity.blockId, () => []).add(item);
     }
 
     final orderedRecordEntities = <ProjectTrackingRecordEntity>[];
@@ -1525,9 +1521,8 @@ class DatabasePersistenceCoordinator {
       final blockStaged = entry.value;
 
       final combinedBlockRecordMap = <String, ProjectTrackingRecordEntity>{
-        for (final r
-            in (existingProjectRecordsByBlockId[blockId] ??
-                const <ProjectTrackingRecordEntity>[]))
+        for (final r in (existingProjectRecordsByBlockId[blockId] ??
+            const <ProjectTrackingRecordEntity>[]))
           r.id: r,
         for (final item in blockStaged) item.entity.id: item.entity,
       };
@@ -1581,9 +1576,8 @@ class DatabasePersistenceCoordinator {
           .toList();
 
       final runningRecordsMap = <String, ProjectTrackingRecordEntity>{
-        for (final r
-            in (existingProjectRecordsByBlockId[blockId] ??
-                const <ProjectTrackingRecordEntity>[]))
+        for (final r in (existingProjectRecordsByBlockId[blockId] ??
+            const <ProjectTrackingRecordEntity>[]))
           if (!blockStaged.any((s) => s.entity.id == r.id)) r.id: r,
       };
 
@@ -3065,7 +3059,8 @@ class DatabasePersistenceCoordinator {
         );
       }
 
-      final liveRecordsByBlockId = <String, List<ProjectTrackingRecordEntity>>{};
+      final liveRecordsByBlockId =
+          <String, List<ProjectTrackingRecordEntity>>{};
       for (final row in liveProjectRecords) {
         final rec = ProjectTrackingRecordEntity(
           id: row.id,

@@ -92,9 +92,8 @@ class _ProjectTrackingBlocksWidgetState
   Future<void> _archiveBlock(ProjectTrackingBlockEntity block) async {
     await widget.projectsController.setBlockArchived(block.id, true);
     if (widget.project.customFields['primaryBlockId'] == block.id) {
-      final nextFields =
-          Map<String, dynamic>.from(widget.project.customFields)
-            ..remove('primaryBlockId');
+      final nextFields = Map<String, dynamic>.from(widget.project.customFields)
+        ..remove('primaryBlockId');
       await widget.projectsController.updateProject(
         widget.project.copyWith(
           customFields: nextFields,
@@ -347,7 +346,8 @@ class _ProjectTrackingBlocksWidgetState
                     return;
                   }
                   final durRaw = durationCtrl.text.trim();
-                  final parsedDur = durRaw.isEmpty ? null : int.tryParse(durRaw);
+                  final parsedDur =
+                      durRaw.isEmpty ? null : int.tryParse(durRaw);
                   if (durRaw.isNotEmpty &&
                       (parsedDur == null || parsedDur <= 0)) {
                     setDialogState(
@@ -726,8 +726,9 @@ class _ProjectTrackingBlocksWidgetState
         .where((r) => r.blockId == block.id)
         .toList()
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
-    final groups =
-        blockRecords.where((r) => r.recordType == ProjectRecordType.group).toList();
+    final groups = blockRecords
+        .where((r) => r.recordType == ProjectRecordType.group)
+        .toList();
     final items = blockRecords
         .where((r) => r.recordType == ProjectRecordType.groupedItem)
         .toList();
@@ -760,8 +761,8 @@ class _ProjectTrackingBlocksWidgetState
       final logged = metric?.itemTotals[item.id] ?? 0.0;
       final target = item.targetValue;
       final isOver = target != null && target > 0 && logged > target;
-      final isDone =
-          item.isCompleted || (target != null && target > 0 && logged >= target);
+      final isDone = item.isCompleted ||
+          (target != null && target > 0 && logged >= target);
       switch (statusFilter) {
         case 'remaining':
           return !isDone;
@@ -859,7 +860,8 @@ class _ProjectTrackingBlocksWidgetState
                 ('all', 'All (${items.length})'),
                 ('remaining', 'Remaining'),
                 ('done', 'Done'),
-                if (blockOverItems > 0) ('over', 'Over target ($blockOverItems)'),
+                if (blockOverItems > 0)
+                  ('over', 'Over target ($blockOverItems)'),
               ])
                 ChoiceChip(
                   label: Text(f.$2),
@@ -892,9 +894,8 @@ class _ProjectTrackingBlocksWidgetState
           for (final group in groups) ...[
             Builder(
               builder: (context) {
-                final rawChildren = items
-                    .where((it) => it.parentRecordId == group.id)
-                    .toList();
+                final rawChildren =
+                    items.where((it) => it.parentRecordId == group.id).toList();
                 final groupMatchesQuery = query.isNotEmpty &&
                     (group.title ?? '').toLowerCase().contains(query);
                 final childItems = rawChildren.where((it) {
@@ -920,7 +921,8 @@ class _ProjectTrackingBlocksWidgetState
                     groupMetric?.loggedTotal ??
                     0.0;
                 final groupOver = groupMetric?.overTargetAmount ?? 0.0;
-                final groupTarget = groupMetric?.targetValue ?? group.targetValue;
+                final groupTarget =
+                    groupMetric?.targetValue ?? group.targetValue;
                 final isCollapsed = query.isEmpty &&
                     statusFilter == 'all' &&
                     collapsedSet.contains(group.id);
@@ -1139,8 +1141,7 @@ class _ProjectTrackingBlocksWidgetState
                                       icon: Icons.delete_outline,
                                       tooltip: 'Delete item',
                                       isDestructive: true,
-                                      onPressed: () => widget
-                                          .projectsController
+                                      onPressed: () => widget.projectsController
                                           .deleteRecord(
                                         widget.project.id,
                                         item.id,
@@ -1180,8 +1181,8 @@ class _ProjectTrackingBlocksWidgetState
       ..sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
 
     final addCtrl = _checklistControllerFor(block.id);
-    final completed = metric?.completedCount ??
-        items.where((i) => i.isCompleted).length;
+    final completed =
+        metric?.completedCount ?? items.where((i) => i.isCompleted).length;
     final total = metric?.totalCount ?? items.length;
     final pct = total > 0 ? (completed / total) : 0.0;
 
@@ -1349,8 +1350,7 @@ class _ProjectTrackingBlocksWidgetState
                           deltaValue: item.deltaValue,
                           durationMinutes: item.durationMinutes,
                           isCompleted: nextDone,
-                          completedAt:
-                              nextDone ? EthiopiaClock.nowUtc() : null,
+                          completedAt: nextDone ? EthiopiaClock.nowUtc() : null,
                           recordedDate: item.recordedDate,
                           scheduledDate: item.scheduledDate,
                           linkedTaskId: item.linkedTaskId,
@@ -1553,11 +1553,10 @@ class _LogAmountDialogState extends State<_LogAmountDialog> {
             .fold<double>(0.0, (sum, r) => sum + (r.deltaValue ?? 0.0))
         : null;
     final itemTarget = widget.targetItem?.targetValue;
-    final remaining = (alreadyLogged != null &&
-            itemTarget != null &&
-            itemTarget > 0)
-        ? (itemTarget - alreadyLogged).clamp(0.0, double.infinity)
-        : null;
+    final remaining =
+        (alreadyLogged != null && itemTarget != null && itemTarget > 0)
+            ? (itemTarget - alreadyLogged).clamp(0.0, double.infinity)
+            : null;
     final enteredAmount = double.tryParse(_amountCtrl.text.trim());
     final willExceedTarget = !widget.isScheduleDuration &&
         alreadyLogged != null &&
@@ -1737,7 +1736,8 @@ class _StandaloneBlockDialogState extends State<_StandaloneBlockDialog> {
   String? _rollupSourceId;
   bool _showGroupTotals = true;
   bool _showDailyTotals = true;
-  ScheduleItemCompletionRule _completionRule = ScheduleItemCompletionRule.manual;
+  ScheduleItemCompletionRule _completionRule =
+      ScheduleItemCompletionRule.manual;
   bool _trackActualDuration = true;
   String? _error;
   bool _isSaving = false;
@@ -1816,10 +1816,8 @@ class _StandaloneBlockDialogState extends State<_StandaloneBlockDialog> {
 
     final eligibleSources = widget.siblingBlocks
         .where(
-          (s) =>
-              !(s.blockType == ProjectBlockType.counter &&
-                  CounterBlockConfig.fromMap(s.config).rollupSourceBlockId !=
-                      null),
+          (s) => !(s.blockType == ProjectBlockType.counter &&
+              CounterBlockConfig.fromMap(s.config).rollupSourceBlockId != null),
         )
         .toList();
 
@@ -1827,7 +1825,8 @@ class _StandaloneBlockDialogState extends State<_StandaloneBlockDialog> {
         _isRollup &&
         (_rollupSourceId == null ||
             !eligibleSources.any((s) => s.id == _rollupSourceId))) {
-      setState(() => _error = 'Select a source tracking block for this rollup.');
+      setState(
+          () => _error = 'Select a source tracking block for this rollup.');
       return;
     }
 
@@ -1921,10 +1920,8 @@ class _StandaloneBlockDialogState extends State<_StandaloneBlockDialog> {
   Widget build(BuildContext context) {
     final eligibleSources = widget.siblingBlocks
         .where(
-          (s) =>
-              !(s.blockType == ProjectBlockType.counter &&
-                  CounterBlockConfig.fromMap(s.config).rollupSourceBlockId !=
-                      null),
+          (s) => !(s.blockType == ProjectBlockType.counter &&
+              CounterBlockConfig.fromMap(s.config).rollupSourceBlockId != null),
         )
         .toList();
 
@@ -1946,8 +1943,9 @@ class _StandaloneBlockDialogState extends State<_StandaloneBlockDialog> {
             value: _blockType,
             label: 'Block Type',
             enabled: !_isEditing,
-            helperText:
-                _isEditing ? 'Block type cannot be changed after creation.' : null,
+            helperText: _isEditing
+                ? 'Block type cannot be changed after creation.'
+                : null,
             items: ProjectBlockType.values
                 .map(
                   (t) => DropdownMenuItem(

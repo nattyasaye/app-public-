@@ -86,8 +86,9 @@ class ProgressEngine {
         .where((t) => t.projectId == project.id && t.status != 'cancelled')
         .toList();
     final linkedTasksTotal = projectTasks.length;
-    final linkedTasksCompleted =
-        projectTasks.where((t) => t.isCompleted || t.status == 'completed').length;
+    final linkedTasksCompleted = projectTasks
+        .where((t) => t.isCompleted || t.status == 'completed')
+        .length;
 
     final projectMilestones =
         milestones.where((m) => m.projectId == project.id).toList();
@@ -95,14 +96,13 @@ class ProgressEngine {
     final milestonesCompleted =
         projectMilestones.where((m) => m.isCompleted).length;
 
-    final projectBlocks = blocks
-        .where((b) => b.projectId == project.id)
-        .toList()
-      ..sort((a, b) {
-        final orderCmp = a.sortOrder.compareTo(b.sortOrder);
-        if (orderCmp != 0) return orderCmp;
-        return a.createdAt.compareTo(b.createdAt);
-      });
+    final projectBlocks =
+        blocks.where((b) => b.projectId == project.id).toList()
+          ..sort((a, b) {
+            final orderCmp = a.sortOrder.compareTo(b.sortOrder);
+            if (orderCmp != 0) return orderCmp;
+            return a.createdAt.compareTo(b.createdAt);
+          });
 
     final recordsByBlock = <String, List<ProjectTrackingRecordEntity>>{};
     for (final rec in records) {
@@ -157,7 +157,8 @@ class ProgressEngine {
       final pace = (effectiveTarget != null &&
               effectiveTarget > 0 &&
               daysRemaining != null)
-          ? ((effectiveTarget - effectiveCompleted).clamp(0.0, double.infinity)) /
+          ? ((effectiveTarget - effectiveCompleted)
+                  .clamp(0.0, double.infinity)) /
               (daysRemaining > 0 ? daysRemaining : 1)
           : null;
 
@@ -258,15 +259,13 @@ class ProgressEngine {
 
     switch (block.blockType) {
       case ProjectBlockType.counter:
-        final percent =
-            (block.targetValue != null && block.targetValue! > 0)
-                ? (loggedTotal / block.targetValue! * 100.0).clamp(0.0, 100.0)
-                : null;
+        final percent = (block.targetValue != null && block.targetValue! > 0)
+            ? (loggedTotal / block.targetValue! * 100.0).clamp(0.0, 100.0)
+            : null;
         final pace = (block.targetValue != null &&
                 block.targetValue! > 0 &&
                 daysRemaining != null)
-            ? ((block.targetValue! - loggedTotal)
-                    .clamp(0.0, double.infinity)) /
+            ? ((block.targetValue! - loggedTotal).clamp(0.0, double.infinity)) /
                 (daysRemaining > 0 ? daysRemaining : 1)
             : null;
         return ProjectBlockProgressMetric(
@@ -323,7 +322,9 @@ class ProgressEngine {
             blockTargetCompletedTotal += itemTotal;
           }
           if (item.isCompleted ||
-              (itemTarget != null && itemTarget > 0 && itemTotal >= itemTarget)) {
+              (itemTarget != null &&
+                  itemTarget > 0 &&
+                  itemTotal >= itemTarget)) {
             completedItems += 1;
           }
         }
@@ -349,7 +350,8 @@ class ProgressEngine {
             final childTarget = child.targetValue;
             if (childTarget != null && childTarget > 0) {
               childTargetsSum += childTarget;
-              final capped = childTotal < childTarget ? childTotal : childTarget;
+              final capped =
+                  childTotal < childTarget ? childTotal : childTarget;
               final over =
                   childTotal > childTarget ? childTotal - childTarget : 0.0;
               groupCappedTotal += capped;
@@ -473,8 +475,7 @@ class ProgressEngine {
               (loggedTotal / block.targetValue! * 100.0).clamp(0.0, 100.0);
         } else if (cfg.completionRule != ScheduleItemCompletionRule.manual &&
             plannedMinutes > 0) {
-          percent =
-              (loggedTotal / plannedMinutes * 100.0).clamp(0.0, 100.0);
+          percent = (loggedTotal / plannedMinutes * 100.0).clamp(0.0, 100.0);
         } else if (total > 0) {
           percent = (completed / total * 100.0).clamp(0.0, 100.0);
         } else {

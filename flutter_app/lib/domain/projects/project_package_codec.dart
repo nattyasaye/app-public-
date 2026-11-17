@@ -125,7 +125,8 @@ Map<String, dynamic> _recordToPackageJson(ProjectTrackingRecordEntity record) {
     'id': record.id,
     'projectId': record.projectId,
     'blockId': record.blockId,
-    if (record.parentRecordId != null && record.parentRecordId!.trim().isNotEmpty)
+    if (record.parentRecordId != null &&
+        record.parentRecordId!.trim().isNotEmpty)
       'parentRecordId': record.parentRecordId!.trim(),
     'recordType': record.recordType.wireValue,
     if (record.title != null && record.title!.trim().isNotEmpty)
@@ -261,8 +262,8 @@ class ProjectPackageCodec {
 
     final nonCorrections = records
         .where(
-          (r) =>
-              !(r.recordType == ProjectRecordType.progressLog && r.isCorrection),
+          (r) => !(r.recordType == ProjectRecordType.progressLog &&
+              r.isCorrection),
         )
         .toList()
       ..sort(baseCmp);
@@ -1622,9 +1623,8 @@ class ProjectPackageCodec {
             'Record hierarchy exceeds maximum depth (${SharedProjectRules.maxHierarchyDepth}).',
           );
         }
-        cursor = cursor.parentRecordId != null
-            ? byId[cursor.parentRecordId!]
-            : null;
+        cursor =
+            cursor.parentRecordId != null ? byId[cursor.parentRecordId!] : null;
       }
     }
 

@@ -944,8 +944,7 @@ void main() {
           expect(survivingTask, isNotNull);
           expect(survivingTask!.projectId, isNull);
 
-          final remainingBlocks =
-              await repo.getBlocksForProject('proj-video');
+          final remainingBlocks = await repo.getBlocksForProject('proj-video');
           final remainingRecords =
               await repo.getRecordsForProject('proj-video');
           expect(remainingBlocks, isEmpty);

@@ -20,7 +20,8 @@ class SnapshotVersionInterpretation {
   /// or legacy snapshots explicitly tagged with financeSchemaVersion >= 7.
   /// Never derived from databaseSchemaVersion alone.
   bool get usesModernFinanceV7Rules =>
-      snapshotFormatVersion >= SnapshotVersionPolicy.supportedSnapshotFormatVersion ||
+      snapshotFormatVersion >=
+          SnapshotVersionPolicy.supportedSnapshotFormatVersion ||
       schemaVersion >= SnapshotVersionPolicy.supportedFinanceSchemaVersion ||
       (financeSchemaVersion != null &&
           financeSchemaVersion! >=

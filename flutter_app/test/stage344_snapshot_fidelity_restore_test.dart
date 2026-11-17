@@ -2101,9 +2101,8 @@ void main() {
           await targetDb.ensureInitialized();
           addTearDown(targetDb.close);
 
-          final importResult =
-              await DatabasePersistenceCoordinator(targetDb)
-                  .importSnapshotDetailed(validFormat2);
+          final importResult = await DatabasePersistenceCoordinator(targetDb)
+              .importSnapshotDetailed(validFormat2);
           expect(importResult.diagnostics, isEmpty);
 
           final storedReport = await (targetDb.select(targetDb.appSettings)

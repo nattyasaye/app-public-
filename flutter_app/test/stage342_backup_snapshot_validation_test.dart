@@ -691,8 +691,11 @@ void main() {
         _minimalValidSnapshot(schemaVersion: 5)
           ..['snapshotFormatVersion'] = 1
           ..['databaseSchemaVersion'] = 8,
-        _minimalValidSnapshot(schemaVersion: 8), // omitted snapshotFormatVersion -> legacy 1
-        _minimalValidSnapshot(schemaVersion: 9), // pre-1.1 v9 snapshot without snapshotFormatVersion
+        _minimalValidSnapshot(
+            schemaVersion: 8), // omitted snapshotFormatVersion -> legacy 1
+        _minimalValidSnapshot(
+            schemaVersion:
+                9), // pre-1.1 v9 snapshot without snapshotFormatVersion
       ];
 
       for (final snap in acceptedSnapshots) {
