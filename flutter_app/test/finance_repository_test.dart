@@ -586,6 +586,7 @@ void main() {
         );
 
         // Lowercase 'etb' active asset account must be recognized by markCommitmentPaid
+        // while unlinked commitments remain blocked under Stage 2.2 rules.
         await db.into(db.accountsTable).insert(
               AccountsTableCompanion.insert(
                 id: 'acc-etb-lower',
@@ -598,11 +599,41 @@ void main() {
             );
         await repo.addCommitment(
           CommitmentModel(
+            id: 'com-unlinked-stage22',
+            title: 'Unlinked Historical Bill',
+            amountCents: 15000,
+            dueDate: CalendarDate(year: 2026, month: 11, day: 15),
+            direction: CommitmentDirection.outflow,
+          ),
+        );
+        await expectLater(
+          repo.markCommitmentPaid(
+            'com-unlinked-stage22',
+            createExpenseTransaction: true,
+          ),
+          throwsA(isA<DoubleEntryValidationError>()),
+        );
+
+        await repo.upsertRecurringRule(
+          RecurringRuleModel(
+            id: 'rec-lower-etb',
+            title: 'Monthly Phone Bill',
+            ruleType: RecurringRuleType.commitment,
+            amountCents: 15000,
+            frequency: RecurrenceFrequency.monthly,
+            startDate: CalendarDate(year: 2026, month: 11, day: 1),
+            nextOccurrenceDate: CalendarDate(year: 2026, month: 11, day: 15),
+            accountId: 'acc-etb-lower',
+          ),
+        );
+        await repo.addCommitment(
+          CommitmentModel(
             id: 'com-lower-etb',
             title: 'Phone Bill',
             amountCents: 15000,
             dueDate: CalendarDate(year: 2026, month: 11, day: 15),
             direction: CommitmentDirection.outflow,
+            recurringRuleId: 'rec-lower-etb',
           ),
         );
         await repo.markCommitmentPaid(

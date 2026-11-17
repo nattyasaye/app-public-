@@ -1,0 +1,437 @@
+Run Automated Tests & Quality Checks
+failed 1 minute ago in 3m 14s
+Search logs
+1s
+2s
+1s
+21s
+0s
+22s
+2m 24s
+Run cd flutter_app
+
+  ╔════════════════════════════════════════════════════════════════════════════╗
+  ║                 Welcome to Flutter! - https://flutter.dev                  ║
+  ║                                                                            ║
+  ║ The Flutter tool uses Google Analytics to anonymously report feature usage ║
+  ║ statistics and basic crash reports. This data is used to help improve      ║
+  ║ Flutter tools over time.                                                   ║
+  ║                                                                            ║
+  ║ Flutter tool analytics are not sent on the very first run. To disable      ║
+  ║ reporting, type 'flutter config --no-analytics'. To display the current    ║
+  ║ setting, type 'flutter config'. If you opt out of analytics, an opt-out    ║
+  ║ event will be sent, and then no further information will be sent by the    ║
+  ║ Flutter tool.                                                              ║
+  ║                                                                            ║
+  ║ By downloading the Flutter SDK, you agree to the Google Terms of Service.  ║
+  ║ The Google Privacy Policy describes how data is handled in this service.   ║
+  ║                                                                            ║
+  ║ Moreover, Flutter includes the Dart SDK, which may send usage metrics and  ║
+  ║ crash reports to Google.                                                   ║
+  ║                                                                            ║
+  ║ Read about data we send with crash reports:                                ║
+  ║ https://flutter.dev/to/crash-reporting                                     ║
+  ║                                                                            ║
+  ║ See Google's privacy policy:                                               ║
+  ║ https://policies.google.com/privacy                                        ║
+  ║                                                                            ║
+  ║ To disable animations in this tool, use                                    ║
+  ║ 'flutter config --no-cli-animations'.                                      ║
+  ╚════════════════════════════════════════════════════════════════════════════╝
+
+Resolving dependencies...
+Downloading packages...
++ _fe_analyzer_shared 72.0.0 (111.0.0 available)
++ _macros 0.3.2 from sdk dart
++ analyzer 6.7.0 (14.7.0 available)
++ analyzer_plugin 0.11.3 (0.14.20 available)
++ args 2.7.0
++ async 2.11.0 (2.13.1 available)
++ boolean_selector 2.1.1 (2.1.2 available)
++ build 2.4.1 (5.0.0 available)
++ build_config 1.1.1 (1.4.0 available)
++ build_daemon 4.0.2 (4.1.7 available)
++ build_resolvers 2.4.2 (3.0.4 available)
++ build_runner 2.4.13 (2.17.1 available)
++ build_runner_core 7.3.2 (9.3.2 available)
++ built_collection 5.1.1 (6.0.0 available)
++ built_value 8.13.0
++ characters 1.3.0 (1.4.1 available)
++ charcode 1.4.0
++ checked_yaml 2.0.3 (2.0.4 available)
++ cli_util 0.4.2 (0.6.0 available)
++ clock 1.1.1 (1.1.3 available)
++ code_builder 4.10.1 (4.13.0 available)
++ collection 1.18.0 (1.19.1 available)
++ convert 3.1.2
++ cross_file 0.3.4+2 (0.4.0 available)
++ crypto 3.0.8
++ cryptography 2.9.0
++ custom_lint_core 0.7.0 (0.8.2 available)
++ custom_lint_visitor 1.0.0+6.7.0 (1.0.0+9.0.0 available)
++ dart_style 2.3.7 (3.1.14 available)
++ dbus 0.7.12 (0.8.0 available)
++ drift 2.19.1+1 (2.35.4 available)
++ drift_dev 2.19.1 (2.35.3 available)
++ drift_flutter 0.1.0 (0.3.1 available)
++ fake_async 1.3.1 (1.3.3 available)
++ ffi 2.1.3 (2.2.0 available)
++ file 7.0.1
++ fixnum 1.1.1
++ flutter 0.0.0 from sdk flutter
++ flutter_lints 3.0.2 (6.0.0 available)
++ flutter_local_notifications 17.2.4 (23.0.2 available)
++ flutter_local_notifications_linux 4.0.1 (9.0.0 available)
++ flutter_local_notifications_platform_interface 7.2.0 (13.0.0 available)
++ flutter_localizations 0.0.0 from sdk flutter
++ flutter_riverpod 2.6.1 (3.5.0 available)
++ flutter_secure_storage 9.2.4 (11.2.0 available)
++ flutter_secure_storage_linux 1.2.3 (3.0.3 available)
++ flutter_secure_storage_macos 3.1.3 (4.0.0 available)
++ flutter_secure_storage_platform_interface 1.1.2 (2.1.1 available)
++ flutter_secure_storage_web 1.2.1 (2.1.1 available)
++ flutter_secure_storage_windows 3.1.2 (4.2.2 available)
++ flutter_test 0.0.0 from sdk flutter
++ flutter_web_plugins 0.0.0 from sdk flutter
++ freezed_annotation 2.4.4 (3.1.0 available)
++ frontend_server_client 4.0.0 (4.2.0 available)
++ glob 2.2.0
++ graphs 2.3.2
++ http_multi_server 3.2.3
++ http_parser 4.0.2 (4.1.2 available)
++ intl 0.19.0 (0.20.3 available)
++ io 1.1.0
++ js 0.6.7 (0.7.2 available)
++ json_annotation 4.9.0 (4.12.0 available)
++ leak_tracker 10.0.5 (11.0.2 available)
++ leak_tracker_flutter_testing 3.0.5 (3.0.10 available)
++ leak_tracker_testing 3.0.1 (3.0.2 available)
++ lints 3.0.0 (6.1.0 available)
++ logging 1.3.0
++ macros 0.1.2-main.4 (0.1.3-main.0 available)
++ matcher 0.12.16+1 (0.12.20 available)
++ material_color_utilities 0.11.1 (0.13.1 available)
++ meta 1.15.0 (1.19.0 available)
++ mime 1.0.6 (2.1.0 available)
++ package_config 2.2.0 (3.0.0 available)
++ path 1.9.0 (1.9.1 available)
++ path_provider 2.1.5 (2.1.6 available)
++ path_provider_android 2.2.15 (2.3.1 available)
++ path_provider_foundation 2.4.1 (2.6.0 available)
++ path_provider_linux 2.2.1 (2.2.2 available)
++ path_provider_platform_interface 2.1.2 (2.1.3 available)
++ path_provider_windows 2.3.0
++ petitparser 6.0.2 (7.1.0 available)
++ platform 3.1.6 (3.2.0 available)
++ plugin_platform_interface 2.1.8
++ pool 1.5.3
++ pub_semver 2.2.1
++ pubspec_parse 1.4.0 (1.7.0 available)
++ recase 4.1.0
++ riverpod 2.6.1 (3.5.0 available)
++ riverpod_analyzer_utils 0.5.8 (1.0.0 available)
++ riverpod_annotation 2.6.1 (4.0.8 available)
++ riverpod_generator 2.6.3 (4.0.10 available)
++ share_plus 8.0.3 (13.3.1 available)
++ share_plus_platform_interface 3.4.0 (7.2.0 available)
++ shelf 1.4.1 (1.4.3 available)
++ shelf_web_socket 2.0.1 (3.0.0 available)
++ sky_engine 0.0.99 from sdk flutter
++ source_gen 1.5.0 (4.3.1 available)
++ source_span 1.10.0 (1.10.2 available)
++ sqlite3 2.4.5 (3.9.1 available)
++ sqlite3_flutter_libs 0.5.42 (0.6.0+eol available)
++ sqlparser 0.37.1 (0.45.1 available)
++ stack_trace 1.11.1 (1.12.2 available)
++ state_notifier 1.0.0
++ stream_channel 2.1.2 (2.1.4 available)
++ stream_transform 2.1.2
++ string_scanner 1.2.0 (1.4.1 available)
++ term_glyph 1.2.1 (1.2.2 available)
++ test_api 0.7.2 (0.7.15 available)
++ timezone 0.9.4 (0.11.2 available)
++ timing 1.0.2
++ typed_data 1.4.0
++ url_launcher_linux 3.2.1 (3.2.3 available)
++ url_launcher_platform_interface 2.3.2
++ url_launcher_web 2.3.3 (2.4.3 available)
++ url_launcher_windows 3.1.4 (3.1.6 available)
++ uuid 4.6.0
++ vector_math 2.1.4 (2.4.4 available)
++ vm_service 14.2.5 (15.4.0 available)
++ watcher 1.2.1
++ web 0.5.1 (1.1.2 available)
++ web_socket 1.0.1
++ web_socket_channel 3.0.3
++ win32 5.10.1 (6.4.0 available)
++ xdg_directories 1.1.0
++ xml 6.5.0 (7.1.0 available)
++ yaml 3.1.4
+Changed 126 dependencies!
+91 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+[INFO] Generating build script...
+[INFO] Generating build script completed, took 350ms
+
+[INFO] Precompiling build script......
+[INFO] Precompiling build script... completed, took 5.0s
+
+[INFO] Initializing inputs
+[INFO] Building new asset graph...
+[INFO] Building new asset graph completed, took 1.2s
+
+[INFO] Checking for unexpected pre-existing outputs....
+[INFO] Deleting 1 declared outputs which already existed on disk.
+[INFO] Checking for unexpected pre-existing outputs. completed, took 87ms
+
+[INFO] Running build...
+[INFO] Generating SDK summary...
+[INFO] 2.1s elapsed, 0/16 actions completed.
+[INFO] 3.7s elapsed, 0/16 actions completed.
+[INFO] Generating SDK summary completed, took 4.6s
+
+[INFO] 5.7s elapsed, 103/125 actions completed.
+[INFO] 8.8s elapsed, 149/152 actions completed.
+[INFO] 9.9s elapsed, 150/152 actions completed.
+[INFO] 16.1s elapsed, 152/153 actions completed.
+[INFO] 17.2s elapsed, 186/205 actions completed.
+[INFO] 18.5s elapsed, 209/228 actions completed.
+[INFO] 22.4s elapsed, 212/228 actions completed.
+[INFO] 23.5s elapsed, 231/247 actions completed.
+[INFO] 24.5s elapsed, 274/290 actions completed.
+[INFO] 25.6s elapsed, 356/372 actions completed.
+[INFO] 26.7s elapsed, 445/451 actions completed.
+[INFO] 27.7s elapsed, 463/469 actions completed.
+[INFO] 28.8s elapsed, 467/469 actions completed.
+[INFO] 29.9s elapsed, 467/469 actions completed.
+[INFO] 30.9s elapsed, 467/469 actions completed.
+[INFO] 32.0s elapsed, 467/469 actions completed.
+[INFO] 33.1s elapsed, 467/469 actions completed.
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "recurringRulesTableRefs" on table "$AccountsTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "recurringRulesTableRefs" on table "$AccountsTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "debtsTableRefs" on table "$JournalEntriesTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "debtsTableRefs" on table "$JournalEntriesTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[INFO] Running build completed, took 34.7s
+
+[INFO] Caching finalized dependency graph...
+[INFO] Caching finalized dependency graph completed, took 175ms
+
+[INFO] Succeeded after 34.9s with 215 outputs (812 actions)
+
+Formatted 130 files (0 changed) in 2.02 seconds.
+Analyzing flutter_app...                                        
+No issues found! (ran in 18.2s)
+
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Converts Ethiopian New Year 2017 (Enkutatash - Sep 11, 2024)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Converts Gregorian date (Nov 07, 2024) to Ethiopian Tikimt 28, 2017
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Bidirectional round-trip conversion preserves exact dates
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Pagumē leap year calculation (Year % 4 == 3 has 6 days)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Dual calendar display formatting
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellThemeController & DaywellApp Contract Unit Tests Defaults to ThemeMode.system and notifies only on changes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellThemeController & DaywellApp Contract Unit Tests Asserts when non-system themeMode and themeController are both passed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests Manages typed tabs, lazy visited set, and secondary route unwind
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests Resolves indexes via destination registry independently of enum order and guards out-of-range indexes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests Calculates recorded balance accurately without floating point error
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests Computes Available-to-Spend subtracting commitments and savings
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests String parsing handles fractional cents and negative values safely
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests DaywellAdaptiveScaffold renders and navigates custom destination order via registry
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Notes preserve full Ge`ez/Amharic Unicode text faithfully
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Calendar converter handles Pagume leap years accurately (Year % 4 == 3)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Calendar converter handles Enkutatash (Meskerem 1) transitions
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Offline local notification parameters format properly without cloud server
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Share-Intent receiver extracts shared text into inbox format
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_contracts_v6_test.dart: Stage 4.1 V6 Finance Domain Models & Contracts AccountSubType taxonomy classifies liquid, vault, credit, and system accounts
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_contracts_v6_test.dart: Stage 4.1 V6 Finance Domain Models & Contracts AccountModel and JournalEntryModel round-trip v6 fields safely
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_contracts_v6_test.dart: Stage 4.1 V6 Finance Domain Models & Contracts BudgetModel, RecurringRuleModel, CommitmentModel, and SavingsGoalModel serialize cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Displays DaywellShellStatusView error banner on failure and recovers on Retry
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Prevents FAB Hero collision across visited Tasks and Notes tabs and pushes Note editor cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation Accepts canonical snapshots v4..v8 and omitted-version legacy default 5
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation Rejects 0..3, 9, 99, negative, non-int, null, contradictory, and malformed snapshots with zero data/reminder/settings loss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Preserves visited tab State and user input live across 600dp breakpoint resize and back
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Routes real Dashboard and More callbacks and unwinds Backup via system PopScope back
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Supports live ThemeMode switching via More Appearance dialog and renders on short wide landscape
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Buffers cold-start trigger and shared text while DB initializes and deduplicates repeat signals
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Preserves buffered shared text across startup failure and Retry recovery
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Warm-start rapid duplicate triggers show 1 dialog at a time and flush distinct queued text on barrier dismiss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: CalendarPlaceholderView States Tests Renders loading, error + Retry, populated preview, and empty states accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_engine_v6_test.dart: Stage 4.4 — DoubleEntryEngine & AvailableToSpend(H) V6 Tests All 6 Numerical AvailableToSpend(H) Examples (H = 2026-11-30)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_engine_v6_test.dart: Stage 4.4 — DoubleEntryEngine & AvailableToSpend(H) V6 Tests Period Cashflow & Category Spend Rollup exclude transfers, opening equity, debt principal, and voided entries
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Token version and color tokens compile with expected ARGB values
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Typography tokens resolve TextStyle and tabularFigures FontFeature accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Spacing, radii, elevation, and breakpoints are monotonic doubles
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Pure-Dart core foundation exports rules and clean seed state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 1. Reminders Round-Trip & Soft-Link Policy Export/import preserves valid task, commitment, calendar_event, and custom reminders with exact UTC triggerTimeUtc, isActive, and createdAt
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 1. Reminders Round-Trip & Soft-Link Policy Dangling entity reminders warn-skip while custom/valid reminders persist; omitted reminders clears on replace; invalid reminder scalars fail closed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 2. AppSettings Fidelity, Exclusions & Stale Cleanup User settings round-trip cleanly; internal sentinels and secret or device prefixes are excluded on export & skipped with warning on import
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 2. AppSettings Fidelity, Exclusions & Stale Cleanup Omitted appSettings preserves user settings, omitted ledgerMigrationReportV7 clears stale v7 report, and malformed settings fail closed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 3. Per-Table Duplicate-ID & Unique Index Enforcement Same-table duplicate PK or duplicate key rejects fail closed; cross-table ID reuse succeeds
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 4. Tier 1 Required vs Tier 2/3 Optional FK & Type Safety Broken Tier 1 FKs fail closed with zero synthetic category creation; unsafe scalar types fail pre-transaction
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 4. Tier 1 Required vs Tier 2/3 Optional FK & Type Safety Broken Tier 2 nullable FKs, cycles, and Tier 3 soft links warn-clear to null cleanly and pass PRAGMA foreign_key_check
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation EncryptionBackupService validates format_version, KDF, iterations, headers, checksums, and inner snapshot bounds fail-closed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary All 4 entrypoints reject broken Tier 1 FK snapshots pre-quarantine and pre-clear, and propagate diagnostics on warn-clear
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary 8-Step Rollback on healthy session failure: preserves quarantine, restores .sqlite+-wal+-shm copy-back, and rehydrates original healthy DB
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary 8-Step Rollback on corrupt startup recovery failure: preserves corrupt-startup recovery state, diagnostics, and quarantined .sqlite/-wal/-shm
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary Best-effort post-commit notification failure does not roll back verified restore
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Post-commit deleteQuarantine() and clearFailureDiagnostic() failures never reverse a committed restore and emit warning diagnostics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Concurrent recovery/import calls fail fast without state corruption and release lock cleanly in finally on success or error
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Case/whitespace normalized appSettings policy, clearExisting: false merge cleanup, and merge reminders targeting live DB entities
+❌ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Phase A enforces all 12 Drift withLength bounds, allocatedCents >= 1, and v7+ fail-closed vs pre-v7 fallback for transfer categoryId (failed)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/notes_inbox_architecture_test.dart: NotesController & NotesModuleState Architecture Tests Create, pin, tag, archive, trash, and reload persists metadata under schema v4
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/notes_inbox_architecture_test.dart: NotesController & NotesModuleState Architecture Tests Repository errors are captured cleanly in NotesModuleState.errorMessage
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/notes_inbox_architecture_test.dart: InboxController & InboxModuleState Architecture Tests Captures quick thoughts, triggers decoupled triage callback, and disposes stream cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Decimal-safe integer calculations prevent floating point rounding drift
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Available-to-Spend formula deducts period commitments and savings allocations
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Avoid double-counting: Paid commitment is excluded from unpaid commitments
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Transaction correction audit trail preserves original transaction history
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration schedules outflow and inflow commitment due reminders safely
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration QuickCaptureDialog hands off expense text to Finance Composer
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration Overview & Reports display Option 1 Prepaid Card Credit and v7 audit info
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration restoreFromEncryptedBackup uses quarantine swap when builder is present
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Scenarios 7–8 (Option 1): Overpaid credit card prepaid credit IS included in AvailableToSpend(H) and NetPosition and tracked separately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Scenario 9–11: Partial outflow commitments, inflow = 0 until received, legacyPaidUnverified = 0, and archived savings goal = 0 reserve
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) ETB-only filter excludes non-ETB account from LiquidCash and NetPosition
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Debt settlement validates over-allocation, inactive status, and fees
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) buildCommitmentReceipt generates balanced asset debit & income credit
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) RecurringEngine pause/resume >= today and skipNext work cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Stage 2.2: AccountModel.fromJson preserves omitted user currencyCode as empty and FinancialEngine.formatBirr labels tiers cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellTheme & ThemeMode Construction Light and Dark ThemeData use Material 3 and canonical design tokens
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellTheme & ThemeMode Construction DaywellApp defaults to ThemeMode.system and accepts custom ThemeMode
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension Both themes register DaywellSemanticColors with canonical values
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension copyWith and lerp behave accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension BuildContext.daywellColors resolves registered extension
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellTypography & Ethiopic Font Fallback Maps canonical typography tokens and Ethiopic fallbacks cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: Material Component Themes & Accessibility Contrast Registers all centralized Material component themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: Material Component Themes & Accessibility Contrast Foreground/background contrast meets WCAG AA requirements
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Renders cleanly in light theme at 1.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Renders cleanly in dark theme at 1.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Handles enlarged 2.0x text scaling without layout overflow in light and dark themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Interactive controls, dialog, snackbar, and input work
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 1. Enforces SQLite ON DELETE RESTRICT across all finance FKs under PRAGMA foreign_keys = ON
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 2. Level 0-3 v6->v7 upgrade cleans orphans, recreates indices, preserves DDL without temp names, and produces convergence report
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 3. Misconfigured PRAGMA foreign_keys = ON before v6->v7 upgrade throws LedgerMigrationException cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 4. Snapshot convergence across v5/v6/v7 + immutable :rev:n 1x balance + voidDebtOrigin guard
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 5. Cold WAL/SHM recovery closes failed DB first, exports SHA-256 manifest without Drift, handles corruption quarantine & restores backup
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Matches all shared golden vectors (Ethiopian, Gregorian, weekday)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Independent historical & century-leap astronomical anchors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Exhaustive daily JDN & dual-calendar continuity (1890..2120)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Strict validation rejects impossible dates, zones, and malformed strings
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Fixed Ethiopia UTC+3 clock boundary and LocalDateTime conversion
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Month clamping, bounds, grids, DateRange, CalendarEventEntity, and formatting
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSectionContainer Composes optional header, subtitle, surface card, and footer across themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSectionContainer Renders without overflow at 2.0x text scale on 320px width and preserves header semantics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Switches cleanly across loading, empty, error, and lazy content states
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Renders empty and error states in dark mode at 2.0x text scale on 320px width
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Omits empty or whitespace-only action labels instead of rendering blank buttons
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSearchFilterBar Forwards search input, clear button, filter selection, and reset action
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSearchFilterBar Handles horizontal scroll layout, 320px width, 2.0x text scale, dark mode, and semantics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellConfirmationDialog Resolves true on confirm, false on cancel, and false on barrier dismiss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellConfirmationDialog Renders safely at 2.0x text scale on 320px width in dark mode with clean semantics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellThemeShowcase Stage 3.5 section Displays and interacts with composed patterns at 2.0x text scale in light and dark themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellConfirmationDialog scrolls cleanly on short landscape viewport at 2.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellSearchFilterBar renders safely with button/badge controls and unbounded horizontal parents
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellSectionContainer wraps cleanly at tight 260px width and 2.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation Enforces strict header vs effective inner-version matrix across EncryptionBackupService, DatabasePersistenceCoordinator, and AppStateManager restore/recovery paths
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Calculates project progress percentage accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Zero tasks or milestones returns 0% without divide-by-zero error
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Manually completed project always returns 100%
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Unfinished tasks are preserved and postponed without data loss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Task can exist with or without Project association
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Stage 2 Unit Controller Hydration CalendarController persists events and rehydrates cleanly on fresh restart instance
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Stage 2 Unit Controller Hydration TasksController persists Schema v4 task metadata across restart
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation AppStateManager restore and SharedFoundationBridge reject unsupported backups BEFORE quarantine or DB replacement and expose detailed errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Real File-Backed SQLite Restart Persistence (Part E) Persists all 5 modules + Schema v5 metadata across full AppStateManager teardown & restart without duplicate seeding
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 1. Concurrent initialize() calls share one startup run and stay idempotent
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 2. Startup failure sets initializationError cleanly and recovers on retry initialize()
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 3. Calling disposeAsync() mid-initialization waits cleanly before closing DB with zero post-dispose errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 4. Stream subscriptions cancel safely on disposeAsync() without late listener crashes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 1 & 2: Boundary Test (Jan 30 Expense, Feb 2 Repayment)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 3: Direct Income and Direct Expense Recording
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 4: Account Transfer creates Zero Income and Zero Expense
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 5 & 6: Lending Money and Collecting Repayment
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 7 & 8: Borrowing Money and Repaying Loan
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 10: Split Expense (Dinner 1,000 ETB, My share 400 ETB, Colleague owes 600 ETB)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 12: Interest separated from Principal
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 13: Invariant Rejection on Unbalanced Entries
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 14 & 15: Net Financial Position & Available to Spend Formula
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 18: Transfer with Bank Service Fee
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 19: Voided Transaction Strictly Excluded from Account Balances and Net Position
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios AccountModel and PartyModel copyWith produces clean immutable copies
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/inbox_repository_test.dart: Inbox Repository Offline Logic Tests Quick capture assigns UUID v4, defaults category, and marks isProcessed false
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/inbox_repository_test.dart: Inbox Repository Offline Logic Tests Mark processed flags item without deleting history
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 1. Setup, opening balance update, and direct cashflows unify on double-entry ledger
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 2. Debts, settlements, write-offs, commitments, vaults, budgets, and recurring rules stay consistent
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 3. Controller propagates errors cleanly into state.errorMessage without losing responsiveness
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation BackupView surfaces distinct error SnackBars for authentication failure, unsupported format, unsupported KDF, unsupported future schema, and invalid canonical payload
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 4. Default planningPeriodEnd uses endOfGregorianMonth and Option 1 PrepaidCardCredit flows into AvailableToSpend & NetPosition
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 5. v7 partial outflow/inflow commitments, releaseAndArchiveSavingsGoal, :rev:n history, voidDebtOrigin, and recurring skip/pause/resume
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 2. Stage 2.2 strict ETB-only controller guards block non-ETB account creation and addDoubleEntryDirectExpense
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/local_search_test.dart: Local Offline Search Tests Searches English text case-insensitively
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/local_search_test.dart: Local Offline Search Tests Searches Amharic Unicode text faithfully
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v6_migration_test.dart: Stage 4.3 — Schema v5 -> v6 Double-Entry Ledger Migration Tests Fixture 1 (Mixed v5 DB): converts opening balances, 15 income/expense rows, and 2 paired transfers without duplication or balance drift
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v6_migration_test.dart: Stage 4.3 — Schema v5 -> v6 Double-Entry Ledger Migration Tests Fixture 2 (Inconsistent Legacy DB): deduplicates entry-open-*, isolates null-account payments to acc-sys-legacy-offset, voids superseded chains, and recalculates stale debt balances
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 1. Fresh installation creates all 22 v8 tables, indices, FK enforcement, system control accounts, and 11 starter categories
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v6_migration_test.dart: Stage 4.3 — Schema v5 -> v6 Double-Entry Ledger Migration Tests Fixture 3: Idempotency, Atomic Rollback on Corrupt Posting, & v5 Backup Import Round-Trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 2. Real v3 -> v5 upgrade preserves Finance, Tasks, Notes, and Inbox records without data loss or duplicates
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 3. Real v4 -> v5 upgrade converts legacy timestamps under Ethiopia UTC+3 to canonical YYYY-MM-DD and adds end_date_iso
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 4. Mixed v4 ms-epochs, bare vs zoned ISO strings, empty optional dates, and DatabasePersistenceCoordinator Goals/goalId round-trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 5. v4 -> v5 aborts atomically on corrupt/garbage nullable or required dates, never silencing to NULL or today and leaving v4 database completely intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / 3.4.4.1 Forward Database Migration Safety (v8 Baseline) 1. Baseline v8 database opens cleanly with PRAGMA foreign_keys = ON and preserves seeded relational user data
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / 3.4.4.1 Forward Database Migration Safety (v8 Baseline) 2. Simulated v8 -> v9 upgrade preserves v8 data, applies defaults, enforces FKs, and reopens idempotently
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / 3.4.4.1 Forward Database Migration Safety (v8 Baseline) 3. Deliberate mid-migration failure (DDL + DML throw and FK check failure) rolls back atomically leaving v8 schema and data intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / 3.4.4.1 Forward Database Migration Safety (v8 Baseline) 4. Production v8 AppDatabase and AppStateManager fail closed when opening a v9 database without modifying user data or user_version
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Passphrase-derived AES-GCM-256 generates complete authenticated envelope
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8 Migration & Reminder Fidelity 1. Real v7 database upgrades to v8 preserving all reminders with null title/channelId, valid FKs, and idempotent reopen
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8 Migration & Reminder Fidelity 2. New v8 Reminder with title and channelId persists across database reopen and snapshot export/import round-trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8 Migration & Reminder Fidelity 3. Multi-hop v4 -> v8 and v6 -> v8 migrations preserve reminders with null title/channelId and valid FKs without nested-transaction errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8 Migration & Reminder Fidelity 4. Deliberately failed v7 -> v8 migration rolls back atomically leaving v7 reminders schema (no title/channel_id) and data intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Decryption with correct passphrase restores identical plaintext and verifies SHA-256
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 1. Setup, direct income/expense, and transfer with fee maintain balanced ledger
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 2. Split expense creates balanced 3-leg entry and receivable debt atomically
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 3. Void, unvoid, correct entry, and write-off maintain debt & commitment consistency
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 4. Commitment payment supports both expense bills and linked debt settlements, and unmarks on void
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 5. Vault-linked vs virtual savings goals sync vault ledger balance without double-counting
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 6. Budgets upsert enforces unique (month, category) and recurring rules process idempotently
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 7. Delete protection blocks deleting referenced accounts, categories, or system accounts
+❌ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 8. Stage 2.2 unvoidJournalEntry rejects excluded non-ETB/legacyOffset entries and markCommitmentPaid handles lowercase etb (failed)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Decryption fails when an incorrect passphrase is supplied
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton Renders all variants, invokes callbacks, and enforces >=48x48 touch targets
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Tampering with ciphertext or authentication tag triggers integrity failure
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton Disabled and loading states prevent interaction and expose loading indicator
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton DaywellIconButton supports tooltips, selection, destructive tint, and 48x48 hit target
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Cards, SectionHeader & EmptyState Preserves existing constructors, supports light/dark themes, and handles taps
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Cards, SectionHeader & EmptyState DaywellSectionHeader handles narrow width and 2.0x text scale without overflow
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellTextField handles labels, required indicator, errors, callbacks, and disabled state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellSearchField clear action fires onChanged("") and onCleared once without duplicates
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellSearchField safely replaces controllers and does not dispose external controllers
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellDropdownField selects values and respects disabled state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Selection Controls Switch, Checkbox, and Radio tiles toggle via row tap and respect disabled state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Multi-device full restore equivalence test on clean secondary instance
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Feedback & Status Indicators DaywellStatusBadge and DaywellStatusBanner render all tones with icons, actions, and dismiss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Responsive Narrow Screen, 2.0x Text Scale & Expanded Showcase Expanded DaywellThemeShowcase renders without overflow at 2.0x text scale and narrow width
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions DaywellButton and DaywellIconButton expose single button SemanticsNodes without duplicate labels
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions Input and selection primitives preserve native Material semantics without wrapper duplication
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions Feedback & indicator semantics avoid duplication, liveRegion spam, and NaN crashes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions DaywellSearchField updates clear button visibility across disabled-to-enabled controller swaps
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Shared primitives survive unbounded horizontal constraints without Flex errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Handles 320px width and 2.0x text scale across stacked headers, progress headers, badges, buttons, and banners
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Custom semanticLabel binds cleanly to interactive inputs without double-reading static labels
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Keyboard Tab focus moves across DaywellButton and interactive DaywellCard
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Stage 3.8 Integration & SQLite Tests Renders live hydrated values across all 5 modules from SQLite and persists inline task toggle
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Displays initial loading per module, preserves populated data during reload, and isolates module failures
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Deduplicates concurrent RefreshIndicator reloads and preserves Inbox includeProcessed=true
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Renders empty states for all modules and Finance incomplete-setup notice banner
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Rebuild Isolation Tests Rebuilds only the affected section and metric tile when an individual controller notifies
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Routes all Dashboard navigation, Quick Capture, Backup callbacks and shell flows
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Renders under Light and Dark themes without exceptions
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Switches single-column (<720dp) vs two-column (>=720dp) cleanly and avoids overflow at 320dp + 2.0x textScale
+
+Error: 200 tests passed, 2 failed.
+Error: Process completed with exit code 1.
+0s
+0s
+0s
+0s

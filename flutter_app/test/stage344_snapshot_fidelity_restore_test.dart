@@ -1649,6 +1649,7 @@ void main() {
                         'name': v,
                         'type': 'asset',
                         'subType': 'cash',
+                        'currencyCode': 'ETB',
                         'openingBalanceCents': 100000,
                       },
                     ],
