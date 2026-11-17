@@ -1935,6 +1935,8 @@ void main() {
                   'type': 'asset',
                 },
               ],
+              journalEntries: const <Map<String, dynamic>>[],
+              postings: const <Map<String, dynamic>>[],
             ),
           );
           expect(
