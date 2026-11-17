@@ -2230,6 +2230,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
           payload: {
             schemaVersion: 7,
             accounts: [{ id: 'acc-usd', name: 'USD Wallet', type: 'asset', currencyCode: 'USD' }],
+            transactions: [],
           },
         },
         {
@@ -2237,6 +2238,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
           payload: {
             schemaVersion: 5,
             accounts: [{ id: 'acc-eur', name: 'Euro Bank', type: 'asset', currencyCode: 'EUR' }],
+            transactions: [],
           },
         },
         {
@@ -2244,6 +2246,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
           payload: {
             schemaVersion: 7,
             accounts: [{ id: 'acc-xyz', name: 'Unknown', type: 'asset', currencyCode: 'XYZ' }],
+            transactions: [],
           },
         },
         {
@@ -2251,6 +2254,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
           payload: {
             schemaVersion: 7,
             accounts: [{ id: 'acc-empty', name: 'Blank', type: 'asset', currencyCode: '   ' }],
+            transactions: [],
           },
         },
         {
@@ -2258,6 +2262,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
           payload: {
             schemaVersion: 7,
             accounts: [{ id: 'acc-v7-missing', name: 'Cash', type: 'asset' }],
+            transactions: [],
           },
         },
         {
@@ -2266,6 +2271,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
             schemaVersion: 5,
             financeSchemaVersion: 7,
             accounts: [{ id: 'acc-fin7-missing', name: 'Cash', type: 'asset' }],
+            transactions: [],
           },
         },
       ];
@@ -2274,6 +2280,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
         const res = SharedStateBridge.importFromAndroidJson(JSON.stringify(tc.payload));
         assert.strictEqual(res.success, false, `Expected failure for ${tc.label}`);
         assert.strictEqual(res.errorKind, 'invalid_payload', tc.label);
+        assert.match(res.error ?? '', /ETB|currency/i, tc.label);
         assert.deepStrictEqual(
           Array.from(store.entries()),
           Array.from(baselineSnapshot.entries()),
@@ -2288,6 +2295,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
           accounts: [
             { id: 'acc-etb-lower', name: 'Birr Cash', type: 'asset', currencyCode: ' etb ' },
           ],
+          transactions: [],
         })
       );
       assert.strictEqual(normalizedRes.success, true, normalizedRes.error);
