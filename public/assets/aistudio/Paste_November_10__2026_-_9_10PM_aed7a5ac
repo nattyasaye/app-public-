@@ -1,0 +1,896 @@
+# FINANCE MODULE RESET AND FOUNDATION IMPLEMENTATION
+## Development Batch 5 — Tasks 21–25
+
+**Primary objective: Simplify the existing Finance module and rebuild its foundation around accurate accounts, balances, and transactions.**
+
+You are working on an existing Flutter Android personal management application. This is not a greenfield project.
+
+The application currently contains four main modules:
+
+1. Finance
+2. To-Do
+3. Notes
+4. Calendar
+
+The immediate priority is to make the Finance module simple, reliable, accurate, and easy to use.
+
+This assignment has two equally important parts:
+
+1. Remove unnecessary existing Finance functionality and simplify the module.
+2. Implement the five foundational Finance tasks described below.
+
+Do not expand the Finance module with additional features. We will decide what to add later.
+
+---
+
+# PART 1 — PROJECT INSPECTION AND FINANCE MODULE SIMPLIFICATION
+
+## 1.1 Inspect the existing application first
+
+Before changing anything:
+
+1. Inspect the actual project structure.
+2. Inspect the complete existing Finance module.
+3. Identify all Finance screens, menus, buttons, widgets, features, calculations, models, database tables, services, repositories, and navigation routes.
+4. Identify which parts of the Finance module are shared with other modules.
+5. Identify existing financial records and relationships that may be affected by changes.
+6. Understand the current database and state-management architecture.
+7. Identify which existing features are necessary for the new simplified Finance foundation.
+
+Do not begin deleting files or database structures before understanding their purpose.
+
+## 1.2 Remove unnecessary Finance functionality
+
+I want the Finance module to be simplified substantially.
+
+**Remove existing Finance features that are not directly necessary for the functionality described in this assignment.**
+
+This includes unnecessary:
+
+- Screens and tabs.
+- Menus and navigation options.
+- Buttons and actions.
+- Dashboard widgets.
+- Financial reports and charts.
+- Budgeting and planning features.
+- Advanced calculations.
+- Unnecessary settings.
+- Complex financial workflows.
+- Unused data models and services.
+- Other features that make the Finance module more complicated than necessary.
+
+Do not preserve a feature simply because it already exists.
+
+The goal is not to keep adding functionality to the current Finance module. The goal is to establish a clean, dependable foundation.
+
+## 1.3 What must remain
+
+Retain or implement only what is necessary for:
+
+1. Finance first-time setup.
+2. Account creation and management.
+3. Opening balances.
+4. Combined balance.
+5. Individual account balances.
+6. Income transactions.
+7. Expense transactions.
+8. Account-to-account transfers.
+9. Transaction categories.
+10. Adding custom categories.
+11. Viewing transaction history.
+12. Viewing transaction details.
+13. Editing transactions.
+14. Deleting transactions.
+15. Correct balance recalculation.
+16. Basic validation and confirmation.
+17. Essential navigation and feedback.
+18. Required database integrity and persistence.
+19. Necessary offline functionality.
+
+A feature not explicitly listed above should generally be removed unless it is essential to making one of these functions work correctly.
+
+## 1.4 Important distinction: remove features, not necessary infrastructure
+
+Do not delete shared infrastructure just because the Finance module no longer needs a particular screen.
+
+For example, preserve shared systems that other modules depend on, including:
+
+- Shared database infrastructure.
+- Database migrations needed by other modules.
+- Shared navigation infrastructure.
+- Shared date conversion and Ethiopian calendar support.
+- Shared notification infrastructure.
+- Shared backup infrastructure.
+- Shared attachment infrastructure.
+- Shared settings infrastructure.
+- Shared offline functionality.
+- Shared UI components.
+- Shared logging and error handling.
+
+Do not break To-Do, Notes, or Calendar while simplifying Finance.
+
+If an existing service is used by multiple modules, preserve it and remove only the unnecessary Finance-specific functionality.
+
+## 1.5 Existing financial data
+
+Before removing or restructuring anything:
+
+- Determine whether existing Finance records contain real user data.
+- Do not silently destroy real financial records.
+- Do not treat dummy or demonstration records as real transactions.
+- Do not migrate fabricated balances into the new system.
+- Preserve useful historical data only where it can be migrated reliably into the simplified architecture.
+- If a safe migration is impossible, document the issue rather than silently discarding data.
+
+If a database migration is necessary, make it safe, explicit, and testable.
+
+## 1.6 Clean Finance interface
+
+After simplification, the Finance module should be easy to understand.
+
+The user should not encounter old Finance tabs, empty screens, dead buttons, unrelated features, or unnecessary settings.
+
+The primary experience should focus on:
+
+- Combined balance.
+- Individual accounts and their balances.
+- Adding a transaction.
+- Viewing transaction history.
+- Managing accounts.
+- Managing categories.
+
+Do not add decorative or complicated interface elements that do not help with these operations.
+
+---
+
+# PART 2 — GENERAL IMPLEMENTATION RULES
+
+1. Inspect before implementing.
+2. Preserve existing working functionality that is necessary.
+3. Do not create duplicate database structures or services.
+4. Use stable unique IDs for accounts, categories, and transactions.
+5. Keep the database as the source of truth.
+6. Keep the UI synchronized with actual stored financial records.
+7. Ensure all foundational Finance functionality works offline.
+8. Do not use fabricated production data.
+9. Do not introduce unnecessary dependencies.
+10. Do not redesign unrelated modules.
+11. Do not implement future Finance features in this batch.
+12. Do not claim that a feature works without testing it.
+
+**Core principle:** The UI and underlying financial data structure must work hand in hand. Every visible balance must represent the actual financial state in the database.
+
+---
+
+# PART 3 — FIVE FOUNDATIONAL FINANCE TASKS
+
+# Task 21 — First-Time Finance Setup and Opening Balances
+
+## Objective
+
+Allow the user to establish their actual starting financial position.
+
+### 21.1 First-time setup
+
+When the user first enters Finance, check whether initial setup has been completed.
+
+If not, guide the user through the necessary setup.
+
+Collect:
+
+- The user's actual name, if it has not already been collected during global app onboarding.
+- The financial accounts they use.
+- The opening balance of each account.
+
+Do not assume the user's name or invent financial values.
+
+### 21.2 Default accounts
+
+Provide these initial account options:
+
+- CBE
+- BOA
+- Dashen Bank
+- Telebirr
+- Cash
+
+The user must be able to add additional accounts.
+
+The user should not be forced to use every default account.
+
+### 21.3 Opening balances
+
+For every selected account:
+
+- Allow the user to enter its actual starting balance.
+- Allow zero as a valid balance.
+- Do not automatically populate nonzero balances.
+- Clearly identify which balance belongs to which account.
+- Use the application's existing currency conventions.
+
+The user should be able to review all entered information before completing setup.
+
+### 21.4 Opening balance dates
+
+Store an appropriate opening-balance date for each account.
+
+The opening balance represents money already available when financial tracking begins.
+
+It must not be counted as income or a salary transaction.
+
+### 21.5 Saving setup
+
+- Validate all entered information.
+- Prevent accidental duplicate setup.
+- Save accounts and opening balances persistently.
+- Complete setup only after successful database persistence.
+- Preserve user input if saving fails.
+- Display understandable error messages.
+- Navigate to the simplified Finance dashboard after successful setup.
+
+### Acceptance Tests
+
+1. First-time setup appears when appropriate.
+2. Completed setup does not unnecessarily appear again.
+3. The user can select the accounts they actually use.
+4. The user can add another account.
+5. Each account accepts its own opening balance.
+6. Zero balances are accepted.
+7. No invented balances or dummy transactions appear.
+8. Opening balances are not counted as income.
+9. Setup persists after restarting the app.
+10. Failed setup does not leave partially initialized data.
+
+---
+
+# Task 22 — Account Management and Combined Balance
+
+## Objective
+
+Provide reliable account management and display the correct combined balance.
+
+### 22.1 Account list
+
+Provide a screen or section showing all financial accounts.
+
+Each account should display:
+
+- Account name.
+- Current balance.
+- Currency, where applicable.
+
+Examples:
+
+- CBE
+- BOA
+- Dashen Bank
+- Telebirr
+- Cash
+
+### 22.2 Add accounts
+
+Allow the user to create accounts at any time.
+
+Account creation should include:
+
+- Account name.
+- Initial balance.
+- Opening-balance date, where applicable.
+
+A newly created account must immediately become available when recording transactions.
+
+### 22.3 Edit accounts
+
+Allow the user to:
+
+- Rename an account.
+- Correct account details where supported.
+- View its transaction history.
+
+Renaming must not break historical transactions.
+
+Use stable account IDs rather than account names as database relationships.
+
+### 22.4 Account deletion and archiving
+
+- Unused accounts may be safely deleted.
+- Accounts with transaction history must not be permanently deleted in a way that breaks historical records.
+- Allow accounts to be archived or deactivated where appropriate.
+- Preserve historical transaction access.
+- Prevent archived accounts from being selected for new transactions unless explicitly supported.
+
+### 22.5 Combined balance
+
+The Finance dashboard must prominently display the combined balance of all active financial accounts.
+
+Combined Balance = Sum of All Account Balances.
+
+Each account balance must be derived consistently from its opening balance and financial movements.
+
+Conceptually:
+
+Account Balance = Opening Balance + Income - Expenses + Incoming Transfers - Outgoing Transfers
+
+Do not duplicate independent balance calculations across multiple UI components.
+
+### 22.6 Synchronization
+
+Whenever an account or financial activity changes:
+
+- Recalculate affected account balances.
+- Recalculate the combined balance.
+- Update the dashboard.
+- Update account details.
+- Update other affected Finance screens.
+
+The UI must never display stale or independently invented balances.
+
+### Acceptance Tests
+
+1. All configured accounts appear correctly.
+2. Individual account balances are correct.
+3. Combined balance equals the sum of individual balances.
+4. Adding an account updates the list and combined balance.
+5. Renaming an account preserves transaction history.
+6. Archived accounts remain accessible historically.
+7. Accounts with transaction history cannot be deleted destructively.
+8. Balances remain correct after restarting the application.
+
+---
+
+# Task 23 — Categories and Income/Expense Transaction Creation
+
+## Objective
+
+Implement a simple and dependable transaction-entry interface.
+
+Adding a transaction should be quick and require only the information necessary to record it accurately.
+
+### 23.1 Transaction types
+
+Support:
+
+- Expense.
+- Income.
+
+The user must be able to select the transaction type clearly.
+
+### 23.2 Mandatory fields
+
+Every income or expense transaction must require:
+
+**1. Amount**
+
+- Must be entered.
+- Must be greater than zero.
+- Reject invalid numbers and malformed input.
+- Display consistently.
+
+**2. Category**
+
+- Must be selected.
+- Must match the selected transaction type.
+- Expense transactions must use expense categories.
+- Income transactions must use income categories.
+
+**3. Account**
+
+- Must be selected.
+- Identifies the account affected by the transaction.
+- Only appropriate active accounts should be selectable.
+
+### 23.3 Optional fields
+
+**Description**
+
+- Optional.
+- The user must be able to save without entering a description.
+
+**Transaction date**
+
+- Defaults to today.
+- Can be changed by the user.
+- Uses the existing Ethiopian/Gregorian calendar implementation.
+- Must not introduce inconsistent date conversion.
+
+### 23.4 Default categories
+
+Expense categories:
+
+- Food
+- Transport
+- Housing
+- Utilities
+- Communication
+- Other
+
+Income categories:
+
+- Salary
+- From Asaye
+- Other
+
+These are starting categories, not a permanently fixed list.
+
+### 23.5 Category management
+
+Allow the user to:
+
+- Add categories.
+- Rename categories.
+- View income and expense categories separately.
+- Prevent accidental duplicate categories.
+- Preserve historical transaction relationships when renaming.
+- Archive or safely reassign categories that are already in use before deletion.
+
+Never allow an expense category to be accidentally assigned to an income transaction or vice versa.
+
+### 23.6 Saving transactions
+
+For an expense:
+
+- Deduct the amount from the selected account.
+
+For income:
+
+- Add the amount to the selected account.
+
+Save the transaction and its financial effect reliably.
+
+- Prevent duplicate submissions from rapid taps.
+- Do not report success before the database operation succeeds.
+- Preserve entered information if saving fails.
+- Display understandable validation and error messages.
+
+### 23.7 Interface requirements
+
+- Clearly distinguish income and expense.
+- Make mandatory fields obvious.
+- Provide suitable numeric keyboards.
+- Do not let the keyboard hide important controls.
+- Allow cancellation without saving.
+- Avoid unnecessary steps and unnecessary input fields.
+
+### Acceptance Tests
+
+1. Create an expense.
+2. Create income.
+3. Amount is mandatory.
+4. Category is mandatory.
+5. Account is mandatory.
+6. Description is optional.
+7. Transaction date defaults correctly.
+8. Income and expense categories remain separate.
+9. Create a new category.
+10. New categories become immediately available.
+11. Invalid or zero amounts are rejected.
+12. Expense decreases the selected account.
+13. Income increases the selected account.
+14. Transaction and balance update correctly.
+15. Rapid repeated taps do not create duplicate transactions.
+
+---
+
+# Task 24 — Transaction History, Viewing, and Editing
+
+## Objective
+
+Allow the user to see all financial activity and correct previously entered transactions.
+
+### 24.1 Transaction history
+
+Provide a dedicated screen or section displaying all saved transactions.
+
+Each transaction should show:
+
+- Description, if provided.
+- Amount.
+- Income or expense type.
+- Category.
+- Account.
+- Transaction date.
+
+Clearly distinguish income and expenses.
+
+Do not display fabricated sample transactions as real activity.
+
+### 24.2 Transaction details
+
+Tapping a transaction must open its details.
+
+Display all information saved for that transaction:
+
+- Description.
+- Amount.
+- Type.
+- Category.
+- Account.
+- Transaction date.
+
+### 24.3 Editing
+
+Allow the user to edit:
+
+- Amount.
+- Transaction type.
+- Category.
+- Account.
+- Description.
+- Transaction date.
+
+Editing must update the existing transaction rather than creating a duplicate.
+
+### 24.4 Balance recalculation
+
+Editing must reverse the original financial effect and apply the new effect correctly.
+
+**Example A — Amount change**
+
+Original:
+- Expense: 100
+- Account: CBE
+
+Edited:
+- Expense: 150
+- Account: CBE
+
+Final balance must reflect a deduction of 150, not 250.
+
+**Example B — Account change**
+
+Original:
+- Expense: 100
+- Account: CBE
+
+Edited:
+- Expense: 100
+- Account: BOA
+
+Restore 100 to CBE and deduct 100 from BOA.
+
+**Example C — Transaction type change**
+
+Original:
+- Expense: 100
+- Account: CBE
+
+Edited:
+- Income: 100
+- Account: CBE
+
+Reverse the original expense and apply the income.
+
+### 24.5 Synchronization
+
+After editing:
+
+- Transaction history must show the updated information.
+- Affected account balances must be correct.
+- Combined balance must be correct.
+- Dashboard values must update.
+- Changes must persist after application restart.
+
+### Acceptance Tests
+
+1. All transactions appear in history.
+2. Income and expenses are distinguishable.
+3. Details show correct information.
+4. Editing updates the existing record.
+5. Amount changes recalculate correctly.
+6. Account changes update both affected accounts.
+7. Changing transaction type works correctly.
+8. Category changes update related information.
+9. Editing creates no duplicate records.
+10. Dashboard and transaction history remain synchronized.
+11. Changes persist after restarting.
+
+---
+
+# Task 25 — Transaction Deletion, Balance Reversal, and Transfers
+
+## Objective
+
+Ensure that deleting transactions correctly restores balances and that transfers do not distort the combined financial position.
+
+### 25.1 Transaction deletion
+
+Allow deletion from the transaction detail screen and appropriate action menus.
+
+Use the existing confirmation and feedback conventions.
+
+### 25.2 Reverse financial effects
+
+Deleting a transaction must reverse its effect.
+
+**Expense example**
+
+- Initial CBE balance: 1,000.
+- Expense: 200.
+- Balance after expense: 800.
+- Delete expense.
+- Restored CBE balance: 1,000.
+
+**Income example**
+
+- Initial BOA balance: 1,000.
+- Income: 300.
+- Balance after income: 1,300.
+- Delete income.
+- Restored BOA balance: 1,000.
+
+Update individual account balances, combined balance, and affected summaries.
+
+### 25.3 Safe database operations
+
+- Never leave orphaned financial movements.
+- Never reverse the same transaction twice.
+- Prevent repeated delete operations.
+- Keep database and UI synchronized.
+- Use atomic database operations where necessary.
+- Preserve existing undo functionality if available.
+
+Undoing a deletion must restore the transaction and its financial effect exactly once.
+
+### 25.4 Account-to-account transfers
+
+Support basic transfers between accounts.
+
+A transfer must be a distinct financial operation, not income or expense.
+
+Example:
+
+Initial balances:
+- CBE: 1,000.
+- BOA: 500.
+
+Transfer 200 from CBE to BOA.
+
+Final balances:
+- CBE: 800.
+- BOA: 700.
+
+Combined balance before: 1,500.
+
+Combined balance after: 1,500.
+
+Rules:
+
+- Require a source account.
+- Require a destination account.
+- Source and destination must be different.
+- Amount must be greater than zero.
+- Record the transfer as one logical operation with the required account movements.
+- Do not count transfers as income or expenses.
+- Update both accounts together.
+- Do not allow partial transfers if one side fails.
+
+### 25.5 Transfer editing and deletion
+
+- Editing a transfer must reverse the original effect and apply the new effect.
+- Deleting a transfer must restore both account balances.
+- Undoing a deleted transfer must restore both movements exactly once.
+- Transfers must remain identifiable in transaction history.
+
+### 25.6 Financial integrity checks
+
+Verify:
+
+- Expense decreases the correct account.
+- Income increases the correct account.
+- Deleting an expense restores the account.
+- Deleting income reverses the account movement.
+- Editing an amount changes balances correctly.
+- Editing the account restores the old account and updates the new one.
+- Transfers change individual balances but not combined balance.
+- Deleting transfers restores both accounts.
+- No operation creates duplicate movements.
+- No operation changes unrelated accounts.
+
+### Acceptance Tests
+
+1. Deleting an expense restores the balance.
+2. Deleting income reverses its effect.
+3. Combined balance updates after deletion.
+4. Undo restores the transaction exactly once, where supported.
+5. Transfer decreases the source account.
+6. Transfer increases the destination account.
+7. Transfer does not change combined balance.
+8. Transfer is not counted as income or expense.
+9. Editing transfers works correctly.
+10. Deleting transfers restores both accounts.
+11. Invalid transfers are rejected.
+12. Failed operations do not leave partially updated data.
+
+---
+
+# PART 4 — REQUIRED FINANCIAL DATA ARCHITECTURE
+
+The underlying data structure must support the visible functionality correctly.
+
+Use existing suitable structures where possible. Do not create duplicate tables or unnecessary abstraction.
+
+## Accounts
+
+Each account should have:
+
+- Unique ID.
+- Name.
+- Currency, where applicable.
+- Opening balance.
+- Opening-balance date.
+- Active or archived status.
+- Creation and modification metadata where appropriate.
+
+## Categories
+
+Each category should have:
+
+- Unique ID.
+- Name.
+- Type: income or expense.
+- Active or archived status.
+- Creation and modification metadata where appropriate.
+
+## Transactions
+
+Each transaction should have:
+
+- Unique ID.
+- Type: income, expense, or transfer.
+- Amount.
+- Category reference for income or expense.
+- Account reference, or source and destination account references for transfers.
+- Optional description.
+- Transaction date.
+- Creation timestamp.
+- Modification timestamp where appropriate.
+
+These are conceptual requirements, not an instruction to create duplicate tables if equivalent structures already exist.
+
+## Balance calculation
+
+Account balance must be consistently derived from opening balances and valid financial movements.
+
+Do not independently modify a stored account balance while leaving the transaction history unchanged.
+
+If cached balances are needed for performance, ensure they can be reconciled against the underlying records.
+
+## Atomicity
+
+Financial operations that affect multiple records must either succeed completely or fail without leaving partial changes.
+
+This includes:
+
+- Creating transactions.
+- Editing transactions.
+- Deleting transactions.
+- Creating transfers.
+- Editing transfers.
+- Reversing transfers.
+
+## Historical integrity
+
+- Renaming an account must not break historical transactions.
+- Renaming a category must not break historical transactions.
+- Archiving an account or category must not destroy history.
+- Deleting transactions must reverse their effects correctly.
+- All relationships must use stable identifiers.
+
+---
+
+# PART 5 — TESTING AND QUALITY REQUIREMENTS
+
+Test the Finance module through both the actual UI and underlying database operations.
+
+Do not rely only on unit tests or only on visual inspection.
+
+Test at least:
+
+1. First-time setup.
+2. Opening balances.
+3. Multiple accounts.
+4. Combined balance calculation.
+5. Creating income.
+6. Creating expenses.
+7. Creating categories.
+8. Creating accounts.
+9. Transaction history.
+10. Editing transactions.
+11. Deleting transactions.
+12. Undo after deletion.
+13. Account-to-account transfers.
+14. Editing and deleting transfers.
+15. Application restart and persistence.
+16. Offline functionality.
+17. Invalid input.
+18. Repeated rapid actions.
+19. Empty account and transaction states.
+20. Large transaction collections.
+
+Use test-only data for automated testing.
+
+Never insert test transactions, sample balances, or fabricated accounts into the user's production database.
+
+For every test, verify the complete chain:
+
+**UI action → validation → business logic → database change → balance calculation → displayed UI.**
+
+The visible balance and independently calculated expected balance must agree.
+
+Do not weaken existing tests simply to make them pass.
+
+---
+
+# PART 6 — DOCUMENTATION
+
+Update existing documentation.
+
+## IMPLEMENTATION_STATUS.md
+
+Record Tasks 21–25 individually.
+
+Include:
+- What was already working.
+- What was removed.
+- What was changed.
+- What was tested.
+- Actual test results.
+- Remaining defects or blocked requirements.
+
+## MAYBE_LATER.md
+
+Record useful Finance features that were removed or deferred because they are outside this assignment.
+
+Do not implement them now.
+
+Preserve the existing documentation and history.
+
+---
+
+# PART 7 — FINAL REPORT AND STOPPING CONDITION
+
+When finished, provide a report containing:
+
+1. What was removed from the old Finance module.
+2. What was retained and why.
+3. What was implemented in Tasks 21–25.
+4. What was already working and left unchanged.
+5. Database and architecture changes.
+6. UI and navigation changes.
+7. Tests executed and actual results.
+8. Whether account balances match independently calculated values.
+9. Any incomplete requirements.
+10. Any risks or discovered problems.
+11. Documentation updated.
+
+**STRICT STOPPING CONDITION**
+
+Stop after completing this assignment.
+
+Do not begin Tasks 26–30.
+
+Do not add budgets, charts, advanced reports, debt management, SMS detection, AI features, or other additional Finance functionality.
+
+Do not preserve unnecessary old Finance features just because they already exist.
+
+Do not redesign unrelated modules.
+
+Wait for further instructions.
+
+## FINAL PRODUCT EXPECTATION
+
+The finished Finance module should be simple enough that a user can immediately understand how to use it:
+
+- See how much money they have in total.
+- See how much money is in each account.
+- Add an income transaction.
+- Add an expense transaction.
+- Transfer money between accounts.
+- View all transactions.
+- Edit incorrect transactions.
+- Delete transactions and correctly restore balances.
+- Add accounts and categories when needed.
+
+Nothing else is a priority in this assignment.
+
+**The goal is accuracy, simplicity, and reliability—not feature quantity.**

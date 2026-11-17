@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 5,
+  "appVersion": "1.0.2+3",
+  "exportedAt": "2026-11-11T00:00:00.000Z",
+  "isFinanceSetupCompleted": false,
+  "openingBalanceCents": 0,
+  "accounts": [],
+  "categories": [
+    { "id": "cat-food", "name": "Food", "type": "expense", "colorHex": "#EF4444", "isDefault": false, "isArchived": false },
+    { "id": "cat-transport", "name": "Transport", "type": "expense", "colorHex": "#F97316", "isDefault": false, "isArchived": false },
+    { "id": "cat-housing", "name": "Housing", "type": "expense", "colorHex": "#F59E0B", "isDefault": false, "isArchived": false },
+    { "id": "cat-utilities", "name": "Utilities", "type": "expense", "colorHex": "#EAB308", "isDefault": false, "isArchived": false },
+    { "id": "cat-comm", "name": "Communication", "type": "expense", "colorHex": "#84CC16", "isDefault": false, "isArchived": false },
+    { "id": "cat-other-exp", "name": "Other", "type": "expense", "colorHex": "#94A3B8", "isDefault": true, "isArchived": false },
+    { "id": "cat-salary", "name": "Salary", "type": "income", "colorHex": "#10B981", "isDefault": false, "isArchived": false },
+    { "id": "cat-freelance", "name": "Freelance & Business", "type": "income", "colorHex": "#06B6D4", "isDefault": false, "isArchived": false },
+    { "id": "cat-asaye", "name": "From Asaye", "type": "income", "colorHex": "#3B82F6", "isDefault": false, "isArchived": false },
+    { "id": "cat-invest", "name": "Investments & Returns", "type": "income", "colorHex": "#8B5CF6", "isDefault": false, "isArchived": false },
+    { "id": "cat-other-inc", "name": "Other Income", "type": "income", "colorHex": "#64748B", "isDefault": true, "isArchived": false }
+  ],
+  "transactions": [],
+  "tasks": [],
+  "notes": [],
+  "projects": [],
+  "goals": [],
+  "inboxItems": [],
+  "calendarEvents": []
+}

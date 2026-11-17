@@ -1,0 +1,1277 @@
+# DAYWELL — PROMPT 1.5 OF 25
+## Final Architecture Audit, Contradiction Resolution, and Stage 2 Implementation Readiness Approval
+
+# 1. WHAT WE HAVE DONE SO FAR
+
+We have completed four iterations of Daywell's 25-iteration development and improvement plan.
+
+### Prompt 1.1 — Repository Synchronization and Current-State Verification
+
+Established the repository baseline, identified the primary GitHub branch, inspected the workspace, and verified the available development environment.
+
+The AI Studio workspace was identified as a static snapshot without Git metadata. No destructive repository operations were authorized.
+
+### Prompt 1.2 — Complete Application Architecture and Module Inventory
+
+Investigated the existing Flutter application, TypeScript verification environment, database, repositories, domain logic, and UI.
+
+Identified critical architectural defects:
+
+- Flutter UI operates primarily on volatile in-memory data.
+- Existing Drift repositories are disconnected from the runtime UI.
+- Calendar functionality is incomplete.
+- Some task and note metadata exists only in widget state.
+- The finance repository does not use the existing double-entry ledger.
+- Persistence and application-lifecycle integration tests are insufficient.
+
+### Prompt 1.3 — Architecture Evaluation and Target Architecture Design
+
+Established the proposed architecture:
+
+- Pragmatic feature-first layered architecture.
+- Drift SQLite as the authoritative persistent database.
+- Double-entry accounting as the financial source of truth.
+- Repository-based data access.
+- AppStateManager retained temporarily as a coordinating facade.
+- Shared foundation JSON as the canonical source for shared business contracts.
+- TypeScript/React retained as a development and verification environment, not bundled unnecessarily into the Android production APK.
+
+### Prompt 1.4 — Authoritative Persistence Contracts and Migration Specification
+
+Produced detailed repository contracts, database ownership rules, calendar schema proposals, finance ledger operations, migration specifications, backup/restore requirements, and testing plans.
+
+The report declared Prompt 1.4 complete.
+
+However, our subsequent review identified several unresolved problems:
+
+1. Accounting terminology and ledger treatment were inconsistent.
+2. Opening balances were not fully specified.
+3. The calendar repository mixed UTC range parameters with local calendar-date storage.
+4. Recurrence and cross-midnight event semantics were incomplete.
+5. Backup restoration examples omitted several persistent entities.
+6. Project, Inbox, Settings, and other repository boundaries were not fully resolved.
+7. AppStateManager could still become a large coordinating object.
+8. JSON-column decisions were not sufficiently evaluated against actual query requirements.
+9. Migration safety and historical migration compatibility needed stronger evidence.
+
+**Important:** The previous reports are architectural inputs, not unquestionable truth. Inspect the actual source code again before making final decisions.
+
+---
+
+# 2. OUR OVERALL AIM
+
+We are building Daywell as a reliable, offline-first, extensible personal management application.
+
+The initial application modules are:
+
+- Finance
+- To-Do
+- Notes
+- Calendar
+
+The architecture must also accommodate future modules without requiring a redesign of the shared application foundation.
+
+Our requirements include:
+
+- Reliable persistence of all user-created data.
+- Normal core functionality without internet access.
+- Consistent data after closing and reopening the application.
+- Correct financial calculations and auditable accounting history.
+- Reliable task, note, and calendar operations.
+- Safe encrypted backup and restoration.
+- Clear separation between UI, application coordination, domain logic, repositories, and persistence.
+- Shared business rules and contracts where appropriate.
+- Automated tests that verify actual application behavior.
+- Maintainability as the application grows.
+- No unnecessary increase in Android APK size.
+
+The objective is not to create the most complicated architecture.
+
+The objective is to create the **simplest architecture that reliably satisfies the application's current and foreseeable requirements**.
+
+---
+
+# 3. WHAT THIS ITERATION MUST ACHIEVE
+
+Prompt 1.5 is the final Stage 1 architecture checkpoint.
+
+You must independently investigate and finalize:
+
+1. All unresolved issues from Prompt 1.4.
+2. Financial accounting and ledger correctness.
+3. Calendar date, time, timezone, and recurrence semantics.
+4. Complete backup and restoration behavior.
+5. Repository boundaries and application-service responsibilities.
+6. AppStateManager's final transitional role.
+7. Database migration safety and initialization.
+8. Data ownership across all current modules.
+9. Offline-first behavior and future synchronization compatibility.
+10. Cross-platform shared foundation responsibilities.
+11. Additional architectural risks not identified previously.
+12. Measurable implementation acceptance criteria.
+
+At the end, produce a final, internally consistent architecture specification.
+
+**This is still a design and audit iteration. Do not implement production changes.**
+
+---
+
+# PART A — INDEPENDENT SOURCE-CODE REAUDIT
+
+## 4. Inspect the Actual Current Workspace
+
+Reinspect the source code rather than simply reviewing the Prompt 1.4 report.
+
+Investigate at minimum:
+
+- `flutter_app/lib/main.dart`
+- `flutter_app/lib/ui/app_state.dart`
+- `flutter_app/lib/data/database/tables.dart`
+- `flutter_app/lib/data/database/app_database.dart`
+- `flutter_app/lib/data/repositories/`
+- `flutter_app/lib/domain/`
+- `flutter_app/lib/services/`
+- `flutter_app/lib/ui/screens/`
+- `flutter_app/lib/services/backup/`
+- `shared_foundation/`
+- `scripts/sync_foundation.mjs`
+- Relevant Flutter and TypeScript tests.
+- Android configuration and production build configuration.
+
+Inspect actual code, not just class names or documentation.
+
+Verify:
+
+- Database schema version.
+- All actual tables and columns.
+- Foreign keys and indexes.
+- Existing repository interfaces and implementations.
+- Model serialization and deserialization.
+- Database initialization.
+- Application dependency injection.
+- Existing transaction behavior.
+- Backup payload structure.
+- Existing migration history.
+- Test coverage.
+- Android production dependency inclusion.
+
+For each important finding, cite the exact file and relevant class, method, table, or field.
+
+If you cannot inspect something, identify it as unverified.
+
+## 5. Independently Challenge Previous Reports
+
+Create a comparison table:
+
+| Previous claim | Actual source-code evidence | Assessment | Final decision |
+|---|---|---|---|
+| Drift is schema v3 | | | |
+| Six repositories exist | | | |
+| All persistent data can be moved to Drift | | | |
+| Double-entry ledger is complete | | | |
+| CalendarEvents is sufficient | | | |
+| Backup supports complete restoration | | | |
+| AppStateManager can remain a facade | | | |
+| JSON metadata columns are appropriate | | | |
+
+Identify any incorrect, exaggerated, outdated, or unsupported claims.
+
+Do not preserve an earlier decision merely because another iteration approved it.
+
+---
+
+# PART B — FINAL FINANCIAL ACCOUNTING DESIGN
+
+## 6. Establish the Actual Accounting Model
+
+This is one of the most important parts of the final audit.
+
+Inspect the real definitions of:
+
+- AccountsTable
+- FinancialCategories
+- JournalEntriesTable
+- PostingsTable
+- DebtsTable
+- SettlementAllocationsTable
+- PartiesTable
+- Finance domain models
+- Existing financial calculations
+- Existing finance UI behavior
+
+Produce a precise explanation of the relationship between:
+
+1. Asset accounts.
+2. Liability accounts.
+3. Income accounts.
+4. Expense accounts.
+5. Equity accounts.
+6. User-facing categories.
+7. Journal entries.
+8. Postings.
+9. Financial transaction projections.
+
+Do not assume a category is automatically a ledger account.
+
+Decide whether financial categories should:
+- Be actual accounts in the chart of accounts.
+- Map to dedicated ledger accounts.
+- Be separate metadata referencing appropriate ledger accounts.
+- Use another justified design.
+
+Choose one coherent accounting model and explain why.
+
+## 7. Resolve Opening Balances
+
+The previous specification did not sufficiently define how account opening balances enter a balanced double-entry ledger.
+
+Specify:
+
+- How a new account is created.
+- How its opening balance is recorded.
+- Which balancing account is used.
+- How the opening date is represented.
+- How an account with a zero opening balance is handled.
+- How existing accounts are migrated if opening balances already exist.
+- How opening balances are displayed in transaction history.
+- How opening balances affect combined balances and reports.
+
+Opening balances must not be stored in a way that causes the displayed balance to disagree with the ledger.
+
+## 8. Define Accounting Invariants Mathematically
+
+Define the debit/credit convention for every account type.
+
+For every posted journal entry:
+
+\[
+\sum \text{Debits} = \sum \text{Credits}
+\]
+
+Define account balance calculations using the chosen convention.
+
+Provide worked examples for:
+
+### A. Expense
+
+Spend 150 ETB from a bank account.
+
+Show:
+- Journal entry.
+- Debit posting.
+- Credit posting.
+- Account balance effect.
+- Expense category effect.
+- Combined asset balance effect.
+
+### B. Income
+
+Receive 20,000 ETB into a bank account.
+
+Show the corresponding postings and balance effects.
+
+### C. Transfer without a fee
+
+Transfer 500 ETB between two asset accounts.
+
+Show why combined asset balances remain unchanged.
+
+### D. Transfer with a fee
+
+Transfer 500 ETB and pay a 5 ETB fee.
+
+Show the correct postings, total debits, total credits, and combined asset balance reduction.
+
+**Correction required:** This is a four-posting example, not a three-posting example.
+
+### E. Debt received
+
+Receive borrowed money into an asset account.
+
+Show how the corresponding liability is represented.
+
+### F. Debt repayment
+
+Repay principal and, if applicable, interest.
+
+Distinguish principal repayment from interest expense.
+
+### G. Opening balance
+
+Show how the ledger represents an account's initial balance.
+
+For each example, use consistent units, directions, account types, and calculations.
+
+Do not leave mathematical expressions blank or incomplete.
+
+## 9. Define Posted Transaction Lifecycle
+
+Explicitly distinguish:
+
+- Draft.
+- Posted.
+- Voided draft.
+- Reversed posted transaction.
+- Replacement transaction.
+
+Answer:
+
+1. Can a posted journal entry be edited?
+2. If editing is allowed, how is its previous state preserved?
+3. When must a reversal entry be created?
+4. How does a reversal affect account balances?
+5. Can a reversed entry itself be reversed?
+6. How are void reasons and audit history stored?
+7. How do transaction projections represent reversals?
+8. What happens when a user deletes a transaction from the UI?
+
+Do not treat setting `is_voided = true` as a complete accounting solution without demonstrating how the resulting ledger remains auditable and balanced.
+
+## 10. Define Finance Repository Contracts
+
+Finalize the financial repository or repositories.
+
+Decide whether debts and settlements belong inside FinanceRepository or need a separate boundary.
+
+Specify complete method signatures for all necessary operations.
+
+Include:
+
+- Account CRUD and archival.
+- Category CRUD.
+- Income and expense recording.
+- Transfers and fees.
+- Transaction history.
+- Account balances.
+- Combined balances.
+- Opening balances.
+- Reversals.
+- Debt creation.
+- Debt repayment.
+- Settlement allocation.
+- Financial reports.
+
+Identify which methods already have corresponding UI features and which are future capabilities.
+
+Define the database transaction boundary for every operation involving multiple records.
+
+**No operation may leave a partially posted financial transaction.**
+
+## 11. Resolve Financial Transaction Projection
+
+Define exactly how JournalEntries and Postings produce the user-facing TransactionModel.
+
+Address:
+
+- Transaction type.
+- Amount.
+- Source account.
+- Destination account.
+- Category.
+- Description.
+- Occurrence date.
+- Account movement date.
+- Transfer fees.
+- Reversal relationships.
+- Voided drafts.
+- Historical transaction display.
+
+Decide whether a repository-level projection remains the best option.
+
+If so, specify how it avoids N+1 database queries and unnecessary loading of the entire ledger.
+
+Ensure the projection does not become a second persistent financial authority.
+
+---
+
+# PART C — FINAL CALENDAR DESIGN
+
+## 12. Resolve Calendar Date and Time Semantics
+
+The proposed `YYYY-MM-DD` representation is a useful starting point, but the full event model must be defined.
+
+Separate the concepts of:
+
+- Calendar date.
+- Local wall-clock time.
+- Absolute timestamp.
+- Timezone.
+- All-day event.
+- Timed event.
+- Event duration.
+
+Define the canonical storage representation for each.
+
+For example, consider an event beginning on one local date and ending on the following date.
+
+The model must not assume that every event starts and ends on the same calendar date.
+
+Resolve:
+
+1. All-day events.
+2. Timed events.
+3. Events crossing midnight.
+4. Events lasting several days.
+5. Events in a different timezone.
+6. User timezone changes.
+7. Ethiopian and Gregorian date display.
+8. Calendar range queries.
+9. Sorting events.
+10. Reminder scheduling.
+
+Use the existing Ethiopian/Gregorian conversion engine where appropriate.
+
+Do not introduce an external calendar API dependency for basic date conversion.
+
+## 13. Define Recurrence Properly
+
+A recurrence enum alone may be insufficient.
+
+Evaluate whether the application needs a structured recurrence rule supporting:
+
+- Daily recurrence.
+- Weekly recurrence.
+- Selected weekdays.
+- Monthly recurrence.
+- Yearly recurrence.
+- Interval values.
+- End dates.
+- Occurrence counts.
+- Exceptions.
+- Individual occurrence editing.
+- Entire-series editing.
+- Deleting one occurrence.
+- Timezone behavior.
+
+Do not automatically implement a complete calendar standard if the application does not need it.
+
+Choose a design that is sufficiently extensible without unnecessary complexity.
+
+Explain whether recurrence rules should be shared between tasks and calendar events or remain separate where their behavior differs.
+
+## 14. Resolve Tasks and Calendar Integration
+
+Determine whether task due dates should be:
+
+- Separate from calendar events.
+- Represented through a shared calendar-item abstraction.
+- Generated as derived calendar entries.
+
+Avoid duplicating persistent task information into calendar event records.
+
+The calendar should be capable of presenting relevant tasks and events together without creating two conflicting authoritative records.
+
+Specify the appropriate repository and domain boundaries.
+
+## 15. Finalize Calendar Repository Contracts
+
+Define exact method signatures for:
+
+- Event creation.
+- Event editing.
+- Event deletion.
+- Date-range queries.
+- Single-date queries.
+- Search.
+- Recurring event operations.
+- Event occurrence exceptions.
+- Reminder-related queries.
+
+Use date types that match the final storage semantics.
+
+Do not mix UTC-only range parameters with local calendar-date queries without a precise conversion contract.
+
+---
+
+# PART D — COMPLETE BACKUP AND RESTORATION DESIGN
+
+## 16. Audit Every Persistent Entity
+
+Rebuild the data ownership matrix from actual database definitions.
+
+Include every persistent table, not just the major modules.
+
+At minimum, investigate:
+
+- Accounts.
+- Journal entries.
+- Postings.
+- Financial categories.
+- Debts.
+- Settlement allocations.
+- Parties.
+- Tasks.
+- Subtasks.
+- Recurrence rules.
+- Notes.
+- Tags.
+- Calendar events.
+- Event exceptions.
+- Projects.
+- Milestones.
+- Goals.
+- Inbox items.
+- Reminders.
+- App settings.
+- Other existing persistent entities.
+
+For each table, specify:
+
+- Whether it contains user data.
+- Whether it is authoritative.
+- Whether it is included in backup.
+- Whether it is derived and reconstructed.
+- Whether it contains device-specific information.
+- Whether it has foreign-key dependencies.
+- Whether it requires special restoration handling.
+
+Do not omit an existing table simply because it is not yet connected to the UI.
+
+## 17. Define the Complete Backup Envelope
+
+Specify a versioned backup format.
+
+Include:
+
+- Backup format version.
+- Application/schema compatibility information.
+- Export timestamp.
+- Encryption metadata.
+- Integrity metadata.
+- Complete persistent data.
+- Any necessary migration metadata.
+
+Inspect the existing encryption implementation before proposing changes.
+
+Preserve the existing PBKDF2 and AES-GCM security design unless actual evidence justifies changing it.
+
+Evaluate whether the existing PBKDF2 iteration count is appropriate, considering both security and Android performance.
+
+Do not change cryptographic algorithms casually.
+
+## 18. Define the Complete Restore Dependency Graph
+
+Create an actual dependency graph covering every persistent entity.
+
+Then define:
+
+1. File validation.
+2. Backup version validation.
+3. Key derivation.
+4. Decryption.
+5. Integrity verification.
+6. Parsing.
+7. Schema validation.
+8. Duplicate-ID detection.
+9. Foreign-key validation.
+10. Business-rule validation.
+11. Database replacement.
+12. Repository state refresh.
+13. Post-restore verification.
+14. User success/failure notification.
+
+**Critical requirement:** The example in Prompt 1.4 omitted several tables from the restore operation. Correct this.
+
+The final restore specification must cover every included entity.
+
+It must specify dependency-aware deletion and insertion order, or justify a safer alternative.
+
+Evaluate:
+
+- Foreign-key enforcement.
+- Deferred constraints where supported.
+- SQLite transaction boundaries.
+- Database triggers.
+- Index preservation.
+- Schema compatibility.
+- Recovery after a failed restore.
+- Whether app state can remain stale after a successful restore.
+
+Do not claim that atomicity alone guarantees a correct restore. The restored database must also be complete and internally valid.
+
+## 19. Backup and Offline Operation
+
+Confirm that backup export and restoration remain usable offline.
+
+Identify any future Telegram backup integration requirements without making Telegram a dependency of local persistence.
+
+The database must remain fully functional even when Telegram, internet connectivity, or any remote service is unavailable.
+
+---
+
+# PART E — FINAL ARCHITECTURE AND REPOSITORY BOUNDARIES
+
+## 20. Reevaluate Repository Boundaries
+
+The previous report proposed six repositories:
+
+- Task.
+- Finance.
+- Note.
+- Calendar.
+- Project.
+- Inbox.
+
+Do not assume these are automatically the correct boundaries.
+
+Evaluate whether additional repositories or application services are needed for:
+
+- App settings.
+- Reminders and notifications.
+- Debt and settlement management.
+- Goals.
+- Backup.
+- Search.
+- Shared attachments or files.
+- Future synchronization.
+
+Avoid creating an interface for every table.
+
+A repository should represent a meaningful data-access boundary, not simply mirror the database schema.
+
+Produce the final repository and service map.
+
+For each boundary, define:
+
+- Responsibility.
+- Data ownership.
+- Dependencies.
+- Public operations.
+- Cross-repository interactions.
+- Whether it is a repository, application service, or domain service.
+
+## 21. Finalize AppStateManager's Architecture
+
+The previous proposal still risks retaining a large state manager with six repository dependencies and cached lists for every module.
+
+Evaluate three alternatives:
+
+**Option A — Coordinating Facade**
+
+AppStateManager coordinates all repositories and exposes existing screen-compatible properties.
+
+**Option B — Module-Specific State Controllers**
+
+FinanceState, TaskState, NoteState, CalendarState, and other necessary controllers own their module's presentation state.
+
+**Option C — Hybrid Transitional Architecture**
+
+Retain AppStateManager as a lightweight compatibility facade while introducing module-specific state controllers incrementally.
+
+Compare the alternatives based on:
+
+- Current code complexity.
+- Migration effort.
+- UI regression risk.
+- Testing.
+- Memory usage.
+- Stream subscriptions.
+- Future module extensibility.
+- Long-term maintainability.
+
+Choose one final design.
+
+Define:
+
+- Initialization.
+- Disposal.
+- Stream subscription lifecycle.
+- Error propagation.
+- Loading states.
+- Mutation behavior.
+- State refresh.
+- Cached data policy.
+- UI compatibility strategy.
+
+Avoid unnecessary full-list refreshes after every database write.
+
+Consider whether Drift streams should be the primary source of UI updates.
+
+Ensure failed database writes cannot create false UI success.
+
+---
+
+# PART F — TASKS, NOTES, AND DATA MODEL DESIGN
+
+## 22. Finalize Task Metadata Storage
+
+Reevaluate the previous embedded JSON decision.
+
+Inspect actual TaskModel fields and UI behavior.
+
+Determine how to persist:
+
+- Subtasks.
+- Subtask completion.
+- Subtask ordering.
+- Recurrence.
+- Priority.
+- Due dates.
+- Project relationships.
+- Labels or tags, if supported.
+- Completion history, if required.
+
+Compare JSON columns with relational tables using actual use cases.
+
+Consider future search, filtering, independent updates, synchronization, and migration complexity.
+
+If JSON columns are selected, specify:
+
+- Serialization format.
+- Type converters.
+- Validation.
+- Backward compatibility.
+- Corrupt-data behavior.
+- Atomic updates.
+- Versioning considerations.
+
+Do not silently discard malformed metadata.
+
+## 23. Finalize Note Metadata Storage
+
+Define the persistent representation of:
+
+- Tags.
+- Pin status.
+- Archive status.
+- Note categories.
+- Creation and modification timestamps.
+- Search indexing, if necessary.
+
+Distinguish tags from categories if they serve different purposes.
+
+Evaluate whether note search must include titles, body text, and tags.
+
+Consider whether SQLite FTS is justified or whether the current search implementation is sufficient.
+
+Avoid adding indexes or search infrastructure without a demonstrated need.
+
+## 24. Review All Existing Models and Relationships
+
+Inspect the entire domain model inventory.
+
+Identify:
+
+- Missing fields.
+- Duplicate representations.
+- Inconsistent IDs.
+- Unclear ownership.
+- Missing relationships.
+- Serialization mismatches.
+- Date/time inconsistencies.
+- Data that exists only in widget state.
+- Data that is not included in backup.
+
+Pay special attention to model compatibility between:
+
+- Flutter/Dart.
+- Drift SQLite.
+- Shared foundation JSON.
+- TypeScript verification environment.
+
+The final design must not require manually maintaining several conflicting definitions of the same shared contract.
+
+---
+
+# PART G — MIGRATION AND INITIALIZATION SAFETY
+
+## 25. Verify the Actual Migration History
+
+Inspect the actual migration strategy and schema snapshots.
+
+Determine whether schema v3 is genuinely the current version.
+
+Do not assume the previous migration example correctly represents the historical database.
+
+Produce a migration compatibility matrix:
+
+| Starting version | Target version | Required operations | Data preservation risks | Required tests |
+|---|---|---|---|---|
+| v1 | Final | | | |
+| v2 | Final | | | |
+| v3 | Final | | | |
+
+Include any other supported version discovered during inspection.
+
+If historical migration code is incomplete or inconsistent, report it explicitly.
+
+Do not silently invent a safe migration path.
+
+## 26. Validate the Proposed Schema Changes
+
+For every proposed change, specify:
+
+- Table.
+- Column.
+- Data type.
+- Nullability.
+- Default.
+- Index.
+- Foreign key.
+- Backfill logic.
+- Serialization implications.
+
+Evaluate whether the proposed migration should be one version increment or several.
+
+The goal is not to maximize migration count. The goal is safe, testable evolution.
+
+## 27. Define Safe Initialization
+
+Specify a complete first-launch process.
+
+It must ensure:
+
+- Database opening.
+- Migration completion.
+- Default category initialization.
+- Default settings initialization.
+- No fake user records.
+- No duplicate seed records.
+- No accidental overwrite of user data.
+- Safe recovery from interrupted initialization.
+
+Evaluate whether `db_initialized` is sufficient.
+
+If the app requires several independent initialization steps, consider a more robust mechanism.
+
+Seeding must be idempotent.
+
+---
+
+# PART H — OFFLINE-FIRST AND FUTURE SYNCHRONIZATION READINESS
+
+## 28. Verify the Offline-First Architecture
+
+Daywell is intended to work offline for almost all core functionality.
+
+Verify that the proposed architecture supports:
+
+- Creating and editing tasks offline.
+- Creating and editing notes offline.
+- Recording finance transactions offline.
+- Creating calendar events offline.
+- Searching local records offline.
+- Exporting backups offline.
+- Restoring backups offline.
+
+No normal local operation should depend on an internet request.
+
+## 29. Evaluate Future Synchronization Compatibility
+
+Daywell may later support remote synchronization and periodic Telegram backups.
+
+Do not implement synchronization in this iteration.
+
+However, evaluate whether the current design creates problems for future synchronization.
+
+Consider:
+
+- Stable IDs.
+- Creation and modification timestamps.
+- Deletion tracking or tombstones.
+- Conflict detection.
+- Idempotent operations.
+- Transaction grouping.
+- Schema versioning.
+- Backup identity.
+- Duplicate prevention.
+
+Do not add unnecessary synchronization infrastructure now.
+
+Specify only the minimum design decisions that should be made today to avoid an expensive redesign later.
+
+Distinguish a backup from a synchronization system. They are not interchangeable.
+
+---
+
+# PART I — CROSS-PLATFORM FOUNDATION AND PRODUCTION BUILD
+
+## 30. Audit Shared Foundation Ownership
+
+Review:
+
+- `business_rules.json`
+- `schema_contracts.json`
+- `design_tokens.json`
+- `canonical_seed_database.json`
+- `scripts/sync_foundation.mjs`
+
+Specify which definitions belong in shared JSON and which should remain implementation-specific.
+
+The canonical JSON files should not become a dumping ground for every Dart model or database detail.
+
+Define how generated Dart and TypeScript outputs remain synchronized.
+
+Identify how the build should detect stale generated code.
+
+Prevent manually edited generated files from becoming conflicting authorities.
+
+## 31. Confirm Production APK Boundaries
+
+Verify the distinction between:
+
+- Flutter production application.
+- Android-specific dependencies.
+- TypeScript/React preview.
+- Test and verification tools.
+- Design assets.
+- Development scripts.
+- AI-agent development infrastructure.
+
+Identify what is actually packaged into the Android APK.
+
+The goal is to avoid including development-only dependencies and unnecessary assets while preserving all application functionality.
+
+Do not propose deleting assets or dependencies without proving they are unused.
+
+This is an architecture audit, not an APK optimization implementation.
+
+---
+
+# PART J — ADDITIONAL ARCHITECTURAL RISK DISCOVERY
+
+## 32. Find Problems We Have Not Already Identified
+
+This section is mandatory.
+
+Do not limit the audit to the issues listed in previous reports.
+
+Actively search for additional architectural risks, including but not limited to:
+
+### Data integrity
+- Race conditions between simultaneous writes.
+- Duplicate records.
+- Partial writes.
+- ID collisions.
+- Incorrect deletion behavior.
+- Stale cached data.
+- Serialization failures.
+- Data corruption recovery.
+
+### Application lifecycle
+- App termination during autosave.
+- Backgrounding during a database transaction.
+- Reopening after an interrupted write.
+- Multiple repository subscriptions.
+- Resource leaks.
+- Database connection lifecycle.
+
+### Finance
+- Rounding and currency precision.
+- Negative amounts.
+- Currency changes.
+- Archived account transactions.
+- Account deletion.
+- Transfers between incompatible account types.
+- Historical balance calculations.
+- Opening balance changes.
+- Reversals and reporting.
+
+### Calendar and reminders
+- Daylight-saving changes.
+- Local timezone changes.
+- Notifications after device restart.
+- Duplicate reminder scheduling.
+- Permission denial.
+- Recurrence exceptions.
+- Event and task synchronization.
+
+### Extensibility
+- Future module registration.
+- Cross-module relationships.
+- Shared settings.
+- Search across modules.
+- Backup schema evolution.
+- Future attachments.
+- Future remote synchronization.
+
+### Security and privacy
+- Local database exposure.
+- Backup passphrase handling.
+- Sensitive data in logs.
+- Cryptographic metadata validation.
+- Accidental plaintext backup files.
+- Restore from untrusted files.
+
+### Performance
+- Large task and note collections.
+- Large transaction history.
+- Expensive full-table refreshes.
+- Excessive JSON parsing.
+- Unnecessary database indexes.
+- APK dependency growth.
+
+For every discovered issue, document:
+
+1. Risk.
+2. Evidence.
+3. Practical consequence.
+4. Severity.
+5. Proposed resolution.
+6. Whether it must be resolved before Stage 2 or can safely be deferred.
+
+Prioritize actual risks, not hypothetical complexity.
+
+---
+
+# PART K — FINAL CONTRADICTION RESOLUTION
+
+## 33. Produce a Contradiction Register
+
+Create a table of all conflicting or incomplete decisions across Prompts 1.1–1.4.
+
+At minimum, address:
+
+| Issue | Earlier proposal | Problem | Final authoritative decision |
+|---|---|---|---|
+| Finance category representation | Categories used as ledger accounts | Accounting ambiguity | |
+| Opening balances | Opening balance fields | Ledger treatment incomplete | |
+| Posted transaction editing | updateTransaction() | Audit history unclear | |
+| Voiding | is_voided flag | Accounting treatment incomplete | |
+| Transfer with fee | Three-leg description | Four postings required | |
+| Calendar date ranges | UTC parameters and local date storage | Semantic mismatch | |
+| Multi-day events | Single eventDate | End-date behavior unclear | |
+| Recurrence | Simple enum | Insufficient lifecycle rules | |
+| Backup restore | Partial table example | Missing persistent entities | |
+| Repository boundaries | Six repositories | Other responsibilities unresolved | |
+| Settings | Direct database/service access | Ownership unclear | |
+| AppStateManager | Coordinating facade | Potential god object | |
+| JSON metadata | Embedded columns | Query and evolution tradeoffs | |
+| Migration | v4 proposal | Historical compatibility unverified | |
+
+Add any other contradictions you discover.
+
+For each issue, provide one final decision. Do not leave two competing authoritative designs.
+
+---
+
+# PART L — FINAL IMPLEMENTATION ROADMAP
+
+## 34. Establish the Stage 2–5 Implementation Sequence
+
+The project still contains 25 prompts arranged into five stages with five prompts per stage.
+
+Do not change the total number of prompts.
+
+Prompt 1.5 is the final Stage 1 checkpoint.
+
+Propose the final dependency-aware implementation sequence for Stages 2–5.
+
+The earlier proposed implementation areas were:
+
+1. Database migration and persistence foundation.
+2. Repository implementation and finance ledger integration.
+3. AppStateManager and application-state integration.
+4. Task, note, and calendar UI persistence alignment.
+5. Backup, testing, and production hardening.
+
+You may revise these boundaries if actual dependencies justify doing so.
+
+For every stage and substage, specify:
+
+- Objective.
+- Scope.
+- Dependencies.
+- Files or components likely to change.
+- Expected deliverables.
+- Tests required.
+- Acceptance criteria.
+- Re-audit requirements.
+- Risks.
+
+Do not produce the full copy-paste prompts for all remaining iterations.
+
+Only establish their technical scope and dependency order. We will create each prompt separately.
+
+## 35. Define Implementation Ordering Rules
+
+The implementation sequence must avoid:
+
+- Changing UI before persistence contracts are stable.
+- Rewriting repositories without migration tests.
+- Migrating all screens simultaneously.
+- Changing accounting rules without ledger tests.
+- Restoring backups without full entity coverage.
+- Declaring persistence complete without restart tests.
+
+Identify which components can be implemented independently and which must be coordinated.
+
+---
+
+# PART M — FINAL STAGE 1 ACCEPTANCE CRITERIA
+
+## 36. Create Measurable Acceptance Criteria
+
+Stage 1 is complete only when the architecture has clear, testable acceptance criteria.
+
+At minimum, establish criteria for:
+
+### Persistence
+- Every persistent entity has one authoritative owner.
+- Every required entity has a repository or explicitly justified alternative.
+- Every required mutation is persisted.
+- Database reopening preserves records.
+
+### Finance
+- Every posted journal entry balances.
+- Account balances are derived consistently.
+- Transfers preserve combined asset value except fees.
+- Opening balances are represented correctly.
+- Reversals preserve audit history.
+
+### Tasks and Notes
+- Subtasks survive navigation and application restart.
+- Recurrence data survives restart.
+- Note tags, pins, and archive state survive restart.
+- Search and filtering use persisted data.
+
+### Calendar
+- All-day dates never shift due to timezone conversion.
+- Timed events preserve local-time semantics.
+- Multi-day events work.
+- Recurrence behavior is explicitly defined.
+- Task and event data are not duplicated unnecessarily.
+
+### Backup
+- Every required persistent entity is covered.
+- Restore validates the complete dataset.
+- Failed restoration leaves the previous database intact.
+- Successful restoration refreshes application state.
+
+### Offline operation
+- Normal core operations require no internet connection.
+- Backup and restore can run offline.
+
+### Architecture
+- UI does not directly write to Drift.
+- Persistent records are not owned by widget state.
+- AppStateManager has clearly bounded responsibilities.
+- Future modules can be added without redesigning the core.
+
+For every criterion, specify how it will be tested and what constitutes a pass.
+
+---
+
+# PART N — STRICT EXECUTION RESTRICTIONS
+
+## 37. No Production Implementation
+
+This iteration is a final architecture audit and design exercise.
+
+Do not:
+
+- Modify production Dart files.
+- Modify production TypeScript files.
+- Change database schemas.
+- Run database migrations.
+- Rewrite repositories.
+- Rewrite AppStateManager.
+- Modify UI screens.
+- Change backup implementation.
+- Modify shared foundation JSON.
+- Change Android build configuration.
+- Delete or replace files.
+- Perform broad refactoring.
+- Make destructive Git operations.
+- Begin Stage 2 implementation.
+
+You may inspect source code and run non-destructive verification commands.
+
+If a conclusion cannot be verified without implementation, clearly identify the missing evidence.
+
+Do not claim a test passed unless it was actually executed.
+
+Do not claim Android or Flutter verification if the required SDK or environment is unavailable.
+
+Preserve all existing work.
+
+---
+
+# PART O — REQUIRED FINAL REPORT
+
+## 38. Deliver the Final Architecture and Readiness Report
+
+Your report must contain:
+
+1. Executive summary.
+2. Independent source-code audit.
+3. Corrections to earlier reports.
+4. Final authoritative architecture.
+5. Final data ownership matrix.
+6. Final repository and service boundaries.
+7. AppStateManager design.
+8. Final finance accounting model.
+9. Opening balance and transaction lifecycle design.
+10. Final calendar model.
+11. Final recurrence design.
+12. Task and note metadata decisions.
+13. Complete backup and restoration design.
+14. Final database migration and initialization design.
+15. Offline-first and future synchronization readiness.
+16. Shared foundation and code-generation design.
+17. Production APK boundary audit.
+18. Additional architectural risks.
+19. Contradiction register.
+20. Final implementation roadmap for Prompts 2.1–5.5.
+21. Measurable Stage 1 acceptance criteria.
+22. Explicit unresolved questions or blockers.
+23. Confirmation that no production source code was modified.
+
+Use concrete examples, code signatures, schemas, diagrams, and tables where they improve precision.
+
+Avoid vague statements such as "the system will be reliable" without defining how reliability is achieved and verified.
+
+## 39. Final Self-Challenge
+
+Before declaring Stage 1 complete, challenge your final design one last time.
+
+Ask:
+
+- Are we overengineering the application?
+- Are we underengineering any critical area?
+- Can the same requirements be satisfied with fewer moving parts?
+- Are any two components competing for ownership of the same data?
+- Can every financial operation be explained and reconciled mathematically?
+- Can every persistent record be backed up and restored?
+- Can every core feature work offline?
+- Can the application recover from interrupted operations?
+- Can future modules be added without changing unrelated modules?
+- Are there hidden dependencies that make the proposed implementation sequence unsafe?
+- Are our acceptance criteria actually measurable?
+- Are we assuming functionality that does not exist in the inspected code?
+
+List any final changes made to the proposed architecture as a result of this self-challenge.
+
+Do not hide unresolved issues to achieve a COMPLETE status.
+
+## 40. Final Completion Decision
+
+Provide one of these statuses:
+
+**STAGE 1: READY FOR IMPLEMENTATION**
+
+All critical architecture decisions are consistent, evidence-grounded, and sufficiently specified.
+
+**STAGE 1: READY WITH DEFERRED NON-CRITICAL RISKS**
+
+The implementation can safely begin, but specific non-critical issues have been documented with explicit deferral decisions.
+
+**STAGE 1: NOT READY**
+
+One or more critical architecture decisions remain unresolved.
+
+If not ready, identify exactly what must be resolved.
+
+For a READY decision, provide a concise list of the conditions that Stage 2 must follow.
+
+## 41. STOP CONDITION
+
+Do not begin Prompt 2.1.
+
+Do not automatically modify the project after completing the report.
+
+Wait for my review and explicit authorization.
+
+This is the final architecture checkpoint. We should not rush into implementation while critical design contradictions remain.
+
+**The objective is not to declare Stage 1 complete. The objective is to prove that Stage 1 is complete.**

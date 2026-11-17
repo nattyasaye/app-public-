@@ -1,0 +1,216 @@
+/**
+ * DAYWELL CANONICAL CSS DESIGN TOKENS (Single Source of Truth)
+ * Generated automatically from /shared_foundation/design_tokens.json (v1.1.0)
+ * DO NOT EDIT DIRECTLY. Run "npm run sync-foundation" to regenerate.
+ */
+
+:root {
+  /* Primary & Secondary */
+  --dw-primary: #1B4D3E;
+  --dw-primary-hover: #153E32;
+  --dw-primary-deep: #153E32;
+  --dw-primary-brand: #1B4D3E;
+  --dw-on-primary: #FFFFFF;
+  --dw-primary-container: #E0EFE8;
+  --dw-primary-container-subtle: #F0F7F4;
+  --dw-on-primary-container: #1B4D3E;
+
+  /* Surfaces & Borders */
+  --dw-canvas: #FAF9F5;
+  --dw-surface-subtle: #F2F0E8;
+  --dw-card: #FFFFFF;
+  --dw-elevated: #FFFFFF;
+  --dw-border: #E5E7EB;
+  --dw-divider: #ECEAE3;
+
+  /* Text Hierarchy */
+  --dw-text-primary: #111827;
+  --dw-text-secondary: #4B5563;
+  --dw-text-muted: #6B7280;
+  --dw-text-disabled: #9CA3AF;
+
+  /* Semantic Finance & Status */
+  --dw-income: #10B981;
+  --dw-on-income: #052E16;
+  --dw-income-container: #ECFDF5;
+  --dw-on-income-container: #065F46;
+
+  --dw-expense: #EF4444;
+  --dw-on-expense: #090D16;
+  --dw-expense-container: #FEF2F2;
+  --dw-on-expense-container: #991B1B;
+
+  --dw-transfer: #0D9488;
+  --dw-on-transfer: #021615;
+  --dw-transfer-container: #F0FDFA;
+  --dw-on-transfer-container: #115E59;
+
+  --dw-success: #15803D;
+  --dw-on-success: #FFFFFF;
+  --dw-success-container: #F0FDF4;
+  --dw-on-success-container: #166534;
+
+  --dw-error: #DC2626;
+  --dw-on-error: #FFFFFF;
+  --dw-error-container: #FEE2E2;
+  --dw-on-error-container: #7F1D1D;
+
+  --dw-warning: #F59E0B;
+  --dw-on-warning: #111827;
+  --dw-warning-container: #FFFBEB;
+  --dw-on-warning-container: #92400E;
+
+  --dw-info: #3B82F6;
+  --dw-on-info: #0B1120;
+  --dw-info-container: #EFF6FF;
+  --dw-on-info-container: #1E40AF;
+
+  /* Typography Families */
+  --dw-font-serif: Newsreader, Georgia, serif;
+  --dw-font-sans: Inter, -apple-system, BlinkMacSystemFont, sans-serif;
+  --dw-font-mono: JetBrains Mono, monospace;
+
+  /* Spacing Scale */
+  --dw-space-xs: 4px;
+  --dw-space-sm: 8px;
+  --dw-space-compact: 12px;
+  --dw-space-md: 16px;
+  --dw-space-lg: 24px;
+  --dw-space-xl: 32px;
+
+  /* Corner Radii */
+  --dw-radius-sm: 8px;
+  --dw-radius-md: 12px;
+  --dw-radius-lg: 16px;
+  --dw-radius-xl: 20px;
+  --dw-radius-sheet: 24px;
+  --dw-radius-full: 9999px;
+
+  /* Layout Breakpoints */
+  --dw-breakpoint-medium: 600px;
+  --dw-breakpoint-expanded: 840px;
+  --dw-max-content-width: 720px;
+  --dw-max-wide-width: 1120px;
+}
+
+.dark {
+  /* Primary & Secondary (Dark Mode) */
+  --dw-primary: #81C784;
+  --dw-primary-hover: #E0EFE8;
+  --dw-primary-deep: #245E4D;
+  --dw-primary-brand: #245E4D;
+  --dw-on-primary: #0E241C;
+  --dw-primary-container: #1D382E;
+  --dw-primary-container-subtle: #1D382E;
+  --dw-on-primary-container: #81C784;
+
+  /* Surfaces & Borders (Dark Mode) */
+  --dw-canvas: #121816;
+  --dw-surface-subtle: #161E1B;
+  --dw-card: #1A2320;
+  --dw-elevated: #212C28;
+  --dw-border: #2B3A34;
+  --dw-divider: #222E29;
+
+  /* Text Hierarchy (Dark Mode) */
+  --dw-text-primary: #F9FAFB;
+  --dw-text-secondary: #CBD5E1;
+  --dw-text-muted: #9CA3AF;
+  --dw-text-disabled: #5C6B64;
+
+  /* Semantic Containers (Dark Mode) */
+  --dw-income-container: #0D3326;
+  --dw-on-income-container: #6EE7B7;
+
+  --dw-expense-container: #3B1517;
+  --dw-on-expense-container: #FCA5A5;
+
+  --dw-transfer-container: #0E3330;
+  --dw-on-transfer-container: #5EEAD4;
+
+  --dw-success-container: #11331F;
+  --dw-on-success-container: #86EFAC;
+
+  --dw-error-container: #451215;
+  --dw-on-error-container: #FECACA;
+
+  --dw-warning-container: #36250B;
+  --dw-on-warning-container: #FCD34D;
+
+  --dw-info-container: #132645;
+  --dw-on-info-container: #93C5FD;
+}
+
+.dw-type-display {
+  font-family: var(--dw-font-serif);
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+.dw-type-heading {
+  font-family: var(--dw-font-serif);
+  font-size: 22px;
+  line-height: 28px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.dw-type-title {
+  font-family: var(--dw-font-sans);
+  font-size: 17px;
+  line-height: 24px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+.dw-type-body {
+  font-family: var(--dw-font-sans);
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+  letter-spacing: 0px;
+}
+.dw-type-body-compact {
+  font-family: var(--dw-font-sans);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
+  letter-spacing: 0px;
+}
+.dw-type-label {
+  font-family: var(--dw-font-sans);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.dw-type-caption {
+  font-family: var(--dw-font-sans);
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+.dw-type-numeric-hero {
+  font-family: var(--dw-font-sans);
+  font-size: 32px;
+  line-height: 38px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  font-variant-numeric: tabular-nums;
+}
+.dw-type-numeric-body {
+  font-family: var(--dw-font-sans);
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  letter-spacing: 0px;
+  font-variant-numeric: tabular-nums;
+}
+.dw-type-mono {
+  font-family: var(--dw-font-mono);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  letter-spacing: 0px;
+  font-variant-numeric: tabular-nums;
+}

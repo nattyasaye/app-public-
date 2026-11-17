@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@import "./styles/daywellTokens.css";
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  --color-daywell-canvas: var(--dw-canvas);
+  --color-daywell-emerald: var(--dw-primary);
+  --color-daywell-mint: var(--dw-primary-container);
+  --color-daywell-card: var(--dw-card);
+  --color-daywell-border: var(--dw-border);
+}
+
+body {
+  margin: 0;
+  background-color: var(--dw-canvas);
+  color: var(--dw-text-primary);
+  font-family: var(--dw-font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}

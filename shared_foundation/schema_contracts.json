@@ -1,0 +1,244 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "version": "2.0.0",
+  "schemaVersion": 8,
+  "timeConvention": {
+    "id": "Africa/Addis_Ababa",
+    "fixedUtcOffsetMinutes": 180,
+    "fixedUtcOffsetLabel": "UTC+3",
+    "observesDst": false
+  },
+  "entities": {
+    "Task": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "description": { "type": "string", "required": false },
+        "status": { "type": "string", "enum": ["not_started", "in_progress", "completed", "cancelled", "inbox"], "default": "not_started" },
+        "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"], "default": "medium" },
+        "dueDate": { "type": "string", "format": "date", "required": false },
+        "scheduledDate": { "type": "string", "format": "date", "required": false },
+        "projectId": { "type": "string", "required": false },
+        "milestoneId": { "type": "string", "required": false },
+        "estimatedDurationMinutes": { "type": "number", "required": false },
+        "subtasks": { "type": "array", "default": [] },
+        "labels": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "isPinned": { "type": "boolean", "default": false },
+        "isMyDay": { "type": "boolean", "default": false },
+        "recurrenceRule": { "type": "string", "required": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": false }
+      }
+    },
+    "Note": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "body": { "type": "string", "required": true },
+        "folder": { "type": "string", "required": false, "default": "General" },
+        "tags": { "type": "array", "items": { "type": "string" }, "default": [] },
+        "isPinned": { "type": "boolean", "default": false },
+        "isFavorite": { "type": "boolean", "default": false },
+        "isArchived": { "type": "boolean", "default": false },
+        "isTrashed": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "CalendarEvent": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "date": { "type": "string", "format": "date", "required": true },
+        "endDate": { "type": "string", "format": "date", "required": false },
+        "startTime": { "type": "string", "required": false },
+        "endTime": { "type": "string", "required": false },
+        "isAllDay": { "type": "boolean", "default": false },
+        "category": { "type": "string", "default": "general" },
+        "colorHex": { "type": "string", "default": "#1B4D3E" },
+        "hasReminder": { "type": "boolean", "default": false },
+        "notes": { "type": "string", "required": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "Account": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "name": { "type": "string", "required": true },
+        "type": { "type": "string", "enum": ["asset", "liability", "equity", "income", "expense", "revenue"], "default": "asset" },
+        "subType": {
+          "type": "string",
+          "enum": [
+            "cash",
+            "bank",
+            "mobile_money",
+            "savings_vault",
+            "credit_card",
+            "receivable",
+            "payable",
+            "opening_equity",
+            "nominal_income",
+            "nominal_expense",
+            "legacy_clearing"
+          ],
+          "default": "cash"
+        },
+        "isSystem": { "type": "boolean", "default": false },
+        "currencyCode": { "type": "string", "default": "ETB" },
+        "openingBalanceCents": { "type": "integer", "default": 0 },
+        "openingBalanceDate": { "type": "string", "format": "date", "required": false },
+        "isArchived": { "type": "boolean", "default": false }
+      }
+    },
+    "Category": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "name": { "type": "string", "required": true },
+        "type": { "type": "string", "enum": ["income", "expense"], "required": true },
+        "colorHex": { "type": "string", "default": "#1B4D3E" },
+        "parentId": { "type": "string", "required": false },
+        "sortOrder": { "type": "integer", "default": 0 },
+        "isDefault": { "type": "boolean", "default": false },
+        "isArchived": { "type": "boolean", "default": false }
+      }
+    },
+    "Transaction": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "amountCents": { "type": "integer", "minimum": 1, "required": true },
+        "type": { "type": "string", "enum": ["income", "expense", "transfer"], "required": true },
+        "categoryId": { "type": "string", "required": false },
+        "categoryName": { "type": "string", "required": false },
+        "accountId": { "type": "string", "required": true },
+        "accountName": { "type": "string", "required": false },
+        "destinationAccountId": { "type": "string", "required": false },
+        "destinationAccountName": { "type": "string", "required": false },
+        "transactionDate": { "type": "string", "format": "date", "required": true },
+        "note": { "type": "string", "required": false },
+        "payee": { "type": "string", "required": false },
+        "isSuperseded": { "type": "boolean", "default": false }
+      }
+    },
+    "Project": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "description": { "type": "string", "required": false },
+        "status": { "type": "string", "enum": ["active", "completed", "on_hold"], "default": "active" },
+        "targetDate": { "type": "string", "format": "date", "required": false },
+        "goalId": { "type": "string", "required": false }
+      }
+    },
+    "Goal": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "description": { "type": "string", "required": false },
+        "status": { "type": "string", "enum": ["active", "achieved", "archived"], "default": "active" },
+        "targetDate": { "type": "string", "format": "date", "required": false }
+      }
+    },
+    "InboxItem": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "rawText": { "type": "string", "required": true },
+        "category": { "type": "string", "enum": ["task", "idea", "expense", "note", "problem", "decision", "general"], "default": "task" },
+        "isProcessed": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "Commitment": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "amountCents": { "type": "integer", "minimum": 1, "required": true },
+        "dueDate": { "type": "string", "format": "date", "required": true },
+        "isPaid": { "type": "boolean", "default": false },
+        "recurringRule": { "type": "string", "required": false },
+        "linkedAccountId": { "type": "string", "required": false },
+        "categoryId": { "type": "string", "required": false },
+        "linkedDebtId": { "type": "string", "required": false },
+        "settlementEntryId": { "type": "string", "required": false },
+        "recurringRuleId": { "type": "string", "required": false },
+        "direction": { "type": "string", "enum": ["outflow", "inflow"], "default": "outflow" },
+        "legacyPaidUnverified": { "type": "boolean", "default": false }
+      }
+    },
+    "CommitmentSettlement": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "commitmentId": { "type": "string", "required": true },
+        "entryId": { "type": "string", "required": true },
+        "amountCents": { "type": "integer", "minimum": 1, "required": true },
+        "settledDate": { "type": "string", "format": "date", "required": true },
+        "createdAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "SavingsGoal": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "targetCents": { "type": "integer", "minimum": 1, "required": true },
+        "currentAllocatedCents": { "type": "integer", "minimum": 0, "default": 0 },
+        "targetDate": { "type": "string", "format": "date", "required": false },
+        "linkedAccountId": { "type": "string", "required": false },
+        "status": { "type": "string", "enum": ["active", "completed", "archived"], "default": "active" }
+      }
+    },
+    "Budget": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "categoryId": { "type": "string", "required": true },
+        "monthIso": { "type": "string", "required": true },
+        "limitCents": { "type": "integer", "minimum": 1, "required": true },
+        "rolloverEnabled": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "RecurringRule": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "ruleType": { "type": "string", "enum": ["expense", "income", "transfer", "commitment"], "required": true },
+        "amountCents": { "type": "integer", "minimum": 1, "required": true },
+        "frequency": { "type": "string", "enum": ["weekly", "biweekly", "monthly", "quarterly", "yearly"], "required": true },
+        "interval": { "type": "integer", "minimum": 1, "default": 1 },
+        "startDate": { "type": "string", "format": "date", "required": true },
+        "nextOccurrenceDate": { "type": "string", "format": "date", "required": true },
+        "endDate": { "type": "string", "format": "date", "required": false },
+        "accountId": { "type": "string", "required": false },
+        "destinationAccountId": { "type": "string", "required": false },
+        "categoryId": { "type": "string", "required": false },
+        "linkedDebtId": { "type": "string", "required": false },
+        "isActive": { "type": "boolean", "default": true },
+        "autoPost": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "Reminder": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "targetId": { "type": "string", "required": true },
+        "targetType": {
+          "type": "string",
+          "enum": ["task", "commitment", "calendar_event", "note", "custom"],
+          "required": true
+        },
+        "triggerTimeUtc": { "type": "string", "format": "date-time", "required": true },
+        "isActive": { "type": "boolean", "default": true },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "title": { "type": "string", "required": false },
+        "channelId": { "type": "string", "required": false }
+      }
+    },
+    "AppSetting": {
+      "fields": {
+        "key": { "type": "string", "required": true },
+        "value": { "type": "string", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": false }
+      }
+    }
+  }
+}

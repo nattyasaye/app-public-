@@ -1,0 +1,102 @@
+{
+  "version": "1.0.0",
+  "governedBy": "docs/architecture/module-boundaries.md",
+  "exceptions": [
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/database/app_database.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager acts as the thin dependency-wiring composition root initializing AppDatabase.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/database/database_persistence_coordinator.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager coordinates atomic SQLite snapshot export/import through DatabasePersistenceCoordinator.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/database/raw_database_recovery_exporter.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager wires startup failure diagnostics and cold recovery export/restore.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/repositories/calendar_repository.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager instantiates CalendarRepository for CalendarController.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/repositories/finance_repository.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager instantiates DriftFinanceRepository for FinanceController.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/repositories/inbox_repository.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager instantiates InboxRepository for InboxController.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/repositories/notes_repository.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager instantiates DriftNotesRepository for NotesController.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/repositories/search_repository.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager instantiates DriftSearchRepository for read-only cross-module search.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/app_state.dart",
+      "target": "flutter_app/lib/data/repositories/tasks_repository.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-composition-root",
+      "reason": "AppStateManager instantiates DriftTasksRepository for TasksController.",
+      "adrOrDoc": "docs/architecture/module-boundaries.md"
+    },
+    {
+      "source": "flutter_app/lib/ui/shell/daywell_shell_status_view.dart",
+      "target": "flutter_app/lib/data/database/raw_database_recovery_exporter.dart",
+      "rule": "flutter-ui-no-data",
+      "responsibleLayer": "presentation-recovery-host",
+      "reason": "Pre-existing startup diagnostic status view consumes DatabaseStartupFailure type without executing Drift queries; retained via narrow exception until decoupled.",
+      "adrOrDoc": "docs/architecture/data-and-persistence.md"
+    },
+    {
+      "source": "flutter_app/lib/core/shared_foundation_bridge.dart",
+      "target": "flutter_app/lib/ui/app_state.dart",
+      "rule": "flutter-core-isolation",
+      "responsibleLayer": "core-legacy-bridge",
+      "reason": "Pre-existing legacy canonical snapshot bridge in core reads AppStateManager controllers until relocated out of core/.",
+      "adrOrDoc": "docs/architecture/shared-foundation.md"
+    },
+    {
+      "source": "flutter_app/lib/core/shared_foundation_bridge.dart",
+      "target": "flutter_app/lib/domain/finance/double_entry_engine.dart",
+      "rule": "flutter-core-isolation",
+      "responsibleLayer": "core-legacy-bridge",
+      "reason": "Pre-existing legacy bridge validates AccountSubType and SystemControlAccounts invariants until relocated out of core/.",
+      "adrOrDoc": "docs/architecture/shared-foundation.md"
+    }
+  ]
+}

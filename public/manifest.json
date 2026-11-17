@@ -1,0 +1,18 @@
+{
+  "short_name": "PersonalApp",
+  "name": "Personal Management App (የግል አስተዳደር መተግበሪያ)",
+  "description": "Offline-first personal management app with tasks, projects, ETB personal finance, dual Ethiopian-Gregorian calendar, and encrypted backup.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#090d16",
+  "background_color": "#090d16",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ]
+}

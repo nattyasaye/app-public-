@@ -1,0 +1,6 @@
+{
+  "name": "Daywell - Personal Management System",
+  "description": "Offline-first personal management and life operating system featuring dual Ethiopian-Gregorian calendar, ETB double-entry financial engine, tasks, notes, and encrypted backups.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

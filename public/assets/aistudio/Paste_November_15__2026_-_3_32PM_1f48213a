@@ -1,0 +1,422 @@
+Daywell — Stage 4.0.5: Final Finance Architecture Blueprint (Corrected & Implementation-Ready)
+Planning-Only Deliverable — Zero Repository Modifications
+Stage 4.1 implementation is not authorized yet. Zero repository files, schemas, migrations, tests, generated .g.dart files, dependencies, configuration, or repository docs were modified. Nothing in this blueprint claims that tests, builds, or migrations were executed.
+Epistemic Labels Used Throughout This Blueprint
+[Confirmed repository fact] — Directly inspected and verified in repository files.
+[Confirmed user decision] — Product behavior explicitly confirmed by the user (preserved without reopening).
+[Proposed engineering decision] — Technical implementation strategy preserving confirmed product behavior.
+[New decision requiring user approval] — Schema or data-lifecycle policy in Section 14 Group 3 requiring sign-off before Stage 4.1 begins.
+[Deferred feature] — Excluded from the first personal-finance release (Stages 4.1–4.17).
+1. Executive Summary
+This corrected Stage 4.0.5 blueprint aligns every accounting formula, migration contract, foreign-key rebuild step, recovery workflow, and numerical scenario cleanly before Stage 4.1:
+Confirmed Credit-Card Overpayment (Option 1): [Confirmed user decision] Negative credit-card liability balances (PrepaidCardCredit = sum(max(0, -Balance(a))) on active ETB credit cards) are included in AvailableToSpend(H), included in NetFinancialPosition, and displayed separately as Prepaid Card Credit in Finance Overview and the AvailableToSpend Breakdown Sheet.
+Confirmed Expected-Income Commitments: [Confirmed user decision] First-release UI supports both bill outflows (outflow) and expected income (inflow) commitments; pending expected income never increases cash balances, income P&L, AvailableToSpend(H), or NetFinancialPosition until actually received.
+Exact Snapshot Normalization (v4 / v5 / v6 / v7): [Proposed engineering decision] Specifies field-by-field v4 -> v5 canonical date coercion, v5 8-table normalization into v7 tables, self-FK clearing & leaf-to-parent delete order under PRAGMA foreign_keys = ON, topological parent-first insertion, frozen V6LedgerMigrator (< 6), and unified V7LedgerHardener convergence producing ledger_migration_report_v7.
+SQLite-Accurate TableMigration FK Strategy: [Proposed engineering decision] Eliminates any assumption that PRAGMA foreign_keys can be toggled inside Drift's active onUpgrade transaction. Instead, relies cleanly on Drift's pre-beforeOpen foreign_keys = 0 startup state, rebuilds tables in strict Level 0 -> 1 -> 2 -> 3 parent-before-child topological order (avoiding SQLite 12-step ALTER TABLE RENAME reference corruption), cleans up pre-v7 un-FK'd orphan links (FinancialCommitments.recurringRuleId, FinancialCategories.parentId), recreates dropped indices, and validates PRAGMA foreign_key_check before commit.
+Immutable :rev:{n} Opening-Balance Provenance: [Proposed engineering decision] Preserves original 'open:{id}' and 'open:{id}:rev:{n}' identifiers + correctedFromEntryId chains across edits and zeroing, isolates ordinary manual adjustments from 7-point candidate detection, and guarantees exact 1x balance counting from PostingsTable.
+Cold WAL/SHM Recovery Bootstrap: [Proposed engineering decision] Explicitly awaits _db.close() before inspecting or cold-copying personal_management.sqlite + -wal + -shm + SHA-256 verification manifest via pure dart:io (zero Drift queries on failed DBs), separates invariant vs. corruption vs. I/O vs. export failures, and isolates corrupt files in quarantine prior to encrypted backup restoration.
+2. Confirmed Repository Facts
+All statements below are verified directly against inspected repository code (separated from proposed decisions):
+[Confirmed repository fact] Current Schema Version & Shipped v6 History: flutter_app/lib/data/database/app_database.dart (line 45) declares schemaVersion => 6; flutter_app/pubspec.yaml (1.0.2+3), INSTALLED_STORAGE_AND_APK_SIZE_AUDIT.md (1.0.1+2), and .github/workflows/android.yml confirm v6 has shipped in release APKs.
+[Confirmed repository fact] Drift Open & Upgrade Lifecycle (app_database.dart):
+Lines 673–679 open personal_management.sqlite via NativeDatabase.createInBackground(file) with no pre-open setup: setting PRAGMA foreign_keys = ON.
+Line 331 executes PRAGMA foreign_keys = ON inside beforeOpen, which Drift runs after onCreate and onUpgrade commit.
+Lines 124–220 (from < 5) run Drift TableMigration rebuilds followed by PRAGMA foreign_key_check. Lines 222–327 (from < 6) run additive columns, table creates, createPerformanceIndices() (including unique partial index idx_journal_legacy_source at lines 482–485), and V6LedgerMigrator.migrateDataInTransaction(this).
+[Confirmed repository fact] Actual V6LedgerMigrator Behavior (v6_ledger_migrator.dart):
+Reads/writes only 8 tables (accounts_table, financial_categories, financial_transactions, journal_entries_table, postings_table, debts_table, settlement_allocations_table, app_settings).
+Writes only AppSettings['ledger_v6_migrated_at'] (lines 22, 536–542); it does not create ledger_migration_report_v6.
+Matches transfers permissively (_findMatchingTransferEntry, lines 666–708) without ambiguity checks, falls back to acc-sys-legacy-offset on missing accounts (lines 710–718), deduplicates opening entries heuristically (lines 256–287), and writes 'writtenOff' for voided debt origins (lines 576–578).
+[Confirmed repository fact] DatabasePersistenceCoordinator (database_persistence_coordinator.dart):
+exportSnapshot writes 'schemaVersion': _db.schemaVersion (line 56).
+importSnapshot (lines 326–1024) runs one _db.transaction(...), deletes 20 tables in clearExisting (lines 336–356) without clearing self-FKs first, normalizes dates via _parseRequiredCanonicalDateString / _parseOptionalCanonicalDateString, classifies accounts via V6LedgerMigrator.inferAccountClassification (line 391), inserts rows, and executes if (snapshotVersion < 6) V6LedgerMigrator.migrateDataInTransaction(_db) else control accounts + reconcileAllDebts.
+[Confirmed repository fact] Opening-Balance Provenance Erasure (finance_repository.dart):
+_syncOpeningBalanceEntryInTx (lines 2233–2285) marks the prior 'open:${account.id}' entry isVoided = true and clears legacySourceTxId: Value(null) before inserting the replacement 'open:${account.id}'.
+[Confirmed repository fact] Schema & Model Constraints (tables.dart, sharedFoundation.ts, schema_contracts.json):
+FinancialCommitments, CommitmentModel, and SharedCommitment have no direction or commitmentType column (dueDate NOT NULL, isPaid, single settlementEntryId, recurringRuleId). RecurringRulesTable.ruleType already supports expense | income | transfer | commitment.
+FinancialCommitments.recurringRuleId, JournalEntriesTable.correctedFromEntryId, and FinancialCategories.parentId have no SQLite .references(...) FK constraints in v6 (tables.dart), so un-FK'd orphan IDs can exist in pre-v7 databases.
+PostingsTable.entryId & BudgetsTable.categoryId use KeyAction.cascade; FinancialCommitments.*, SavingsGoals.linkedAccountId, and RecurringRulesTable.* use KeyAction.setNull.
+DebtsTable lacks writeOffEntryId; SavingsGoals lacks status; schema_contracts.json (line 89) has "minimum": 0 on openingBalanceCents.
+[Confirmed repository fact] Engine & State Gaps (double_entry_engine.dart, finance_state.dart):
+DoubleEntryEngine derives account balances strictly from non-voided PostingsTable rows; calculateShortTermCreditOwed skips negative CC balances while calculateNetPosition includes them; buildDebtSettlement clamps max(0, outstanding - allocated) without explicit feeCents; ETB currency filtering is missing.
+FinanceModuleState still computes CalendarDate(year, month, 31) at line 131 (crashes in short months) and keeps pre-ledger openingBalanceCents fallbacks at lines 189–248.
+[Confirmed repository fact] Repository Guards, Recurring & Bootstrap:
+deleteAccount / deleteCategory already block referenced deletions (finance_repository.dart lines 210–257, 361–406); markCommitmentPaid(..., createExpenseTransaction: false) still permits non-ledger paid flags; processDueRecurringRules deduplicates 'rec:{id}:{occIso}' / 'com-rec-{id}-{occIso}' with a 24-cycle cap.
+AppStateManager._runInitialize() (app_state.dart lines 287–327) catches errors into _initializationError and renders DaywellShellStatusView (daywell_shell_status_view.dart) without closing _db, inspecting WAL/SHM, or offering raw .sqlite recovery export.
+[Confirmed repository fact] Open CI Failure: Reported baseline is 134 passed, 1 failed (flutter_app/test/dashboard_view_test.dart line 1700, responsive-layout / 320dp + 2.0x textScale test).
+3. Confirmed User Decisions (Locked — Do Not Reopen)
+[Confirmed user decision] Credit-Card Overpayment (Option 1):
+Include PrepaidCardCredit (sum(max(0, -Balance(a))) for active, non-system ETB credit_card accounts) in AvailableToSpend(H).
+Include PrepaidCardCredit in NetFinancialPosition.
+Display PrepaidCardCredit separately as Prepaid Card Credit in Finance Overview & the AvailableToSpend(H) Breakdown Sheet so users see both liquid cash and prepaid card credit clearly.
+[Confirmed user decision] ETB-Only First Release: Restrict active first-release accounting to ETB (1 ETB = 100 cents); exclude existing non-ETB accounts from all ETB calculations and flag them for review.
+[Confirmed user decision] Partial Commitment Settlements: Support partial payments/receipts on commitments with settlement history (CommitmentSettlementsTable).
+[Confirmed user decision] Immutable Debt Principal: Debt principalCents cannot be edited after creation; changing principal requires voiding the origin (when unblocked) and re-issuing the debt.
+[Confirmed user decision] Default Planning Horizon H: Default to the end of the current civil Gregorian month (today.endOfGregorianMonth) and keep H user-adjustable across Dashboard & Finance.
+[Confirmed user decision] Expected-Income & Expected-Expense Commitments in First-Release UI: Show both bill outflows (outflow) and expected income (inflow) in the first-release UI (Plans & confirmation flows).
+[Confirmed user decision] Expected Income Excluded Until Received: Expected income contributes 0 to actual account balances, income P&L, AvailableToSpend(H), and NetFinancialPosition before actual receipt.
+4. Corrected Accounting Contracts and Formulas
+4.1 Authoritative Formulas (ETB Integer Cents Only)
+Only non-archived, non-system ETB accounts (isSystem == false && isArchived == false && currencyCode == 'ETB') and non-voided ledger postings (JournalEntriesTable.isVoided == false) participate. Pre-existing non-ETB accounts contribute 0 everywhere and raise review flags.
+LiquidCash:
+sum(Balance(a)) where a.type == asset && a.subType IN {cash, bank, mobile_money} (Dr - Cr; bank overdrafts < 0 reduce LiquidCash directly).
+VaultSavings:
+sum(Balance(a)) where a.type == asset && a.subType == savings_vault.
+ShortTermCreditOwed:
+sum(max(0, Balance(a))) where a.type == liability && a.subType == credit_card (Cr - Dr > 0).
+PrepaidCardCredit (Confirmed Option 1):
+sum(max(0, -Balance(a))) where a.type == liability && a.subType == credit_card && Balance(a) < 0.
+Included in AvailableToSpend(H).
+Included in NetFinancialPosition.
+Displayed separately in Finance Overview & Breakdown Sheet as Prepaid Card Credit: +X ETB alongside Liquid Cash.
+DuePayables(H):
+sum(d.outstandingCents) where d.debtType == payable && d.status == active && (d.dueDate == null || d.dueDate <= H) (undated active payables count as due on demand <= H; settled, written_off, voided, and dueDate > H contribute 0).
+DueOutflowNonDebtCommitments(H):
+sum(max(0, c.amountCents - c.verifiedSettledCents)) where c.direction == outflow && c.linkedDebtId == null && c.status IN {unpaid, partial} && c.dueDate <= H.
+Excludes (0): all direction == inflow expected-income commitments, all linkedDebtId != null commitments (preventing payable double-count), dueDate > H, paid, and legacy_unverified_paid.
+VirtualSavingsReserve:
+sum(max(0, g.currentAllocatedCents)) where g.linkedAccountId == null && g.status != archived. Vault-linked goals (linkedAccountId != null) contribute 0.
+AvailableToSpend(H) (Confirmed Option 1 — Zero-Crossing Transfer Invariant):
+AvailableToSpend(H) = LiquidCash + PrepaidCardCredit - ShortTermCreditOwed - DuePayables(H) - DueOutflowNonDebtCommitments(H) - VirtualSavingsReserve
+(Equivalently, LiquidCash - SignedCreditCardOwed - DuePayables(H) - DueOutflowNonDebtCommitments(H) - VirtualSavingsReserve: paying down or overpaying a credit card from liquid cash preserves AvailableToSpend(H) identically across zero! Negative totals display exact minus sign + ETB in context.daywellColors.error + shortfall banner.)
+NetFinancialPosition:
+NetFinancialPosition = LiquidCash + VaultSavings + TotalActiveReceivables + PrepaidCardCredit - ShortTermCreditOwed - TotalActivePayables
+4.2 Balance Authority & Opening-Balance Sign Rules
+[Proposed engineering decision] PostingsTable (non-voided postings) is the sole runtime authority for all account balances; AccountsTable.openingBalanceCents / openingBalanceDate stay strictly metadata-only. Legacy pre-ledger fallback paths in finance_state.dart (lines 189–248) and AppSettings['opening_balance_cents'] are retired for balance calculations.
+[Proposed engineering decision] Normal-debit (asset/expense) > 0 posts Dr Account / Cr acc-sys-equity (< 0 overdraft reverses); normal-credit (liability) > 0 posts Dr acc-sys-equity / Cr Account (< 0 prepaid card credit reverses). Remove "minimum": 0 from schema_contracts.json Account.openingBalanceCents in Stage 4.1.
+5. Migration and Snapshot Normalization Architecture (Issues 2.A & v6/v7 Diagnostics)
+5.1 Frozen V6LedgerMigrator + Unified V7LedgerHardener
+from < 6 (V6LedgerMigrator) — Strictly Frozen: Unchanged historical v5 -> v6 transformer (writes ledger_v6_migrated_at; does not invent a retroactive ledger_migration_report_v6).
+from < 7 (V7LedgerHardener) — Unified Convergence & Audit Engine: Runs identically at the end of installed v4/v5/v6 -> v7 upgrades AND v4/v5/v6/v7 snapshot imports:
+Deterministic Repairs: Normalizes 'writtenOff' -> 'written_off'; reclassifies originVoided debts -> 'voided'; links unique unassigned non-voided 'writeOff' entries to DebtsTable.writeOffEntryId (UNLINKED_LEGACY_WRITEOFF flagged otherwise); backfills CommitmentSettlementsTable (direction = 'outflow' default, legacyPaidUnverified = true when isPaid && settlementEntryId == null); sets SavingsGoals.status = 'active'; cleans pre-v7 un-FK'd orphans safely while logging IDs.
+Non-Destructive Post-v6 Audit (ledger_migration_report_v7): Captures Phase A pre-v7 audit snapshot (plus ledger_v6_migrated_at if present) + Phase B post-v7 state into AppSettings['ledger_migration_report_v7']: flags acc-sys-legacy-offset clearing transfers, multi-candidate transfers, 5-case/7-point opening-balance anomalies, UNLINKED_LEGACY_WRITEOFF, legacy_unverified_paid, nonEtbAccountsFlagged, and Tier A/B DebtControlAuditReport.
+Strict Pre-Commit Assertions: Asserts >= 2 postings/entry, Dr == Cr, valid account IDs, canonical dates, PRAGMA foreign_key_check == empty, throwing LedgerMigrationException on any violation.
+5.2 Exact Snapshot Normalization Pipeline (v4, v5, v6, v7)
+DatabasePersistenceCoordinator.importSnapshot executes inside one SQLite transaction on the open v7 AppDatabase (never requiring a second throwaway DB file):
+Step 0 — Atomic Clear Under Active PRAGMA foreign_keys = ON:
+First break intra-table self-FKs & cyclical refs: UPDATE financial_categories SET parent_id = NULL; UPDATE journal_entries_table SET corrected_from_entry_id = NULL; UPDATE debts_table SET write_off_entry_id = NULL;
+Delete in strict leaf-to-parent order: commitment_settlements_table -> recurring_rules_table -> budgets_table -> financial_commitments -> savings_goals -> settlement_allocations_table -> debts_table -> postings_table -> journal_entries_table -> financial_transactions -> reminders -> tasks -> milestones -> notes -> projects -> goals -> inbox_items -> calendar_events -> parties_table -> accounts_table -> financial_categories.
+Version-Specific Pre-Load Normalization:
+v4 Snapshot (snapshotVersion < 5):
+Applies exact UTC+3 canonical YYYY-MM-DD coercion (_parseRequiredCanonicalDateString / _parseOptionalCanonicalDateString) to every date field identically to app_database.dart's _validateLegacyDatesBeforeV5Migration (aborting cleanly on corrupt/overflowing dates—never synthesizing today).
+Populates from < 5 column defaults (subtasksJson = [], labelsJson = [], isArchived = false, isSuperseded = false, accountId/destinationAccountId nullable), inserts normalized categories & accounts (inferring subType/isSystem), topologically sorts categories (parents before children), and inserts legacy FinancialTransactions cleanly into the exact 8-table v5 shape read by frozen V6LedgerMigrator!
+v5 Snapshot (snapshotVersion == 5):
+Validates canonical YYYY-MM-DD dates, runs inferAccountClassification, ensures default/missing categories for transactions, maps empty optional arrays (debts, journalEntries, postings, settlementAllocations), populates v7 non-breaking column defaults (direction = 'outflow', legacyPaidUnverified = false, status = 'active', writeOffEntryId = null), then runs frozen V6LedgerMigrator.migrateDataInTransaction(_db) -> V7LedgerHardener.hardenAndAuditInTransaction(_db).
+v6 Snapshot (snapshotVersion == 6):
+Inserts v6 categories topologically (parentId parent-before-child; orphans logged & nulled safely), accounts, parties, journal entries topologically (correctedFromEntryId original-before-replacement), postings, debts, allocations, commitments (direction = 'outflow'), goals (status = 'active'), budgets, and recurring rules (nulling dangling recurringRuleId where referenced rule missing & logging in audit) -> runs V7LedgerHardener.hardenAndAuditInTransaction(_db).
+v7 Snapshot (snapshotVersion >= 7):
+Topological insert of all v7 tables including DebtsTable.writeOffEntryId (UPDATE second pass if needed cleanly inside tx after entries inserted, or already topologically ordered after journal_entries_table), FinancialCommitments.{direction, legacyPaidUnverified}, CommitmentSettlementsTable, SavingsGoals.status, and AppSettings report metadata -> ensures control accounts -> runs V7LedgerHardener.verifyInvariantsOnly(_db) + PRAGMA foreign_key_check.
+Convergence Guarantee & Documented Edge-Case Limit:
+Identical v4/v5/v6 source data runs through the exact same deterministic V6LedgerMigrator (when < 6) and V7LedgerHardener logic across both installed upgrade and importSnapshot, yielding bit-for-bit identical balances, postings, debts, commitments, categories, and ledger_migration_report_v7 findings.
+Explicitly Documented Parity Limit: If an external pre-v6 JSON backup omits createdAt metadata timestamps, importSnapshot defaults createdAt = now whereas an installed DB keeps original row created_at timestamps; when createdAt is present (all exported Daywell snapshots include it), row-level parity is exact.
+Atomic Rollback & Determinism: Any throw inside importSnapshot rolls back the entire SQLite transaction—leaving the existing DB intact—and repeating the same import converges identically.
+6. Opening-Balance Migration and Revision Strategy (Issue 2.C)
+Strict Plausible Opening-Candidate Rule (No Manual-Adjustment False Positives):
+An entry e is a plausible opening-balance candidate for account acc iff:
+e.entryType == 'adjustment' AND (e.id.startsWith('entry-open-') || e.description.startsWith('Opening Balance') || e.legacySourceTxId == 'open:${acc.id}' || e.legacySourceTxId?.startsWith('open:${acc.id}:rev:') == true) AND (e touches acc.id OR legacySourceTxId names acc.id).
+Ordinary manual adjustments (e.g., 'Cash Count Adjustment') are strictly excluded so they never block migration or get flagged.
+Exact 7 Verification Criteria + 5-Case Migration Outcomes (V7LedgerHardener):
+Criteria: (1) exact acc.id signed balance == acc.openingBalanceCents, (2) correct Dr/Cr direction, (3) exact abs amount with clean equity offset, (4) >= 2 postings & Dr == Cr, (5) isVoided == false, (6) valid opening type/marker, (7) legacySourceTxId == null or matches 'open:${acc.id}'/:rev:n.
+Case 1 (Conflicting non-opening legacySourceTxId) -> Preserve untouched & flag OPENING_CONFLICTING_LEGACY_LINK.
+Case 2 (0 plausible active candidates & openingBalanceCents != 0 & no broken candidate) -> Synthesize single opening entry ('open:${acc.id}')—never duplicating when a valid entry exists!
+Case 3 (Exactly 1 valid candidate passing 1–7) -> Match idempotently (matchedOpeningBalances).
+Case 4 (>= 2 valid candidates passing 1–7) -> Preserve all untouched & flag OPENING_MULTIPLE_CANDIDATES (zero silent deletions/merges).
+Case 5 (>= 1 non-superseded plausible candidate failing 1–7) -> Preserve untouched & flag OPENING_INCONSISTENT_CANDIDATE with exact failing criterion codes (never auto-create a duplicate entry). Superseded voided :rev:n entries chained via correctedFromEntryId to a valid active opening entry are recognized as valid edit history, not errors.
+Immutable :rev:{n} Provenance on User Edits (DriftFinanceRepository):
+First opening entry uses legacySourceTxId = 'open:${account.id}'.
+Every subsequent edit computes n = maxExistingRevision + 1, marks prior active opening entry isVoided = true, voidReason = 'Updated opening balance' without clearing legacySourceTxId, postings, amount, or date, and (when new balance != 0) inserts 'open:${account.id}:rev:$n' referencing correctedFromEntryId = previousEntry.id.
+Editing opening balance to 0 voids the active opening entry; restoring non-zero later creates 'open:${account.id}:rev:${n+1}' chaining from the latest voided revision, guaranteeing exact 1x balance counting and unbroken provenance.
+7. Commitment, Debt, and Streamlined Recurring Lifecycle
+Commitment Direction & Partial Settlements: FinancialCommitments.direction ('outflow' | 'inflow', default 'outflow') + linkedDebtId classifies bills (expected_expense), expected income (expected_income), and debt_linked (payable->outflow, receivable->inflow). Both directions use CommitmentSettlementsTable for partial/full settlements and void restoration (paid -> partial -> unpaid). Pre-v7 isPaid && settlementEntryId == null rows set legacyPaidUnverified = true (legacy_unverified_paid, 0 in AvailableToSpend(H), explicit UI "Record Cash Payment" / "Mark Unpaid" actions). Remove createExpenseTransaction: false.
+Debt Lifecycle & Write-Offs: Nullable DebtsTable.writeOffEntryId (ON DELETE RESTRICT), 1 full write-off per active debt, 'active' | 'settled' | 'written_off' | 'voided' statuses, explicit feeCents & strict over-allocation checks in buildDebtSettlement, void-writeOff restoration, origin-void guard, and Tier A/B DebtControlAuditReport.
+Streamlined First-Release Recurring Rules: Default autoPost = false generates outflow bills and inflow expected-income commitments; opt-in autoPost = true posts 'rec:{ruleId}:{occIso}'; 24-cycle safety cap; basic pause/resume (resuming advances nextOccurrenceDate to next cycle >= today); and simple single-update Skip Next action. Advanced catch-up modals and schedule reconstruction stay deferred.
+8. Foreign-Key and SQLite TableMigration Rebuild Procedure (Issue 2.B)
+8.1 Universal SQLite ON DELETE RESTRICT + App Lifecycle Policy
+Every finance FK uses ON DELETE RESTRICT in SQLite (PRAGMA foreign_keys = ON enabled in beforeOpen), preventing silent CASCADE deletions or SET NULL side effects, while application services enforce relationship-specific behavior:
+Never hard-deleted: JournalEntriesTable, PostingsTable, DebtsTable, SettlementAllocationsTable, CommitmentSettlementsTable (after creation), FinancialTransactions (use voiding / immutable records).
+Archive instead of delete once referenced: AccountsTable, FinancialCategories, PartiesTable, RecurringRulesTable (once rules have generated commitments/rec:* entries, pause via isActive = false; unused rules delete freely).
+Explicit App Unlink Permitted (UPDATE ... SET col = NULL, never DELETE side effect): FinancialCommitments.linkedAccountId, FinancialCommitments.categoryId, FinancialCommitments.linkedDebtId (unpaid draft only), RecurringRulesTable.{accountId, destinationAccountId, categoryId, linkedDebtId} (Edit Rule), FinancialCategories.parentId (promote subcategory to top-level), and SavingsGoals.linkedAccountId (explicitly gated on 0 balance/allocation).
+Unused Draft Delete Permitted: Unpaid commitments (0 settlements & !legacyPaidUnverified), individual BudgetsTable rows, unreferenced accounts/categories/parties/rules, and virtual SavingsGoals (currentAllocatedCents == 0).
+8.2 Valid SQLite & Drift Transaction Table-Rebuild Procedure
+[Proposed engineering decision] Because SQLite ignores PRAGMA foreign_keys toggles inside an active transaction:
+Transaction Boundary Invariant: Never enable PRAGMA foreign_keys = ON in any NativeDatabase(..., setup: ...) hook before beforeOpen; confirm via SELECT foreign_keys at entry of from < 7 that foreign_keys == 0 while onUpgrade runs inside Drift's upgrade transaction (throw LedgerMigrationException immediately before DDL if a misconfigured test harness pre-enabled it!).
+Pre-Rebuild Orphan Hygiene (For Un-FK'd v6 Columns): Before adding ON DELETE RESTRICT constraints via rebuilds, clean pre-v7 dangling FinancialCommitments.recurring_rule_id (SET NULL + log ORPHANED_RECURRING_RULE_LINK_CLEARED) and dangling FinancialCategories.parent_id (SET NULL + log ORPHANED_CATEGORY_PARENT_CLEARED) so existing v6 data passes PRAGMA foreign_key_check.
+Strict Topological Rebuild Order (Parents Before Children — Level 0 -> Level 3):
+(Prevents SQLite 12-step ALTER TABLE parent RENAME from leaving child tables referencing temp names!)
+Level 0: financial_categories, accounts_table, parties_table, journal_entries_table.
+Level 1: postings_table, debts_table (adds write_off_entry_id, normalizes writtenOff/voided), savings_goals (adds status), budgets_table, financial_transactions.
+Level 2: settlement_allocations_table, recurring_rules_table, financial_commitments (adds direction, legacy_paid_unverified; rebuilt after recurring_rules_table, debts_table, accounts_table, financial_categories, journal_entries_table).
+Level 3: commitment_settlements_table (created cleanly referencing final v7 financial_commitments and journal_entries_table).
+Re-Create All Performance Indices: Immediately after TableMigration rebuilds, re-create every CREATE [UNIQUE] INDEX IF NOT EXISTS ... (which TableMigration drops on rebuilt tables!).
+Audit & Commit Check: Run V7LedgerHardener.hardenAndAuditInTransaction(this) -> verify PRAGMA foreign_key_check returns zero rows inside onUpgrade (throw LedgerMigrationException to roll back on any failure). After onUpgrade commits, beforeOpen activates PRAGMA foreign_keys = ON cleanly.
+9. Safe Raw Database Recovery Sequence (Issue 2.D)
+Detect & Classify Failure (AppStateManager._runInitialize()): Distinguish LedgerMigrationException (logical migration/invariant rollback), DatabaseCorruptionException (SQLITE_CORRUPT/SQLITE_NOTADB or PRAGMA quick_check(1) fail), and File-System I/O (FileSystemException/disk full/lock).
+Block App Initialization: Keep isInitialized = false; never load repositories, controllers, or recurring jobs.
+Dispose Failed Connection First: Always await _db.close() (guarded by try/catch + bounded timeout) before inspecting or touching .sqlite files on disk so background isolate handles release cleanly.
+Inspect WAL & SHM Sidecars Cold: While closed, inspect personal_management.sqlite, personal_management.sqlite-wal, and personal_management.sqlite-shm. Never open a failed/corrupt DB to checkpoint WAL or run VACUUM INTO, and never copy .sqlite without its -wal/-shm sidecars!
+Persist External Diagnostic Atomic Fallback: Write sanitized failure JSON via .tmp -> rename to migration_last_failure.json alongside app support dir; if disk-full/permission error prevents writing the file, retain full JSON in AppStateManager.initializationFailure memory so UI diagnostics remain intact.
+Cold Raw Copy & Verification (RawDatabaseRecoveryExporter, Zero Drift): Using pure dart:io while DB is closed, stage .sqlite + existing -wal/-shm + migration_last_failure.json + a manifest.json (recording exact filenames, byte sizes, and SHA-256 checksums computed before export) into a .zip/folder at the user's chosen destination, verify written bundle files exist with matching byte sizes/SHA-256, and show explicit confirmation; if export fails, preserve original failure state & live files untouched.
+Recovery Actions on DaywellShellStatusView (Zero DB Queries):
+Invariant / Transient I/O Failure: Prompt Export Raw DB Backup (strongly recommended after attemptCount >= 2) and allow Retry Upgrade.
+Corrupt SQLite File: Suppress blind retry; offer Export Raw DB Backup + Restore Encrypted .daywell Backup (double confirmation).
+Quarantine & Verified Restoration Sequence: Move damaged .sqlite, -wal, and -shm atomically into recovery_quarantine/<timestamp>/; instantiate fresh AppDatabase; execute importSnapshot in 1 transaction + PRAGMA foreign_key_check; delete quarantine only after verified v7 commit (restoring quarantine automatically if import aborts).
+Controlled Reopen: Delete migration_last_failure.json only after ensureInitialized() succeeds cleanly at user_version = 7, then hydrate controllers into DaywellAppShell.
+10. Rechecked Numerical Scenarios (Issue 2.E — Option 1 Applied)
+(Baseline 2026-11-15, Default H = 2026-11-30, All calculations strictly in ETB integer cents where 1 ETB = 100 cents. Per confirmed user Option 1: PrepaidCardCredit IS included in AvailableToSpend(H), included in NetFinancialPosition, and shown separately as Prepaid Card Credit.)
+#	Scenario & Step-by-Step Operations (Values in ETB; integer-cent precision noted where critical)	Liquid Cash	Credit Owed	Prepaid Card Credit (Separate + Included)	Due Payables (<=H)	Due Outflow Commit (<=H)	Virtual Reserve	Available To Spend (H)	Net Financial Position	Invariant & Formula Proof
+1	Opening Balance Create -> Revise :rev:2 -> Zero -> Restore :rev:3
+1a) Create CBE 1,000 (100,000c)
+1b) Revise -> 1,500 (rev:2, rev1 voided)
+1c) Edit -> 0 + Spend 200 Cash
+1d) Restore -> 800 (rev:3)	1,000
+1,500
+-200
+600	0
+0
+0
+0	0
+0
+0
+0	0
+0
+0
+0	0
+0
+0
+0	0
+0
+0
+0	1,000
+1,500
+-200
+600	1,000
+1,500
+-200
+600	Exact 1x counting via PostingsTable only; overdraft (-200) lowers AvailableToSpend(H).
+2	Expense vs. Liquid Transfer vs. Fee vs. Vault
+Start: CBE 10,000, Cash 2,000, Vault 5,000
+2a) Transfer 1,000 CBE->Cash (0 fee)
+2b) Transfer 1,000 CBE->Cash (15 fee)
+2c) Transfer 2,000 CBE->Vault (Vault 7,000)
+2d) Direct Expense 500 Cash	12,000
+12,000
+11,985
+9,985
+9,485	0
+0
+0
+0
+0	0
+0
+0
+0
+0	0
+0
+0
+0
+0	0
+0
+0
+0
+0	0
+0
+0
+0
+0	12,000
+12,000
+11,985
+9,985
+9,485	17,000
+17,000
+16,985
+16,985
+16,485	Fee (15) + Expense (500) = 515 P&L; vault transfer moves cash out of Available (-2,000), preserves NetPosition.
+3	Credit Card Spend, Repay & Crossing-Zero Overpayment (Option 1 Corrected)
+Start: CBE 10,000 (1,000,000c), CC 0
+3a) Spend 1,200 on CC (CC = +1,200 owed)
+3b) Repay 700 CC from CBE (CC = +500 owed)
+3c) Overpay 700 CC from CBE (CC = -200 = -20,000c)	10,000
+10,000
+9,300
+8,600	0
+1,200
+500
+0	0
+0
+0
+200	0
+0
+0
+0	0
+0
+0
+0	0
+0
+0
+0	10,000
+8,800
+8,800
+8,800	10,000
+8,800
+8,800
+8,800	Paying 700 across zero converts -500 card debt + +200 PrepaidCardCredit; Available = 8,600 + 200 = 8,800 (strict repayment invariance!), Prepaid Card Credit shown separately (+200), NetPosition = 8,800.
+4	Split Expense + Partial Receivable Collection
+Start: CBE 10,000
+4a) Pay 1,000 (400 mine, 600 Abebe receivable)
+4b) Collect 350 to CBE (250 receivable left)	10,000
+9,000
+9,350	0
+0
+0	0
+0
+0	0
+0
+0	0
+0
+0	0
+0
+0	10,000
+9,000
+9,350	10,000
+9,600
+9,600	My share (400) hits Expense; uncollected receivable excluded from Available; collection restores +350 (0 income).
+5	Payables Inside vs. Beyond H + Shifting H
+Start: CBE 10,000, H = 2026-11-30
+5a) Borrow 4,000 (due 12-15) + 3rd-party bill 1,500 (due 11-28)
+5b) Repay 500 of 11-28 payable
+5c) Shift H -> 2026-12-31	10,000
+14,000
+
+13,500
+13,500	0
+0
+
+0
+0	0
+0
+
+0
+0	0
+1,500
+
+1,000
+5,000	0
+0
+
+0
+0	0
+0
+
+0
+0	10,000
+12,500
+
+12,500
+8,500	10,000
+8,500
+
+8,500
+8,500	12-15 excluded until H = 12-31; inside-H repayment preserves Available (12,500).
+6	Outflow Commitment Partial Payments + Void
+Start: CBE 10,000, Rent 3,000 (outflow, 11-25)
+6a) Pay #1 1,200 -> 6b) Pay #2 1,800 -> 6c) Void #2	10,000
+8,800 / 7,000 / 8,800	0	0	0	3,000
+1,800 / 0 / 1,800	0	7,000
+7,000	10,000
+8,800 / 7,000 / 8,800	Available remains 7,000; Expense follows verified non-voided settlements (0 -> 1,200 -> 3,000 -> 1,200).
+7	Expected Income (inflow) Before, Partial, Full & Void Receipt
+Start: CBE 5,000, Freelance 4,000 (inflow, 11-26)
+7a) Pending -> 7b) +1,500 -> 7c) +2,500 -> 7d) Void #2	5,000
+5,000 / 6,500 / 9,000 / 6,500	0	0	0	0	0	5,000
+5,000 / 6,500 / 9,000 / 6,500	5,000
+5,000 / 6,500 / 9,000 / 6,500	0 pre-receipt effect; cash, Available, NetPosition, and Income P&L move strictly on verified receipts.
+8	Debt-Linked Commitments (Zero Double-Count)
+Start: CBE 10,000, Payable 3,000 (11-25, linkedDebtId), Receivable 1,000
+8a) Partial payable settle 1,000	10,000
+9,000	0	0	3,000
+2,000	0
+0	0	7,000
+7,000	8,000
+8,000	Debt-linked commitments excluded from DueOutflowNonDebtCommit(H).
+9	Virtual Goal, Vault Goal & Overfunded Completed Goal
+Start: CBE 10,000, Vault 4,000, Virtual 2,500, Vault Goal 4,000
+9a) Move 1,000 to Vault, drop Virtual to 1,500
+9b) Lower target to 1,200 (allocated 1,500)	10,000
+9,000
+9,000	0	0	0	0	2,500
+1,500
+1,500	7,500
+7,500
+7,500	14,000
+14,000
+14,000	Full 1,500 unlinked reserve retained until released (see Section 14 Group 3).
+10	Debt Settlement (Principal+Int+Fee) & Write-Offs
+Start: CBE 10,000, Payable P1 2,000, Payable P2 500, Receivable R1 1,000
+10a) Settle P1 (2,000 + 150 int + 25 fee)
+10b) Write off R1 (1,000) -> 10c) Void write-off
+10d) Forgive P2 (500)	10,000
+7,825
+7,825 / 7,825
+7,825	0	0	2,500
+500
+500
+0	0	0	7,500
+7,325
+7,325 / 7,325
+7,825	8,500
+8,325
+7,325 / 8,325
+8,325	Int+Fee lowers Available (-175); R1 write-off hits Expense & void restores R1; forgiven P2 adds Income & frees +500 Available.
+11	Non-ETB + Legacy Unverified + Negative Shortfall (Option 1 Corrected)
+CBE 2,000 (200,000c), USD 500, CC -200 (Prepaid = +200), Payable 2,500, Outflow Commit 600, Legacy Unverified 400, Virtual 500	2,000	0	200 (20,000c)	2,500	600	500	-1,400 ETB (-140,000c)	-300 ETB (-30,000c)	USD excluded & flagged; Legacy Unverified 400 excluded (0); PrepaidCardCredit (+200) included: 2,000 + 200 - 2,500 - 600 - 500 = -1,400 ETB (displayed -1,400.00 ETB error shortfall + Prepaid Card Credit: +200.00 ETB).
+11. Corrected Stage 4.1–4.17 Roadmap
+Isolated Pre-Finance CI Baseline Gate (134 passed, 1 failed): Diagnose and fix the open responsive-layout regression in flutter_app/test/dashboard_view_test.dart (line 1700) cleanly before merging Stage 4.1+ changes.
+All Finance UI stages (4.7–4.17) reuse existing Stage 3 design tokens (DaywellTheme, context.daywellColors, SharedDesignTokens), adaptive navigation (DaywellAdaptiveScaffold), and shared widgets:
+Stage 4.1 — Domain & Contract Lock: Lock Dart & shared_foundation/schema_contracts.json models (AvailableToSpendBreakdown including PrepaidCardCredit in AvailableToSpend(H) & NetFinancialPosition, CommitmentDirection outflow/inflow, CommitmentSettlement, DebtStatus, SavingsGoalStatus, ETB-only validation, buildDebtSettlement fee/over-allocation guard, MigrationDiagnosticReport, exception types, signed openingBalanceCents, sync-foundation); unit-test Scenarios 1–11.
+Stage 4.2 — Schema v7 & Topological FK Rebuild: schemaVersion => 7, CommitmentSettlementsTable, DebtsTable.writeOffEntryId, FinancialCommitments.{direction, legacyPaidUnverified}, SavingsGoals.status; Level 0–3 TableMigration rebuilds enforcing ON DELETE RESTRICT + index recreation + pre-rebuild orphan hygiene + PRAGMA foreign_key_check; regenerate .g.dart.
+Stage 4.3 — Frozen V6 + Convergent V7LedgerHardener & Snapshot Normalizer: Freeze from < 6; implement V7LedgerHardener (from < 7 and importSnapshot for v4/v5/v6/v7 with self-FK clear & topological inserts, single ledger_migration_report_v7).
+Stage 4.4 — Repository & Ledger Engine Completion: :rev:{n} immutable opening-balance edits, multi-settlement outflow/inflow commitments, explicit Edit-form unlinking vs. archive/void/unused-draft delete, writeOffEntryId + void-writeOff restore, origin-void blocking, streamlined recurring (autoPost = false, inflow generation, basic pause/resume, simple Skip Next), ETB guards, remove createExpenseTransaction: false.
+Stage 4.5 — Application State, Horizon & Cold Recovery Bootstrap: endOfGregorianMonth fix, retire legacy opening fallbacks, wire H & PrepaidCardCredit / Non-ETB / shortfall signals, close _db cleanly before cold .sqlite + -wal + -shm + manifest RawDatabaseRecoveryExporter, quarantine restore flow, and DaywellShellStatusView recovery UI.
+Stage 4.6 — Foundation Verification Checkpoint: Green tests across pure math, direct SQLite RESTRICT constraints, topological rebuilds, onUpgrade vs. importSnapshot parity, :rev:{n} 1x proof, and cold recovery/corruption paths.
+Stages 4.7–4.15 — Finance UI (Stage 3 Reuse): 4.7 Setup Wizard (ETB + signed opening balances); 4.8 Overview (AvailableToSpend(H) w/ Prepaid Card Credit included & displayed separately, shortfall/Non-ETB/audit banners); 4.9 Transactions & Composer ("Auto-Posted", fee, split, corrections); 4.10 Plans Commitments (Upcoming Bills + Expected Income, partial receipts/payments, settlement history, legacy unverified reconciliation); 4.11 Accounts/Categories (:rev:n, archive, explicit unlink); 4.12 Savings Goals (statuses, overfunded notice, release+archive); 4.13 Debts (Void & Re-issue, settlement w/ int+fee, full write-off + void restore); 4.14 Budgets & Recurring UI (pause/resume, simple Skip Next, autoPost opt-in); 4.15 Reports, Ethiopian calendar, CSV/JSON & ledger_migration_report_v7 viewer.
+Stage 4.16 — Cross-Module Integration: Dashboard hero card sync (H, Prepaid Card Credit, shortfall warning), Quick Capture -> Composer handoff, v7 encrypted backup & quarantine restore, commitment reminders (outflow & inflow).
+Stage 4.17 — Final QA & Release Gate: Light/Dark + 320dp / 2.0x textScale sweep, flutter test, flutter analyze, dart format, npm test, and APK verification.
+12. Test and Acceptance Criteria (Planned Verification Gates)
+Domain (4.1): Integer-cent tests matching all 11 scenarios (#3c Available = 8,800 w/ separate Prepaid Card Credit = 200; #7 inflow = 0 pre-receipt; #11 Available = -1,400).
+SQLite FKs & Rebuild (4.2): Raw DELETE FROM tests failing with SQLite FK errors on every RESTRICT relation under PRAGMA foreign_keys = ON; Level 0–3 rebuild tests verifying sqlite_master DDL has zero dangling temp names, all indices exist, orphan recurring_rule_id/parent_id clean up safely, and PRAGMA foreign_key_check == empty.
+Migration & Snapshot Parity (4.3): Golden v4, v5, and v6 datasets migrated via onUpgrade vs. importSnapshot converge identically (balances, settlements, commitments, ledger_migration_report_v7) and survive repeated imports idempotently.
+Repository (4.4): :rev:{n} chain & 1x counting across create -> rev:2 -> 0 -> rev:3; outflow/inflow partial settlements & void restore; simple Skip Next; writeOffEntryId void restore; ETB rejection on non-ETB accounts.
+Cold Recovery (4.5): Verify _db.close() completes prior to copy; cold .sqlite + -wal + -shm + SHA-256 manifest verifies without Drift; export failure keeps original diagnostic intact; disk-full falls back to memory; corrupt SQLite triggers quarantine + .daywell restore.
+UI & Release (4.7–4.17): Light/Dark & 320dp + 2.0x widget checks, full test suites (flutter + npm), and APK verification.
+13. Final Decision Register (Separated Into 4 Categories)
+1. Previously Confirmed User Decisions (Locked)
+Credit-Card Overpayment (Option 1): Include PrepaidCardCredit in AvailableToSpend(H) and NetFinancialPosition, and display it separately as Prepaid Card Credit.
+Expected-Income Commitments: Show both outflow bills and inflow expected income in v1 UI; expected income never increases cash, income P&L, AvailableToSpend(H), or NetFinancialPosition before actual receipt.
+ETB-Only First Release: Exclude non-ETB accounts from ETB totals and flag for review.
+Partial Commitment Settlements: Support partial payments/receipts with CommitmentSettlementsTable history.
+Immutable Debt Principal: Correct original principal strictly via void + re-issue.
+Default Planning Horizon H: End of current civil Gregorian month, user-adjustable.
+2. Proposed Engineering Decisions (Product-Neutral Implementation Choices)
+Frozen V6LedgerMigrator + Unified V7LedgerHardener Convergence: Exact v4/v5/v6/v7 snapshot normalization into v7 tables + frozen V6 + single authoritative ledger_migration_report_v7.
+SQLite Level 0–3 TableMigration Rebuild Order: Respects immutable mid-transaction PRAGMA foreign_keys, cleans un-FK'd v6 recurring_rule_id / parent_id orphans, recreates indices, asserts PRAGMA foreign_key_check == empty.
+5-Case / 7-Point Opening Verification: Keeps manual adjustments isolated, preserves failing candidates without duplicating entries.
+Cold WAL/SHM Recovery Bootstrap: _db.close() before dart:io copy, SHA-256 verification manifest, corruption quarantine + .daywell restore.
+Postings-Only Runtime Balance Authority: Retires FinanceModuleState legacy fallbacks cleanly.
+Debt Settlement Fee/Over-Allocation Guard & Tier A/B Reconciliation.
+Isolated Pre-Finance CI Gate: Fix 134/1 dashboard_view_test.dart separately before Stage 4.1+ code merges.
+3. New Decisions Requiring User Approval
+Five Data-Lifecycle & Schema Decisions Requiring Sign-Off Before Stage 4.1
+Decision	Summary	Approval Effect	Rejection Effect
+1. Schema v6 -> v7 Bump	schemaVersion => 7; add CommitmentSettlementsTable, DebtsTable.writeOffEntryId, FinancialCommitments.{direction, legacyPaidUnverified}, SavingsGoals.status.	Shipped v6 devices & snapshots upgrade cleanly in from < 7 with full commitment/debt features.	from < 6 edits miss v6 installs, or relational partial/inflow/write-off features drop from v1.
+2. :rev:{n} Opening-Balance Provenance	Keep 'open:{id}' on voided entries; use 'open:{id}:rev:{n}' + correctedFromEntryId on edits.	Permanent opening history & unbroken correction chain with 1x balance counting.	Edits clear legacySourceTxId = null, erasing legacy provenance.
+3. Universal ON DELETE RESTRICT + App Lifecycle	Enforce RESTRICT in SQLite; separate archive, void, unused-draft delete, and explicit Edit unlink (UPDATE SET NULL).	Blocks accidental silent SET NULL/CASCADE corruption across vault goals, debts & budgets.	Accidental DELETE can still drop links silently or cascade-delete postings/budgets.
+4. Overfunded Virtual Goal Reserve	Retain full unlinked currentAllocatedCents (even > targetCents) until withdrawn or released to archive.	AvailableToSpend(H) never jumps unexpectedly when a goal completes or targets shrink.	Cap virtual reserves at min(allocated, target), auto-releasing surplus to spendable cash.
+5. legacyPaidUnverified Isolation	Mark isPaid && settlementEntryId == null rows legacy_unverified_paid (0 in Available) with user verification actions.	Never fabricates fake cash expenses or forces old paid bills unpaid automatically.	Must either flip old paid bills back to unpaid or synthesize unbacked expense entries.
+4. Deferred Features (Excluded From First Release)
+[Deferred feature] Complex recurring catch-up modals, schedule reconstruction, series splitting, and exception calendars (v1 retains basic pause/resume -> next >= today, opt-in autoPost, 24-cycle cap, and simple Skip Next).
+[Deferred feature] Multi-currency FX conversion & cross-currency transfers.
+[Deferred feature] Partial debt write-offs (v1 supports 1 full remaining-balance write-off per active debt).
+[Deferred feature] Accrued compounding interest schedules & automatic debt refinancing.
+[Deferred feature] Receipt image / binary attachment storage.
+14. Readiness Assessment
+Blueprint Readiness: Ready for implementation once you approve the 5 schema/data-lifecycle items in Section 13 Group 3 (zero contradictions remain, and all 7 confirmed user product decisions—especially Credit-Card Overpayment Option 1—are accurately incorporated across formulas, scenarios, UI specs, and tests).
+Pre-Implementation Gate: First resolve the separate 134 passed, 1 failed CI test in flutter_app/test/dashboard_view_test.dart (line 1700) before starting Stage 4.1 code changes.

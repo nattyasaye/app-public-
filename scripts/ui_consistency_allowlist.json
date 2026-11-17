@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "description": "Strict finite allowlist for pre-existing legacy Flutter Colors.* usages slated for incremental migration to DaywellTheme/context.daywellColors. Web UI and migrated Flutter screens allow zero hardcoded hexes or raw Colors.* literals.",
+  "web": {
+    "files": []
+  },
+  "flutter": {
+    "exemptColorsTransparent": true,
+    "forbiddenAllowlistFiles": [
+      "flutter_app/lib/ui/screens/more_view.dart",
+      "flutter_app/lib/ui/screens/dashboard_view.dart"
+    ],
+    "rawColorsAllowlist": {
+      "flutter_app/lib/ui/screens/backup_view.dart": {
+        "maxCount": 14,
+        "reason": "Pre-existing BackupView legacy status/button Material Colors.* slated for subsequent migration to context.daywellColors."
+      },
+      "flutter_app/lib/ui/screens/finance/finance_overview_tab.dart": {
+        "maxCount": 1,
+        "reason": "Single pre-existing Colors.teal literal in finance_overview_tab.dart slated for semantic token replacement."
+      },
+      "flutter_app/lib/ui/screens/notes_view.dart": {
+        "maxCount": 11,
+        "reason": "Pre-existing NotesView legacy Material Colors.* literals slated for incremental DaywellTheme migration."
+      },
+      "flutter_app/lib/ui/screens/tasks_view.dart": {
+        "maxCount": 21,
+        "reason": "Pre-existing TasksView legacy Material Colors.* literals slated for incremental DaywellTheme migration."
+      },
+      "flutter_app/lib/ui/widgets/quick_capture_dialog.dart": {
+        "maxCount": 1,
+        "reason": "Single pre-existing Colors.white literal in QuickCaptureDialog slated for ColorScheme.onPrimary replacement."
+      }
+    }
+  }
+}

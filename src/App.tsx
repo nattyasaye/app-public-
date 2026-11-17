@@ -1,0 +1,2552 @@
+import React, { useState, useEffect, useMemo } from 'react';
+import {
+  Calendar,
+  CheckCircle2,
+  Layers,
+  Grid2X2,
+  Plus,
+  SlidersHorizontal,
+  ArrowUpRight,
+  Clock3,
+  Flag,
+  Bell,
+  Repeat2,
+  Landmark,
+  HardDrive,
+  ChevronRight,
+  ChevronLeft,
+  Search,
+  Check,
+  Target,
+  NotebookPen,
+  Wallet,
+  UsersRound,
+  ListOrdered,
+  Calculator,
+  ChartNoAxesColumn,
+  SunMoon,
+  Send,
+  Database,
+  Info,
+  ShieldCheck,
+  Download,
+  FolderOpen,
+  CloudOff,
+  RefreshCw,
+  FileQuestion,
+  X,
+  FileText,
+  CalendarDays,
+  Inbox as InboxIcon,
+  Archive,
+  ArrowLeft,
+  Smartphone,
+  Eye,
+  CheckSquare,
+  Sparkles
+} from 'lucide-react';
+
+import { CalendarDate, EthiopiaClock, LocalDateTime, SharedDateFormatter } from './domain/date';
+import { formatBirr, formatCentsAsInput } from './domain/financialEngine';
+import {
+  parseQuickCaptureExpense,
+  Account,
+  CategoryBudget,
+  Debt,
+  JournalEntry,
+  Posting,
+  SettlementAllocation,
+  SimpleTransaction,
+} from './domain/doubleEntryFinance';
+import {
+  calculateAvailableToSpendBreakdownV7,
+  classifyAllJournalEntries,
+  formatCurrencyCents,
+  hydrateLedgerFromSimpleTransactions,
+  isActiveVerifiedEtbAccount,
+  SharedCommitment,
+  SharedCommitmentSettlement,
+  SharedRecurringRule,
+  SharedSavingsGoal,
+} from './domain/financeV7Engine';
+import { FinanceComposerPrefill } from './components/finance/financeV7Types';
+import { DaywellFinanceModule } from './components/DaywellFinanceModule';
+import { DaywellCalendarModule } from './components/DaywellCalendarModule';
+import { DaywellTasksModule, DaywellTask, DEFAULT_SAMPLE_TASKS } from './components/DaywellTasksModule';
+import { DaywellNotesModule } from './components/DaywellNotesModule';
+import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWizard';
+import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
+import { SharedStateBridge } from './services/sharedStateBridge';
+import { SHARED_DESIGN_TOKENS, SYSTEM_CONTROL_ACCOUNT_IDS } from './domain/sharedFoundation';
+import {
+  DaywellButton,
+  DaywellCard,
+  DaywellEmptyState,
+  DaywellIconButton,
+  DaywellProgressBar,
+  DaywellSectionHeader,
+  DaywellStatusBadge,
+  DaywellStatusBanner,
+  DeprecatedPrototypeBanner,
+} from './components/ui';
+
+export type ScreenId =
+  | 'today'
+  | 'tasks'
+  | 'calendar'
+  | 'projects'
+  | 'project_detail'
+  | 'goals'
+  | 'notes'
+  | 'finance'
+  | 'relationships'
+  | 'priorities'
+  | 'tools'
+  | 'history'
+  | 'more'
+  | 'sync_backup';
+
+interface ProjectItem {
+  id: string;
+  title: string;
+  subtitle: string;
+  narrative: string;
+  tasksCompleted: number;
+  totalTasks: number;
+  percent: number;
+  icon: 'panels' | 'house' | 'languages';
+}
+
+export default function App() {
+  // Navigation & Screen View State
+  const [currentTab, setCurrentTab] = useState<'today' | 'tasks' | 'calendar' | 'notes' | 'finance' | 'more'>('today');
+  const [activeScreen, setActiveScreen] = useState<ScreenId>('today');
+  const [screenHistory, setScreenHistory] = useState<ScreenId[]>(['today']);
+
+  // Theme State: 'system' | 'light' | 'dark'
+  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
+  const [effectiveDark, setEffectiveDark] = useState<boolean>(false);
+
+  // User Profile State (Safe Startup: default completed=true to reliably show Home screen)
+  const [userProfile, setUserProfile] = useState<UserProfile>(() => {
+    try {
+      const saved = localStorage.getItem('daywell_user_profile');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed.name === 'string') {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return { name: 'Friend', completed: true };
+  });
+  const [isEditingProfileName, setIsEditingProfileName] = useState(false);
+  const [profileNameInput, setProfileNameInput] = useState('');
+  const [isSetupWizardOpen, setIsSetupWizardOpen] = useState(false);
+
+  const handleSetupComplete = (profile: UserProfile, setupAccounts: Account[], setupBudgets: CategoryBudget[]) => {
+    setUserProfile(profile);
+    setIsSetupWizardOpen(false);
+    try {
+      localStorage.setItem('daywell_user_profile', JSON.stringify(profile));
+      localStorage.setItem('daywell_accounts', JSON.stringify(setupAccounts));
+      if (setupBudgets.length > 0) {
+        localStorage.setItem('daywell_budgets', JSON.stringify(setupBudgets));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  // Quick Capture Modal State (Figma Screen 14)
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
+  const [quickCaptureType, setQuickCaptureType] = useState<'task' | 'note' | 'expense' | 'reminder'>('task');
+  const [quickCaptureInput, setQuickCaptureInput] = useState('');
+  const [quickCaptureExpenseAccount, setQuickCaptureExpenseAccount] = useState('CBE');
+  const [quickCaptureToast, setQuickCaptureToast] = useState<string | null>(null);
+  const [quickCaptureError, setQuickCaptureError] = useState<string | null>(null);
+  const [showUnsavedQuickCapture, setShowUnsavedQuickCapture] = useState(false);
+  const [isSubmittingQuickCapture, setIsSubmittingQuickCapture] = useState(false);
+  const [sharedFoundationToast, setSharedFoundationToast] = useState<string | null>(null);
+  const [financeComposerPrefill, setFinanceComposerPrefill] =
+    useState<FinanceComposerPrefill | null>(null);
+  const [financeSyncTick, setFinanceSyncTick] = useState(0);
+
+  const handleExportSharedFoundation = () => {
+    const json = SharedStateBridge.exportToAndroidJson();
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `daywell_canonical_backup_${CalendarDate.today().toIsoString()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    setSharedFoundationToast('Shared database exported! Compatible with Android.');
+    setTimeout(() => setSharedFoundationToast(null), 4000);
+  };
+
+  const handleImportSharedFoundation = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      if (!content) return;
+      const res = SharedStateBridge.importFromAndroidJson(content);
+      if (res.success && res.state) {
+        setSharedFoundationToast('Shared database restored! Synced with Android state.');
+        setTimeout(() => {
+          setSharedFoundationToast(null);
+          window.location.reload();
+        }, 1200);
+      } else {
+        setSharedFoundationToast(
+          `Import rejected (existing data preserved): ${res.error || 'Failed to parse JSON'}`
+        );
+        setTimeout(() => setSharedFoundationToast(null), 6000);
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  // Filter & Search states
+  const [taskFilter, setTaskFilter] = useState<'today' | 'inbox' | 'upcoming'>('today');
+  const [projectFilter, setProjectFilter] = useState<'active' | 'completed' | 'archived'>('active');
+  const [goalFilter, setGoalFilter] = useState<'all' | 'short' | 'long'>('all');
+  const [noteFilter, setNoteFilter] = useState<'recent' | 'inbox' | 'collections'>('recent');
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // Device Frame View: 'mobile_frame' | 'side_by_side'
+  const [viewMode, setViewMode] = useState<'mobile_frame' | 'side_by_side'>('mobile_frame');
+
+  // Application Data State (Persistent Daywell Tasks with subtasks & deadlines)
+  const [tasks, setTasks] = useState<DaywellTask[]>(() => {
+    try {
+      const saved = localStorage.getItem('daywell_tasks');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch (e) {
+      // ignore
+    }
+    return [];
+  });
+
+  // On initial mount, purge any legacy demonstration records while preserving user records
+  useEffect(() => {
+    try {
+      SharedStateBridge.purgeKnownSeedData();
+    } catch (e) {
+      console.warn('Seed purge error:', e);
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('daywell_tasks', JSON.stringify(tasks));
+    } catch (e) {
+      console.error(e);
+    }
+  }, [tasks]);
+
+  useEffect(() => {
+    const handleSync = () => {
+      try {
+        const saved = localStorage.getItem('daywell_tasks');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setTasks(parsed);
+          }
+        }
+      } catch (e) {
+        // ignore
+      }
+      setFinanceSyncTick((n) => n + 1);
+    };
+    window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
+    return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
+  }, []);
+
+  const todayFinanceSummary = useMemo(() => {
+    const readArr = <T,>(key: string): T[] => {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    };
+    const rawAccounts = readArr<Account>('daywell_accounts');
+    const rawTxs =
+      readArr<SimpleTransaction>('daywell_finance_transactions').length > 0
+        ? readArr<SimpleTransaction>('daywell_finance_transactions')
+        : readArr<SimpleTransaction>('daywell_transactions');
+    const rawEntries = readArr<JournalEntry>('daywell_journal_entries');
+    const rawPostings = readArr<Posting>('daywell_postings');
+    const debts = readArr<Debt>('daywell_debts');
+    const allocations = readArr<SettlementAllocation>('daywell_settlement_allocations');
+    const hydrated = hydrateLedgerFromSimpleTransactions({
+      accounts: rawAccounts,
+      transactions: rawTxs,
+      entries: rawEntries,
+      postings: rawPostings,
+    });
+    const horizon = localStorage.getItem('daywell_finance_planning_horizon') || undefined;
+    const breakdown = calculateAvailableToSpendBreakdownV7({
+      accounts: hydrated.accounts,
+      postings: hydrated.postings,
+      entries: hydrated.entries,
+      debts,
+      allocations,
+      commitments: readArr<SharedCommitment>('daywell_commitments'),
+      commitmentSettlements: readArr<SharedCommitmentSettlement>('daywell_commitment_settlements'),
+      recurringRules: readArr<SharedRecurringRule>('daywell_recurring_rules'),
+      savingsGoals: readArr<SharedSavingsGoal>('daywell_savings_goals'),
+      planningPeriodEndIso: horizon,
+    });
+    const classificationsByEntryId = classifyAllJournalEntries({
+      accounts: hydrated.accounts,
+      entries: hydrated.entries,
+      postings: hydrated.postings,
+      debts,
+      allocations,
+    });
+    const accountById = new Map(hydrated.accounts.map((a) => [a.id, a]));
+    const postingsByEntry = new Map<string, Posting[]>();
+    for (const p of hydrated.postings) {
+      const list = postingsByEntry.get(p.entryId) || [];
+      list.push(p);
+      postingsByEntry.set(p.entryId, list);
+    }
+    const recentEntries = [...hydrated.entries]
+      .sort((a, b) =>
+        a.occurrenceDate !== b.occurrenceDate
+          ? b.occurrenceDate.localeCompare(a.occurrenceDate)
+          : (b.createdAt || '').localeCompare(a.createdAt || '')
+      )
+      .slice(0, 3)
+      .map((entry) => {
+        const cls = classificationsByEntryId.get(entry.id);
+        const list = postingsByEntry.get(entry.id) || [];
+        const maxAmount = list.reduce((m, p) => Math.max(m, p.amountCents), 0);
+        const displayCurrency =
+          cls?.nativeCurrencyCode
+            ? cls.nativeCurrencyCode
+            : cls && cls.touchedCurrencies.length === 1
+            ? cls.touchedCurrencies[0]
+            : cls && cls.touchedCurrencies.length > 1
+            ? 'MIXED'
+            : cls?.status === 'eligible_etb'
+            ? 'ETB'
+            : '';
+        const nonSystemLegs = list.filter((p) => !accountById.get(p.accountId)?.isSystem);
+        const formattedAmount =
+          displayCurrency === 'MIXED'
+            ? nonSystemLegs.length > 0
+              ? nonSystemLegs
+                  .map((p) =>
+                    formatCurrencyCents(
+                      p.amountCents,
+                      accountById.get(p.accountId)?.currencyCode || ''
+                    )
+                  )
+                  .join(' / ')
+              : `${(maxAmount / 100).toFixed(2)} (${cls!.touchedCurrencies.join('/')})`
+            : formatCurrencyCents(
+                maxAmount,
+                displayCurrency === 'UNVERIFIED'
+                  ? ''
+                  : displayCurrency ||
+                      accountById.get(list.find((p) => !accountById.get(p.accountId)?.isSystem)?.accountId || '')
+                        ?.currencyCode ||
+                      ''
+              );
+        return { entry, cls, formattedAmount };
+      });
+    return { breakdown, recentEntries };
+  }, [financeSyncTick, activeScreen]);
+  const todaySafeHarbor = todayFinanceSummary.breakdown;
+
+  const [projects, setProjects] = useState<ProjectItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('daywell_projects');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((p: any) => !['p-1', 'p-2', 'p-3', 'proj-seed-1'].includes(p.id));
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return [];
+  });
+
+  // System Dark Mode Effect
+  useEffect(() => {
+    const updateTheme = () => {
+      let isDark = false;
+      if (themeMode === 'system') {
+        isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      } else {
+        isDark = themeMode === 'dark';
+      }
+      setEffectiveDark(isDark);
+      if (isDark) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    };
+
+    updateTheme();
+    const media = window.matchMedia('(prefers-color-scheme: dark)');
+    media.addEventListener('change', updateTheme);
+    return () => media.removeEventListener('change', updateTheme);
+  }, [themeMode]);
+
+  // Dual Date under Daywell Ethiopia UTC+3 convention
+  const todayCal = useMemo(() => CalendarDate.today(), []);
+  const dualDate = useMemo(() => SharedDateFormatter.formatDual(todayCal), [todayCal]);
+
+  // Navigate Screen Helper
+  const navigateTo = (screen: ScreenId) => {
+    if (activeScreen === screen) return; // Prevent duplicate navigation stack entries!
+    setActiveScreen(screen);
+    setScreenHistory((prev) => {
+      if (prev.length > 0 && prev[prev.length - 1] === screen) return prev;
+      return [...prev, screen];
+    });
+
+    // Keep primary tab bar sync
+    if (screen === 'today') setCurrentTab('today');
+    else if (screen === 'tasks') setCurrentTab('tasks');
+    else if (screen === 'calendar') setCurrentTab('calendar');
+    else if (screen === 'notes') setCurrentTab('notes');
+    else if (screen === 'finance') setCurrentTab('finance');
+    else setCurrentTab('more');
+
+    try {
+      window.history.pushState({ screen }, '', `#${screen}`);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleAttemptCloseQuickCapture = () => {
+    if (quickCaptureInput.trim()) {
+      setShowUnsavedQuickCapture(true);
+    } else {
+      setIsQuickCaptureOpen(false);
+      setQuickCaptureError(null);
+    }
+  };
+
+  const handleBack = () => {
+    // 1. If Quick Capture modal is open, close it first without popping the underlying screen
+    if (isQuickCaptureOpen) {
+      handleAttemptCloseQuickCapture();
+      return;
+    }
+
+    if (screenHistory.length > 1) {
+      const newHist = [...screenHistory];
+      newHist.pop();
+      const prevScreen = newHist[newHist.length - 1];
+      setScreenHistory(newHist);
+      setActiveScreen(prevScreen);
+
+      if (prevScreen === 'today') setCurrentTab('today');
+      else if (prevScreen === 'tasks') setCurrentTab('tasks');
+      else if (prevScreen === 'calendar') setCurrentTab('calendar');
+      else if (prevScreen === 'notes') setCurrentTab('notes');
+      else if (prevScreen === 'finance') setCurrentTab('finance');
+      else setCurrentTab('more');
+    } else {
+      setActiveScreen('today');
+      setCurrentTab('today');
+      setScreenHistory(['today']);
+    }
+  };
+
+  // Hardware and browser popstate listener for Android back gesture & browser back button
+  useEffect(() => {
+    try {
+      window.history.replaceState({ screen: 'today' }, '', '#today');
+    } catch {
+      // ignore
+    }
+
+    const onPopState = (e: PopStateEvent) => {
+      // Intercept if Quick Capture modal is open
+      if (isQuickCaptureOpen) {
+        handleAttemptCloseQuickCapture();
+        try {
+          window.history.pushState({ screen: activeScreen }, '', `#${activeScreen}`);
+        } catch {
+          // ignore
+        }
+        return;
+      }
+
+      if (e.state && e.state.screen) {
+        const target = e.state.screen as ScreenId;
+        setActiveScreen(target);
+        if (target === 'today') setCurrentTab('today');
+        else if (target === 'tasks') setCurrentTab('tasks');
+        else if (target === 'calendar') setCurrentTab('calendar');
+        else if (target === 'notes') setCurrentTab('notes');
+        else if (target === 'finance') setCurrentTab('finance');
+        else setCurrentTab('more');
+
+        setScreenHistory((prev) => {
+          if (prev.length > 1) {
+            const copy = [...prev];
+            copy.pop();
+            return copy;
+          }
+          return ['today'];
+        });
+      } else {
+        handleBack();
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [isQuickCaptureOpen, activeScreen, quickCaptureInput]);
+
+  // Toggle Task Completion
+  const toggleTask = (id: string) => {
+    setTasks((prev) =>
+      prev.map((t) => {
+        if (t.id === id) {
+          const next = !t.completed;
+          return {
+            ...t,
+            completed: next,
+            completedAt: next ? LocalDateTime.now().timeOfDay.toDisplay12Hour() : undefined,
+          };
+        }
+        return t;
+      })
+    );
+  };
+
+  // Save Quick Capture (Tasks, Notes, Expenses, Calendar Reminders)
+  const handleSaveQuickCapture = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const text = quickCaptureInput.trim();
+    if (!text) {
+      setQuickCaptureError('Please enter something to capture.');
+      return;
+    }
+
+    if (isSubmittingQuickCapture) return;
+    setIsSubmittingQuickCapture(true);
+    setQuickCaptureError(null);
+
+    if (quickCaptureType === 'expense') {
+      let storedAccounts: Account[] = [];
+      try {
+        const rawAcc = localStorage.getItem('daywell_accounts');
+        const parsedAcc = rawAcc ? JSON.parse(rawAcc) : [];
+        if (Array.isArray(parsedAcc)) storedAccounts = parsedAcc;
+      } catch {
+        storedAccounts = [];
+      }
+      const etbUserAccounts = storedAccounts.filter(
+        (a) =>
+          isActiveVerifiedEtbAccount(a) &&
+          a.type === 'asset' &&
+          a.subType !== 'savings_vault' &&
+          a.subType !== 'receivable'
+      );
+      const fallbackEtbAccounts = storedAccounts.filter((a) => isActiveVerifiedEtbAccount(a));
+      const candidateAccounts = etbUserAccounts.length > 0 ? etbUserAccounts : fallbackEtbAccounts;
+      const hint = quickCaptureExpenseAccount.trim().toLowerCase();
+      const matchedAccount =
+        candidateAccounts.find((a) => a.name.toLowerCase().includes(hint)) ||
+        candidateAccounts[0];
+
+      if (!matchedAccount) {
+        setIsSubmittingQuickCapture(false);
+        setQuickCaptureError(
+          'No active Verified ETB account is available. Add or activate an ETB account in Finance before recording expenses.'
+        );
+        return;
+      }
+
+      const parsed = parseQuickCaptureExpense(text, matchedAccount.name, storedAccounts);
+      if (parsed.rejectedCurrency) {
+        setIsSubmittingQuickCapture(false);
+        setQuickCaptureError(
+          parsed.error ||
+            `Only ETB amounts are supported in Quick Capture (detected ${parsed.rejectedCurrency}).`
+        );
+        return;
+      }
+      if (parsed.amountCents <= 0) {
+        setIsSubmittingQuickCapture(false);
+        setQuickCaptureError('Enter a valid expense amount greater than 0.');
+        return;
+      }
+      const targetAccountId = matchedAccount.id;
+      try {
+        const savedEntries = localStorage.getItem('daywell_journal_entries');
+        const entries = savedEntries ? JSON.parse(savedEntries) : [];
+        const entryId = `entry-qc-${Date.now()}`;
+        const todayIso = CalendarDate.today().toIsoString();
+        const newEntry = {
+          id: entryId,
+          entryType: 'standard',
+          description: parsed.description || text,
+          occurrenceDate: todayIso,
+          isVoided: false,
+          createdAt: EthiopiaClock.nowUtc().toISOString(),
+        };
+        const savedPostings = localStorage.getItem('daywell_postings');
+        const postings = savedPostings ? JSON.parse(savedPostings) : [];
+        const newPostings = [
+          {
+            id: `${entryId}-dr`,
+            entryId,
+            accountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+            amountCents: parsed.amountCents,
+            direction: 'debit',
+            accountMovementDate: todayIso,
+            categoryId: parsed.categoryId || 'cat-other-exp',
+            note: 'Quick capture',
+          },
+          {
+            id: `${entryId}-cr`,
+            entryId,
+            accountId: targetAccountId,
+            amountCents: parsed.amountCents,
+            direction: 'credit',
+            accountMovementDate: todayIso,
+            note: 'Quick capture',
+          },
+        ];
+        localStorage.setItem('daywell_journal_entries', JSON.stringify([newEntry, ...entries]));
+        localStorage.setItem('daywell_postings', JSON.stringify([...newPostings, ...postings]));
+
+        // Synchronize with simplified Finance transactions
+        const savedSimpleTxs = localStorage.getItem('daywell_finance_transactions');
+        const simpleTxs = savedSimpleTxs ? JSON.parse(savedSimpleTxs) : [];
+        const newSimpleTx = {
+          id: `tx-qc-${Date.now()}`,
+          type: 'expense',
+          amountCents: parsed.amountCents,
+          accountId: targetAccountId,
+          categoryId: parsed.categoryId || 'cat-food',
+          description: parsed.description || text,
+          transactionDate: todayIso,
+          createdAt: EthiopiaClock.nowUtc().toISOString(),
+          updatedAt: EthiopiaClock.nowUtc().toISOString(),
+          journalEntryId: entryId,
+        };
+        const nextSimple = [newSimpleTx, ...simpleTxs];
+        localStorage.setItem('daywell_finance_transactions', JSON.stringify(nextSimple));
+        localStorage.setItem('daywell_transactions', JSON.stringify(nextSimple));
+        window.dispatchEvent(new CustomEvent(SharedStateBridge.SYNC_EVENT_NAME));
+      } catch (err) {
+        console.error(err);
+      }
+      setIsSubmittingQuickCapture(false);
+      setIsQuickCaptureOpen(false);
+      setQuickCaptureInput('');
+      setQuickCaptureToast(
+        `Recorded ${formatBirr(parsed.amountCents)}: "${parsed.description}" to ${matchedAccount.name}`
+      );
+      setTimeout(() => setQuickCaptureToast(null), 3500);
+      return;
+    }
+
+    if (quickCaptureType === 'note') {
+      try {
+        const savedNotes = localStorage.getItem('daywell_notes');
+        const notesList = savedNotes ? JSON.parse(savedNotes) : [];
+        const newNote = {
+          id: `note-${Date.now()}`,
+          title: text.split('\n')[0].slice(0, 40) || 'Quick Note',
+          content: text,
+          notebook: 'Personal',
+          tags: ['quick_capture'],
+          isPinned: false,
+          isArchived: false,
+          createdAt: EthiopiaClock.nowUtc().toISOString(),
+          updatedAt: EthiopiaClock.nowUtc().toISOString(),
+        };
+        localStorage.setItem('daywell_notes', JSON.stringify([newNote, ...notesList]));
+      } catch (err) {
+        console.error(err);
+      }
+      setIsSubmittingQuickCapture(false);
+      setIsQuickCaptureOpen(false);
+      setQuickCaptureInput('');
+      setQuickCaptureToast(`Saved note "${text.slice(0, 24)}..." to Notes`);
+      setTimeout(() => setQuickCaptureToast(null), 3000);
+      return;
+    }
+
+    if (quickCaptureType === 'reminder') {
+      try {
+        const savedEvents = localStorage.getItem('daywell_calendar_events');
+        const eventsList = savedEvents ? JSON.parse(savedEvents) : [];
+        const newEvent = {
+          id: `evt-${Date.now()}`,
+          title: text,
+          date: CalendarDate.today().toIsoString(),
+          isAllDay: true,
+          category: 'personal',
+          colorHex: SHARED_DESIGN_TOKENS.colors.semantic.info,
+          hasReminder: true,
+        };
+        localStorage.setItem('daywell_calendar_events', JSON.stringify([newEvent, ...eventsList]));
+      } catch (err) {
+        console.error(err);
+      }
+      setIsSubmittingQuickCapture(false);
+      setIsQuickCaptureOpen(false);
+      setQuickCaptureInput('');
+      setQuickCaptureToast(`Scheduled reminder "${text.slice(0, 24)}..." on Calendar`);
+      setTimeout(() => setQuickCaptureToast(null), 3000);
+      return;
+    }
+
+    // Default: Task
+    const newTask: DaywellTask = {
+      id: `task-${Date.now()}`,
+      title: text,
+      category: 'Personal',
+      priority: 'medium',
+      completed: false,
+      dueDate: CalendarDate.today().toIsoString(),
+      hasReminder: false,
+      subtasks: [],
+      createdAt: EthiopiaClock.nowUtc().toISOString(),
+    };
+
+    setTasks((prev) => [newTask, ...prev]);
+    setIsSubmittingQuickCapture(false);
+    setIsQuickCaptureOpen(false);
+    setQuickCaptureInput('');
+    setQuickCaptureToast(`Saved "${text.slice(0, 28)}..." to Tasks`);
+    setTimeout(() => setQuickCaptureToast(null), 3000);
+  };
+
+  if (isSetupWizardOpen) {
+    return (
+      <FirstTimeSetupWizard
+        onComplete={handleSetupComplete}
+        initialName={userProfile.name === 'Friend' ? '' : userProfile.name}
+      />
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[var(--dw-surface-subtle)] text-[var(--dw-text-primary)] transition-colors duration-200 flex flex-col font-sans">
+      {/* Top Workspace Command Bar */}
+      <header className="bg-[var(--dw-card)]/90 backdrop-blur-md border-b border-[var(--dw-border)] px-4 py-3 shrink-0 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-[var(--dw-radius-sm)] bg-[var(--dw-primary-brand)] flex items-center justify-center text-white font-bold text-sm shadow-sm">
+              D
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-base tracking-tight text-[var(--dw-text-primary)]">Daywell</span>
+                <DaywellStatusBadge
+                  tone="success"
+                  showIcon={false}
+                  label="Canonical Design System"
+                />
+              </div>
+              <p className="text-xs text-[var(--dw-text-muted)]">
+                Web Preview · Ethiopian/Gregorian Dual Engine · 100% Offline Local Storage
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Screen Jump Selector & Controls */}
+          <div className="flex items-center flex-wrap gap-2">
+            <div className="flex items-center gap-1.5 bg-[var(--dw-surface-subtle)] p-1 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+              <span className="text-xs text-[var(--dw-text-muted)] pl-2">Screen:</span>
+              <select
+                value={activeScreen}
+                onChange={(e) => navigateTo(e.target.value as ScreenId)}
+                aria-label="Screen"
+                className="bg-transparent text-xs font-semibold py-1 px-2 rounded-[var(--dw-radius-sm)] text-[var(--dw-text-primary)] outline-none cursor-pointer"
+              >
+                <option value="today">01 · Today Dashboard</option>
+                <option value="tasks">02 · Tasks (To-Do)</option>
+                <option value="calendar">03 · Calendar (Dual Engine)</option>
+                <option value="finance">04 · Finance (Balanced Ledger)</option>
+                <option value="notes">05 · Notes & Knowledge</option>
+                <option value="projects">06 · Projects (Deprecated Prototype)</option>
+                <option value="project_detail">07 · Project Detail (Deprecated Prototype)</option>
+                <option value="goals">08 · Goals (Deprecated Prototype)</option>
+                <option value="relationships">09 · Relationships (Deprecated Prototype)</option>
+                <option value="priorities">10 · Priorities (Deprecated Prototype)</option>
+                <option value="tools">11 · Calculations & Tools (Deprecated Prototype)</option>
+                <option value="history">12 · History & Progress (Deprecated Prototype)</option>
+                <option value="more">13 · More / All Areas</option>
+                <option value="sync_backup">14 · Sync & Local Export</option>
+              </select>
+            </div>
+
+            {/* Theme Toggle */}
+            <div className="flex items-center bg-[var(--dw-surface-subtle)] p-1 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+              <button
+                type="button"
+                onClick={() => setThemeMode('light')}
+                className={`text-xs px-2.5 py-1 rounded-[var(--dw-radius-sm)] font-medium transition-all cursor-pointer ${
+                  themeMode === 'light'
+                    ? 'bg-[var(--dw-card)] text-[var(--dw-text-primary)] shadow-sm'
+                    : 'text-[var(--dw-text-muted)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                Light
+              </button>
+              <button
+                type="button"
+                onClick={() => setThemeMode('dark')}
+                className={`text-xs px-2.5 py-1 rounded-[var(--dw-radius-sm)] font-medium transition-all cursor-pointer ${
+                  themeMode === 'dark'
+                    ? 'bg-[var(--dw-card)] text-[var(--dw-text-primary)] shadow-sm'
+                    : 'text-[var(--dw-text-muted)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                Dark
+              </button>
+              <button
+                type="button"
+                onClick={() => setThemeMode('system')}
+                className={`text-xs px-2.5 py-1 rounded-[var(--dw-radius-sm)] font-medium transition-all cursor-pointer ${
+                  themeMode === 'system'
+                    ? 'bg-[var(--dw-card)] text-[var(--dw-text-primary)] shadow-sm'
+                    : 'text-[var(--dw-text-muted)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                Auto
+              </button>
+            </div>
+
+            {/* View Mode Toggle */}
+            <div className="flex items-center bg-[var(--dw-surface-subtle)] p-1 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+              <button
+                type="button"
+                onClick={() => setViewMode('mobile_frame')}
+                className={`text-xs px-2.5 py-1 rounded-[var(--dw-radius-sm)] font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  viewMode === 'mobile_frame'
+                    ? 'bg-[var(--dw-card)] text-[var(--dw-text-primary)] shadow-sm'
+                    : 'text-[var(--dw-text-muted)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                <Smartphone className="w-3.5 h-3.5" />
+                Phone
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('side_by_side')}
+                className={`text-xs px-2.5 py-1 rounded-[var(--dw-radius-sm)] font-medium transition-all flex items-center gap-1 cursor-pointer ${
+                  viewMode === 'side_by_side'
+                    ? 'bg-[var(--dw-card)] text-[var(--dw-text-primary)] shadow-sm'
+                    : 'text-[var(--dw-text-muted)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                Design Match
+              </button>
+            </div>
+
+            {/* APK & ZIP Downloads */}
+            <a
+              href="/personal_management_app_flutter.zip"
+              download="personal_management_app_flutter.zip"
+              className="text-xs bg-[var(--dw-primary-brand)] hover:opacity-90 text-white font-medium px-3 py-1.5 rounded-[var(--dw-radius-md)] transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Flutter .ZIP
+            </a>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Preview Container */}
+      <main className="flex-1 p-4 md:p-8 flex items-center justify-center overflow-auto">
+        <div className={`w-full ${viewMode === 'side_by_side' ? 'max-w-6xl grid grid-cols-1 lg:grid-cols-2 gap-8 items-start' : 'max-w-md mx-auto'}`}>
+          {/* Side-by-Side Reference PNG (if side-by-side mode is active) */}
+          {viewMode === 'side_by_side' && (
+            <div className="bg-[var(--dw-card)] rounded-[38px] p-4 shadow-xl border border-[var(--dw-border)] flex flex-col items-center">
+              <div className="w-full flex items-center justify-between pb-3 px-2 border-b border-[var(--dw-divider)] mb-3">
+                <span className="dw-type-label uppercase tracking-wider text-[var(--dw-text-muted)]">
+                  Visual Screen Reference
+                </span>
+                <span className="text-xs font-semibold text-[var(--dw-primary)]">
+                  {effectiveDark ? 'Dark Theme' : 'Light Theme'}
+                </span>
+              </div>
+              <div className="w-full max-w-[375px] rounded-[32px] overflow-hidden shadow-inner border border-[var(--dw-border)] bg-[var(--dw-canvas)]">
+                <img
+                  src={
+                    activeScreen === 'today'
+                      ? effectiveDark
+                        ? '/screens/today_dashboard___dark.png'
+                        : '/screens/today_dashboard___light.png'
+                      : activeScreen === 'tasks'
+                      ? effectiveDark
+                        ? '/screens/tasks___dark.png'
+                        : '/screens/tasks___light.png'
+                      : activeScreen === 'projects'
+                      ? effectiveDark
+                        ? '/screens/projects___dark.png'
+                        : '/screens/projects___light.png'
+                      : activeScreen === 'project_detail'
+                      ? effectiveDark
+                        ? '/screens/portfolio_refresh___dark.png'
+                        : '/screens/portfolio_refresh___light.png'
+                      : activeScreen === 'goals'
+                      ? effectiveDark
+                        ? '/screens/goals___dark.png'
+                        : '/screens/goals___light.png'
+                      : activeScreen === 'notes'
+                      ? effectiveDark
+                        ? '/screens/notes___knowledge___dark.png'
+                        : '/screens/notes___knowledge___light.png'
+                      : activeScreen === 'finance'
+                      ? effectiveDark
+                        ? '/screens/finance___dark.png'
+                        : '/screens/finance___light.png'
+                      : activeScreen === 'relationships'
+                      ? effectiveDark
+                        ? '/screens/relationships___dark.png'
+                        : '/screens/relationships___light.png'
+                      : activeScreen === 'priorities'
+                      ? effectiveDark
+                        ? '/screens/priorities___dark.png'
+                        : '/screens/priorities___light.png'
+                      : activeScreen === 'tools'
+                      ? effectiveDark
+                        ? '/screens/calculations___tools___dark.png'
+                        : '/screens/calculations___tools___light.png'
+                      : activeScreen === 'history'
+                      ? effectiveDark
+                        ? '/screens/history___progress___dark.png'
+                        : '/screens/history___progress___light.png'
+                      : activeScreen === 'sync_backup'
+                      ? effectiveDark
+                        ? '/screens/sync___backup_settings___dark.png'
+                        : '/screens/sync___backup_settings___light.png'
+                      : effectiveDark
+                      ? '/screens/_all_areas___dark.png'
+                      : '/screens/_all_areas___light.png'
+                  }
+                  alt="Daywell Screen Reference"
+                  className="w-full h-auto object-cover"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Interactive Mobile Device Frame */}
+          <div className="relative mx-auto w-full max-w-[390px] h-[820px] bg-[var(--dw-canvas)] rounded-[48px] shadow-2xl border-[10px] border-[var(--dw-border)] flex flex-col overflow-hidden text-[var(--dw-text-primary)] transition-colors duration-200">
+            {/* Top Phone Speaker & Camera Notch */}
+            <div className="absolute top-2 left-1/2 -translate-x-1/2 w-28 h-4 bg-[var(--dw-border)] rounded-[var(--dw-radius-full)] z-40 pointer-events-none" />
+
+            {/* Mobile System Status Bar (9:05, Wi-Fi, Cellular, Battery) */}
+            <div className="pt-3 px-7 pb-1 flex items-center justify-between text-xs font-semibold text-[var(--dw-text-secondary)] select-none z-30 shrink-0">
+              <span>9:05</span>
+              <div className="flex items-center gap-1.5 text-[var(--dw-text-secondary)]">
+                <span className="text-[10px]">5G</span>
+                <div className="w-4 h-2.5 border border-current rounded-sm relative p-0.5">
+                  <div className="h-full bg-current rounded-xs w-3/4" />
+                </div>
+              </div>
+            </div>
+
+            {/* Active Screen Scrollable Body Area */}
+            <div className="flex-1 overflow-y-auto px-5 pb-24 pt-2">
+              {/* SCREEN 01: TODAY DASHBOARD */}
+              {activeScreen === 'today' && (
+                <div className="space-y-4">
+                  {/* Header */}
+                  <div className="flex items-start justify-between pt-1">
+                    <div>
+                      <div className="dw-type-caption font-bold tracking-wider text-[var(--dw-text-muted)] uppercase">
+                        {`${todayCal.englishWeekdayName}, ${todayCal.gregorianShortMonthName} ${todayCal.day}, ${todayCal.year}`}
+                      </div>
+                      <div className="text-xs font-semibold text-[var(--dw-primary)]">
+                        {dualDate.split('(')[0].trim()} ዓ.ም.
+                      </div>
+                      <h1 className="dw-type-display text-[var(--dw-text-primary)] mt-0.5">
+                        Today
+                      </h1>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <DaywellIconButton
+                        label="Filter options"
+                        tone="muted"
+                        onClick={() => navigateTo('more')}
+                        icon={<SlidersHorizontal className="w-5 h-5" />}
+                      />
+                      <DaywellIconButton
+                        label="Quick capture"
+                        tone="primary"
+                        onClick={() => setIsQuickCaptureOpen(true)}
+                        icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Hero Greeting */}
+                  <div className="pt-1">
+                    <h2 className="dw-type-heading text-[var(--dw-text-primary)]">
+                      Good morning, {userProfile.name || 'Friend'}
+                    </h2>
+                    <p className="dw-type-body-compact text-[var(--dw-text-muted)] mt-0.5">
+                      A little focus. A little more room.
+                    </p>
+                  </div>
+
+                  {/* Core 4-Module Quick Launcher */}
+                  <div className="grid grid-cols-4 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => navigateTo('tasks')}
+                      className="p-2.5 bg-[var(--dw-card)] rounded-[var(--dw-radius-lg)] border border-[var(--dw-border)] text-center hover:border-[var(--dw-primary)] transition-all shadow-2xs cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-4 h-4 text-[var(--dw-income)] mx-auto" />
+                      <span className="block text-[11px] font-bold text-[var(--dw-text-primary)] mt-1">To-Do</span>
+                      <span className="block text-[9px] text-[var(--dw-text-muted)]">{tasks.filter((t) => !t.completed).length} pending</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigateTo('calendar')}
+                      className="p-2.5 bg-[var(--dw-card)] rounded-[var(--dw-radius-lg)] border border-[var(--dw-border)] text-center hover:border-[var(--dw-primary)] transition-all shadow-2xs cursor-pointer"
+                    >
+                      <CalendarDays className="w-4 h-4 text-[var(--dw-info)] mx-auto" />
+                      <span className="block text-[11px] font-bold text-[var(--dw-text-primary)] mt-1">Calendar</span>
+                      <span className="block text-[9px] text-[var(--dw-text-muted)]">Dual view</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigateTo('finance')}
+                      className="p-2.5 bg-[var(--dw-card)] rounded-[var(--dw-radius-lg)] border border-[var(--dw-border)] text-center hover:border-[var(--dw-primary)] transition-all shadow-2xs cursor-pointer"
+                    >
+                      <Wallet className="w-4 h-4 text-[var(--dw-warning)] mx-auto" />
+                      <span className="block text-[11px] font-bold text-[var(--dw-text-primary)] mt-1">Finance</span>
+                      <span className="block text-[9px] text-[var(--dw-text-muted)]">Ledger</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => navigateTo('notes')}
+                      className="p-2.5 bg-[var(--dw-card)] rounded-[var(--dw-radius-lg)] border border-[var(--dw-border)] text-center hover:border-[var(--dw-primary)] transition-all shadow-2xs cursor-pointer"
+                    >
+                      <NotebookPen className="w-4 h-4 text-[var(--dw-primary)] mx-auto" />
+                      <span className="block text-[11px] font-bold text-[var(--dw-text-primary)] mt-1">Notes</span>
+                      <span className="block text-[9px] text-[var(--dw-text-muted)]">Autosave</span>
+                    </button>
+                  </div>
+
+                  {/* "YOUR NEXT RIGHT THING" Deprecated Prototype Hero Card */}
+                  <div
+                    onClick={() => navigateTo('project_detail')}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        navigateTo('project_detail');
+                      }
+                    }}
+                    className="bg-[var(--dw-primary-brand)] text-white rounded-[var(--dw-radius-xl)] p-5 shadow-sm cursor-pointer hover:opacity-95 transition-all relative overflow-hidden"
+                  >
+                    <div className="flex items-center justify-between gap-2 text-xs font-bold tracking-wider text-white/85 uppercase">
+                      <span>YOUR NEXT RIGHT THING</span>
+                      <div className="flex items-center gap-1.5">
+                        <DaywellStatusBadge
+                          tone="warning"
+                          showIcon={false}
+                          label="Deprecated Prototype"
+                        />
+                        <ArrowUpRight className="w-4 h-4 text-white/85" />
+                      </div>
+                    </div>
+                    <h3 className="text-xl font-bold text-white mt-3 leading-snug">
+                      Review portfolio case study
+                    </h3>
+                    <div className="flex items-center gap-2 text-xs text-white/85 mt-3">
+                      <Clock3 className="w-3.5 h-3.5" />
+                      <span>Sample focus card · Portfolio refresh prototype</span>
+                    </div>
+                  </div>
+
+                  {/* Live Today's Priorities */}
+                  <div className="space-y-2 pt-1">
+                    <DaywellSectionHeader
+                      title="Today's priorities"
+                      actionLabel={`View all (${tasks.length})`}
+                      onActionPressed={() => navigateTo('tasks')}
+                    />
+
+                    <div className="space-y-2">
+                      {tasks.length === 0 ? (
+                        <DaywellCard variant="default" padding="compact">
+                          <p className="text-xs text-[var(--dw-text-muted)] text-center py-2">
+                            No saved tasks yet. Add one via Quick Capture or To-Do.
+                          </p>
+                        </DaywellCard>
+                      ) : (
+                        tasks.slice(0, 3).map((item) => (
+                          <DaywellCard
+                            key={item.id}
+                            padding="compact"
+                            onClick={() => toggleTask(item.id)}
+                            className="flex items-start gap-3"
+                          >
+                            <div
+                              className={`w-5 h-5 rounded-md border mt-0.5 flex items-center justify-center transition-colors shrink-0 ${
+                                item.completed
+                                  ? 'bg-[var(--dw-primary-brand)] border-[var(--dw-primary-brand)] text-white'
+                                  : 'border-[var(--dw-border)] bg-transparent'
+                              }`}
+                            >
+                              {item.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p
+                                className={`text-xs font-semibold ${
+                                  item.completed
+                                    ? 'line-through text-[var(--dw-text-muted)]'
+                                    : 'text-[var(--dw-text-primary)]'
+                                }`}
+                              >
+                                {item.title}
+                              </p>
+                              <div className="flex items-center gap-1.5 text-[11px] text-[var(--dw-text-muted)] mt-0.5">
+                                {item.priority === 'high' && <Flag className="w-3 h-3 text-[var(--dw-warning)]" />}
+                                <span>{item.category || item.projectName || 'Personal'}</span>
+                              </div>
+                            </div>
+                            {item.hasReminder && (
+                              <Bell className="w-3.5 h-3.5 text-[var(--dw-text-muted)] mt-1 shrink-0" />
+                            )}
+                          </DaywellCard>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  {/* A Little Later (Deprecated Sample Card) */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <h3 className="dw-type-title text-[var(--dw-text-primary)]">
+                          A little later
+                        </h3>
+                        <DaywellStatusBadge
+                          tone="warning"
+                          showIcon={false}
+                          label="Deprecated Prototype"
+                        />
+                      </div>
+                      <DaywellButton
+                        label="Open tasks"
+                        variant="text"
+                        size="compact"
+                        onClick={() => navigateTo('tasks')}
+                      />
+                    </div>
+
+                    <DaywellCard padding="compact" className="flex items-center gap-3">
+                      <span className="dw-type-mono font-bold text-[var(--dw-text-muted)]">
+                        21:00
+                      </span>
+                      <div className="flex-1">
+                        <p className="text-xs font-semibold text-[var(--dw-text-primary)]">
+                          Read 20 pages
+                        </p>
+                        <p className="text-[11px] text-[var(--dw-text-muted)]">
+                          Sample habit card · Not backed by live schedule persistence
+                        </p>
+                      </div>
+                      <Repeat2 className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                    </DaywellCard>
+                  </div>
+
+                  {/* Active Project Progress Card (Deprecated Prototype Sample) */}
+                  <DaywellCard
+                    padding="md"
+                    radius="xl"
+                    onClick={() => navigateTo('project_detail')}
+                    className="space-y-3"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">
+                          Portfolio refresh
+                        </h4>
+                        <DaywellStatusBadge
+                          tone="warning"
+                          showIcon={false}
+                          label="Deprecated Prototype"
+                        />
+                      </div>
+                      <span className="text-xs font-bold text-[var(--dw-text-secondary)]">60%</span>
+                    </div>
+
+                    <DaywellProgressBar value={60} label="Portfolio refresh prototype progress" />
+
+                    <p className="text-[11px] text-[var(--dw-text-muted)]">
+                      Sample project progress card · Prototype screen
+                    </p>
+
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigateTo('goals');
+                      }}
+                      className="pt-2 border-t border-[var(--dw-divider)] flex items-center gap-2 text-xs font-medium text-[var(--dw-text-secondary)] hover:text-[var(--dw-primary)] transition-colors"
+                    >
+                      <Landmark className="w-3.5 h-3.5 text-[var(--dw-primary)]" />
+                      <span>Emergency fund sample · Goals prototype</span>
+                    </div>
+                  </DaywellCard>
+
+                  {/* Safe Harbor v7 Hero Snippet (Live Finance Data) */}
+                  <DaywellCard padding="md" radius="xl" className="space-y-2">
+                    <div className="flex items-center justify-between text-[10px] font-bold tracking-wider uppercase">
+                      <span
+                        className={
+                          todaySafeHarbor.isShortfall
+                            ? 'text-[var(--dw-on-expense-container)]'
+                            : 'text-[var(--dw-text-muted)]'
+                        }
+                      >
+                        {todaySafeHarbor.isShortfall ? 'SHORTFALL · ' : ''}AVAILABLE TO SPEND (H:{' '}
+                        {todaySafeHarbor.planningPeriodEndIso})
+                      </span>
+                    </div>
+                    <div className="flex items-baseline justify-between gap-2 mt-0.5">
+                      <span
+                        className={`dw-type-numeric-hero ${
+                          todaySafeHarbor.isShortfall
+                            ? 'text-[var(--dw-on-expense-container)]'
+                            : 'text-[var(--dw-text-primary)]'
+                        }`}
+                      >
+                        {(todaySafeHarbor.availableToSpendCents / 100).toLocaleString('en-US', {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{' '}
+                        <span className="text-sm font-bold text-[var(--dw-primary)]">
+                          ETB
+                        </span>
+                      </span>
+                      <DaywellButton
+                        label="View ledger"
+                        variant="text"
+                        size="compact"
+                        trailingIcon={<ChevronRight className="w-3.5 h-3.5" />}
+                        onClick={() => navigateTo('finance')}
+                      />
+                    </div>
+                    {(todaySafeHarbor.prepaidCardCreditCents > 0 ||
+                      todaySafeHarbor.nonEtbAccountCount > 0 ||
+                      (todaySafeHarbor.unverifiedAccountCount || 0) > 0 ||
+                      todaySafeHarbor.currencyReviewEntryCount > 0 ||
+                      todaySafeHarbor.unverifiedLegacyPaidCount > 0) && (
+                      <div className="text-[11px] text-[var(--dw-text-muted)] flex flex-wrap gap-x-3 gap-y-0.5 tabular-nums">
+                        {todaySafeHarbor.prepaidCardCreditCents > 0 && (
+                          <span className="text-[var(--dw-on-income-container)] font-medium">
+                            Includes +{formatBirr(todaySafeHarbor.prepaidCardCreditCents)} Prepaid
+                            Credit
+                          </span>
+                        )}
+                        {todaySafeHarbor.nonEtbAccountCount > 0 && (
+                          <span>
+                            {todaySafeHarbor.nonEtbAccountCount} non-ETB account(s) excluded
+                          </span>
+                        )}
+                        {(todaySafeHarbor.unverifiedAccountCount || 0) > 0 && (
+                          <span className="text-[var(--dw-on-warning-container)]">
+                            {todaySafeHarbor.unverifiedAccountCount} unverified account(s) excluded
+                          </span>
+                        )}
+                        {todaySafeHarbor.currencyReviewEntryCount > 0 && (
+                          <span className="text-[var(--dw-on-expense-container)] font-medium">
+                            {todaySafeHarbor.currencyReviewEntryCount} entry review notice(s)
+                          </span>
+                        )}
+                        {todaySafeHarbor.unverifiedLegacyPaidCount > 0 && (
+                          <span className="text-[var(--dw-on-warning-container)]">
+                            {todaySafeHarbor.unverifiedLegacyPaidCount} unverified legacy bill(s)
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    {todayFinanceSummary.recentEntries.length > 0 && (
+                      <div className="pt-2 space-y-1.5 border-t border-[var(--dw-divider)]">
+                        {todayFinanceSummary.recentEntries.map(({ entry, cls, formattedAmount }) => (
+                          <div
+                            key={entry.id}
+                            className={`flex items-center justify-between gap-2 text-[11px] ${
+                              entry.isVoided ? 'opacity-55' : ''
+                            }`}
+                          >
+                            <div className="min-w-0 flex items-center gap-1.5">
+                              <span
+                                className={`truncate font-medium text-[var(--dw-text-primary)] ${
+                                  entry.isVoided ? 'line-through' : ''
+                                }`}
+                              >
+                                {entry.description}
+                              </span>
+                              {entry.isVoided ? (
+                                <DaywellStatusBadge tone="neutral" showIcon={false} label="Voided" />
+                              ) : cls?.status === 'excluded_non_etb' ? (
+                                <DaywellStatusBadge
+                                  tone="warning"
+                                  showIcon={false}
+                                  label={`Excluded (${cls.nativeCurrencyCode || cls.touchedCurrencies[0] || 'Non-ETB'})`}
+                                />
+                              ) : cls?.status === 'mixed_or_ambiguous' ? (
+                                <DaywellStatusBadge
+                                  tone="error"
+                                  showIcon={false}
+                                  label="Currency Review"
+                                />
+                              ) : null}
+                            </div>
+                            <span className="dw-type-mono font-semibold text-[var(--dw-text-secondary)] shrink-0">
+                              {formattedAmount}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </DaywellCard>
+
+                  {/* Device Storage & Local Export Link */}
+                  <DaywellCard
+                    padding="compact"
+                    onClick={() => navigateTo('sync_backup')}
+                    className="flex items-center justify-between text-xs text-[var(--dw-text-secondary)]"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <HardDrive className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
+                      <span className="truncate">Saved on this device · Local backup</span>
+                    </div>
+                    <ChevronRight className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
+                  </DaywellCard>
+                </div>
+              )}
+
+              {/* SCREEN 02: TASKS (Preserved State) */}
+              <div className={activeScreen === 'tasks' ? 'block' : 'hidden'}>
+                <DaywellTasksModule
+                  tasks={tasks}
+                  onUpdateTasks={setTasks}
+                  onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
+                  onNavigateToCalendar={() => navigateTo('calendar')}
+                />
+              </div>
+
+              {/* SCREEN 03: CALENDAR (Preserved State) */}
+              <div className={activeScreen === 'calendar' ? 'block' : 'hidden'}>
+                <DaywellCalendarModule
+                  tasks={tasks.map((t) => ({
+                    id: t.id,
+                    title: t.title,
+                    dueDate: t.dueDate,
+                    completed: t.completed,
+                    priority: t.priority,
+                  }))}
+                  onToggleTask={toggleTask}
+                  onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
+                />
+              </div>
+
+              {/* SCREEN 03: PROJECTS (DEPRECATED PROTOTYPE) */}
+              {activeScreen === 'projects' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-2">
+                      <DaywellIconButton
+                        label="Go back"
+                        tone="muted"
+                        onClick={handleBack}
+                        icon={<ArrowLeft className="w-5 h-5" />}
+                      />
+                      <div>
+                        <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                          MAKE ROOM FOR THE MEANINGFUL
+                        </div>
+                        <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                          Projects
+                        </h1>
+                      </div>
+                    </div>
+                    <DaywellIconButton
+                      label="Quick capture"
+                      tone="primary"
+                      onClick={() => setIsQuickCaptureOpen(true)}
+                      icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
+                    />
+                  </div>
+
+                  <DeprecatedPrototypeBanner areaName="Projects" />
+
+                  <div className="flex items-center gap-2">
+                    {(['active', 'completed', 'archived'] as const).map((filterKey) => (
+                      <button
+                        key={filterKey}
+                        type="button"
+                        onClick={() => setProjectFilter(filterKey)}
+                        className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all cursor-pointer capitalize ${
+                          projectFilter === filterKey
+                            ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                            : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                        }`}
+                      >
+                        {filterKey}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="space-y-3">
+                    {projects.length === 0 ? (
+                      <DaywellCard padding="md" radius="xl">
+                        <DaywellEmptyState
+                          icon={<Layers className="w-8 h-8" />}
+                          message="No projects yet"
+                          subtitle="Create projects to group multi-step tasks, milestones, and deadlines."
+                          actionLabel="Quick Capture"
+                          onActionPressed={() => setIsQuickCaptureOpen(true)}
+                        />
+                      </DaywellCard>
+                    ) : (
+                      projects.map((proj) => (
+                        <DaywellCard
+                          key={proj.id}
+                          padding="md"
+                          radius="xl"
+                          onClick={() => navigateTo('project_detail')}
+                          className="space-y-3"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-[var(--dw-radius-lg)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] flex items-center justify-center">
+                                {proj.icon === 'panels' && <Layers className="w-5 h-5" />}
+                                {proj.icon === 'house' && <Landmark className="w-5 h-5" />}
+                                {proj.icon === 'languages' && <FileText className="w-5 h-5" />}
+                              </div>
+                              <div>
+                                <h4 className="text-sm font-bold text-[var(--dw-text-primary)]">
+                                  {proj.title}
+                                </h4>
+                                <p className="text-[11px] text-[var(--dw-text-muted)]">{proj.subtitle}</p>
+                              </div>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                          </div>
+                          <p className="text-xs text-[var(--dw-text-secondary)]">{proj.narrative}</p>
+                          <DaywellProgressBar value={proj.percent} label={proj.title} />
+                          <div className="flex items-center justify-between text-[11px] font-bold text-[var(--dw-text-muted)]">
+                            <span>{proj.tasksCompleted} of {proj.totalTasks} tasks complete</span>
+                            <span className="text-[var(--dw-text-primary)]">{proj.percent}%</span>
+                          </div>
+                        </DaywellCard>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* SCREEN 04: PROJECT DETAIL (DEPRECATED PROTOTYPE) */}
+              {activeScreen === 'project_detail' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pt-1">
+                    <DaywellIconButton
+                      label="Go back"
+                      tone="muted"
+                      onClick={handleBack}
+                      icon={<ArrowLeft className="w-5 h-5" />}
+                    />
+                    <span className="dw-type-label uppercase tracking-wider text-[var(--dw-text-muted)]">
+                      PROJECT DETAIL
+                    </span>
+                    <DaywellIconButton
+                      label="More options"
+                      tone="muted"
+                      onClick={() => navigateTo('projects')}
+                      icon={<SlidersHorizontal className="w-4 h-4" />}
+                    />
+                  </div>
+
+                  <DeprecatedPrototypeBanner areaName="Project Detail" />
+
+                  <div>
+                    <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                      Portfolio refresh
+                    </h1>
+                    <p className="text-xs text-[var(--dw-text-muted)] mt-0.5">Sample prototype · Career</p>
+                  </div>
+
+                  <DaywellCard padding="compact">
+                    <p className="text-xs text-[var(--dw-text-secondary)]">
+                      Tell a clearer story about the work I do. Focus on case studies, impact, and design decisions.
+                    </p>
+                  </DaywellCard>
+
+                  <DaywellCard padding="md" radius="xl" className="space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold">
+                      <span className="text-[var(--dw-text-primary)]">Progress</span>
+                      <span className="text-[var(--dw-text-primary)]">60%</span>
+                    </div>
+                    <DaywellProgressBar value={60} label="Portfolio refresh progress" />
+                    <p className="text-[11px] text-[var(--dw-text-muted)]">6 of 10 sample milestones complete</p>
+                  </DaywellCard>
+
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-bold text-[var(--dw-text-primary)]">
+                      Sample Milestones & Tasks
+                    </h3>
+                    <div className="space-y-2">
+                      <DaywellCard padding="compact" className="flex items-center gap-3">
+                        <Check className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <span className="text-xs line-through text-[var(--dw-text-muted)] flex-1">
+                          Select top 3 case studies
+                        </span>
+                      </DaywellCard>
+                      <DaywellCard padding="compact" className="flex items-center gap-3">
+                        <Check className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <span className="text-xs line-through text-[var(--dw-text-muted)] flex-1">
+                          Draft problem and metrics statements
+                        </span>
+                      </DaywellCard>
+                      <DaywellCard padding="compact" className="flex items-center gap-3">
+                        <div className="w-4 h-4 rounded-md border border-[var(--dw-border)]" />
+                        <span className="text-xs font-medium text-[var(--dw-text-primary)] flex-1">
+                          Review portfolio case study
+                        </span>
+                        <span className="text-[10px] text-[var(--dw-on-warning-container)] font-bold">Sample 10:00</span>
+                      </DaywellCard>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* SCREEN 05: GOALS (DEPRECATED PROTOTYPE) */}
+              {activeScreen === 'goals' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-2">
+                      <DaywellIconButton
+                        label="Go back"
+                        tone="muted"
+                        onClick={handleBack}
+                        icon={<ArrowLeft className="w-5 h-5" />}
+                      />
+                      <div>
+                        <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                          SMALL STEPS, LASTING CHANGE
+                        </div>
+                        <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                          Goals
+                        </h1>
+                      </div>
+                    </div>
+                    <DaywellIconButton
+                      label="Quick capture"
+                      tone="primary"
+                      onClick={() => setIsQuickCaptureOpen(true)}
+                      icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
+                    />
+                  </div>
+
+                  <DeprecatedPrototypeBanner areaName="Goals" />
+
+                  <div className="flex items-center gap-2">
+                    {[
+                      { key: 'all', label: 'All goals' },
+                      { key: 'short', label: 'Short term' },
+                      { key: 'long', label: 'Long term' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.key}
+                        type="button"
+                        onClick={() => setGoalFilter(opt.key as 'all' | 'short' | 'long')}
+                        className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all cursor-pointer ${
+                          goalFilter === opt.key
+                            ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                            : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <DaywellCard padding="md" radius="xl">
+                    <DaywellEmptyState
+                      icon={<Target className="w-8 h-8" />}
+                      message="No active goals yet"
+                      subtitle="Define short-term milestones or long-term personal ambitions in Finance Savings Goals."
+                      actionLabel="Open Finance Plan"
+                      onActionPressed={() => navigateTo('finance')}
+                    />
+                  </DaywellCard>
+                </div>
+              )}
+
+              {/* SCREEN 06: NOTES & KNOWLEDGE (Preserved State) */}
+              <div className={activeScreen === 'notes' ? 'block' : 'hidden'}>
+                <div className="space-y-4">
+                  <DaywellNotesModule
+                    onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
+                    onNavigateToModule={(mod) => navigateTo(mod as ScreenId)}
+                  />
+                </div>
+              </div>
+
+              {/* SCREEN 07: FINANCE (Preserved State) */}
+              <div className={activeScreen === 'finance' ? 'block' : 'hidden'}>
+                <DaywellFinanceModule
+                  effectiveDark={effectiveDark}
+                  onOpenQuickCapture={() => setIsQuickCaptureOpen(true)}
+                  composerPrefill={financeComposerPrefill}
+                  onClearComposerPrefill={() => setFinanceComposerPrefill(null)}
+                />
+              </div>
+
+              {/* SCREEN 12: MORE / ALL AREAS */}
+              {activeScreen === 'more' && (
+                <div className="space-y-4">
+                  {/* Header with Back Navigation */}
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-2">
+                      <DaywellIconButton
+                        label="Go back"
+                        tone="muted"
+                        onClick={handleBack}
+                        icon={<ArrowLeft className="w-5 h-5" />}
+                      />
+                      <div>
+                        <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                          DAYWELL / ALL AREAS
+                        </div>
+                        <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                          Your space
+                        </h1>
+                      </div>
+                    </div>
+                    <DaywellIconButton
+                      label="Quick capture"
+                      tone="primary"
+                      onClick={() => setIsQuickCaptureOpen(true)}
+                      icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
+                    />
+                  </div>
+
+                  {/* Profile Card */}
+                  <DaywellCard padding="compact" className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-[var(--dw-radius-full)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] font-bold text-sm flex items-center justify-center uppercase shrink-0">
+                          {(userProfile.name || 'User').slice(0, 2)}
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-bold text-[var(--dw-text-primary)] truncate">
+                            {userProfile.name || 'Daywell User'}
+                          </h3>
+                          <p className="text-[11px] text-[var(--dw-text-muted)]">
+                            A little more intentional, every day.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1 shrink-0">
+                        <DaywellButton
+                          label="Edit Name"
+                          variant="text"
+                          size="compact"
+                          onClick={() => {
+                            setProfileNameInput(userProfile.name || '');
+                            setIsEditingProfileName(true);
+                          }}
+                        />
+                        <DaywellButton
+                          label="Setup"
+                          variant="outlined"
+                          size="compact"
+                          onClick={() => {
+                            setIsSetupWizardOpen(true);
+                          }}
+                          title="Rerun the first-time setup wizard"
+                        />
+                      </div>
+                    </div>
+
+                    {isEditingProfileName && (
+                      <div className="pt-2 border-t border-[var(--dw-divider)] flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={profileNameInput}
+                          onChange={(e) => setProfileNameInput(e.target.value)}
+                          placeholder="Enter your name"
+                          className="flex-1 min-h-[36px] px-2.5 py-1 text-xs bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] rounded-[var(--dw-radius-sm)] text-[var(--dw-text-primary)] focus:outline-none focus:border-[var(--dw-primary)]"
+                        />
+                        <DaywellButton
+                          label="Save"
+                          size="compact"
+                          onClick={() => {
+                            const trimmed = profileNameInput.trim();
+                            if (trimmed) {
+                              const updated = { ...userProfile, name: trimmed };
+                              setUserProfile(updated);
+                              localStorage.setItem('daywell_user_profile', JSON.stringify(updated));
+                            }
+                            setIsEditingProfileName(false);
+                          }}
+                        />
+                        <DaywellButton
+                          label="Cancel"
+                          variant="text"
+                          size="compact"
+                          onClick={() => setIsEditingProfileName(false)}
+                        />
+                      </div>
+                    )}
+                  </DaywellCard>
+
+                  {/* All Areas Grid */}
+                  <div className="space-y-2 pt-1">
+                    <DaywellSectionHeader title="All areas" />
+
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <DaywellCard padding="compact" onClick={() => navigateTo('tasks')} className="space-y-1">
+                        <CheckCircle2 className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Tasks</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">
+                          {tasks.filter((t) => !t.completed).length} open tasks
+                        </p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('notes')} className="space-y-1">
+                        <NotebookPen className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">
+                          Notes & knowledge
+                        </h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Local notebooks</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('finance')} className="space-y-1">
+                        <Wallet className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Finance</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Balanced ETB ledger</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('calendar')} className="space-y-1">
+                        <CalendarDays className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Calendar</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Dual Ethiopian & Gregorian</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('projects')} className="space-y-1">
+                        <Layers className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Projects</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Deprecated prototype</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('goals')} className="space-y-1">
+                        <Target className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Goals</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Deprecated prototype</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('priorities')} className="space-y-1">
+                        <ListOrdered className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Priorities</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Deprecated prototype</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('tools')} className="space-y-1">
+                        <Calculator className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Tools</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Deprecated prototype</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('history')} className="space-y-1">
+                        <ChartNoAxesColumn className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">History</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Deprecated prototype</p>
+                      </DaywellCard>
+
+                      <DaywellCard padding="compact" onClick={() => navigateTo('relationships')} className="space-y-1">
+                        <UsersRound className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Relationships</h4>
+                        <p className="text-[10px] text-[var(--dw-text-muted)]">Deprecated prototype</p>
+                      </DaywellCard>
+                    </div>
+                  </div>
+
+                  {/* Make it yours */}
+                  <div className="space-y-2 pt-1">
+                    <DaywellSectionHeader title="Make it yours" />
+                    <div className="space-y-1.5">
+                      <DaywellCard
+                        padding="compact"
+                        onClick={() => setThemeMode(effectiveDark ? 'light' : 'dark')}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <SunMoon className="w-4 h-4 text-[var(--dw-primary)]" />
+                          <div>
+                            <p className="text-xs font-bold text-[var(--dw-text-primary)]">
+                              Appearance
+                            </p>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">
+                              System · Light / Dark ({effectiveDark ? 'Dark active' : 'Light active'})
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                      </DaywellCard>
+
+                      <DaywellCard
+                        padding="compact"
+                        onClick={() => navigateTo('tasks')}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Bell className="w-4 h-4 text-[var(--dw-primary)]" />
+                          <div>
+                            <p className="text-xs font-bold text-[var(--dw-text-primary)]">
+                              Notifications & reminders
+                            </p>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">
+                              Managed in Android settings & task reminders
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                      </DaywellCard>
+                    </div>
+                  </div>
+
+                  {/* Your Data */}
+                  <div className="space-y-2 pt-1">
+                    <DaywellSectionHeader title="Your data" />
+                    <div className="space-y-1.5">
+                      <DaywellCard
+                        padding="compact"
+                        onClick={() => navigateTo('sync_backup')}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <RefreshCw className="w-4 h-4 text-[var(--dw-primary)]" />
+                          <div>
+                            <p className="text-xs font-bold text-[var(--dw-text-primary)]">
+                              Sync & backup
+                            </p>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">
+                              Local save, canonical export & restore
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                      </DaywellCard>
+
+                      <DaywellCard
+                        padding="compact"
+                        onClick={() => navigateTo('sync_backup')}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <Database className="w-4 h-4 text-[var(--dw-primary)]" />
+                          <div>
+                            <p className="text-xs font-bold text-[var(--dw-text-primary)]">
+                              Data management
+                            </p>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">
+                              Export & import SharedStateBridge JSON
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                      </DaywellCard>
+                    </div>
+                  </div>
+
+                  <p className="text-center text-[10px] text-[var(--dw-text-muted)] pt-2 pb-4">
+                    Daywell · A considered place for everyday life.
+                  </p>
+                </div>
+              )}
+
+              {/* SCREEN: RELATIONSHIPS (DEPRECATED PROTOTYPE) */}
+              {activeScreen === 'relationships' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-2">
+                      <DaywellIconButton
+                        label="Go back"
+                        tone="muted"
+                        onClick={handleBack}
+                        icon={<ArrowLeft className="w-5 h-5" />}
+                      />
+                      <div>
+                        <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                          INTENTIONAL CONNECTIONS
+                        </div>
+                        <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                          Relationships
+                        </h1>
+                      </div>
+                    </div>
+                    <DaywellIconButton
+                      label="Add connection"
+                      tone="primary"
+                      onClick={() => setIsQuickCaptureOpen(true)}
+                      icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
+                    />
+                  </div>
+
+                  <DeprecatedPrototypeBanner areaName="Relationships" />
+
+                  <DaywellCard padding="md" radius="xl">
+                    <DaywellEmptyState
+                      icon={<UsersRound className="w-8 h-8" />}
+                      message="No contacts or cadence tracked"
+                      subtitle="Prototype area — use Notes & Tasks to record follow-ups for now."
+                      actionLabel="Open Notes"
+                      onActionPressed={() => navigateTo('notes')}
+                    />
+                  </DaywellCard>
+                </div>
+              )}
+
+              {/* SCREEN: PRIORITIES (DEPRECATED PROTOTYPE) */}
+              {activeScreen === 'priorities' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pt-1">
+                    <div className="flex items-center gap-2">
+                      <DaywellIconButton
+                        label="Go back"
+                        tone="muted"
+                        onClick={handleBack}
+                        icon={<ArrowLeft className="w-5 h-5" />}
+                      />
+                      <div>
+                        <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                          THE ESSENTIAL FEW
+                        </div>
+                        <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                          Priorities
+                        </h1>
+                      </div>
+                    </div>
+                    <DaywellButton
+                      label="Open Tasks"
+                      variant="text"
+                      size="compact"
+                      onClick={() => navigateTo('tasks')}
+                    />
+                  </div>
+
+                  <DeprecatedPrototypeBanner areaName="Priorities" />
+
+                  <div className="space-y-2.5">
+                    {tasks.length === 0 ? (
+                      <DaywellCard padding="md" radius="xl">
+                        <DaywellEmptyState
+                          icon={<CheckSquare className="w-8 h-8" />}
+                          message="No priority tasks yet"
+                          subtitle="Create tasks in the Tasks module to track your daily priorities."
+                          actionLabel="Add Task"
+                          onActionPressed={() => navigateTo('tasks')}
+                        />
+                      </DaywellCard>
+                    ) : (
+                      tasks.slice(0, 3).map((item, idx) => (
+                        <DaywellCard
+                          key={item.id}
+                          padding="compact"
+                          onClick={() => toggleTask(item.id)}
+                          className="flex items-center gap-3"
+                        >
+                          <div className="w-6 h-6 rounded-[var(--dw-radius-full)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] text-xs font-bold flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-xs font-bold ${item.completed ? 'line-through text-[var(--dw-text-muted)]' : 'text-[var(--dw-text-primary)]'}`}>
+                              {item.title}
+                            </p>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">{item.projectName || item.category}</p>
+                          </div>
+                          <div
+                            className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
+                              item.completed
+                                ? 'bg-[var(--dw-primary-brand)] border-[var(--dw-primary-brand)] text-white'
+                                : 'border-[var(--dw-border)]'
+                            }`}
+                          >
+                            {item.completed && <Check className="w-3.5 h-3.5" />}
+                          </div>
+                        </DaywellCard>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* SCREEN: TOOLS (DEPRECATED PROTOTYPE) */}
+              {activeScreen === 'tools' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 pt-1">
+                    <DaywellIconButton
+                      label="Go back"
+                      tone="muted"
+                      onClick={handleBack}
+                      icon={<ArrowLeft className="w-5 h-5" />}
+                    />
+                    <div>
+                      <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                        EVERYDAY UTILITIES
+                      </div>
+                      <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                        Calculations & tools
+                      </h1>
+                    </div>
+                  </div>
+
+                  <DeprecatedPrototypeBanner areaName="Calculations & Tools" />
+
+                  <div className="space-y-2">
+                    <DaywellCard padding="compact" onClick={() => navigateTo('finance')} className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Wallet className="w-4 h-4 text-[var(--dw-income)]" />
+                        <div>
+                          <p className="text-xs font-bold text-[var(--dw-text-primary)]">ETB Cents Ledger Calculator</p>
+                          <p className="text-[10px] text-[var(--dw-text-muted)]">Open Finance module</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                    </DaywellCard>
+
+                    <DaywellCard padding="compact" onClick={() => navigateTo('calendar')} className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <CalendarDays className="w-4 h-4 text-[var(--dw-info)]" />
+                        <div>
+                          <p className="text-xs font-bold text-[var(--dw-text-primary)]">Ethiopian & Gregorian Dual Converter</p>
+                          <p className="text-[10px] text-[var(--dw-text-muted)]">Open Calendar module</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                    </DaywellCard>
+
+                    <DaywellCard padding="compact" onClick={() => navigateTo('sync_backup')} className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <Download className="w-4 h-4 text-[var(--dw-primary)]" />
+                        <div>
+                          <p className="text-xs font-bold text-[var(--dw-text-primary)]">Export Canonical Archive</p>
+                          <p className="text-[10px] text-[var(--dw-text-muted)]">Open Sync & Backup</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                    </DaywellCard>
+                  </div>
+                </div>
+              )}
+
+              {/* SCREEN: HISTORY (DEPRECATED PROTOTYPE) */}
+              {activeScreen === 'history' && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 pt-1">
+                    <DaywellIconButton
+                      label="Go back"
+                      tone="muted"
+                      onClick={handleBack}
+                      icon={<ArrowLeft className="w-5 h-5" />}
+                    />
+                    <div>
+                      <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                        JOURNEY & REFLECTION
+                      </div>
+                      <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                        History & progress
+                      </h1>
+                    </div>
+                  </div>
+
+                  <DeprecatedPrototypeBanner areaName="History & Progress" />
+
+                  <DaywellCard padding="md" radius="xl" className="space-y-3">
+                    <h3 className="text-xs font-bold text-[var(--dw-text-primary)]">Current task snapshot</h3>
+                    <div className="grid grid-cols-3 gap-2 text-center pt-1">
+                      <div className="p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)]">
+                        <span className="text-base font-extrabold text-[var(--dw-primary)] tabular-nums">
+                          {tasks.filter((t) => t.completed).length}
+                        </span>
+                        <span className="block text-[9px] text-[var(--dw-text-muted)]">Done</span>
+                      </div>
+                      <div className="p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)]">
+                        <span className="text-base font-extrabold text-[var(--dw-on-info-container)] tabular-nums">
+                          {tasks.filter((t) => !t.completed).length}
+                        </span>
+                        <span className="block text-[9px] text-[var(--dw-text-muted)]">Active</span>
+                      </div>
+                      <div className="p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)]">
+                        <span className="text-base font-extrabold text-[var(--dw-on-warning-container)]">100%</span>
+                        <span className="block text-[9px] text-[var(--dw-text-muted)]">Offline</span>
+                      </div>
+                    </div>
+                  </DaywellCard>
+                </div>
+              )}
+
+              {/* SCREEN 13: SYNC & BACKUP */}
+              {activeScreen === 'sync_backup' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between pt-1">
+                    <DaywellIconButton
+                      label="Go back"
+                      tone="muted"
+                      onClick={handleBack}
+                      icon={<ArrowLeft className="w-5 h-5" />}
+                    />
+                    <span className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                      SETTINGS / YOUR DATA
+                    </span>
+                    <Info className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                  </div>
+
+                  <div>
+                    <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
+                      Sync & backup
+                    </h1>
+                  </div>
+
+                  {sharedFoundationToast && (
+                    <DaywellStatusBanner
+                      tone="info"
+                      liveRegion
+                      message={sharedFoundationToast}
+                    />
+                  )}
+
+                  {/* Saved on this device Hero Card */}
+                  <DaywellCard variant="primaryContainer" padding="md" radius="xl" className="flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-[var(--dw-radius-md)] bg-[var(--dw-primary-brand)] text-white flex items-center justify-center shrink-0">
+                      <ShieldCheck className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-[var(--dw-on-primary-container)]">
+                        Saved on this device
+                      </h4>
+                      <p className="text-[11px] text-[var(--dw-text-secondary)]">
+                        Your work is stored locally on this browser session (Web Preview) or SQLite (Android).
+                      </p>
+                    </div>
+                  </DaywellCard>
+
+                  {/* On This Device (Live Export/Import) */}
+                  <div className="space-y-2 pt-1">
+                    <DaywellSectionHeader title="On this device" />
+                    <p className="text-[11px] text-[var(--dw-text-muted)] leading-relaxed">
+                      Export or restore your canonical SharedStateBridge JSON database payload between Web Preview and Android.
+                    </p>
+
+                    <div className="space-y-1.5 pt-1">
+                      <DaywellCard
+                        padding="compact"
+                        onClick={handleExportSharedFoundation}
+                        className="flex items-center justify-between"
+                      >
+                        <div className="flex items-center gap-3">
+                          <Download className="w-4 h-4 text-[var(--dw-primary)]" />
+                          <div>
+                            <p className="text-xs font-bold text-[var(--dw-text-primary)]">
+                              Create local backup
+                            </p>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">
+                              Export canonical JSON payload for Android / local backup
+                            </p>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                      </DaywellCard>
+
+                      <label className="block cursor-pointer">
+                        <DaywellCard padding="compact" interactive className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <FolderOpen className="w-4 h-4 text-[var(--dw-primary)]" />
+                            <div>
+                              <p className="text-xs font-bold text-[var(--dw-text-primary)]">
+                                Restore from backup
+                              </p>
+                              <p className="text-[10px] text-[var(--dw-text-muted)]">
+                                Load Android / canonical JSON file into Web Preview
+                              </p>
+                            </div>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                          <input
+                            type="file"
+                            accept=".json,.pmbackup"
+                            className="hidden"
+                            onChange={handleImportSharedFoundation}
+                          />
+                        </DaywellCard>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* Shared Foundation Unified Architecture Badge */}
+                  <DaywellCard variant="primaryContainer" padding="md" radius="xl" className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[var(--dw-on-primary-container)]" />
+                        <h4 className="text-xs font-bold text-[var(--dw-on-primary-container)]">
+                          Shared Foundation: Single Source of Truth
+                        </h4>
+                      </div>
+                      <DaywellStatusBadge tone="success" showIcon={false} label="Active" />
+                    </div>
+                    <p className="text-[11px] text-[var(--dw-text-secondary)] leading-relaxed">
+                      Web Preview and Flutter Android share canonical design tokens, business rules, financial calculations, and schemas from <code className="text-[10px] bg-[var(--dw-card)] px-1 py-0.5 rounded font-mono">shared_foundation/</code>.
+                    </p>
+                  </DaywellCard>
+
+                  {/* Deprecated Static Prototype Cards for Future Sync/Telegram */}
+                  <div className="space-y-2 pt-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[var(--dw-text-primary)]">Sync & Remote Backup Preview</span>
+                      <DaywellStatusBadge
+                        tone="warning"
+                        showIcon={false}
+                        label="Deprecated Prototype"
+                      />
+                    </div>
+
+                    <DaywellCard padding="md" radius="xl" className="space-y-3">
+                      <div className="flex items-center justify-between text-xs">
+                        <DaywellStatusBadge
+                          tone="neutral"
+                          icon={<CloudOff className="w-3 h-3" />}
+                          label="Offline"
+                        />
+                        <span className="text-[var(--dw-text-muted)] font-medium">Prototype status card</span>
+                      </div>
+                      <p className="text-[11px] text-[var(--dw-text-muted)] leading-relaxed">
+                        Cloud sync and Telegram remote destinations are static design mockups in Web Preview. Use Create local backup above for real exports.
+                      </p>
+                    </DaywellCard>
+
+                    <DaywellCard padding="md" radius="xl" className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Send className="w-4 h-4 text-[var(--dw-primary)]" />
+                          <div>
+                            <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">
+                              Telegram configuration
+                            </h4>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">
+                              Static prototype only (Android encrypted export runs in native app)
+                            </p>
+                          </div>
+                        </div>
+                        <DaywellStatusBadge tone="warning" showIcon={false} label="Mockup" />
+                      </div>
+                    </DaywellCard>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* SCREEN 14: QUICK CAPTURE BOTTOM SHEET OVERLAY */}
+            {isQuickCaptureOpen && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Quick capture"
+                className="absolute inset-0 bg-black/40 backdrop-blur-xs z-50 flex flex-col justify-end"
+              >
+                <div className="bg-[var(--dw-elevated)] rounded-t-[32px] border-t border-[var(--dw-border)] p-5 shadow-2xl space-y-4">
+                  {/* Top Drag Handle & Title */}
+                  <div className="w-10 h-1 bg-[var(--dw-border)] rounded-[var(--dw-radius-full)] mx-auto" />
+                  <div className="flex items-center justify-between pt-1">
+                    <h3 className="dw-type-title text-[var(--dw-text-primary)]">Quick capture</h3>
+                    <DaywellIconButton
+                      label="Close Quick capture"
+                      tone="muted"
+                      size="compact"
+                      onClick={handleAttemptCloseQuickCapture}
+                      icon={<X className="w-5 h-5" />}
+                    />
+                  </div>
+
+                  {/* Type Selector Pills */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setQuickCaptureType('task')}
+                      className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        quickCaptureType === 'task'
+                          ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                          : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border border-transparent'
+                      }`}
+                    >
+                      <CheckSquare className="w-3.5 h-3.5" />
+                      Task
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickCaptureType('expense');
+                        setQuickCaptureInput('450 ETB groceries');
+                      }}
+                      className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        quickCaptureType === 'expense'
+                          ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                          : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border border-transparent'
+                      }`}
+                    >
+                      <Wallet className="w-3.5 h-3.5" />
+                      Expense
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickCaptureType('note')}
+                      className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        quickCaptureType === 'note'
+                          ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                          : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border border-transparent'
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      Note
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickCaptureType('reminder')}
+                      className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        quickCaptureType === 'reminder'
+                          ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                          : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border border-transparent'
+                      }`}
+                    >
+                      <Bell className="w-3.5 h-3.5" />
+                      Reminder
+                    </button>
+                  </div>
+
+                  {/* Large Question Input */}
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="quick-capture-input"
+                      className="dw-type-caption tracking-wider text-[var(--dw-text-muted)] uppercase"
+                    >
+                      WHAT'S ON YOUR MIND? <span className="text-[var(--dw-error)]">*</span>
+                    </label>
+                    <div
+                      className={`p-3 bg-[var(--dw-card)] rounded-[var(--dw-radius-lg)] border-2 ${
+                        quickCaptureError ? 'border-[var(--dw-error)]' : 'border-[var(--dw-primary)]'
+                      } shadow-xs`}
+                    >
+                      <input
+                        id="quick-capture-input"
+                        type="text"
+                        autoFocus
+                        value={quickCaptureInput}
+                        onChange={(e) => {
+                          setQuickCaptureInput(e.target.value);
+                          if (quickCaptureError) setQuickCaptureError(null);
+                        }}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSaveQuickCapture()}
+                        placeholder="e.g. Ask landlord about move-in time"
+                        className="w-full text-sm font-bold text-[var(--dw-text-primary)] bg-transparent outline-none"
+                      />
+                    </div>
+                    {quickCaptureError && (
+                      <DaywellStatusBanner
+                        tone="error"
+                        message={quickCaptureError}
+                        className="mt-2"
+                      />
+                    )}
+                  </div>
+
+                  {/* Primary Save & Expense Composer Handoff */}
+                  <div className="flex gap-2">
+                    {quickCaptureType === 'expense' && (
+                      <DaywellButton
+                        label="Open in Composer"
+                        variant="outlined"
+                        disabled={isSubmittingQuickCapture || !quickCaptureInput.trim()}
+                        onClick={() => {
+                          const text = quickCaptureInput.trim();
+                          if (!text) return;
+                          let storedAccounts: Account[] = [];
+                          try {
+                            const rawAcc = localStorage.getItem('daywell_accounts');
+                            const parsedAcc = rawAcc ? JSON.parse(rawAcc) : [];
+                            if (Array.isArray(parsedAcc)) storedAccounts = parsedAcc;
+                          } catch {
+                            storedAccounts = [];
+                          }
+                          const etbAccounts = storedAccounts.filter((a) => isActiveVerifiedEtbAccount(a));
+                          const hint = quickCaptureExpenseAccount.trim().toLowerCase();
+                          const matchedAccount =
+                            etbAccounts.find((a) => a.name.toLowerCase().includes(hint)) ||
+                            etbAccounts[0];
+                          const parsed = parseQuickCaptureExpense(
+                            text,
+                            matchedAccount?.name || quickCaptureExpenseAccount,
+                            storedAccounts
+                          );
+                          if (parsed.rejectedCurrency) {
+                            setQuickCaptureError(
+                              parsed.error ||
+                                `Only ETB amounts are supported in Quick Capture (detected ${parsed.rejectedCurrency}).`
+                            );
+                            return;
+                          }
+                          setFinanceComposerPrefill({
+                            nonce: Date.now(),
+                            kind: 'expense',
+                            amountText: parsed.amountCents > 0 ? formatCentsAsInput(parsed.amountCents) : '',
+                            description: parsed.description || text,
+                            accountId: matchedAccount?.id,
+                            categoryId: parsed.categoryId || 'cat-food',
+                          });
+                          setIsQuickCaptureOpen(false);
+                          setQuickCaptureInput('');
+                          setQuickCaptureError(null);
+                          navigateTo('finance');
+                        }}
+                      />
+                    )}
+                    <DaywellButton
+                      label={isSubmittingQuickCapture ? 'Saving...' : 'Save to Inbox'}
+                      variant="primary"
+                      fullWidth
+                      isLoading={isSubmittingQuickCapture}
+                      disabled={isSubmittingQuickCapture || !quickCaptureInput.trim()}
+                      leadingIcon={!isSubmittingQuickCapture ? <InboxIcon className="w-4 h-4" /> : undefined}
+                      onClick={() => handleSaveQuickCapture()}
+                    />
+                  </div>
+
+                  <p className="text-center text-[10px] text-[var(--dw-text-muted)] pb-1">
+                    Capture now. Organize in Inbox later.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Unsaved Changes Protection for Quick Capture */}
+            <UnsavedChangesDialog
+              isOpen={showUnsavedQuickCapture}
+              title="Discard Unsaved Quick Capture?"
+              description="You have typed text in Quick Capture that has not been saved yet. Discard changes?"
+              onStay={() => setShowUnsavedQuickCapture(false)}
+              onDiscard={() => {
+                setShowUnsavedQuickCapture(false);
+                setIsQuickCaptureOpen(false);
+                setQuickCaptureInput('');
+                setQuickCaptureError(null);
+              }}
+            />
+
+            {/* Toast Notification */}
+            {quickCaptureToast && (
+              <div
+                role="status"
+                aria-live="polite"
+                className="absolute top-12 left-6 right-6 p-3 bg-[var(--dw-primary-brand)] text-white rounded-[var(--dw-radius-lg)] text-xs font-semibold shadow-lg text-center z-50"
+              >
+                {quickCaptureToast}
+              </div>
+            )}
+
+            {/* Fixed Bottom Tab Bar (6 Tabs: Today, To-Do, Calendar, Notes, Finance, More) */}
+            <nav
+              role="navigation"
+              aria-label="Main Navigation"
+              className="absolute bottom-0 left-0 right-0 h-16 bg-[var(--dw-card)]/95 backdrop-blur-md border-t border-[var(--dw-border)] grid grid-cols-6 items-center px-1 z-40 select-none"
+            >
+              {[
+                { id: 'today' as ScreenId, aria: 'Today Dashboard', label: 'Today', icon: Calendar },
+                { id: 'tasks' as ScreenId, aria: 'To-Do Tasks', label: 'To-Do', icon: CheckCircle2 },
+                { id: 'calendar' as ScreenId, aria: 'Calendar', label: 'Calendar', icon: CalendarDays },
+                { id: 'notes' as ScreenId, aria: 'Notes & Knowledge', label: 'Notes', icon: NotebookPen },
+                { id: 'finance' as ScreenId, aria: 'Finance Ledger', label: 'Finance', icon: Wallet },
+                { id: 'more' as ScreenId, aria: 'More Areas and Settings', label: 'More', icon: Grid2X2 },
+              ].map((tab) => {
+                const IconComp = tab.icon;
+                const isSelected =
+                  tab.id === 'more'
+                    ? [
+                        'more',
+                        'projects',
+                        'project_detail',
+                        'goals',
+                        'relationships',
+                        'priorities',
+                        'tools',
+                        'history',
+                        'sync_backup',
+                      ].includes(activeScreen)
+                    : activeScreen === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => navigateTo(tab.id)}
+                    aria-label={tab.aria}
+                    aria-current={isSelected ? 'page' : undefined}
+                    className="flex flex-col items-center justify-center min-h-[48px] py-1 group cursor-pointer active:scale-95 transition-transform"
+                  >
+                    <div
+                      className={`px-2 py-1 rounded-[var(--dw-radius-full)] transition-colors ${
+                        isSelected
+                          ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)]'
+                          : 'text-[var(--dw-text-muted)] group-hover:text-[var(--dw-text-primary)]'
+                      }`}
+                    >
+                      <IconComp className="w-4 h-4" />
+                    </div>
+                    <span
+                      className={`text-[9.5px] tracking-tight ${
+                        isSelected
+                          ? 'font-bold text-[var(--dw-primary)]'
+                          : 'font-medium text-[var(--dw-text-muted)] group-hover:text-[var(--dw-text-primary)]'
+                      }`}
+                    >
+                      {tab.label}
+                    </span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+      </main>
+    </div>
+  );
+}

@@ -1,0 +1,49 @@
+name: personal_management_app
+description: "A private, offline-first personal management application built with Flutter and Drift SQLite for Android and iOS."
+publish_to: "none"
+version: 1.0.2+3
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.19.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # Local SQLite Database with Drift (cross-platform, type-safe)
+  drift: ^2.16.0
+  drift_flutter: ^0.1.0
+  sqlite3_flutter_libs: ^0.5.20
+  path_provider: ^2.1.2
+  path: ^1.9.0
+  uuid: ^4.3.3
+
+  # State Management & Dependency Injection
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+
+  # UI & Design System
+  material_color_utilities: ^0.11.1
+  intl: ^0.19.0
+
+  # Security & Encryption (AES-GCM-256 + PBKDF2 for backups)
+  cryptography: ^2.7.1
+  flutter_secure_storage: ^9.0.0
+
+  # Platform Services (Local Notifications & Sharing)
+  flutter_local_notifications: ^17.1.0
+  share_plus: ^8.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  drift_dev: ^2.16.0
+  build_runner: ^2.4.8
+  riverpod_generator: ^2.4.0
+
+flutter:
+  uses-material-design: true

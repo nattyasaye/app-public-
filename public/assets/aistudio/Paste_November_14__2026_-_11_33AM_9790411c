@@ -1,0 +1,733 @@
+# DAYWELL — PROMPT 2.6.1: COMPREHENSIVE SHARED CALENDAR AUDIT, CORRECTIVE IMPLEMENTATION, DATA-SAFETY VERIFICATION, AND RELEASE READINESS
+
+## 1. What We Have Done So Far
+
+Daywell has completed the initial Stage 2.6 shared date architecture and schema v5 implementation across Flutter/Dart and React/TypeScript.
+
+The previous implementation report claims the following:
+
+- A shared Gregorian/Ethiopian calendar engine using Julian Day Numbers.
+- `CalendarDate`, `LocalDateTime`, `EthiopiaClock`, `CalendarMetadata`, and `SharedDateFormatter`.
+- A fixed Ethiopia civil-time convention (UTC+3), without multi-timezone functionality.
+- Shared test vectors in `shared_foundation/calendar_test_vectors.json`.
+- Drift schema v5, including migration of date-only fields to canonical `YYYY-MM-DD` text storage.
+- A nullable `calendar_events.end_date_iso` field for multi-day events.
+- TypeScript tests, linting, and builds passing.
+- Native Flutter/Dart tests and Drift code generation still awaiting execution because the previous environment did not have the Flutter/Dart SDK.
+
+The previous report is a description of claimed work, not proof that every implementation is correct. You must independently inspect the actual current repository and verify the implementation.
+
+## 2. Our Overall Aim
+
+Our aim is to establish one reliable, reusable, well-structured date and calendar foundation for the entire Daywell application.
+
+This foundation must correctly support both the Gregorian and Ethiopian calendars and be usable by:
+
+- Calendar
+- Finance
+- To-Do and Tasks
+- Notes
+- Inbox
+- Goals and Projects
+- Reminders
+- Any future module
+
+The shared date foundation must remain independent of individual feature modules. No module should need to implement its own competing calendar conversion, date arithmetic, date parsing, or date-formatting logic.
+
+The application uses one fixed Ethiopian local civil-time convention: UTC+3. We do not need multi-timezone support, per-event timezone selection, travel-timezone conversion, or a general-purpose timezone framework.
+
+The goal is correctness, consistency, persistence safety, clean architecture, maintainability, and reliable future extensibility—not additional features or UI redesign.
+
+## 3. What This Prompt Must Achieve
+
+Perform a complete second-stage audit of the calendar implementation, identify every suspicious, incomplete, incorrect, inconsistent, duplicated, or unverified part, and fix it.
+
+Do not merely review the previous report or write recommendations. Inspect the actual code, make necessary corrections, and verify them with as many meaningful tests as the environment supports.
+
+Treat this as a corrective engineering task, not a new feature-development task.
+
+You have permission to make reasonable engineering decisions independently. Do not stop to ask me questions about ordinary implementation choices. If a genuine ambiguity could cause data loss or an irreversible change, investigate the existing implementation and choose the safest compatible solution. Document any unresolved issue.
+
+---
+
+# PART A — INDEPENDENT AUDIT OF THE EXISTING IMPLEMENTATION
+
+## 4. Inspect the Actual Repository
+
+Before changing anything:
+
+1. Inspect the current repository structure and working state.
+2. Identify the actual files implementing the calendar engine, date models, formatting, clock, shared foundation, Drift schema, migrations, repositories, controllers, and module integrations.
+3. Inspect the actual schema v4 and v5 definitions and migration history.
+4. Inspect the generated Drift code and the source from which it is generated.
+5. Inspect the shared foundation synchronization scripts and generated Dart/TypeScript files.
+6. Inspect every date-related field and every date conversion, parsing, formatting, comparison, sorting, filtering, and arithmetic operation throughout the application.
+7. Inspect all existing tests and determine what they actually prove.
+
+Do not assume the previous implementation report is accurate.
+
+Create an internal checklist of every issue discovered. Fix the issues within the scope of this prompt and include the complete findings in your final report.
+
+Do not discard existing work merely because you would have implemented it differently. Preserve correct work and correct only what is necessary.
+
+## 5. Audit the Calendar Engine's Mathematical Correctness
+
+Inspect the actual Gregorian/Ethiopian conversion algorithms, including their epoch definitions, Julian Day Number calculations, leap-year rules, and month/day arithmetic.
+
+Verify the following:
+
+### Gregorian calendar
+
+- Correct Gregorian leap-year rules.
+- Correct month lengths.
+- Correct handling of February 29.
+- Correct transitions between months and years.
+- Correct Gregorian dates around century boundaries.
+- Correct behavior for the supported date range.
+- Rejection of invalid dates.
+
+### Ethiopian calendar
+
+- Correct Ethiopian epoch and conversion algorithm.
+- Correct Ethiopian leap-year rules.
+- Correct handling of all 13 months.
+- Correct Pagume length in leap and non-leap years.
+- Correct Ethiopian New Year transitions.
+- Correct conversion around Gregorian leap years.
+- Correct behavior at the beginning and end of the supported date range.
+- Rejection of invalid Ethiopian dates, including Pagume 6 in non-leap years.
+
+### Bidirectional conversion
+
+Verify that:
+
+- Gregorian → Ethiopian conversion is correct.
+- Ethiopian → Gregorian conversion is correct.
+- Both directions identify the same underlying civil day.
+- Conversion does not lose or introduce a day.
+- Date arithmetic works across month, year, leap-day, and Pagume boundaries.
+- Comparison and equality work consistently regardless of which calendar representation was used to construct the date.
+
+**Important:** Do not rely exclusively on round-trip tests or on the same shared test vectors used by both implementations. Two implementations can agree with each other and still both be wrong.
+
+Use independently established Ethiopian and Gregorian reference dates and verify them against reliable calendar references or independently implemented calculations. Include the reference basis in the report.
+
+Create tests for known historical and boundary dates, not just randomly generated dates.
+
+If the existing algorithm has an incorrect epoch, leap-year rule, or conversion boundary, correct it rather than preserving compatibility with an incorrect result.
+
+## 6. Audit the Shared Date Models and Architecture
+
+Inspect the actual responsibilities and boundaries of:
+
+- `CalendarDate`
+- `LocalDateTime`
+- `EthiopiaClock`
+- `CalendarMetadata`
+- `SharedDateFormatter`
+- Any date range, time-of-day, or supporting date types.
+
+Correct the design where necessary.
+
+Requirements:
+
+1. A civil calendar date must be distinguishable from a timestamp representing an instant.
+2. A date-only value must not accidentally change day because of UTC/local conversion.
+3. A local date-time must consistently use the application's fixed Ethiopian civil-time convention.
+4. Date ranges must have clear inclusive/exclusive semantics. Choose one convention and use it consistently.
+5. Invalid dates and invalid times must be rejected or handled explicitly.
+6. Models should be immutable where appropriate, validated, and easy to compare and serialize.
+7. Parsing must be strict enough to reject malformed or impossible dates.
+8. Formatting must not contain hidden date conversion or mutation logic.
+9. Calendar display metadata must not become a second source of truth for the actual date.
+10. Avoid unnecessary abstractions, duplicated models, or competing date utilities.
+
+The shared date foundation must not depend on the Calendar feature module, Flutter UI, Drift, or AppStateManager.
+
+Feature modules should depend on the shared foundation, not on each other to obtain basic date functionality.
+
+## 7. Audit the Fixed Ethiopia Time Convention
+
+The user has explicitly chosen one fixed application time convention.
+
+Implement only what is necessary for this convention:
+
+- Ethiopian local civil time, UTC+3.
+- No daylight-saving adjustments.
+- No per-event timezone selection.
+- No multiple-timezone support.
+- No travel-timezone behavior.
+- No unnecessary timezone package or framework.
+
+However, do not confuse a local civil date/time with a UTC instant.
+
+Inspect every place where the implementation converts between:
+
+- `CalendarDate`
+- `LocalDateTime`
+- Dart `DateTime`
+- UTC timestamps
+- SQLite stored values
+- Unix epoch values
+
+Verify that these conversions are deliberate and consistent.
+
+In particular:
+
+- Constructing a date-only value must not depend on the machine's local timezone.
+- Parsing `YYYY-MM-DD` must not shift the date.
+- A timestamp must not be truncated or converted to a civil date without a clearly defined rule.
+- Midnight boundaries must be tested.
+- The same stored civil date must display identically regardless of the computer or Android device's configured timezone.
+
+Do not retain unnecessary per-record timezone fields in the active domain model. If an old database field exists, determine whether it must be preserved for migration compatibility or can safely be retired. Never remove data blindly.
+
+---
+
+# PART B — DATABASE AND MIGRATION CORRECTIONS
+
+## 8. Audit Schema v5 and All Date-Only Fields
+
+The previous report claims that these fields were migrated to canonical Gregorian `YYYY-MM-DD` text storage:
+
+- `goals.target_date`
+- `projects.target_date`
+- `milestones.due_date`
+- `tasks.due_date`
+- `tasks.scheduled_date`
+- `financial_transactions.transaction_date`
+- `financial_commitments.due_date`
+- `savings_goals.target_date`
+
+Verify each field individually.
+
+Do not assume all fields have the same original meaning simply because they use `DateTimeColumn`.
+
+For every migrated field, establish:
+
+1. Whether the field is genuinely date-only or represents an instant.
+2. How the old application created the value.
+3. How the old application stored the value.
+4. Whether it was stored as UTC, local time, or a Unix timestamp.
+5. How the old application displayed and interpreted it.
+6. How the v5 migration converts it.
+7. Whether the resulting `YYYY-MM-DD` preserves the intended original civil day.
+
+Correct any conversion that can shift dates or misinterpret existing data.
+
+**Do not use blind timestamp truncation.** For example, simply taking the first ten characters of a UTC timestamp is not necessarily equivalent to preserving the original Ethiopian civil date.
+
+Use a deliberate, field-appropriate migration rule.
+
+Keep genuine creation, update, and event timestamps as timestamps. Do not convert actual instants into date-only text.
+
+## 9. Test the Real v4 → v5 Migration
+
+The previous report used Python SQLite checks. Those are not sufficient to prove the actual Drift migration is correct.
+
+Use the real Drift schema, generated code, migration implementation, and SQLite database.
+
+Create realistic v4 databases containing:
+
+- Existing goals, projects, milestones, tasks, transactions, commitments, and savings goals.
+- Different date values.
+- Dates around Ethiopian New Year.
+- Dates around Gregorian leap days.
+- Dates near midnight.
+- Values originally stored as UTC timestamps.
+- Values originally stored with explicit `+03:00` offsets.
+- Values stored as Unix integer timestamps, if the previous schema or application actually used them.
+- Null values where allowed.
+- Existing relationships and foreign keys.
+- Existing records unrelated to the migrated date fields.
+
+Run the actual v4 → v5 migration and verify:
+
+- Every existing record remains present.
+- Every primary key remains unchanged.
+- Relationships remain valid.
+- Existing amounts and financial data remain unchanged.
+- Existing task and project metadata remains unchanged.
+- Every migrated date preserves its intended original day.
+- Null values remain null.
+- No unexpected records are created.
+- No records are duplicated.
+- No tables are accidentally dropped or recreated with data loss.
+- `PRAGMA foreign_key_check` returns no violations.
+- The new `calendar_events.end_date_iso` column is correctly available.
+- Existing CalendarEvents data remains intact.
+
+Also test a fresh installation creating the complete v5 schema.
+
+Preserve the historical v1–v4 migration sequence. Do not rewrite historical migrations in a way that breaks users upgrading from older versions.
+
+If migration tests reveal an error, fix it and rerun the entire migration test suite.
+
+## 10. Audit CalendarEvents and Multi-Day Date Ranges
+
+The intended contract is:
+
+- `dateIso` is the event's start civil date.
+- `endDateIso` is nullable and represents the final civil date for a multi-day event.
+- A single-day event may have a null end date if that is the established contract.
+
+Verify and enforce:
+
+- Start and end dates are valid canonical Gregorian civil dates.
+- End date cannot precede start date.
+- Single-day and multi-day events have consistent behavior.
+- All-day and timed events remain distinguishable.
+- Timed events use the fixed Ethiopian local-time convention.
+- Date-range comparisons are correct.
+- Events spanning Ethiopian New Year or Pagume display correctly.
+- Events spanning Gregorian leap day display correctly.
+- Existing events without `endDateIso` remain valid.
+
+Do not introduce a second competing start-date or end-date representation.
+
+---
+
+# PART C — APPLICATION-WIDE INTEGRATION
+
+## 11. Inspect Every Module for Old Date Logic
+
+Audit the complete application, not just the Calendar screen.
+
+Search for:
+
+- Direct Gregorian/Ethiopian conversion algorithms outside the shared engine.
+- Duplicate date formatters.
+- Direct string manipulation of date values.
+- Manual date arithmetic.
+- Inconsistent `DateTime.parse` usage.
+- Date-only values represented as timestamps.
+- Incorrect `.toUtc()` or `.toLocal()` usage.
+- Comparisons between dates with inconsistent time components.
+- Sorting or filtering that compares formatted strings instead of validated dates.
+- Old date models that duplicate the shared foundation.
+- Hardcoded Ethiopian month names or calendar calculations outside the shared metadata/formatting layer.
+
+Inspect at least:
+
+### Calendar
+- Event creation, editing, display, sorting, filtering, and date-range handling.
+- Navigation between dates and months.
+- Existing Gregorian and Ethiopian display behavior.
+
+### Finance
+- Transaction dates.
+- Commitment due dates.
+- Savings goal target dates.
+- Debt and repayment dates.
+- Financial history, filtering, sorting, and summaries.
+
+### To-Do and Projects
+- Task due dates.
+- Scheduled dates.
+- Milestone dates.
+- Goal and project target dates.
+- My Day and reminder date logic.
+- Recurrence date calculations, if implemented.
+
+### Notes and Inbox
+- Creation and update dates.
+- Sorting and filtering.
+- Any date-based grouping or search behavior.
+
+### Reminders and future shared date consumers
+- Reminder scheduling and due-date handling.
+- Any shared date contract that other modules depend on.
+
+Make all modules use the shared foundation consistently.
+
+Do not add new features or redesign screens. Preserve existing behavior except where it is demonstrably incorrect and must be corrected to achieve date consistency.
+
+## 12. Verify Dart and TypeScript Parity
+
+Inspect the shared foundation source, synchronization script, generated Dart/TypeScript implementations, and test vectors.
+
+Verify that:
+
+- Both implementations use the same calendar rules.
+- Generated files are actually synchronized.
+- No manual edits are overwritten by the synchronization process.
+- Serialization formats are consistent.
+- Invalid-date behavior is consistent.
+- Date arithmetic is consistent.
+- Formatting behavior is consistent where shared.
+- Both implementations pass the same authoritative test vectors.
+
+Add tests that compare the outputs of both implementations for a broad set of dates, including boundary and leap-year cases.
+
+Do not claim parity simply because the same JSON file exists in both test suites.
+
+---
+
+# PART D — COMPREHENSIVE TESTING
+
+## 13. Build a Much Stronger Test Suite
+
+Run as many meaningful tests as possible. Do not limit testing to the existing 156 TypeScript tests.
+
+Add tests where coverage is missing.
+
+### A. Calendar mathematical tests
+
+Test:
+
+- Gregorian leap years and non-leap years.
+- Ethiopian leap years and non-leap years.
+- Every Gregorian month boundary.
+- Every Ethiopian month boundary.
+- Pagume in both leap and non-leap years.
+- Ethiopian New Year.
+- Gregorian New Year.
+- Gregorian February 28, 29, and March 1.
+- Ethiopian leap-day transitions.
+- Dates near the supported minimum and maximum.
+- Invalid dates.
+- Bidirectional conversions.
+- Date equality and comparison.
+- Addition and subtraction of days.
+- Month and year arithmetic.
+- Date range inclusion and exclusion.
+- Large date intervals.
+
+Include broad automated date sweeps across the supported date range, not just a handful of examples.
+
+### B. Date and time tests
+
+Test:
+
+- Ethiopian midnight.
+- One second before and after midnight.
+- Gregorian and Ethiopian date boundaries.
+- UTC timestamps around midnight.
+- Explicit `+03:00` timestamps.
+- Unix timestamps, if supported.
+- Date-only parsing and serialization.
+- Local date-time serialization and parsing.
+- Invalid time values.
+- Date-only values remaining unchanged across device timezone settings.
+- Correct distinction between civil dates and timestamps.
+
+### C. Database tests
+
+Test:
+
+- Fresh v5 database creation.
+- v4 → v5 migration.
+- Existing data preservation.
+- Null handling.
+- Primary-key preservation.
+- Foreign-key integrity.
+- Multi-day CalendarEvents.
+- Invalid date rejection at the appropriate boundary.
+- Repository mapping to and from the shared date models.
+- Actual persistence and reloading.
+
+### D. Application integration tests
+
+Test that each module uses the shared date implementation correctly.
+
+At minimum:
+
+- Finance date creation, loading, filtering, and sorting.
+- Task due-date creation, loading, filtering, and sorting.
+- Project and milestone date handling.
+- Calendar single-day and multi-day events.
+- Notes and Inbox date display and sorting.
+- Reminder date handling.
+
+Test repository → controller → UI-facing state where the architecture supports it.
+
+### E. Persistence and restart tests
+
+Verify that date values survive:
+
+1. Creation.
+2. Database insertion.
+3. Application/process restart or a realistic database close/reopen.
+4. Repository reload.
+5. Controller hydration.
+6. Display and comparison.
+
+Ensure that an Ethiopian date entered by the user still represents the same civil day after restarting the application.
+
+### F. Regression and architecture tests
+
+Test that:
+
+- No module has its own competing calendar engine.
+- Shared date code does not depend on feature modules.
+- Domain/application layers do not import Drift or Flutter UI.
+- Existing module behavior has not been broken.
+- Existing database migration history remains intact.
+- The date foundation does not introduce unnecessary dependencies.
+- The application does not maintain competing representations of the same date.
+
+Use static architecture checks where useful, but do not treat grep-based checks as substitutes for runtime tests.
+
+## 14. Run Native Flutter/Dart Verification
+
+If the current environment has Flutter and Dart available, run:
+
+1. `flutter pub get`
+2. Drift code generation using the project's actual build_runner configuration.
+3. `dart format --output=none --set-exit-if-changed lib test`
+4. `flutter analyze`
+5. `flutter test`
+
+Also run the actual SQLite migration and persistence tests.
+
+If the environment does not have Flutter/Dart, do not pretend these tests passed. Determine whether the repository has a suitable GitHub Actions workflow or another available CI environment and use it if possible.
+
+If native execution cannot be completed, clearly identify exactly what remains unverified and provide the exact commands and CI workflow needed to complete it.
+
+Do not mark native verification as successful based on TypeScript tests, Python SQLite tests, or static inspection.
+
+## 15. Run All Existing Project Checks
+
+Run the relevant existing checks, including:
+
+- TypeScript test suite.
+- TypeScript compilation.
+- Linting.
+- Shared foundation synchronization.
+- Applet build and lint.
+- Flutter/Dart analysis and tests, if available.
+- Drift code generation.
+- SQLite migration tests.
+- Android release build, if the environment supports it.
+
+Fix failures caused by this work. Do not hide failures, weaken tests, or remove existing tests merely to achieve a passing result.
+
+If a pre-existing unrelated failure prevents a check from passing, report it separately with evidence.
+
+---
+
+# PART E — PRODUCTION DATA SAFETY AND APK RELEASE
+
+## 16. Absolutely No Test or Dummy Data in the Delivered APK
+
+This is a strict requirement.
+
+The delivered production Android APK must not contain test records, dummy user records, fake transactions, sample tasks, sample notes, sample calendar events, or other development/test fixtures.
+
+Inspect:
+
+- Database seed functions.
+- Default data initialization.
+- Demo-data insertion.
+- Debug-only sample data.
+- Test fixtures.
+- Development preview data.
+- Example JSON files.
+- Any initialization code that inserts records automatically.
+- Any code that may run in release mode and create fake records.
+
+Separate legitimate application defaults from test/demo records.
+
+Legitimate defaults may include necessary application configuration or genuinely required standard categories. They must not be confused with fake user activity.
+
+Requirements:
+
+1. Test fixtures must remain in test directories or isolated test infrastructure.
+2. Demo-data insertion must never run in production release builds.
+3. No test database should be packaged as the application's production database.
+4. No dummy records should be inserted during first launch.
+5. Existing legitimate user data must not be deleted or overwritten.
+6. Migration tests must use isolated temporary databases.
+7. Production initialization must not depend on test fixtures.
+8. Debug/test data must not leak into release assets or generated production files.
+
+If a release APK can be built, inspect its packaged assets and initialization paths to verify that test/dummy data is not included.
+
+Do not remove legitimate application defaults or real existing user data merely to satisfy this requirement.
+
+If the project has an established release build configuration, preserve it. Do not change signing credentials or release secrets.
+
+## 17. Release and Regression Safety
+
+If the environment supports an Android release build:
+
+- Build the release APK using the project's existing workflow.
+- Verify that the APK builds successfully.
+- Verify that production initialization does not insert dummy data.
+- Verify that no test database or test-only asset is packaged.
+- Verify that the application can initialize its production database.
+- Verify that the shared date foundation is included correctly.
+
+Do not claim that an APK was verified unless an actual release APK was built and inspected.
+
+Do not create or deliver an APK containing test data.
+
+If a release build is not possible in the current environment, state that explicitly. Do not fabricate an APK or claim release verification.
+
+---
+
+# PART F — ARCHITECTURE CLEANUP AND FINAL AUDIT
+
+## 18. Correct Structural Problems
+
+After the implementation and tests, inspect whether the calendar foundation has:
+
+- Duplicate date models.
+- Duplicate conversion algorithms.
+- Duplicate formatters.
+- Circular dependencies.
+- Feature-module dependencies inside shared foundation.
+- Unnecessary timezone infrastructure.
+- Inconsistent serialization.
+- Unclear ownership of date validation.
+- Unnecessary dependencies or packages.
+- Dead or obsolete date utilities.
+- Incorrect comments or documentation.
+- Generated files out of sync.
+- Unnecessary database fields or competing date representations.
+
+Correct problems that fall within this task.
+
+Do not perform unrelated refactoring across the application.
+
+Do not add a new date picker, new Calendar screens, new functionality, or UI redesign.
+
+Do not begin Stage 3.
+
+## 19. Independent Final Re-Audit
+
+Once all corrections are implemented:
+
+1. Reinspect the final code, rather than relying on your implementation notes.
+2. Rerun the relevant tests after the final changes.
+3. Confirm the actual schema version and migration sequence.
+4. Confirm the shared foundation is the single date authority.
+5. Confirm all relevant modules use it.
+6. Confirm fixed Ethiopia time is consistently implemented without unnecessary multi-timezone infrastructure.
+7. Confirm date-only data is not shifted by serialization, migration, or device timezone.
+8. Confirm Ethiopian/Gregorian conversions against independent reference dates.
+9. Confirm production release initialization does not insert dummy data.
+10. Confirm all unverified items are clearly disclosed.
+
+Do not approve your own work simply because the tests you wrote pass. Look specifically for cases your tests may have missed.
+
+---
+
+# PART G — FINAL REPORT
+
+## 20. Required Final Report
+
+Provide a detailed but organized report with these sections:
+
+### 1. Overall Verdict
+
+Choose exactly one:
+
+- APPROVED
+- CONDITIONALLY APPROVED
+- NOT APPROVED
+
+Explain why.
+
+### 2. Problems Discovered
+
+List every incorrect, suspicious, incomplete, duplicated, or unverified implementation discovered during the audit.
+
+For each issue, include:
+- File or component.
+- What was wrong.
+- Why it mattered.
+- What you changed.
+- How you verified the correction.
+
+### 3. Final Shared Date Architecture
+
+Explain the final architecture and identify the authoritative location of:
+
+- Gregorian/Ethiopian conversion.
+- Calendar date model.
+- Date range model.
+- Local date-time handling.
+- Fixed Ethiopia time convention.
+- Parsing and serialization.
+- Formatting and metadata.
+
+### 4. Database and Migration Results
+
+Report:
+- Final schema version.
+- Exact date-only fields.
+- Exact timestamp fields that remain timestamps.
+- v4 → v5 migration results.
+- Data preservation results.
+- CalendarEvents multi-day behavior.
+- Foreign-key verification.
+- Any remaining migration risks.
+
+### 5. Module Integration
+
+For Calendar, Finance, Tasks, Projects, Goals, Notes, Inbox, and Reminders, explain what uses the shared foundation and identify any remaining old date logic.
+
+### 6. Test Results
+
+Provide a table containing:
+
+| Test/check | Result | Evidence |
+|---|---|---|
+| Gregorian mathematical tests | | |
+| Ethiopian mathematical tests | | |
+| Independent reference vectors | | |
+| Broad date-range sweeps | | |
+| Date/time boundary tests | | |
+| Dart/TypeScript parity | | |
+| Fresh database creation | | |
+| v4 → v5 real SQLite migration | | |
+| Persistence/restart tests | | |
+| Module integration tests | | |
+| TypeScript tests | | |
+| TypeScript compilation/lint | | |
+| Drift code generation | | |
+| Flutter analyze | | |
+| Flutter tests | | |
+| Android release build | | |
+| APK test-data inspection | | |
+
+Use exact test counts and command results. Clearly mark anything not run as NOT RUN. Do not claim success without evidence.
+
+### 7. Production APK Data-Safety Confirmation
+
+Explicitly confirm whether:
+
+- Test and dummy records are isolated from production.
+- Release initialization inserts no fake user records.
+- Test databases and fixtures are excluded from the APK.
+- Legitimate application defaults are preserved.
+- The release APK was actually inspected.
+
+If any of these cannot be verified, state exactly why.
+
+### 8. Remaining Risks
+
+List only genuine unresolved risks, not issues already corrected.
+
+### 9. Files Changed
+
+List the important files created, modified, removed, or regenerated, with a brief explanation.
+
+### 10. Final Recommendation
+
+State whether the shared calendar foundation is now reliable enough to serve as the common date infrastructure for the entire Daywell application.
+
+Do not proceed to Stage 3. Stop after this corrective audit and report.
+
+---
+
+## FINAL INSTRUCTION
+
+Prioritize correctness over speed.
+
+Do not add features. Do not redesign the UI. Do not introduce multi-timezone support. Do not weaken tests. Do not delete legitimate user data. Do not include test or dummy data in the delivered production APK.
+
+Inspect the real code, correct every issue you can establish, and test as thoroughly as the available environment allows.
+
+I want a reliable shared Ethiopian/Gregorian date foundation that the entire application can depend on for years without every module developing its own date logic or creating inconsistent date behavior.

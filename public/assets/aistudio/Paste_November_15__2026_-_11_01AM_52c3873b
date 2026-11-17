@@ -1,0 +1,565 @@
+Run Automated Tests & Quality Checks
+failed now in 2m 38s
+Search logs
+2s
+3s
+0s
+11s
+0s
+22s
+1m 57s
+Run cd flutter_app
+  ╔════════════════════════════════════════════════════════════════════════════╗
+  ║                 Welcome to Flutter! - https://flutter.dev                  ║
+  ║                                                                            ║
+  ║ The Flutter tool uses Google Analytics to anonymously report feature usage ║
+  ║ statistics and basic crash reports. This data is used to help improve      ║
+  ║ Flutter tools over time.                                                   ║
+  ║                                                                            ║
+  ║ Flutter tool analytics are not sent on the very first run. To disable      ║
+  ║ reporting, type 'flutter config --no-analytics'. To display the current    ║
+  ║ setting, type 'flutter config'. If you opt out of analytics, an opt-out    ║
+  ║ event will be sent, and then no further information will be sent by the    ║
+  ║ Flutter tool.                                                              ║
+  ║                                                                            ║
+  ║ By downloading the Flutter SDK, you agree to the Google Terms of Service.  ║
+  ║ The Google Privacy Policy describes how data is handled in this service.   ║
+  ║                                                                            ║
+  ║ Moreover, Flutter includes the Dart SDK, which may send usage metrics and  ║
+  ║ crash reports to Google.                                                   ║
+  ║                                                                            ║
+  ║ Read about data we send with crash reports:                                ║
+  ║ https://flutter.dev/to/crash-reporting                                     ║
+  ║                                                                            ║
+  ║ See Google's privacy policy:                                               ║
+  ║ https://policies.google.com/privacy                                        ║
+  ║                                                                            ║
+  ║ To disable animations in this tool, use                                    ║
+  ║ 'flutter config --no-cli-animations'.                                      ║
+  ╚════════════════════════════════════════════════════════════════════════════╝
+Resolving dependencies...
+Downloading packages...
+  _fe_analyzer_shared 72.0.0 (111.0.0 available)
+  analyzer 6.7.0 (14.7.0 available)
+  analyzer_plugin 0.11.3 (0.14.20 available)
+  async 2.11.0 (2.13.1 available)
+  boolean_selector 2.1.1 (2.1.2 available)
+  build 2.4.1 (5.0.0 available)
+  build_config 1.1.1 (1.4.0 available)
+  build_daemon 4.0.2 (4.1.7 available)
+  build_resolvers 2.4.2 (3.0.4 available)
+  build_runner 2.4.13 (2.17.1 available)
+  build_runner_core 7.3.2 (9.3.2 available)
+  built_collection 5.1.1 (6.0.0 available)
+  characters 1.3.0 (1.4.1 available)
+  checked_yaml 2.0.3 (2.0.4 available)
+  cli_util 0.4.2 (0.6.0 available)
+  clock 1.1.1 (1.1.3 available)
+  code_builder 4.10.1 (4.13.0 available)
+  collection 1.18.0 (1.19.1 available)
+  cross_file 0.3.4+2 (0.4.0 available)
+  custom_lint_core 0.7.0 (0.8.2 available)
+  custom_lint_visitor 1.0.0+6.7.0 (1.0.0+9.0.0 available)
+  dart_style 2.3.7 (3.1.14 available)
+  dbus 0.7.12 (0.8.0 available)
+  drift 2.19.1+1 (2.35.4 available)
+  drift_dev 2.19.1 (2.35.3 available)
+  drift_flutter 0.1.0 (0.3.1 available)
+  fake_async 1.3.1 (1.3.3 available)
+  ffi 2.1.3 (2.2.0 available)
+  flutter_lints 3.0.2 (6.0.0 available)
+  flutter_local_notifications 17.2.4 (23.0.2 available)
+  flutter_local_notifications_linux 4.0.1 (9.0.0 available)
+  flutter_local_notifications_platform_interface 7.2.0 (13.0.0 available)
+  flutter_riverpod 2.6.1 (3.5.0 available)
+  flutter_secure_storage 9.2.4 (11.2.0 available)
+  flutter_secure_storage_linux 1.2.3 (3.0.3 available)
+  flutter_secure_storage_macos 3.1.3 (4.0.0 available)
+  flutter_secure_storage_platform_interface 1.1.2 (2.1.1 available)
+  flutter_secure_storage_web 1.2.1 (2.1.1 available)
+  flutter_secure_storage_windows 3.1.2 (4.2.2 available)
+  freezed_annotation 2.4.4 (3.1.0 available)
+  frontend_server_client 4.0.0 (4.2.0 available)
+  http_parser 4.0.2 (4.1.2 available)
+  intl 0.19.0 (0.20.3 available)
+  js 0.6.7 (0.7.2 available)
+  json_annotation 4.9.0 (4.12.0 available)
+  leak_tracker 10.0.5 (11.0.2 available)
+  leak_tracker_flutter_testing 3.0.5 (3.0.10 available)
+  leak_tracker_testing 3.0.1 (3.0.2 available)
+  lints 3.0.0 (6.1.0 available)
+  macros 0.1.2-main.4 (0.1.3-main.0 available)
+  matcher 0.12.16+1 (0.12.20 available)
+  material_color_utilities 0.11.1 (0.13.1 available)
+  meta 1.15.0 (1.19.0 available)
+  mime 1.0.6 (2.1.0 available)
+  package_config 2.2.0 (3.0.0 available)
+  path 1.9.0 (1.9.1 available)
+  path_provider 2.1.5 (2.1.6 available)
+  path_provider_android 2.2.15 (2.3.1 available)
+  path_provider_foundation 2.4.1 (2.6.0 available)
+  path_provider_linux 2.2.1 (2.2.2 available)
+  path_provider_platform_interface 2.1.2 (2.1.3 available)
+  petitparser 6.0.2 (7.1.0 available)
+  platform 3.1.6 (3.2.0 available)
+  pubspec_parse 1.4.0 (1.7.0 available)
+  riverpod 2.6.1 (3.5.0 available)
+  riverpod_analyzer_utils 0.5.8 (1.0.0 available)
+  riverpod_annotation 2.6.1 (4.0.8 available)
+  riverpod_generator 2.6.3 (4.0.10 available)
+  share_plus 8.0.3 (13.3.1 available)
+  share_plus_platform_interface 3.4.0 (7.2.0 available)
+  shelf 1.4.1 (1.4.3 available)
+  shelf_web_socket 2.0.1 (3.0.0 available)
+  source_gen 1.5.0 (4.3.1 available)
+  source_span 1.10.0 (1.10.2 available)
+  sqlite3 2.4.5 (3.9.1 available)
+  sqlite3_flutter_libs 0.5.42 (0.6.0+eol available)
+  sqlparser 0.37.1 (0.45.1 available)
+  stack_trace 1.11.1 (1.12.2 available)
+  stream_channel 2.1.2 (2.1.4 available)
+  string_scanner 1.2.0 (1.4.1 available)
+  term_glyph 1.2.1 (1.2.2 available)
+  test_api 0.7.2 (0.7.15 available)
+  timezone 0.9.4 (0.11.2 available)
+  url_launcher_linux 3.2.1 (3.2.3 available)
+  url_launcher_web 2.3.3 (2.4.3 available)
+  url_launcher_windows 3.1.4 (3.1.6 available)
+  vector_math 2.1.4 (2.4.4 available)
+  vm_service 14.2.5 (15.4.0 available)
+  web 0.5.1 (1.1.2 available)
+  win32 5.10.1 (6.4.0 available)
+  xml 6.5.0 (7.1.0 available)
+Got dependencies!
+91 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+[INFO] Generating build script...
+[INFO] Generating build script completed, took 324ms
+[INFO] Precompiling build script......
+[INFO] Precompiling build script... completed, took 5.2s
+[INFO] Initializing inputs
+[INFO] Building new asset graph...
+[INFO] Building new asset graph completed, took 1.2s
+[INFO] Checking for unexpected pre-existing outputs....
+[INFO] Deleting 1 declared outputs which already existed on disk.
+[INFO] Checking for unexpected pre-existing outputs. completed, took 2ms
+[INFO] Running build...
+[INFO] Generating SDK summary...
+[INFO] 2.2s elapsed, 0/16 actions completed.
+[INFO] 4.8s elapsed, 0/16 actions completed.
+[INFO] 5.9s elapsed, 0/16 actions completed.
+[INFO] Generating SDK summary completed, took 5.8s
+[INFO] 6.9s elapsed, 113/122 actions completed.
+[INFO] 10.0s elapsed, 127/130 actions completed.
+[INFO] 11.1s elapsed, 128/130 actions completed.
+[INFO] 17.0s elapsed, 130/131 actions completed.
+[INFO] 18.2s elapsed, 155/172 actions completed.
+[INFO] 19.3s elapsed, 176/196 actions completed.
+[INFO] 21.4s elapsed, 221/237 actions completed.
+[INFO] 22.4s elapsed, 221/237 actions completed.
+[INFO] 23.5s elapsed, 286/287 actions completed.
+[INFO] 24.5s elapsed, 353/363 actions completed.
+[INFO] 25.6s elapsed, 381/394 actions completed.
+[INFO] 26.6s elapsed, 392/394 actions completed.
+[INFO] 27.7s elapsed, 392/394 actions completed.
+[INFO] 29.1s elapsed, 500/501 actions completed.
+[INFO] Running build completed, took 29.3s
+[INFO] Caching finalized dependency graph...
+[INFO] Caching finalized dependency graph completed, took 244ms
+[INFO] Succeeded after 29.5s with 184 outputs (684 actions)
+Formatted 108 files (0 changed) in 1.86 seconds.
+Analyzing flutter_app...                                        
+No issues found! (ran in 18.1s)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Converts Ethiopian New Year 2017 (Enkutatash - Sep 11, 2024)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Converts Gregorian date (Nov 07, 2024) to Ethiopian Tikimt 28, 2017
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Bidirectional round-trip conversion preserves exact dates
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Pagumē leap year calculation (Year % 4 == 3 has 6 days)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Dual calendar display formatting
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellThemeController & DaywellApp Contract Unit Tests Defaults to ThemeMode.system and notifies only on changes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellThemeController & DaywellApp Contract Unit Tests Asserts when non-system themeMode and themeController are both passed
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests Manages typed tabs, lazy visited set, and secondary route unwind
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests Resolves indexes via destination registry independently of enum order and guards out-of-range indexes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests DaywellAdaptiveScaffold renders and navigates custom destination order via registry
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Displays DaywellShellStatusView error banner on failure and recovers on Retry
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Prevents FAB Hero collision across visited Tasks and Notes tabs and pushes Note editor cleanly
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Preserves visited tab State and user input live across 600dp breakpoint resize and back
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Routes real Dashboard and More callbacks and unwinds Backup via system PopScope back
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Supports live ThemeMode switching via More Appearance dialog and renders on short wide landscape
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Buffers cold-start trigger and shared text while DB initializes and deduplicates repeat signals
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Preserves buffered shared text across startup failure and Retry recovery
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Warm-start rapid duplicate triggers show 1 dialog at a time and flush distinct queued text on barrier dismiss
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shell_test.dart: CalendarPlaceholderView States Tests Renders loading, error + Retry, populated preview, and empty states accurately
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests Calculates recorded balance accurately without floating point error
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests Computes Available-to-Spend subtracting commitments and savings
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests String parsing handles fractional cents and negative values safely
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Notes preserve full Ge`ez/Amharic Unicode text faithfully
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Calendar converter handles Pagume leap years accurately (Year % 4 == 3)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Calendar converter handles Enkutatash (Meskerem 1) transitions
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Offline local notification parameters format properly without cloud server
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Share-Intent receiver extracts shared text into inbox format
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Token version and color tokens compile with expected ARGB values
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Typography tokens resolve TextStyle and tabularFigures FontFeature accurately
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Spacing, radii, elevation, and breakpoints are monotonic doubles
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Pure-Dart core foundation exports rules and clean seed state
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/notes_inbox_architecture_test.dart: NotesController & NotesModuleState Architecture Tests Create, pin, tag, archive, trash, and reload persists metadata under schema v4
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/notes_inbox_architecture_test.dart: NotesController & NotesModuleState Architecture Tests Repository errors are captured cleanly in NotesModuleState.errorMessage
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/notes_inbox_architecture_test.dart: InboxController & InboxModuleState Architecture Tests Captures quick thoughts, triggers decoupled triage callback, and disposes stream cleanly
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Decimal-safe integer calculations prevent floating point rounding drift
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Available-to-Spend formula deducts period commitments and savings allocations
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Avoid double-counting: Paid commitment is excluded from unpaid commitments
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Transaction correction audit trail preserves original transaction history
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellTheme & ThemeMode Construction Light and Dark ThemeData use Material 3 and canonical design tokens
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellTheme & ThemeMode Construction DaywellApp defaults to ThemeMode.system and accepts custom ThemeMode
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension Both themes register DaywellSemanticColors with canonical values
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension copyWith and lerp behave accurately
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension BuildContext.daywellColors resolves registered extension
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellTypography & Ethiopic Font Fallback Maps canonical typography tokens and Ethiopic fallbacks cleanly
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: Material Component Themes & Accessibility Contrast Registers all centralized Material component themes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: Material Component Themes & Accessibility Contrast Foreground/background contrast meets WCAG AA requirements
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Renders cleanly in light theme at 1.0x text scale
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Renders cleanly in dark theme at 1.0x text scale
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Handles enlarged 2.0x text scaling without layout overflow in light and dark themes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Interactive controls, dialog, snackbar, and input work
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Matches all shared golden vectors (Ethiopian, Gregorian, weekday)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Independent historical & century-leap astronomical anchors
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Exhaustive daily JDN & dual-calendar continuity (1890..2120)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Strict validation rejects impossible dates, zones, and malformed strings
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Fixed Ethiopia UTC+3 clock boundary and LocalDateTime conversion
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Month clamping, bounds, grids, DateRange, CalendarEventEntity, and formatting
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSectionContainer Composes optional header, subtitle, surface card, and footer across themes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSectionContainer Renders without overflow at 2.0x text scale on 320px width and preserves header semantics
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Switches cleanly across loading, empty, error, and lazy content states
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Renders empty and error states in dark mode at 2.0x text scale on 320px width
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Omits empty or whitespace-only action labels instead of rendering blank buttons
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSearchFilterBar Forwards search input, clear button, filter selection, and reset action
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSearchFilterBar Handles horizontal scroll layout, 320px width, 2.0x text scale, dark mode, and semantics
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellConfirmationDialog Resolves true on confirm, false on cancel, and false on barrier dismiss
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellConfirmationDialog Renders safely at 2.0x text scale on 320px width in dark mode with clean semantics
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellThemeShowcase Stage 3.5 section Displays and interacts with composed patterns at 2.0x text scale in light and dark themes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellConfirmationDialog scrolls cleanly on short landscape viewport at 2.0x text scale
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellSearchFilterBar renders safely with button/badge controls and unbounded horizontal parents
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellSectionContainer wraps cleanly at tight 260px width and 2.0x text scale
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Calculates project progress percentage accurately
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Zero tasks or milestones returns 0% without divide-by-zero error
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Manually completed project always returns 100%
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Unfinished tasks are preserved and postponed without data loss
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Task can exist with or without Project association
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage2_consolidation_test.dart: Stage 2 Unit Controller Hydration CalendarController persists events and rehydrates cleanly on fresh restart instance
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage2_consolidation_test.dart: Stage 2 Unit Controller Hydration TasksController persists Schema v4 task metadata across restart
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage2_consolidation_test.dart: Real File-Backed SQLite Restart Persistence (Part E) Persists all 5 modules + Schema v5 metadata across full AppStateManager teardown & restart without duplicate seeding
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 1. Concurrent initialize() calls share one startup run and stay idempotent
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 2. Startup failure sets initializationError cleanly and recovers on retry initialize()
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 3. Calling disposeAsync() mid-initialization waits cleanly before closing DB with zero post-dispose errors
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 4. Stream subscriptions cancel safely on disposeAsync() without late listener crashes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 1 & 2: Boundary Test (Jan 30 Expense, Feb 2 Repayment)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 3: Direct Income and Direct Expense Recording
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 4: Account Transfer creates Zero Income and Zero Expense
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 5 & 6: Lending Money and Collecting Repayment
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 7 & 8: Borrowing Money and Repaying Loan
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 10: Split Expense (Dinner 1,000 ETB, My share 400 ETB, Colleague owes 600 ETB)
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 12: Interest separated from Principal
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 13: Invariant Rejection on Unbalanced Entries
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 14 & 15: Net Financial Position & Available to Spend Formula
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 18: Transfer with Bank Service Fee
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 19: Voided Transaction Strictly Excluded from Account Balances and Net Position
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios AccountModel and PartyModel copyWith produces clean immutable copies
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/inbox_repository_test.dart: Inbox Repository Offline Logic Tests Quick capture assigns UUID v4, defaults category, and marks isProcessed false
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/inbox_repository_test.dart: Inbox Repository Offline Logic Tests Mark processed flags item without deleting history
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/local_search_test.dart: Local Offline Search Tests Searches English text case-insensitively
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/local_search_test.dart: Local Offline Search Tests Searches Amharic Unicode text faithfully
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 1. Fresh installation creates all 19 v5 tables, indices, FK enforcement, and 11 starter categories
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 2. Real v3 -> v5 upgrade preserves Finance, Tasks, Notes, and Inbox records without data loss or duplicates
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 3. Real v4 -> v5 upgrade converts legacy timestamps under Ethiopia UTC+3 to canonical YYYY-MM-DD and adds end_date_iso
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 4. Mixed v4 ms-epochs, bare vs zoned ISO strings, empty optional dates, and DatabasePersistenceCoordinator Goals/goalId round-trip
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 5. v4 -> v5 aborts atomically on corrupt/garbage nullable or required dates, never silencing to NULL or today and leaving v4 database completely intact
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Decryption with correct passphrase restores identical plaintext and verifies SHA-256
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Decryption fails when an incorrect passphrase is supplied
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Tampering with ciphertext or authentication tag triggers integrity failure
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Multi-device full restore equivalence test on clean secondary instance
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton Renders all variants, invokes callbacks, and enforces >=48x48 touch targets
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton Disabled and loading states prevent interaction and expose loading indicator
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton DaywellIconButton supports tooltips, selection, destructive tint, and 48x48 hit target
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Cards, SectionHeader & EmptyState Preserves existing constructors, supports light/dark themes, and handles taps
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Cards, SectionHeader & EmptyState DaywellSectionHeader handles narrow width and 2.0x text scale without overflow
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Passphrase-derived AES-GCM-256 generates complete authenticated envelope
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellTextField handles labels, required indicator, errors, callbacks, and disabled state
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellSearchField clear action fires onChanged("") and onCleared once without duplicates
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellSearchField safely replaces controllers and does not dispose external controllers
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellDropdownField selects values and respects disabled state
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Selection Controls Switch, Checkbox, and Radio tiles toggle via row tap and respect disabled state
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Feedback & Status Indicators DaywellStatusBadge and DaywellStatusBanner render all tones with icons, actions, and dismiss
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Responsive Narrow Screen, 2.0x Text Scale & Expanded Showcase Expanded DaywellThemeShowcase renders without overflow at 2.0x text scale and narrow width
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions DaywellButton and DaywellIconButton expose single button SemanticsNodes without duplicate labels
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions Input and selection primitives preserve native Material semantics without wrapper duplication
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions Feedback & indicator semantics avoid duplication, liveRegion spam, and NaN crashes
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions DaywellSearchField updates clear button visibility across disabled-to-enabled controller swaps
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Shared primitives survive unbounded horizontal constraints without Flex errors
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Handles 320px width and 2.0x text scale across stacked headers, progress headers, badges, buttons, and banners
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Custom semanticLabel binds cleanly to interactive inputs without double-reading static labels
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Keyboard Tab focus moves across DaywellButton and interactive DaywellCard
+❌ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Stage 3.8 Integration & SQLite Tests Renders live hydrated values across all 5 modules from SQLite and persists inline task toggle (failed)
+  
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Displays initial loading per module, preserves populated data during reload, and isolates module failures
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Deduplicates concurrent RefreshIndicator reloads and preserves Inbox includeProcessed=true
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Renders empty states for all modules and Finance incomplete-setup notice banner
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Rebuild Isolation Tests Rebuilds only the affected section and metric tile when an individual controller notifies
+❌ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Routes all Dashboard navigation, Quick Capture, Backup callbacks and shell flows (failed)
+  Warning: A call to tap() with finder "Found 1 widget with text "Open Tasks" (ignoring all but first): [
+    Text("Open Tasks", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery]),
+  ]" derived an Offset (Offset(64.0, 249.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#b9e76 relayoutBoundary=up21 NEEDS-PAINT
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#d0a2c@Offset(64.0, 193.0), RenderSemanticsGestureHandler#d92a1@Offset(64.0, 193.0), RenderPointerListener#d9e15@Offset(64.0, 193.0), _RenderScrollSemantics#ee34f@Offset(64.0, 193.0), RenderClipRect#f5284@Offset(64.0, 193.0), _RenderLayoutBuilder#c4603@Offset(64.0, 193.0), RenderStack#edc88@Offset(64.0, 193.0), RenderCustomMultiChildLayoutBox#15f13@Offset(64.0, 249.0), _RenderInkFeatures#47752@Offset(64.0, 249.0), RenderPhysicalModel#c64fe@Offset(64.0, 249.0), RenderSemanticsAnnotations#90493@Offset(64.0, 249.0), RenderRepaintBoundary#94452@Offset(64.0, 249.0), RenderIgnorePointer#7971f@Offset(64.0, 249.0), _RenderSnapshotWidget#ae8fc@Offset(64.0, 249.0), _RenderSnapshotWidget#45f24@Offset(64.0, 249.0), _RenderSnapshotWidget#38250@Offset(64.0, 249.0), _RenderSnapshotWidget#0cabb@Offset(64.0, 249.0), RenderRepaintBoundary#87e02@Offset(64.0, 249.0), RenderSemanticsAnnotations#43687@Offset(64.0, 249.0), RenderOffstage#919a3@Offset(64.0, 24
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1414:22)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "Open Calendar" (ignoring all but first): [
+    Text("Open Calendar", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery]),
+  ]" derived an Offset (Offset(120.0, 249.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#80411 relayoutBoundary=up21 NEEDS-PAINT
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#d0a2c@Offset(120.0, 193.0), RenderSemanticsGestureHandler#d92a1@Offset(120.0, 193.0), RenderPointerListener#d9e15@Offset(120.0, 193.0), _RenderScrollSemantics#ee34f@Offset(120.0, 193.0), RenderClipRect#f5284@Offset(120.0, 193.0), _RenderLayoutBuilder#c4603@Offset(120.0, 193.0), RenderStack#edc88@Offset(120.0, 193.0), RenderCustomMultiChildLayoutBox#15f13@Offset(120.0, 249.0), _RenderInkFeatures#47752@Offset(120.0, 249.0), RenderPhysicalModel#c64fe@Offset(120.0, 249.0), RenderSemanticsAnnotations#90493@Offset(120.0, 249.0), RenderRepaintBoundary#94452@Offset(120.0, 249.0), RenderIgnorePointer#7971f@Offset(120.0, 249.0), _RenderSnapshotWidget#ae8fc@Offset(120.0, 249.0), _RenderSnapshotWidget#45f24@Offset(120.0, 249.0), _RenderSnapshotWidget#38250@Offset(120.0, 249.0), _RenderSnapshotWidget#0cabb@Offset(120.0, 249.0), RenderRepaintBoundary#87e02@Offset(120.0, 249.0), RenderSemanticsAnnotations#43687@Offset(120.0, 249.0), RenderOffstage#91
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1415:22)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "Open Notes" (ignoring all but first): [
+    Text("Open Notes", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery]),
+  ]" derived an Offset (Offset(176.0, 249.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#050b5 relayoutBoundary=up21 NEEDS-PAINT
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#d0a2c@Offset(176.0, 193.0), RenderSemanticsGestureHandler#d92a1@Offset(176.0, 193.0), RenderPointerListener#d9e15@Offset(176.0, 193.0), _RenderScrollSemantics#ee34f@Offset(176.0, 193.0), RenderClipRect#f5284@Offset(176.0, 193.0), _RenderLayoutBuilder#c4603@Offset(176.0, 193.0), RenderStack#edc88@Offset(176.0, 193.0), RenderCustomMultiChildLayoutBox#15f13@Offset(176.0, 249.0), _RenderInkFeatures#47752@Offset(176.0, 249.0), RenderPhysicalModel#c64fe@Offset(176.0, 249.0), RenderSemanticsAnnotations#90493@Offset(176.0, 249.0), RenderRepaintBoundary#94452@Offset(176.0, 249.0), RenderIgnorePointer#7971f@Offset(176.0, 249.0), _RenderSnapshotWidget#ae8fc@Offset(176.0, 249.0), _RenderSnapshotWidget#45f24@Offset(176.0, 249.0), _RenderSnapshotWidget#38250@Offset(176.0, 249.0), _RenderSnapshotWidget#0cabb@Offset(176.0, 249.0), RenderRepaintBoundary#87e02@Offset(176.0, 249.0), RenderSemanticsAnnotations#43687@Offset(176.0, 249.0), RenderOffstage#91
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1416:22)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "Open Finance" (ignoring all but first): [
+    Text("Open Finance", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery]),
+  ]" derived an Offset (Offset(232.0, 249.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#f9d30 relayoutBoundary=up21 NEEDS-PAINT
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#d0a2c@Offset(232.0, 193.0), RenderSemanticsGestureHandler#d92a1@Offset(232.0, 193.0), RenderPointerListener#d9e15@Offset(232.0, 193.0), _RenderScrollSemantics#ee34f@Offset(232.0, 193.0), RenderClipRect#f5284@Offset(232.0, 193.0), _RenderLayoutBuilder#c4603@Offset(232.0, 193.0), RenderStack#edc88@Offset(232.0, 193.0), RenderCustomMultiChildLayoutBox#15f13@Offset(232.0, 249.0), _RenderInkFeatures#47752@Offset(232.0, 249.0), RenderPhysicalModel#c64fe@Offset(232.0, 249.0), RenderSemanticsAnnotations#90493@Offset(232.0, 249.0), RenderRepaintBoundary#94452@Offset(232.0, 249.0), RenderIgnorePointer#7971f@Offset(232.0, 249.0), _RenderSnapshotWidget#ae8fc@Offset(232.0, 249.0), _RenderSnapshotWidget#45f24@Offset(232.0, 249.0), _RenderSnapshotWidget#38250@Offset(232.0, 249.0), _RenderSnapshotWidget#0cabb@Offset(232.0, 249.0), RenderRepaintBoundary#87e02@Offset(232.0, 249.0), RenderSemanticsAnnotations#43687@Offset(232.0, 249.0), RenderOffstage#91
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1417:22)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "Capture <3s": [
+    Text("Capture <3s", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery]),
+  ]" derived an Offset (Offset(288.0, 249.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#bf4cd relayoutBoundary=up21 NEEDS-PAINT
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#d0a2c@Offset(288.0, 193.0), RenderSemanticsGestureHandler#d92a1@Offset(288.0, 193.0), RenderPointerListener#d9e15@Offset(288.0, 193.0), _RenderScrollSemantics#ee34f@Offset(288.0, 193.0), RenderClipRect#f5284@Offset(288.0, 193.0), _RenderLayoutBuilder#c4603@Offset(288.0, 193.0), RenderStack#edc88@Offset(288.0, 193.0), RenderCustomMultiChildLayoutBox#15f13@Offset(288.0, 249.0), _RenderInkFeatures#47752@Offset(288.0, 249.0), RenderPhysicalModel#c64fe@Offset(288.0, 249.0), RenderSemanticsAnnotations#90493@Offset(288.0, 249.0), RenderRepaintBoundary#94452@Offset(288.0, 249.0), RenderIgnorePointer#7971f@Offset(288.0, 249.0), _RenderSnapshotWidget#ae8fc@Offset(288.0, 249.0), _RenderSnapshotWidget#45f24@Offset(288.0, 249.0), _RenderSnapshotWidget#38250@Offset(288.0, 249.0), _RenderSnapshotWidget#0cabb@Offset(288.0, 249.0), RenderRepaintBoundary#87e02@Offset(288.0, 249.0), RenderSemanticsAnnotations#43687@Offset(288.0, 249.0), RenderOffstage#91
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1418:22)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "Manage": [
+    Text("Manage", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery, _ScrollableScope]),
+  ]" derived an Offset (Offset(418.0, 329.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#730fa relayoutBoundary=up25
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#6452a@Offset(24.0, 28.0), RenderSemanticsAnnotations#e3619@Offset(24.0, 28.0), RenderMouseRegion#1078e@Offset(24.0, 28.0), RenderSemanticsAnnotations#2f91b@Offset(24.0, 28.0), _RenderInkFeatures#74bd7@Offset(24.0, 28.0), RenderCustomPaint#4a601@Offset(24.0, 28.0), RenderPhysicalShape#5fba8@Offset(24.0, 28.0), RenderConstrainedBox#dfde0@Offset(24.0, 28.0), _RenderInputPadding#3e1d4@Offset(24.0, 28.0), RenderSemanticsAnnotations#e74f4@Offset(24.0, 28.0), RenderConstrainedBox#115ae@Offset(24.0, 28.0), RenderFlex#539f1@Offset(402.0, 28.0), _RenderLayoutBuilder#21f91@Offset(402.0, 28.0), RenderFlex#38bcf@Offset(402.0, 28.0), RenderFlex#939fc@Offset(402.0, 28.0), RenderFlex#702ed@Offset(402.0, 28.0), RenderRepaintBoundary#22337@Offset(402.0, 28.0), RenderIndexedSemantics#f1420@Offset(402.0, 28.0), RenderSliverList@(mainAxis: 257.0, crossAxis: 402.0), RenderSliverPadding@(mainAxis: 273.0, crossAxis: 418.0), RenderViewport#c15ee@Offset(418.0, 
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1429:24)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "View All": [
+    Text("View All", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery, _ScrollableScope]),
+  ]" derived an Offset (Offset(860.0, 329.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#8ccc0 relayoutBoundary=up25
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#b518b@Offset(24.0, 28.0), RenderSemanticsAnnotations#b4854@Offset(24.0, 28.0), RenderMouseRegion#52a04@Offset(24.0, 28.0), RenderSemanticsAnnotations#37ac6@Offset(24.0, 28.0), _RenderInkFeatures#d42e4@Offset(24.0, 28.0), RenderCustomPaint#be853@Offset(24.0, 28.0), RenderPhysicalShape#3f2a6@Offset(24.0, 28.0), RenderConstrainedBox#631fe@Offset(24.0, 28.0), _RenderInputPadding#12c8d@Offset(24.0, 28.0), RenderSemanticsAnnotations#3a455@Offset(24.0, 28.0), RenderConstrainedBox#b00a8@Offset(24.0, 28.0), RenderFlex#3749a@Offset(402.0, 28.0), _RenderLayoutBuilder#b30a9@Offset(402.0, 28.0), RenderFlex#7ce6a@Offset(402.0, 28.0), RenderFlex#c8632@Offset(402.0, 28.0), RenderFlex#702ed@Offset(844.0, 28.0), RenderRepaintBoundary#22337@Offset(844.0, 28.0), RenderIndexedSemantics#f1420@Offset(844.0, 28.0), RenderSliverList@(mainAxis: 257.0, crossAxis: 844.0), RenderSliverPadding@(mainAxis: 273.0, crossAxis: 860.0), RenderViewport#c15ee@Offset(860.0, 
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1429:24)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "Calendar": [
+    Text("Calendar", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery, _ScrollableScope]),
+  ]" derived an Offset (Offset(860.0, 703.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#b523c relayoutBoundary=up25
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#331a7@Offset(24.0, 28.0), RenderSemanticsAnnotations#ec02f@Offset(24.0, 28.0), RenderMouseRegion#2fcec@Offset(24.0, 28.0), RenderSemanticsAnnotations#5773b@Offset(24.0, 28.0), _RenderInkFeatures#24dbe@Offset(24.0, 28.0), RenderCustomPaint#ab0d1@Offset(24.0, 28.0), RenderPhysicalShape#02b1c@Offset(24.0, 28.0), RenderConstrainedBox#4c387@Offset(24.0, 28.0), _RenderInputPadding#82424@Offset(24.0, 28.0), RenderSemanticsAnnotations#5d6de@Offset(24.0, 28.0), RenderConstrainedBox#d13ef@Offset(24.0, 28.0), RenderFlex#71c1d@Offset(402.0, 28.0), _RenderLayoutBuilder#26b6b@Offset(402.0, 28.0), RenderFlex#fd918@Offset(402.0, 28.0), RenderFlex#c8632@Offset(402.0, 402.0), RenderFlex#702ed@Offset(844.0, 402.0), RenderRepaintBoundary#22337@Offset(844.0, 402.0), RenderIndexedSemantics#f1420@Offset(844.0, 402.0), RenderSliverList@(mainAxis: 631.0, crossAxis: 844.0), RenderSliverPadding@(mainAxis: 647.0, crossAxis: 860.0), RenderViewport#c15ee@Offset(860
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1429:24)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "All Notes": [
+    Text("All Notes", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery, _ScrollableScope]),
+  ]" derived an Offset (Offset(860.0, 1077.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  The finder corresponds to this RenderBox: RenderParagraph#16481 relayoutBoundary=up25
+  The hit test result at that offset is: HitTestResult(RenderPointerListener#ffb04@Offset(24.0, 28.0), RenderSemanticsAnnotations#9b620@Offset(24.0, 28.0), RenderMouseRegion#5245a@Offset(24.0, 28.0), RenderSemanticsAnnotations#70e1a@Offset(24.0, 28.0), _RenderInkFeatures#99d2b@Offset(24.0, 28.0), RenderCustomPaint#71ba1@Offset(24.0, 28.0), RenderPhysicalShape#1121e@Offset(24.0, 28.0), RenderConstrainedBox#e7f0b@Offset(24.0, 28.0), _RenderInputPadding#39085@Offset(24.0, 28.0), RenderSemanticsAnnotations#a08e5@Offset(24.0, 28.0), RenderConstrainedBox#479e0@Offset(24.0, 28.0), RenderFlex#e68df@Offset(402.0, 28.0), _RenderLayoutBuilder#90620@Offset(402.0, 28.0), RenderFlex#0fa33@Offset(402.0, 28.0), RenderFlex#c8632@Offset(402.0, 776.0), RenderFlex#702ed@Offset(844.0, 776.0), RenderRepaintBoundary#22337@Offset(844.0, 776.0), RenderIndexedSemantics#f1420@Offset(844.0, 776.0), RenderSliverList@(mainAxis: 1005.0, crossAxis: 844.0), RenderSliverPadding@(mainAxis: 1021.0, crossAxis: 860.0), RenderViewport#c15ee@Offset(8
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1429:24)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  Warning: A call to tap() with finder "Found 1 widget with text "Review Tasks": [
+    Text("Review Tasks", textAlign: center, overflow: ellipsis, maxLines: 2, dependencies: [DefaultSelectionStyle, DefaultTextStyle, MediaQuery, _ScrollableScope]),
+  ]" derived an Offset (Offset(860.0, 1433.0)) that would not hit test on the specified widget.
+  Maybe the widget is actually off-screen, or another widget is obscuring it, or the widget cannot receive pointer events.
+  Indeed, Offset(860.0, 1433.0) is outside the bounds of the root of the render tree, Size(900.0, 1200.0).
+  The finder corresponds to this RenderBox: RenderParagraph#6f2b6 relayoutBoundary=up25
+  The hit test result at that offset is: HitTestResult(HitTestEntry<HitTestTarget>#7ea48(_ReusableRenderView#2a02c), HitTestEntry<HitTestTarget>#58dd2(<AutomatedTestWidgetsFlutterBinding>))
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1941:25)
+  #1      WidgetController.getCenter (package:flutter_test/src/controller.dart:1792:12)
+  #2      WidgetController.tap (package:flutter_test/src/controller.dart:1040:18)
+  #3      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1429:24)
+  <asynchronous suspension>
+  #4      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #5      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  #6      StackZoneSpecification._registerCallback.<anonymous closure> (package:stack_trace/src/stack_zone_specification.dart:114:42)
+  <asynchronous suspension>
+  To silence this warning, pass "warnIfMissed: false" to "tap()".
+  To make this warning fatal, set WidgetController.hitTestWarningShouldBeFatal to true.
+  ══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+  The following TestFailure was thrown running a test:
+  Expected: <2>
+    Actual: <1>
+  When the exception was thrown, this was the stack:
+  #4      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1432:9)
+  <asynchronous suspension>
+  #5      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #6      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  <asynchronous suspension>
+  (elided one frame from package:stack_trace)
+  This was caught by the test expectation on the following line:
+    file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart line 1432
+  The test description was:
+    Routes all Dashboard navigation, Quick Capture, Backup callbacks and shell flows
+  ════════════════════════════════════════════════════════════════════════════════════════════════════
+  Test failed. See exception logs above.
+  The test description was: Routes all Dashboard navigation, Quick Capture, Backup callbacks and shell flows
+  
+✅ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Renders under Light and Dark themes without exceptions
+❌ /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Switches single-column (<720dp) vs two-column (>=720dp) cleanly and avoids overflow at 320dp + 2.0x textScale (failed)
+  ══╡ EXCEPTION CAUGHT BY FLUTTER TEST FRAMEWORK ╞════════════════════════════════════════════════════
+  The following assertion was thrown running a test:
+  The finder "Found 0 widgets with type "DashboardFinanceSection": []" (used in a call to
+  "getBottomLeft()") could not find any matching widgets.
+  When the exception was thrown, this was the stack:
+  #0      WidgetController._getElementPoint (package:flutter_test/src/controller.dart:1892:7)
+  #1      WidgetController.getBottomLeft (package:flutter_test/src/controller.dart:1815:12)
+  #2      main.<anonymous closure>.<anonymous closure> (file:///home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-/flutter_app/test/dashboard_view_test.dart:1610:20)
+  <asynchronous suspension>
+  #3      testWidgets.<anonymous closure>.<anonymous closure> (package:flutter_test/src/widget_tester.dart:189:15)
+  <asynchronous suspension>
+  #4      TestWidgetsFlutterBinding._runTestBody (package:flutter_test/src/binding.dart:1032:5)
+  <asynchronous suspension>
+  <asynchronous suspension>
+  (elided one frame from package:stack_trace)
+  The test description was:
+    Switches single-column (<720dp) vs two-column (>=720dp) cleanly and avoids overflow at 320dp +
+    2.0x textScale
+  ════════════════════════════════════════════════════════════════════════════════════════════════════
+  Test failed. See exception logs above.
+  The test description was: Switches single-column (<720dp) vs two-column (>=720dp) cleanly and avoids overflow at 320dp + 2.0x textScale
+Error: 132 tests passed, 3 failed.
+Error: Process completed with exit code 1.
+0s
+Post job cleanup.
+0s
+Post job cleanup.
+(node:3198) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+0s
+1s
+Post job cleanup.
+/usr/bin/git version
+git version 2.56.1
+Temporarily overriding HOME='/home/runner/work/_temp/065606f0-fc2f-4bbd-8937-ade72830926c' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+/usr/bin/git config --global --add safe.directory /home/runner/work/personal-app-development-ai-agent-github-directly-/personal-app-development-ai-agent-github-directly-
+/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+http.https://github.com/.extraheader
+/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url

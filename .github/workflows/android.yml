@@ -1,0 +1,261 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Run Automated Tests & Quality Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js 22 (Shared Foundation & Web Engine)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Run Web & Shared Foundation Tests
+        run: |
+          npm install --legacy-peer-deps
+          npm run check-foundation
+          npm run check-architecture
+          npm run check-migrations
+          npm run check-ui
+          npm test
+          npm run lint
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter SDK (3.24.5)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: 'stable'
+          cache: true
+
+      - name: Run Flutter Formatting, Analysis & Native Tests
+        run: |
+          cd flutter_app
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+          dart format --output=none --set-exit-if-changed lib test
+          flutter analyze
+          flutter test
+
+  build-release:
+    name: Build & Package Signed ARM64 Release APK
+    needs: test
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Configure Gradle Maven Central Mirror
+        run: |
+          mkdir -p ~/.gradle/init.d
+          cat <<'EOF' > ~/.gradle/init.d/maven-mirror.gradle
+          import org.gradle.api.artifacts.repositories.MavenArtifactRepository
+
+          def redirectCentral = { MavenArtifactRepository repo ->
+              def u = repo.url?.toString() ?: ""
+              if (u.contains("repo.maven.apache.org/maven2") || u.contains("repo1.maven.org/maven2")) {
+                  repo.url = "https://maven-central.storage-download.googleapis.com/maven2/"
+              }
+          }
+
+          beforeSettings { settings ->
+              settings.pluginManagement.repositories.withType(MavenArtifactRepository).configureEach(redirectCentral)
+              settings.dependencyResolutionManagement.repositories.withType(MavenArtifactRepository).configureEach(redirectCentral)
+          }
+
+          allprojects {
+              buildscript.repositories.withType(MavenArtifactRepository).configureEach(redirectCentral)
+              repositories.withType(MavenArtifactRepository).configureEach(redirectCentral)
+          }
+          EOF
+
+      - name: Set up Flutter SDK (3.24.5)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.5'
+          channel: 'stable'
+          cache: true
+
+      - name: Validate & Decode Persistent Release Keystore
+        env:
+          INPUT_SECRET_B64: ${{ secrets.KEYSTORE_BASE64 }}
+          INPUT_SECRET_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          INPUT_SECRET_ALIAS: ${{ secrets.KEY_ALIAS }}
+          INPUT_SECRET_KEYPASS: ${{ secrets.KEY_PASSWORD }}
+          INPUT_VAR_B64: ${{ vars.KEYSTORE_BASE64 }}
+          INPUT_VAR_PASS: ${{ vars.KEYSTORE_PASSWORD }}
+          INPUT_VAR_ALIAS: ${{ vars.KEY_ALIAS }}
+          INPUT_VAR_KEYPASS: ${{ vars.KEY_PASSWORD }}
+          INPUT_LOWER_B64: ${{ secrets.keystore_base64 }}
+          INPUT_LOWER_PASS: ${{ secrets.keystore_password }}
+          INPUT_LOWER_ALIAS: ${{ secrets.key_alias }}
+          INPUT_LOWER_KEYPASS: ${{ secrets.key_password }}
+        run: |
+          # Multi-source resolution in Bash to support Secrets or Variables without boolean coercion
+          KEYSTORE_BASE64="${INPUT_SECRET_B64:-${INPUT_VAR_B64:-$INPUT_LOWER_B64}}"
+          KEYSTORE_PASSWORD="${INPUT_SECRET_PASS:-${INPUT_VAR_PASS:-$INPUT_LOWER_PASS}}"
+          KEY_ALIAS="${INPUT_SECRET_ALIAS:-${INPUT_VAR_ALIAS:-$INPUT_LOWER_ALIAS}}"
+          KEY_PASSWORD="${INPUT_SECRET_KEYPASS:-${INPUT_VAR_KEYPASS:-$INPUT_LOWER_KEYPASS}}"
+
+          echo "=== Signing Configuration Diagnostic ==="
+          [ -n "$INPUT_SECRET_B64" ] && echo "  - Found in secrets.KEYSTORE_BASE64 (${#INPUT_SECRET_B64} bytes)" || true
+          [ -n "$INPUT_VAR_B64" ] && echo "  - Found in vars.KEYSTORE_BASE64 (${#INPUT_VAR_B64} bytes)" || true
+          [ -n "$INPUT_LOWER_B64" ] && echo "  - Found in secrets.keystore_base64 (${#INPUT_LOWER_B64} bytes)" || true
+          [ -n "$KEYSTORE_BASE64" ] && echo "  - KEYSTORE_BASE64: [RESOLVED (${#KEYSTORE_BASE64} bytes)]" || echo "  - KEYSTORE_BASE64: [NOT FOUND]"
+          [ -n "$KEYSTORE_PASSWORD" ] && echo "  - KEYSTORE_PASSWORD: [RESOLVED (${#KEYSTORE_PASSWORD} chars)]" || echo "  - KEYSTORE_PASSWORD: [NOT FOUND]"
+          [ -n "$KEY_ALIAS" ] && echo "  - KEY_ALIAS: [RESOLVED ($KEY_ALIAS)]" || echo "  - KEY_ALIAS: [NOT FOUND]"
+          [ -n "$KEY_PASSWORD" ] && echo "  - KEY_PASSWORD: [RESOLVED (${#KEY_PASSWORD} chars)]" || echo "  - KEY_PASSWORD: [NOT FOUND]"
+
+          mkdir -p flutter_app/android/app
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "Configuring release build with repository secrets..."
+            echo "$KEYSTORE_BASE64" | tr -d '\r\n ' | base64 -d > flutter_app/android/app/release.keystore
+            if [ ! -s flutter_app/android/app/release.keystore ]; then
+              echo "::error::Keystore decode failed or resulting release.keystore file is empty."
+              exit 1
+            fi
+            echo "Successfully decoded custom release keystore to flutter_app/android/app/release.keystore"
+          else
+            echo "::warning::Repository signing secrets not configured. Generating self-signed CI release keystore..."
+            KEYSTORE_PASSWORD="daywell_ci_release_pass"
+            KEY_ALIAS="daywell_ci_release_key"
+            KEY_PASSWORD="daywell_ci_release_pass"
+            keytool -genkeypair -v \
+              -keystore flutter_app/android/app/release.keystore \
+              -alias "$KEY_ALIAS" \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -storepass "$KEYSTORE_PASSWORD" \
+              -keypass "$KEY_PASSWORD" \
+              -dname "CN=Daywell CI Release, OU=Mobile, O=Daywell, L=Addis Ababa, ST=Addis Ababa, C=ET"
+            echo "Successfully generated self-signed CI release keystore at flutter_app/android/app/release.keystore"
+            echo "NOTE: To sign with your own official release certificate, configure KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS, and KEY_PASSWORD under GitHub Repository secrets."
+          fi
+
+          # Export credentials to GITHUB_ENV for the Gradle build step
+          echo "KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> $GITHUB_ENV
+          echo "KEY_ALIAS=$KEY_ALIAS" >> $GITHUB_ENV
+          echo "KEY_PASSWORD=$KEY_PASSWORD" >> $GITHUB_ENV
+
+      - name: Build Standalone ARM64-v8a Production Release APK
+        run: |
+          cd flutter_app
+          rm -rf android/.gradle
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+          flutter build apk --release --target-platform android-arm64
+
+      - name: Verify APK Signature & Certificate Fingerprint
+        run: |
+          cd flutter_app
+          APK_DIR="build/app/outputs/flutter-apk"
+          if [ -f "$APK_DIR/app-release.apk" ]; then
+            cp "$APK_DIR/app-release.apk" "$APK_DIR/app-arm64-v8a-release.apk"
+          fi
+
+          APK_FILE="$APK_DIR/app-arm64-v8a-release.apk"
+          if [ ! -s "$APK_FILE" ]; then
+            echo "::error::Expected production APK missing or empty: $APK_FILE"
+            ls -la "$APK_DIR" || true
+            exit 1
+          fi
+
+          echo "=== 1. Package File Details ==="
+          ls -lh "$APK_FILE"
+          echo "SHA-256 Checksum:"
+          sha256sum "$APK_FILE"
+
+          echo "=== 2. Architecture & Native Libraries (ARM64 only) ==="
+          unzip -l "$APK_FILE" | grep "lib/" || true
+
+          echo "=== 3. apksigner Verification ==="
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$APKSIGNER" ] && [ -x "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --verbose --print-certs "$APK_FILE"
+          else
+            keytool -printcert -jarfile "$APK_FILE"
+          fi
+
+          echo "=== 4. Certificate Details & SHA-256 Fingerprint ==="
+          keytool -printcert -jarfile "$APK_FILE" | grep -E "Owner:|Issuer:|SHA256:|Valid from:" || true
+
+      - name: Prune Previous APK Artifacts (Best-Effort)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ARTIFACT_IDS=$(gh api \
+            --paginate \
+            "repos/${{ github.repository }}/actions/artifacts?name=daywell-arm64-v8a-release-apk&per_page=100" \
+            --jq '.artifacts[] | select(.expired == false) | .id' || true)
+          for id in $ARTIFACT_IDS; do
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
+          done
+
+      - name: Upload Production Release APK (ARM64-v8a)
+        id: upload_artifact
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: daywell-arm64-v8a-release-apk
+          path: flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Fallback Upload to GitHub Pre-Release (Bypasses Artifact Quota)
+        if: steps.upload_artifact.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          APK_FILE="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk"
+          SHA_FILE="flutter_app/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk.sha256"
+          sha256sum "$APK_FILE" > "$SHA_FILE"
+          TAG="ci-latest-apk"
+          NOTES="Signed ARM64 release APK for commit ${{ github.sha }} (published to GitHub Pre-Release because Actions artifact storage quota was hit)."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$APK_FILE" "$SHA_FILE" --clobber
+            gh release edit "$TAG" --notes "$NOTES"
+          else
+            gh release create "$TAG" "$APK_FILE" "$SHA_FILE" \
+              --target "${{ github.sha }}" \
+              --prerelease \
+              --latest=false \
+              --title "Daywell CI Latest ARM64 APK" \
+              --notes "$NOTES"
+          fi

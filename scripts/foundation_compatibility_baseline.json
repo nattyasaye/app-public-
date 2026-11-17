@@ -1,0 +1,392 @@
+{
+  "version": "1.0.0",
+  "governedBy": "docs/architecture/decisions/ADR-007-mandatory-backward-compatibility.md",
+  "protectedDesignTokens": {
+    "colors": {
+      "primary": ["emerald", "emeraldDark", "emeraldLight", "darkMode", "onLight", "onDark"],
+      "secondary": ["mint", "mintDark", "mintLight", "onLight", "onDark"],
+      "surface": [
+        "canvasLight",
+        "canvasDark",
+        "subtleLight",
+        "subtleDark",
+        "cardLight",
+        "cardDark",
+        "elevatedLight",
+        "elevatedDark",
+        "borderLight",
+        "borderDark",
+        "dividerLight",
+        "dividerDark"
+      ],
+      "text": [
+        "primaryLight",
+        "primaryDark",
+        "secondaryLight",
+        "secondaryDark",
+        "mutedLight",
+        "mutedDark",
+        "disabledLight",
+        "disabledDark"
+      ],
+      "semantic": [
+        "income",
+        "onIncome",
+        "incomeContainerLight",
+        "onIncomeContainerLight",
+        "incomeContainerDark",
+        "onIncomeContainerDark",
+        "expense",
+        "onExpense",
+        "expenseContainerLight",
+        "onExpenseContainerLight",
+        "expenseContainerDark",
+        "onExpenseContainerDark",
+        "transfer",
+        "onTransfer",
+        "transferContainerLight",
+        "onTransferContainerLight",
+        "transferContainerDark",
+        "onTransferContainerDark",
+        "success",
+        "onSuccess",
+        "successContainerLight",
+        "onSuccessContainerLight",
+        "successContainerDark",
+        "onSuccessContainerDark",
+        "error",
+        "onError",
+        "errorContainerLight",
+        "onErrorContainerLight",
+        "errorContainerDark",
+        "onErrorContainerDark",
+        "warning",
+        "onWarning",
+        "warningContainerLight",
+        "onWarningContainerLight",
+        "warningContainerDark",
+        "onWarningContainerDark",
+        "info",
+        "onInfo",
+        "infoContainerLight",
+        "onInfoContainerLight",
+        "infoContainerDark",
+        "onInfoContainerDark"
+      ]
+    },
+    "typography": {
+      "families": ["fontFamilySerif", "fontFamilySans", "fontFamilyMono"],
+      "scale": [
+        "display",
+        "heading",
+        "title",
+        "body",
+        "bodyCompact",
+        "label",
+        "caption",
+        "numericHero",
+        "numericBody",
+        "mono"
+      ]
+    },
+    "spacing": ["xs", "sm", "compact", "md", "lg", "xl"],
+    "radii": ["sm", "md", "lg", "xl", "sheet", "full"],
+    "elevation": ["none", "low", "medium", "high"],
+    "breakpoints": ["medium", "expanded", "maxContentWidth", "maxWideWidth"]
+  },
+  "protectedKnownSeedIds": {
+    "accounts": ["acc-cbe", "acc-boa", "acc-dashen", "acc-telebirr", "acc-cash"],
+    "transactions": ["tx-seed-1", "tx-seed-2", "tx-seed-3"],
+    "tasks": ["task-seed-1", "task-seed-2", "t-1", "t-2", "t-3", "t-4", "t-5", "t-6", "t-7"],
+    "notes": ["note-seed-1", "note-1", "note-2", "note-3"],
+    "projects": ["proj-seed-1", "proj-1", "proj-2", "proj-3"],
+    "goals": ["goal-seed-1", "goal-1", "goal-2"],
+    "events": ["evt-1", "evt-2", "evt-3", "evt-4"],
+    "commitments": ["com-1", "com-2"],
+    "savingsGoals": ["sav-1", "sav-2"],
+    "inboxItems": ["inbox-1"],
+    "parties": ["party-abebe", "party-landlord", "party-boss"]
+  },
+  "protectedSystemControlAccountIds": {
+    "equity": "acc-sys-equity",
+    "income": "acc-sys-income",
+    "expense": "acc-sys-expense",
+    "receivable": "acc-sys-receivable",
+    "payable": "acc-sys-payable",
+    "legacyOffset": "acc-sys-legacy-offset"
+  },
+  "protectedBusinessRuleKeys": {
+    "finance": ["currencyCode", "minorUnitsPerMajor", "rules", "formulas"],
+    "tasks": ["priorityWeights", "defaultPriority", "defaultStatus"],
+    "calendar": [
+      "system",
+      "monthsCount",
+      "standardMonthDays",
+      "pagumeStandardDays",
+      "pagumeLeapDays",
+      "pagumeLeapRule",
+      "canonicalDateFormat",
+      "timeConvention",
+      "fixedUtcOffsetMinutes"
+    ]
+  },
+  "protectedSchemaContracts": {
+    "Task": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["not_started", "in_progress", "completed", "cancelled", "inbox"] },
+        "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"] },
+        "dueDate": { "type": "string" },
+        "scheduledDate": { "type": "string" },
+        "projectId": { "type": "string" },
+        "milestoneId": { "type": "string" },
+        "estimatedDurationMinutes": { "type": "number" },
+        "subtasks": { "type": "array" },
+        "labels": { "type": "array" },
+        "isPinned": { "type": "boolean" },
+        "isMyDay": { "type": "boolean" },
+        "recurrenceRule": { "type": "string" },
+        "createdAt": { "type": "string", "required": true },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "Note": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "body": { "type": "string", "required": true },
+        "folder": { "type": "string" },
+        "tags": { "type": "array" },
+        "isPinned": { "type": "boolean" },
+        "isFavorite": { "type": "boolean" },
+        "isArchived": { "type": "boolean" },
+        "isTrashed": { "type": "boolean" },
+        "createdAt": { "type": "string", "required": true },
+        "updatedAt": { "type": "string", "required": true }
+      }
+    },
+    "CalendarEvent": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "date": { "type": "string", "required": true },
+        "endDate": { "type": "string" },
+        "startTime": { "type": "string" },
+        "endTime": { "type": "string" },
+        "isAllDay": { "type": "boolean" },
+        "category": { "type": "string" },
+        "colorHex": { "type": "string" },
+        "hasReminder": { "type": "boolean" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "required": true },
+        "updatedAt": { "type": "string", "required": true }
+      }
+    },
+    "Account": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "name": { "type": "string", "required": true },
+        "type": { "type": "string", "enum": ["asset", "liability", "equity", "income", "expense", "revenue"] },
+        "subType": {
+          "type": "string",
+          "enum": [
+            "cash",
+            "bank",
+            "mobile_money",
+            "savings_vault",
+            "credit_card",
+            "receivable",
+            "payable",
+            "opening_equity",
+            "nominal_income",
+            "nominal_expense",
+            "legacy_clearing"
+          ]
+        },
+        "isSystem": { "type": "boolean" },
+        "currencyCode": { "type": "string" },
+        "openingBalanceCents": { "type": "integer" },
+        "openingBalanceDate": { "type": "string" },
+        "isArchived": { "type": "boolean" }
+      }
+    },
+    "Category": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "name": { "type": "string", "required": true },
+        "type": { "type": "string", "required": true, "enum": ["income", "expense"] },
+        "colorHex": { "type": "string" },
+        "parentId": { "type": "string" },
+        "sortOrder": { "type": "integer" },
+        "isDefault": { "type": "boolean" },
+        "isArchived": { "type": "boolean" }
+      }
+    },
+    "Transaction": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "amountCents": { "type": "integer", "required": true },
+        "type": { "type": "string", "required": true, "enum": ["income", "expense", "transfer"] },
+        "categoryId": { "type": "string" },
+        "categoryName": { "type": "string" },
+        "accountId": { "type": "string", "required": true },
+        "accountName": { "type": "string" },
+        "destinationAccountId": { "type": "string" },
+        "destinationAccountName": { "type": "string" },
+        "transactionDate": { "type": "string", "required": true },
+        "note": { "type": "string" },
+        "payee": { "type": "string" },
+        "isSuperseded": { "type": "boolean" }
+      }
+    },
+    "Project": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed", "on_hold"] },
+        "targetDate": { "type": "string" },
+        "goalId": { "type": "string" }
+      }
+    },
+    "Goal": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "achieved", "archived"] },
+        "targetDate": { "type": "string" }
+      }
+    },
+    "InboxItem": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "rawText": { "type": "string", "required": true },
+        "category": { "type": "string", "enum": ["task", "idea", "expense", "note", "problem", "decision", "general"] },
+        "isProcessed": { "type": "boolean" },
+        "createdAt": { "type": "string", "required": true }
+      }
+    },
+    "Commitment": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "amountCents": { "type": "integer", "required": true },
+        "dueDate": { "type": "string", "required": true },
+        "isPaid": { "type": "boolean" },
+        "recurringRule": { "type": "string" },
+        "linkedAccountId": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "linkedDebtId": { "type": "string" },
+        "settlementEntryId": { "type": "string" },
+        "recurringRuleId": { "type": "string" },
+        "direction": { "type": "string", "enum": ["outflow", "inflow"] },
+        "legacyPaidUnverified": { "type": "boolean" }
+      }
+    },
+    "CommitmentSettlement": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "commitmentId": { "type": "string", "required": true },
+        "entryId": { "type": "string", "required": true },
+        "amountCents": { "type": "integer", "required": true },
+        "settledDate": { "type": "string", "required": true },
+        "createdAt": { "type": "string", "required": true }
+      }
+    },
+    "SavingsGoal": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "targetCents": { "type": "integer", "required": true },
+        "currentAllocatedCents": { "type": "integer" },
+        "targetDate": { "type": "string" },
+        "linkedAccountId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "completed", "archived"] }
+      }
+    },
+    "Budget": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "categoryId": { "type": "string", "required": true },
+        "monthIso": { "type": "string", "required": true },
+        "limitCents": { "type": "integer", "required": true },
+        "rolloverEnabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "required": true },
+        "updatedAt": { "type": "string", "required": true }
+      }
+    },
+    "RecurringRule": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "ruleType": { "type": "string", "required": true, "enum": ["expense", "income", "transfer", "commitment"] },
+        "amountCents": { "type": "integer", "required": true },
+        "frequency": { "type": "string", "required": true, "enum": ["weekly", "biweekly", "monthly", "quarterly", "yearly"] },
+        "interval": { "type": "integer" },
+        "startDate": { "type": "string", "required": true },
+        "nextOccurrenceDate": { "type": "string", "required": true },
+        "endDate": { "type": "string" },
+        "accountId": { "type": "string" },
+        "destinationAccountId": { "type": "string" },
+        "categoryId": { "type": "string" },
+        "linkedDebtId": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "autoPost": { "type": "boolean" },
+        "createdAt": { "type": "string", "required": true }
+      }
+    },
+    "Reminder": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "targetId": { "type": "string", "required": true },
+        "targetType": { "type": "string", "required": true, "enum": ["task", "commitment", "calendar_event", "note", "custom"] },
+        "triggerTimeUtc": { "type": "string", "required": true },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "required": true },
+        "title": { "type": "string" },
+        "channelId": { "type": "string" }
+      }
+    },
+    "AppSetting": {
+      "fields": {
+        "key": { "type": "string", "required": true },
+        "value": { "type": "string", "required": true },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  },
+  "intentionalRemovals": [
+    {
+      "target": "schema_contracts.entities.Account.fields.isActive",
+      "adrOrDoc": "docs/architecture/decisions/ADR-008-retire-account-isactive-and-schema-v8.md",
+      "justification": "Android Drift AccountsTable only persists isArchived and has never persisted isActive; keeping both created redundant non-persistent account state across platforms.",
+      "migrationStrategy": "Standardize Account lifecycle on isArchived across shared_foundation, Flutter, and Web; legacy Web/backup account objects carrying isActive: false remain harmlessly ignored or mapped to isArchived during assembly without failing older snapshots.",
+      "coordinatedConsumers": [
+        "shared_foundation/schema_contracts.json",
+        "scripts/sync_foundation.mjs",
+        "src/domain/sharedFoundation.ts",
+        "src/domain/doubleEntryFinance.ts",
+        "src/domain/financeV7Engine.ts",
+        "src/services/sharedStateBridge.ts",
+        "src/components/DaywellFinanceModule.tsx",
+        "src/components/finance/FinanceOverviewTab.tsx",
+        "src/components/finance/FinanceComposerModal.tsx",
+        "flutter_app/lib/core/shared_foundation_core.dart",
+        "flutter_app/lib/core/shared_foundation.dart",
+        "flutter_app/lib/data/database/tables.dart"
+      ],
+      "verificationTests": [
+        "src/domain/sharedFoundationParity.test.ts",
+        "src/domain/stage4Contracts.test.ts",
+        "src/domain/stage32FoundationGovernance.test.ts",
+        "src/domain/stage33GovernanceEnforcement.test.ts",
+        "src/domain/financeV7WebParity.test.ts",
+        "flutter_app/test/stage344_snapshot_fidelity_restore_test.dart"
+      ],
+      "approvedBy": "Daywell Governance Stage 3.4.4.1 (User Approved)"
+    }
+  ]
+}

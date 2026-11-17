@@ -1,0 +1,40 @@
+{
+  "version": "1.0.0",
+  "finance": {
+    "currencyCode": "ETB",
+    "minorUnitsPerMajor": 100,
+    "rules": {
+      "integerCentsOnly": true,
+      "rejectZeroOrNegativeAmount": true,
+      "rejectIdenticalTransferAccounts": true,
+      "transferPreservesCombinedBalance": true,
+      "guardAccountDeletionIfTransactionsExist": true,
+      "guardCategoryDeletionIfTransactionsExist": true
+    },
+    "formulas": {
+      "accountBalance": "openingBalanceCents + totalIncomeCents - totalExpenseCents + incomingTransfersCents - outgoingTransfersCents",
+      "combinedBalance": "sumOfAllActiveAssetAccountBalances"
+    }
+  },
+  "tasks": {
+    "priorityWeights": {
+      "urgent": 4,
+      "high": 3,
+      "medium": 2,
+      "low": 1
+    },
+    "defaultPriority": "medium",
+    "defaultStatus": "not_started"
+  },
+  "calendar": {
+    "system": "ethiopian_dual",
+    "monthsCount": 13,
+    "standardMonthDays": 30,
+    "pagumeStandardDays": 5,
+    "pagumeLeapDays": 6,
+    "pagumeLeapRule": "year % 4 == 3",
+    "canonicalDateFormat": "YYYY-MM-DD",
+    "timeConvention": "UTC+3",
+    "fixedUtcOffsetMinutes": 180
+  }
+}

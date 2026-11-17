@@ -1,0 +1,815 @@
+# DAYWELL — PROMPT 1.4 OF 25
+## Authoritative Persistence Contracts, Database Migration Design, and Implementation Specification
+
+### 1. What We Have Done So Far
+
+We have completed the first three iterations of Daywell's 25-iteration improvement project.
+
+**Prompt 1.1 — Repository Synchronization and Current-State Verification**
+- Established the repository and project baseline.
+- Identified the GitHub repository and primary branch.
+- Established that the AI Studio workspace is a filesystem snapshot without Git metadata.
+- Verified the available TypeScript tests and build environment.
+
+**Prompt 1.2 — Complete Application Architecture and Module Inventory**
+- Investigated the actual Flutter and TypeScript implementations.
+- Identified that the Flutter application uses an in-memory AppStateManager instead of the existing Drift database and repositories.
+- Identified missing Flutter Calendar functionality.
+- Identified ephemeral task and note metadata that disappears during navigation.
+- Identified the disconnect between the double-entry database schema and the existing Finance repository.
+
+**Prompt 1.3 — Architecture Evaluation and Target Architecture Design**
+We agreed on the following architectural direction:
+
+1. Use a pragmatic feature-first layered architecture.
+2. Retain AppStateManager temporarily as a compatibility facade for existing screens.
+3. Use Drift SQLite as the authoritative persistent storage for Flutter.
+4. Use the double-entry ledger as the authoritative source of financial truth.
+5. Treat user-facing financial transactions as projections of ledger entries.
+6. Keep domain logic independent of Flutter UI and database implementation.
+7. Use shared_foundation/*.json as the canonical source for shared contracts and rules.
+8. Keep the TypeScript/React verification environment outside the Android production APK.
+9. Avoid unnecessary rewrites, particularly a big-bang Riverpod migration.
+
+The architecture has been accepted with qualifications. Several details still need to be resolved before implementation.
+
+**Important:** The earlier architecture reports are based on the inspected source code at that time. Do not assume every proposed class, field, table, method, or relationship exists exactly as described. Inspect the current implementation again.
+
+---
+
+### 2. Our Overall Aim
+
+Our goal is to develop Daywell into a reliable, maintainable, extensible, offline-first personal management application.
+
+The application must eventually provide:
+
+- Reliable local persistence for all user-created information.
+- Consistent behavior after closing and reopening the application.
+- Correct financial accounting and transaction history.
+- Reliable task, note, and calendar functionality.
+- Safe backup and restoration.
+- Consistent shared business rules between Flutter and TypeScript.
+- A modular architecture that can accommodate future modules without redesigning the core.
+- Appropriate automated tests that verify actual application behavior, not merely isolated mathematical functions.
+- An Android production build that does not unnecessarily include development or verification assets.
+
+The application must remain usable without an internet connection for its normal core functionality.
+
+**The database must become the authoritative owner of persistent application data.** Widget state and temporary application state must not be the only places where user-created information exists.
+
+---
+
+### 3. What This Iteration Must Achieve
+
+This iteration must produce a detailed, technically grounded implementation specification covering:
+
+1. Exact repository responsibilities and interfaces.
+2. AppStateManager's responsibilities and transition strategy.
+3. Database ownership and entity relationships.
+4. Exact database migration requirements.
+5. Financial ledger transaction boundaries and accounting rules.
+6. Task and note metadata persistence.
+7. Calendar event storage and date/time representation.
+8. Database initialization and safe default seeding.
+9. Error handling and application state synchronization.
+10. Backup and restoration requirements.
+11. A complete test strategy.
+12. A dependency-aware implementation sequence for subsequent iterations.
+
+This is a design and specification iteration.
+
+**Do not implement the proposed changes in this iteration.**
+
+---
+
+# PART A — VERIFY THE ACTUAL CURRENT IMPLEMENTATION
+
+### 4. Reinspect the Relevant Source Code
+
+Before designing contracts, inspect the current implementation directly.
+
+At minimum, investigate:
+
+- `flutter_app/lib/main.dart`
+- `flutter_app/lib/ui/app_state.dart`
+- `flutter_app/lib/data/database/tables.dart`
+- `flutter_app/lib/data/database/app_database.dart`
+- `flutter_app/lib/data/repositories/`
+- `flutter_app/lib/domain/finance/`
+- `flutter_app/lib/domain/calendar/`
+- `flutter_app/lib/ui/screens/tasks_view.dart`
+- `flutter_app/lib/ui/screens/notes_view.dart`
+- `flutter_app/lib/ui/screens/finance_view.dart`
+- `flutter_app/lib/services/backup/`
+- `shared_foundation/schema_contracts.json`
+- `shared_foundation/business_rules.json`
+- `shared_foundation/canonical_seed_database.json`
+- `scripts/sync_foundation.mjs`
+- Relevant Dart and TypeScript tests.
+
+Inspect the actual constructors, method signatures, table columns, foreign keys, indexes, generated code, serialization methods, and migration strategies.
+
+Do not rely on comments, documentation, filenames, or the previous architecture report as proof of implementation.
+
+Produce an inventory showing:
+
+| Component | Actual current implementation | Proposed responsibility | Required changes |
+|---|---|---|---|
+| AppDatabase | | | |
+| Finance repository | | | |
+| Task repository | | | |
+| Note repository | | | |
+| Project repository | | | |
+| Inbox repository | | | |
+| AppStateManager | | | |
+| Shared foundation | | | |
+| Backup service | | | |
+
+If the actual implementation differs from Prompt 1.3, document the difference before proceeding.
+
+---
+
+# PART B — REPOSITORY CONTRACTS AND OWNERSHIP
+
+### 5. Define the Repository Architecture
+
+Design precise repository contracts for the existing and required modules.
+
+At minimum:
+
+- Finance repository
+- Task repository
+- Note repository
+- Project repository
+- Inbox repository
+- Calendar repository
+
+For each repository, specify:
+
+1. Its responsibility.
+2. The entities it owns.
+3. The tables it reads and writes.
+4. Its public methods.
+5. Its input and return types.
+6. Whether methods are synchronous or asynchronous.
+7. Whether it exposes streams for reactive UI updates.
+8. Its validation responsibilities.
+9. Its transaction boundaries.
+10. Its error-handling behavior.
+
+Provide proposed Dart interfaces or abstract classes with realistic method signatures.
+
+For example, a task repository specification might include:
+
+```dart
+abstract interface class TaskRepository {
+  Stream<List<TaskModel>> watchTasks();
+
+  Future<TaskModel?> getTaskById(String id);
+
+  Future<void> createTask(TaskModel task);
+
+  Future<void> updateTask(TaskModel task);
+
+  Future<void> deleteTask(String id);
+
+  Future<void> updateTaskStatus(
+    String id,
+    TaskStatus status,
+  );
+}
+```
+
+This is only an illustrative example. Adapt the actual contracts to the existing models and implementation.
+
+Do not introduce unnecessary interfaces simply for architectural appearance.
+
+### 6. Define AppStateManager's Final Responsibility
+
+AppStateManager must not become a permanent god object.
+
+Specify an evolutionary design that preserves existing screen compatibility while progressively reducing its responsibilities.
+
+Distinguish clearly between:
+
+**Responsibilities it may temporarily retain:**
+- Coordinating repository access for existing screens.
+- Exposing reactive application state.
+- Notifying existing UI listeners.
+- Maintaining temporary UI-related selections and filters.
+- Coordinating state refresh after successful operations.
+
+**Responsibilities that must not remain centralized:**
+- Direct SQL queries.
+- Financial accounting calculations duplicated from domain engines.
+- Database serialization logic.
+- Every module's detailed business rules.
+- Permanent ownership of persistent records.
+
+Evaluate whether AppStateManager should:
+- Expose cached lists backed by repository streams.
+- Subscribe to Drift streams and update its public state.
+- Delegate mutations to repositories and refresh from database results.
+- Gradually be divided into smaller module-specific state controllers.
+
+Choose the least complex approach that preserves reliability and existing UI compatibility.
+
+Explain how repository errors propagate to the UI and how loading, success, and failure states should be represented.
+
+**Important:** A successful UI action must not be reported as successful merely because an in-memory list was modified. It must be confirmed by the authoritative persistence operation.
+
+---
+
+# PART C — DATABASE AND ENTITY DESIGN
+
+### 7. Define the Authoritative Data Ownership Model
+
+Create a complete data ownership matrix for every persistent entity.
+
+Include at least:
+
+- Accounts
+- Journal entries
+- Postings
+- Financial categories
+- Debts
+- Settlement allocations
+- Parties
+- Tasks
+- Subtasks
+- Recurrence rules
+- Notes
+- Note tags
+- Calendar events
+- Projects
+- Milestones
+- Goals
+- Inbox items
+- Reminders
+- App settings
+- Financial commitments
+- Savings goals
+
+For each entity, identify:
+
+- Authoritative owner.
+- Database table or tables.
+- Repository.
+- Primary key.
+- Foreign-key relationships.
+- Whether it is required in backup.
+- Whether it belongs in the shared JSON contracts.
+- Whether it is a persistent record or a derived projection.
+
+Do not create duplicate authoritative representations of the same information.
+
+### 8. Evaluate Task and Note Metadata Storage
+
+The previous proposal suggested:
+
+- `subtasksJson`
+- `recurrenceRule`
+- `isPinned`
+- `isArchived`
+- `tagsJson`
+
+Do not automatically accept JSON columns as the best design.
+
+Evaluate at least two alternatives where relevant:
+
+**Option A: Embedded JSON**
+- Store subtasks and tags in JSON columns.
+- Simpler database structure.
+- Potentially harder to query and update individual records.
+
+**Option B: Relational tables**
+- Separate Subtasks and NoteTags tables.
+- Better indexing, relationships, and independent updates.
+- More migration and repository complexity.
+
+Evaluate recurrence rules separately because they may have a different structure and lifecycle from subtasks.
+
+Choose the most appropriate design for Daywell's actual requirements.
+
+Consider:
+- Future search and filtering.
+- Reordering subtasks.
+- Completing individual subtasks.
+- Reusing or querying tags.
+- Note archiving and pinning.
+- Recurring tasks.
+- Backup and restoration.
+- Future module extensibility.
+
+Explain why the chosen design is preferable.
+
+### 9. Calendar Event Schema Design
+
+Design a complete CalendarEvent model and corresponding database schema.
+
+The design must support:
+
+- Event title and description.
+- All-day events.
+- Timed events.
+- Event start and end.
+- Event dates.
+- Event category or color.
+- Recurrence.
+- Editing and deletion.
+- Search and filtering.
+- Future reminders.
+- Ethiopian and Gregorian display.
+
+Pay particular attention to date and timezone semantics.
+
+Do not assume that storing every event as UTC timestamps is automatically correct.
+
+The system must preserve the intended local date of all-day events and avoid timezone conversion shifting an event to the previous or following day.
+
+Define:
+- Canonical date representation.
+- Canonical time representation.
+- Timezone handling where applicable.
+- All-day event representation.
+- Recurrence representation.
+- Validation for invalid start/end combinations.
+
+The Ethiopian calendar must use the existing proven algorithmic conversion engine. Do not introduce an external calendar API dependency.
+
+Also determine whether calendar events and task due dates should be unified in one table or remain separate entities presented together in calendar views.
+
+---
+
+# PART D — FINANCE LEDGER CONTRACTS
+
+### 10. Define the Financial Repository's Exact Responsibilities
+
+The double-entry ledger is intended to become the sole persistent financial authority.
+
+Specify exact repository operations for:
+
+- Creating accounts.
+- Updating accounts.
+- Archiving accounts.
+- Creating categories.
+- Updating categories.
+- Recording income.
+- Recording expenses.
+- Recording transfers.
+- Recording transfer fees.
+- Editing financial entries.
+- Voiding or reversing entries.
+- Retrieving transaction history.
+- Retrieving account balances.
+- Calculating available-to-spend.
+- Creating and settling debts.
+- Allocating settlements.
+- Retrieving financial reports.
+
+Do not assume that all these features currently have UI implementations.
+
+Distinguish the existing functionality from future functionality.
+
+### 11. Define Accounting Invariants and Atomicity
+
+The specification must define exactly how the following operations work.
+
+**Expense**
+- Debit the appropriate expense category account.
+- Credit the source asset account.
+- Ensure the journal entry balances.
+
+**Income**
+- Debit the receiving asset account.
+- Credit the appropriate income category account.
+- Ensure the journal entry balances.
+
+**Transfer**
+- Debit the destination asset account.
+- Credit the source asset account.
+- Preserve combined account balances except for explicitly recorded fees.
+
+**Transfer with fee**
+- Record the principal and fee correctly.
+- Ensure all postings balance.
+- Ensure the fee is not accidentally counted as a transfer principal.
+
+For every operation, define:
+
+- Required input validation.
+- Posting construction.
+- Database transaction boundary.
+- Failure behavior.
+- Returned result.
+- How the transaction appears in the user-facing history.
+
+Also specify the accounting-safe treatment of editing, deleting, voiding, and reversing posted entries.
+
+Never silently erase accounting history if doing so would undermine ledger integrity.
+
+### 12. Resolve Financial Transaction Projection Design
+
+The previous proposal suggested replacing the legacy FinancialTransactions table with a view or projection over JournalEntriesTable and PostingsTable.
+
+Evaluate whether a real SQLite view is sufficient or whether a repository-level projection is more appropriate.
+
+Consider:
+- Transaction descriptions.
+- Category identification.
+- Account identification.
+- Amount representation.
+- Occurrence date.
+- Cash movement date.
+- Transfer identification.
+- Transfer fees.
+- Voided and reversed entries.
+- Editing history.
+- Performance.
+
+Define the exact mapping between journal entries, postings, and user-facing TransactionModel objects.
+
+Avoid duplicating persistent financial truth in both a flat transaction table and the ledger.
+
+Do not discard the existing distinction between an event's occurrence date and the date money actually moves, if the current domain model requires it.
+
+---
+
+# PART E — MIGRATION AND INITIALIZATION DESIGN
+
+### 13. Inspect the Actual Database Version and Design the Next Migration
+
+The previous report proposed migration v4.
+
+Verify the actual current schema version and migration history before specifying the next version.
+
+Define:
+
+- Current database version.
+- Target migration version.
+- Every added, changed, or removed table/column.
+- Index changes.
+- Foreign-key changes.
+- Default values.
+- Data conversion requirements.
+- Migration order.
+- Rollback or recovery considerations.
+
+Do not automatically assume v4 is correct.
+
+**Migration safety requirements:**
+
+1. Existing user data must not be silently deleted.
+2. Existing rows must remain valid.
+3. New non-null columns must have safe defaults or explicit backfills.
+4. Foreign keys must remain valid.
+5. Migrations must be tested from every supported historical version.
+6. Migration failure must not leave a partially migrated database.
+7. Generated Drift code must be regenerated using the project's correct build process.
+8. Schema snapshots must be updated consistently.
+
+Specify the exact migration tests required.
+
+### 14. Safe First-Launch Initialization
+
+Define a reliable initialization process.
+
+It must:
+- Open the database.
+- Run required migrations.
+- Check initialization status.
+- Seed legitimate default categories and settings only when appropriate.
+- Never insert fake transactions, accounts, tasks, or notes.
+- Never overwrite user-created information on subsequent launches.
+- Prevent duplicate default categories.
+- Handle interrupted initialization safely.
+
+Evaluate whether `db_initialized` alone is sufficient or whether a more robust initialization/versioning mechanism is needed.
+
+Ensure that default seeding is idempotent.
+
+---
+
+# PART F — ERROR HANDLING AND STATE CONSISTENCY
+
+### 15. Define Error and Failure Behavior
+
+Specify how the application behaves when:
+
+- Database initialization fails.
+- A database write fails.
+- A database transaction is rolled back.
+- A foreign-key constraint fails.
+- An entity cannot be deserialized.
+- A repository stream emits an error.
+- A user navigates away while an autosave is pending.
+- A backup restore fails.
+- A notification cannot be scheduled.
+- An application operation is interrupted.
+
+Avoid silent failures and false success messages.
+
+Define whether errors should be represented using:
+- Typed exceptions.
+- Result objects.
+- A combination of both.
+
+Choose a consistent approach based on the current codebase.
+
+### 16. Prevent UI and Database Divergence
+
+Define how every successful database operation updates the UI.
+
+The design must prevent:
+- Updating the UI before a write that later fails.
+- Duplicate records after repeated button presses.
+- Lost autosaves during navigation.
+- Stale cached lists.
+- Double-submission of financial transactions.
+- Incorrect balances after an unsuccessful transaction.
+- Undo operations restoring outdated data.
+
+For every module, explain how the application will know that the persistent operation has actually completed.
+
+Temporary undo behavior must be distinguished from persistent accounting history.
+
+---
+
+# PART G — BACKUP AND RESTORE CONTRACTS
+
+### 17. Define Backup Coverage
+
+Create a complete backup coverage matrix.
+
+Every persistent entity must be classified as:
+
+- Included in backup.
+- Excluded intentionally, with justification.
+- Derived and reconstructed during restore.
+
+The backup must include the authoritative double-entry ledger and every persistent entity required to restore the user's application.
+
+Include the new metadata and calendar entities in the design.
+
+### 18. Define Safe Restore Behavior
+
+Specify the exact restore process:
+
+1. Read backup file.
+2. Validate envelope and supported version.
+3. Derive key and decrypt.
+4. Verify integrity.
+5. Parse canonical data.
+6. Validate entity schemas and relationships.
+7. Check duplicate IDs and foreign-key dependencies.
+8. Prepare the replacement.
+9. Restore atomically.
+10. Refresh application state.
+11. Confirm success only after database verification.
+
+Evaluate whether validation should happen entirely before the database replacement transaction.
+
+Specify how the application avoids leaving the user with a partially restored database.
+
+Do not implement backup changes in this iteration.
+
+---
+
+# PART H — TESTING AND VERIFICATION CONTRACTS
+
+### 19. Define the Required Test Strategy
+
+The existing test suite has strong isolated domain tests but insufficient coverage of the actual Flutter application lifecycle.
+
+Specify tests at the following levels.
+
+**A. Database tests**
+- Database initialization.
+- Seeding idempotency.
+- Foreign-key enforcement.
+- CRUD operations.
+- Repository streams.
+- Migration from supported versions.
+- Database reopening.
+
+**B. Repository tests**
+- Task persistence.
+- Note persistence.
+- Finance ledger integrity.
+- Account balance calculations.
+- Calendar event persistence.
+- Project and inbox persistence.
+- Atomic transaction failure behavior.
+
+**C. Application-state tests**
+- AppStateManager loads from repositories.
+- Successful mutations update visible state.
+- Failed mutations do not falsely update state.
+- Reopening the database restores the same information.
+- State refresh after backup restoration.
+
+**D. Flutter widget tests**
+- Task creation and editing.
+- Subtask persistence.
+- Note autosave and metadata persistence.
+- Finance transaction creation and history.
+- Calendar navigation and event interactions.
+- Loading and error states.
+
+**E. Integration tests**
+At minimum, define an end-to-end scenario:
+
+1. Launch the application.
+2. Create an account.
+3. Record an income transaction.
+4. Record an expense.
+5. Create a task with subtasks.
+6. Create and pin a note with tags.
+7. Create a calendar event.
+8. Close and reopen the application or database.
+9. Verify every record and calculated balance.
+10. Export and restore a backup.
+11. Verify that the restored information matches the original.
+
+Explain which tests belong in unit, widget, database integration, or Android device testing.
+
+Do not claim that a feature is verified merely because its domain function has a unit test.
+
+---
+
+# PART I — IMPLEMENTATION DEPENDENCIES AND ROADMAP
+
+### 20. Produce the Detailed Implementation Sequence
+
+Create a dependency-aware sequence for the subsequent implementation prompts.
+
+The plan must identify:
+
+- Which work must happen first.
+- Which changes depend on database migrations.
+- Which repositories can be implemented independently.
+- Which operations must be coordinated.
+- Which tests must exist before risky changes.
+- Which UI screens can be migrated incrementally.
+- Which features should not be implemented until the persistence foundation is verified.
+
+The roadmap must preserve the existing 25-prompt project structure.
+
+Do not invent additional prompts or silently change the total number.
+
+The five main implementation areas previously proposed are:
+
+1. Repository persistence and AppStateManager integration.
+2. Finance double-entry ledger harmonization.
+3. Task and note metadata persistence.
+4. Flutter Calendar implementation.
+5. Backup parity, final testing, and hardening.
+
+You may revise the order or boundaries if the actual dependency analysis justifies it.
+
+Explain every meaningful change.
+
+---
+
+# PART J — MANDATORY RE-AUDIT AND SELF-CHALLENGE
+
+### 21. Challenge Your Own Architecture Before Finalizing
+
+Do not simply defend your proposed design.
+
+Actively investigate the following:
+
+1. Are we creating too many repository abstractions?
+2. Is AppStateManager still likely to become a god object?
+3. Can the proposed state synchronization work reliably with Drift streams?
+4. Are any entities duplicated unnecessarily?
+5. Are JSON columns actually preferable to relational tables for subtasks and tags?
+6. Is the proposed calendar date/time representation safe across timezones?
+7. Can the double-entry ledger support every existing Finance feature without losing important behavior?
+8. Does the transaction projection preserve the distinction between occurrence date and cash movement date?
+9. Is replacing FinancialTransactions with a database view actually practical with Drift?
+10. Are the proposed migrations safe for existing databases?
+11. Can backup restoration reliably preserve every relationship?
+12. Are any repository methods unnecessarily complicated?
+13. Are any important features missing from the ownership matrix?
+14. Does the design support future modules without hard-coding the initial four modules into the shared foundation?
+15. Is there a simpler architecture that provides the same reliability?
+
+For each significant concern:
+
+- State the concern.
+- Explain its practical consequence.
+- Investigate the relevant implementation.
+- Propose the best solution.
+- Explain why alternatives were rejected.
+
+**You are explicitly authorized to disagree with Prompt 1.3 or this prompt where the actual implementation or technical evidence demonstrates that a different design is safer or simpler.**
+
+Do not preserve a bad design merely because it was previously approved.
+
+---
+
+# PART K — STRICT SCOPE RESTRICTIONS
+
+### 22. Do Not Implement Anything Yet
+
+This iteration is specification-only.
+
+You must not:
+
+- Modify production Dart files.
+- Modify TypeScript production files.
+- Change database schemas.
+- Run schema migrations.
+- Change repository implementations.
+- Change UI screens.
+- Rewrite AppStateManager.
+- Change shared foundation JSON specifications.
+- Change backup implementation.
+- Perform broad cleanup or refactoring.
+- Delete files or branches.
+- Replace existing functionality.
+
+You may inspect the source code and run appropriate non-destructive verification commands.
+
+If a proposed design cannot be verified without changing production code, explain what evidence is missing instead of making the change.
+
+You may create a separate design report only if necessary. Do not overwrite existing documentation or implementation files without explicit authorization.
+
+---
+
+# PART L — REQUIRED FINAL REPORT
+
+### 23. Deliver a Complete Implementation Specification
+
+Your final report must contain:
+
+1. Executive summary.
+2. Actual implementation findings.
+3. Repository contract specifications.
+4. AppStateManager responsibility and transition design.
+5. Complete data ownership matrix.
+6. Task and note metadata storage decision.
+7. Calendar event schema and date/time design.
+8. Financial ledger method and transaction specifications.
+9. Transaction projection design.
+10. Database migration specification.
+11. Initialization and seeding specification.
+12. Error handling and state consistency rules.
+13. Backup and restore specification.
+14. Complete test strategy.
+15. Dependency-aware implementation roadmap.
+16. Risks and rejected alternatives.
+17. Mandatory self-challenge results.
+18. Confirmation that no production code was modified.
+
+Include proposed method signatures and schema definitions where they materially clarify the design.
+
+Use tables and code examples where appropriate.
+
+Avoid vague statements such as "make persistence reliable." Define exactly what reliability means and how it will be verified.
+
+### 24. Evidence Requirements
+
+For every important technical conclusion:
+
+- Identify the actual source file.
+- Provide relevant class, method, table, or field names.
+- Explain what was observed.
+- Distinguish existing implementation from proposed design.
+
+If a detail cannot be verified, label it as unverified.
+
+Do not invent file paths, method names, database fields, or test results.
+
+### 25. Completion Criteria
+
+Prompt 1.4 is complete only when:
+
+- All major repository contracts are specified.
+- AppStateManager's responsibilities are clearly bounded.
+- Database entity ownership is unambiguous.
+- Task and note metadata storage decisions are justified.
+- Calendar date/time semantics are resolved.
+- Finance ledger operations have explicit atomicity and accounting rules.
+- Migration and initialization requirements are specified.
+- Error handling and state consistency are defined.
+- Backup and restoration coverage is complete.
+- Tests verify actual persistence and application behavior.
+- Implementation dependencies are documented.
+- The architecture has been critically challenged.
+- No production source code has been modified.
+
+At the end, provide a clear assessment:
+
+**Prompt 1.4 Status: COMPLETE / INCOMPLETE / BLOCKED**
+
+Explain the evidence supporting that status.
+
+### 26. Stop Condition
+
+Do not automatically begin Prompt 1.5.
+
+Wait for my review and explicit instruction.
+
+The objective is to establish a reliable implementation contract before touching production code. Accuracy, data integrity, and long-term maintainability are more important than rushing through the iterations.

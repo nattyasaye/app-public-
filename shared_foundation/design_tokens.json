@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "version": "1.1.0",
+  "name": "Daywell Design Tokens",
+  "colors": {
+    "primary": {
+      "emerald": "#1B4D3E",
+      "emeraldDark": "#153E32",
+      "emeraldLight": "#245E4D",
+      "darkMode": "#81C784",
+      "onLight": "#FFFFFF",
+      "onDark": "#0E241C"
+    },
+    "secondary": {
+      "mint": "#E0EFE8",
+      "mintDark": "#1D382E",
+      "mintLight": "#F0F7F4",
+      "onLight": "#1B4D3E",
+      "onDark": "#81C784"
+    },
+    "surface": {
+      "canvasLight": "#FAF9F5",
+      "canvasDark": "#121816",
+      "subtleLight": "#F2F0E8",
+      "subtleDark": "#161E1B",
+      "cardLight": "#FFFFFF",
+      "cardDark": "#1A2320",
+      "elevatedLight": "#FFFFFF",
+      "elevatedDark": "#212C28",
+      "borderLight": "#E5E7EB",
+      "borderDark": "#2B3A34",
+      "dividerLight": "#ECEAE3",
+      "dividerDark": "#222E29"
+    },
+    "text": {
+      "primaryLight": "#111827",
+      "primaryDark": "#F9FAFB",
+      "secondaryLight": "#4B5563",
+      "secondaryDark": "#CBD5E1",
+      "mutedLight": "#6B7280",
+      "mutedDark": "#9CA3AF",
+      "disabledLight": "#9CA3AF",
+      "disabledDark": "#5C6B64"
+    },
+    "semantic": {
+      "income": "#10B981",
+      "onIncome": "#052E16",
+      "incomeContainerLight": "#ECFDF5",
+      "onIncomeContainerLight": "#065F46",
+      "incomeContainerDark": "#0D3326",
+      "onIncomeContainerDark": "#6EE7B7",
+      "expense": "#EF4444",
+      "onExpense": "#090D16",
+      "expenseContainerLight": "#FEF2F2",
+      "onExpenseContainerLight": "#991B1B",
+      "expenseContainerDark": "#3B1517",
+      "onExpenseContainerDark": "#FCA5A5",
+      "transfer": "#0D9488",
+      "onTransfer": "#021615",
+      "transferContainerLight": "#F0FDFA",
+      "onTransferContainerLight": "#115E59",
+      "transferContainerDark": "#0E3330",
+      "onTransferContainerDark": "#5EEAD4",
+      "success": "#15803D",
+      "onSuccess": "#FFFFFF",
+      "successContainerLight": "#F0FDF4",
+      "onSuccessContainerLight": "#166534",
+      "successContainerDark": "#11331F",
+      "onSuccessContainerDark": "#86EFAC",
+      "error": "#DC2626",
+      "onError": "#FFFFFF",
+      "errorContainerLight": "#FEE2E2",
+      "onErrorContainerLight": "#7F1D1D",
+      "errorContainerDark": "#451215",
+      "onErrorContainerDark": "#FECACA",
+      "warning": "#F59E0B",
+      "onWarning": "#111827",
+      "warningContainerLight": "#FFFBEB",
+      "onWarningContainerLight": "#92400E",
+      "warningContainerDark": "#36250B",
+      "onWarningContainerDark": "#FCD34D",
+      "info": "#3B82F6",
+      "onInfo": "#0B1120",
+      "infoContainerLight": "#EFF6FF",
+      "onInfoContainerLight": "#1E40AF",
+      "infoContainerDark": "#132645",
+      "onInfoContainerDark": "#93C5FD"
+    }
+  },
+  "typography": {
+    "fontFamilySerif": "Newsreader, Georgia, serif",
+    "fontFamilySans": "Inter, -apple-system, BlinkMacSystemFont, sans-serif",
+    "fontFamilyMono": "JetBrains Mono, monospace",
+    "scale": {
+      "display": {
+        "fontSize": 28,
+        "lineHeight": 36,
+        "fontWeight": 700,
+        "letterSpacing": -0.5,
+        "fontFamily": "serif",
+        "tabularFigures": false
+      },
+      "heading": {
+        "fontSize": 22,
+        "lineHeight": 28,
+        "fontWeight": 700,
+        "letterSpacing": -0.3,
+        "fontFamily": "serif",
+        "tabularFigures": false
+      },
+      "title": {
+        "fontSize": 17,
+        "lineHeight": 24,
+        "fontWeight": 600,
+        "letterSpacing": -0.1,
+        "fontFamily": "sans",
+        "tabularFigures": false
+      },
+      "body": {
+        "fontSize": 14,
+        "lineHeight": 20,
+        "fontWeight": 400,
+        "letterSpacing": 0,
+        "fontFamily": "sans",
+        "tabularFigures": false
+      },
+      "bodyCompact": {
+        "fontSize": 13,
+        "lineHeight": 18,
+        "fontWeight": 400,
+        "letterSpacing": 0,
+        "fontFamily": "sans",
+        "tabularFigures": false
+      },
+      "label": {
+        "fontSize": 12,
+        "lineHeight": 16,
+        "fontWeight": 600,
+        "letterSpacing": 0.2,
+        "fontFamily": "sans",
+        "tabularFigures": false
+      },
+      "caption": {
+        "fontSize": 11,
+        "lineHeight": 14,
+        "fontWeight": 500,
+        "letterSpacing": 0.2,
+        "fontFamily": "sans",
+        "tabularFigures": false
+      },
+      "numericHero": {
+        "fontSize": 32,
+        "lineHeight": 38,
+        "fontWeight": 700,
+        "letterSpacing": -0.5,
+        "fontFamily": "sans",
+        "tabularFigures": true
+      },
+      "numericBody": {
+        "fontSize": 15,
+        "lineHeight": 20,
+        "fontWeight": 600,
+        "letterSpacing": 0,
+        "fontFamily": "sans",
+        "tabularFigures": true
+      },
+      "mono": {
+        "fontSize": 12,
+        "lineHeight": 16,
+        "fontWeight": 500,
+        "letterSpacing": 0,
+        "fontFamily": "mono",
+        "tabularFigures": true
+      }
+    }
+  },
+  "spacing": {
+    "xs": 4,
+    "sm": 8,
+    "compact": 12,
+    "md": 16,
+    "lg": 24,
+    "xl": 32
+  },
+  "radii": {
+    "sm": 8,
+    "md": 12,
+    "lg": 16,
+    "xl": 20,
+    "sheet": 24,
+    "full": 9999
+  },
+  "elevation": {
+    "none": 0,
+    "low": 1,
+    "medium": 3,
+    "high": 6
+  },
+  "breakpoints": {
+    "medium": 600,
+    "expanded": 840,
+    "maxContentWidth": 720,
+    "maxWideWidth": 1120
+  }
+}
