@@ -24,8 +24,8 @@
         "reason": "Pre-existing NotesView legacy Material Colors.* literals slated for incremental DaywellTheme migration."
       },
       "flutter_app/lib/ui/screens/tasks_view.dart": {
-        "maxCount": 21,
-        "reason": "Pre-existing TasksView legacy Material Colors.* literals slated for incremental DaywellTheme migration."
+        "maxCount": 19,
+        "reason": "Pre-existing TasksView legacy Material Colors.* literals (shrunk from 21 to 19 in Stage 2) slated for incremental DaywellTheme migration."
       },
       "flutter_app/lib/ui/widgets/quick_capture_dialog.dart": {
         "maxCount": 1,

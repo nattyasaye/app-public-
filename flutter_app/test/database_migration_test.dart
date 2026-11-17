@@ -2100,7 +2100,19 @@ void main() {
           ..remove('projectTrackingRecords');
         final v8Res = await DatabasePersistenceCoordinator(targetDb)
             .importSnapshotDetailed(v8Snapshot);
-        expect(v8Res.snapshotVersion, 8);
+        expect(v8Res.warnings, isEmpty);
+        expect(v8Res.diagnostics, isEmpty);
+        expect(v8Res.restoredRecordCounts['projects'], 1);
+        expect(v8Res.restoredRecordCounts['projectTrackingBlocks'], 0);
+        expect(v8Res.restoredRecordCounts['projectTrackingRecords'], 0);
+        final restoredV8Projects =
+            await targetDb.select(targetDb.projects).get();
+        expect(restoredV8Projects.length, 1);
+        expect(restoredV8Projects.single.id, 'proj-s1');
+        expect(restoredV8Projects.single.title, 'Video Plan');
+        expect(restoredV8Projects.single.isArchived, isFalse);
+        expect(restoredV8Projects.single.startDate, '2026-11-10');
+        expect(restoredV8Projects.single.targetDate, '2026-12-10');
         expect(
           await targetDb.select(targetDb.projectTrackingBlocks).get(),
           isEmpty,

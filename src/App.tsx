@@ -77,6 +77,7 @@ import { DaywellNotesModule } from './components/DaywellNotesModule';
 import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWizard';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { SharedStateBridge } from './services/sharedStateBridge';
+import { projectsService } from './services/projectsService';
 import { SHARED_DESIGN_TOKENS, SYSTEM_CONTROL_ACCOUNT_IDS } from './domain/sharedFoundation';
 import {
   DaywellButton,
@@ -106,22 +107,13 @@ export type ScreenId =
   | 'more'
   | 'sync_backup';
 
-interface ProjectItem {
-  id: string;
-  title: string;
-  subtitle: string;
-  narrative: string;
-  tasksCompleted: number;
-  totalTasks: number;
-  percent: number;
-  icon: 'panels' | 'house' | 'languages';
-}
-
 export default function App() {
   // Navigation & Screen View State
   const [currentTab, setCurrentTab] = useState<'today' | 'tasks' | 'calendar' | 'notes' | 'finance' | 'more'>('today');
   const [activeScreen, setActiveScreen] = useState<ScreenId>('today');
   const [screenHistory, setScreenHistory] = useState<ScreenId[]>(['today']);
+  const [tasksSubTab, setTasksSubTab] = useState<'tasks' | 'projects'>('tasks');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
 
   // Theme State: 'system' | 'light' | 'dark'
   const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>('system');
@@ -215,7 +207,6 @@ export default function App() {
 
   // Filter & Search states
   const [taskFilter, setTaskFilter] = useState<'today' | 'inbox' | 'upcoming'>('today');
-  const [projectFilter, setProjectFilter] = useState<'active' | 'completed' | 'archived'>('active');
   const [goalFilter, setGoalFilter] = useState<'all' | 'short' | 'long'>('all');
   const [noteFilter, setNoteFilter] = useState<'recent' | 'inbox' | 'collections'>('recent');
   const [searchQuery, setSearchQuery] = useState('');
@@ -375,20 +366,9 @@ export default function App() {
   }, [financeSyncTick, activeScreen]);
   const todaySafeHarbor = todayFinanceSummary.breakdown;
 
-  const [projects, setProjects] = useState<ProjectItem[]>(() => {
-    try {
-      const saved = localStorage.getItem('daywell_projects');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          return parsed.filter((p: any) => !['p-1', 'p-2', 'p-3', 'proj-seed-1'].includes(p.id));
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
-    return [];
-  });
+  const activeProjectsCount = useMemo(() => {
+    return projectsService.listProjects({ includeArchived: false }).length;
+  }, [financeSyncTick, activeScreen]);
 
   // System Dark Mode Effect
   useEffect(() => {
@@ -418,7 +398,13 @@ export default function App() {
   const dualDate = useMemo(() => SharedDateFormatter.formatDual(todayCal), [todayCal]);
 
   // Navigate Screen Helper
-  const navigateTo = (screen: ScreenId) => {
+  const navigateTo = (rawScreen: ScreenId) => {
+    let screen = rawScreen;
+    if (rawScreen === 'projects' || rawScreen === 'project_detail') {
+      setTasksSubTab('projects');
+      setSelectedProjectId(null);
+      screen = 'tasks';
+    }
     if (activeScreen === screen) return; // Prevent duplicate navigation stack entries!
     setActiveScreen(screen);
     setScreenHistory((prev) => {
@@ -498,7 +484,12 @@ export default function App() {
       }
 
       if (e.state && e.state.screen) {
-        const target = e.state.screen as ScreenId;
+        let target = e.state.screen as ScreenId;
+        if (target === 'projects' || target === 'project_detail') {
+          setTasksSubTab('projects');
+          setSelectedProjectId(null);
+          target = 'tasks';
+        }
         setActiveScreen(target);
         if (target === 'today') setCurrentTab('today');
         else if (target === 'tasks') setCurrentTab('tasks');
@@ -784,8 +775,19 @@ export default function App() {
             <div className="flex items-center gap-1.5 bg-[var(--dw-surface-subtle)] p-1 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
               <span className="text-xs text-[var(--dw-text-muted)] pl-2">Screen:</span>
               <select
-                value={activeScreen}
-                onChange={(e) => navigateTo(e.target.value as ScreenId)}
+                value={
+                  activeScreen === 'tasks' && tasksSubTab === 'projects'
+                    ? 'projects'
+                    : activeScreen
+                }
+                onChange={(e) => {
+                  const next = e.target.value as ScreenId;
+                  if (next === 'tasks') {
+                    setTasksSubTab('tasks');
+                    setSelectedProjectId(null);
+                  }
+                  navigateTo(next);
+                }}
                 aria-label="Screen"
                 className="bg-transparent text-xs font-semibold py-1 px-2 rounded-[var(--dw-radius-sm)] text-[var(--dw-text-primary)] outline-none cursor-pointer"
               >
@@ -794,8 +796,7 @@ export default function App() {
                 <option value="calendar">03 · Calendar (Dual Engine)</option>
                 <option value="finance">04 · Finance (Balanced Ledger)</option>
                 <option value="notes">05 · Notes & Knowledge</option>
-                <option value="projects">06 · Projects (Deprecated Prototype)</option>
-                <option value="project_detail">07 · Project Detail (Deprecated Prototype)</option>
+                <option value="projects">06 · Projects (in Tasks)</option>
                 <option value="goals">08 · Goals (Deprecated Prototype)</option>
                 <option value="relationships">09 · Relationships (Deprecated Prototype)</option>
                 <option value="priorities">10 · Priorities (Deprecated Prototype)</option>
@@ -905,18 +906,14 @@ export default function App() {
                       ? effectiveDark
                         ? '/screens/today_dashboard___dark.png'
                         : '/screens/today_dashboard___light.png'
+                      : activeScreen === 'tasks' && tasksSubTab === 'projects'
+                      ? effectiveDark
+                        ? '/screens/projects___dark.png'
+                        : '/screens/projects___light.png'
                       : activeScreen === 'tasks'
                       ? effectiveDark
                         ? '/screens/tasks___dark.png'
                         : '/screens/tasks___light.png'
-                      : activeScreen === 'projects'
-                      ? effectiveDark
-                        ? '/screens/projects___dark.png'
-                        : '/screens/projects___light.png'
-                      : activeScreen === 'project_detail'
-                      ? effectiveDark
-                        ? '/screens/portfolio_refresh___dark.png'
-                        : '/screens/portfolio_refresh___light.png'
                       : activeScreen === 'goals'
                       ? effectiveDark
                         ? '/screens/goals___dark.png'
@@ -1357,13 +1354,17 @@ export default function App() {
                 </div>
               )}
 
-              {/* SCREEN 02: TASKS (Preserved State) */}
+              {/* SCREEN 02: TASKS & PROJECTS (Preserved State) */}
               <div className={activeScreen === 'tasks' ? 'block' : 'hidden'}>
                 <DaywellTasksModule
                   tasks={tasks}
                   onUpdateTasks={setTasks}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                   onNavigateToCalendar={() => navigateTo('calendar')}
+                  activeSubTab={tasksSubTab}
+                  onSubTabChange={setTasksSubTab}
+                  selectedProjectId={selectedProjectId}
+                  onSelectProjectId={setSelectedProjectId}
                 />
               </div>
 
@@ -1381,176 +1382,6 @@ export default function App() {
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                 />
               </div>
-
-              {/* SCREEN 03: PROJECTS (DEPRECATED PROTOTYPE) */}
-              {activeScreen === 'projects' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between pt-1">
-                    <div className="flex items-center gap-2">
-                      <DaywellIconButton
-                        label="Go back"
-                        tone="muted"
-                        onClick={handleBack}
-                        icon={<ArrowLeft className="w-5 h-5" />}
-                      />
-                      <div>
-                        <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
-                          MAKE ROOM FOR THE MEANINGFUL
-                        </div>
-                        <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
-                          Projects
-                        </h1>
-                      </div>
-                    </div>
-                    <DaywellIconButton
-                      label="Quick capture"
-                      tone="primary"
-                      onClick={() => setIsQuickCaptureOpen(true)}
-                      icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
-                    />
-                  </div>
-
-                  <DeprecatedPrototypeBanner areaName="Projects" />
-
-                  <div className="flex items-center gap-2">
-                    {(['active', 'completed', 'archived'] as const).map((filterKey) => (
-                      <button
-                        key={filterKey}
-                        type="button"
-                        onClick={() => setProjectFilter(filterKey)}
-                        className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all cursor-pointer capitalize ${
-                          projectFilter === filterKey
-                            ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
-                            : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
-                        }`}
-                      >
-                        {filterKey}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div className="space-y-3">
-                    {projects.length === 0 ? (
-                      <DaywellCard padding="md" radius="xl">
-                        <DaywellEmptyState
-                          icon={<Layers className="w-8 h-8" />}
-                          message="No projects yet"
-                          subtitle="Create projects to group multi-step tasks, milestones, and deadlines."
-                          actionLabel="Quick Capture"
-                          onActionPressed={() => setIsQuickCaptureOpen(true)}
-                        />
-                      </DaywellCard>
-                    ) : (
-                      projects.map((proj) => (
-                        <DaywellCard
-                          key={proj.id}
-                          padding="md"
-                          radius="xl"
-                          onClick={() => navigateTo('project_detail')}
-                          className="space-y-3"
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="w-10 h-10 rounded-[var(--dw-radius-lg)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] flex items-center justify-center">
-                                {proj.icon === 'panels' && <Layers className="w-5 h-5" />}
-                                {proj.icon === 'house' && <Landmark className="w-5 h-5" />}
-                                {proj.icon === 'languages' && <FileText className="w-5 h-5" />}
-                              </div>
-                              <div>
-                                <h4 className="text-sm font-bold text-[var(--dw-text-primary)]">
-                                  {proj.title}
-                                </h4>
-                                <p className="text-[11px] text-[var(--dw-text-muted)]">{proj.subtitle}</p>
-                              </div>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-[var(--dw-text-muted)]" />
-                          </div>
-                          <p className="text-xs text-[var(--dw-text-secondary)]">{proj.narrative}</p>
-                          <DaywellProgressBar value={proj.percent} label={proj.title} />
-                          <div className="flex items-center justify-between text-[11px] font-bold text-[var(--dw-text-muted)]">
-                            <span>{proj.tasksCompleted} of {proj.totalTasks} tasks complete</span>
-                            <span className="text-[var(--dw-text-primary)]">{proj.percent}%</span>
-                          </div>
-                        </DaywellCard>
-                      ))
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {/* SCREEN 04: PROJECT DETAIL (DEPRECATED PROTOTYPE) */}
-              {activeScreen === 'project_detail' && (
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between pt-1">
-                    <DaywellIconButton
-                      label="Go back"
-                      tone="muted"
-                      onClick={handleBack}
-                      icon={<ArrowLeft className="w-5 h-5" />}
-                    />
-                    <span className="dw-type-label uppercase tracking-wider text-[var(--dw-text-muted)]">
-                      PROJECT DETAIL
-                    </span>
-                    <DaywellIconButton
-                      label="More options"
-                      tone="muted"
-                      onClick={() => navigateTo('projects')}
-                      icon={<SlidersHorizontal className="w-4 h-4" />}
-                    />
-                  </div>
-
-                  <DeprecatedPrototypeBanner areaName="Project Detail" />
-
-                  <div>
-                    <h1 className="dw-type-heading text-[var(--dw-text-primary)]">
-                      Portfolio refresh
-                    </h1>
-                    <p className="text-xs text-[var(--dw-text-muted)] mt-0.5">Sample prototype · Career</p>
-                  </div>
-
-                  <DaywellCard padding="compact">
-                    <p className="text-xs text-[var(--dw-text-secondary)]">
-                      Tell a clearer story about the work I do. Focus on case studies, impact, and design decisions.
-                    </p>
-                  </DaywellCard>
-
-                  <DaywellCard padding="md" radius="xl" className="space-y-2">
-                    <div className="flex items-center justify-between text-xs font-bold">
-                      <span className="text-[var(--dw-text-primary)]">Progress</span>
-                      <span className="text-[var(--dw-text-primary)]">60%</span>
-                    </div>
-                    <DaywellProgressBar value={60} label="Portfolio refresh progress" />
-                    <p className="text-[11px] text-[var(--dw-text-muted)]">6 of 10 sample milestones complete</p>
-                  </DaywellCard>
-
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-bold text-[var(--dw-text-primary)]">
-                      Sample Milestones & Tasks
-                    </h3>
-                    <div className="space-y-2">
-                      <DaywellCard padding="compact" className="flex items-center gap-3">
-                        <Check className="w-4 h-4 text-[var(--dw-primary)]" />
-                        <span className="text-xs line-through text-[var(--dw-text-muted)] flex-1">
-                          Select top 3 case studies
-                        </span>
-                      </DaywellCard>
-                      <DaywellCard padding="compact" className="flex items-center gap-3">
-                        <Check className="w-4 h-4 text-[var(--dw-primary)]" />
-                        <span className="text-xs line-through text-[var(--dw-text-muted)] flex-1">
-                          Draft problem and metrics statements
-                        </span>
-                      </DaywellCard>
-                      <DaywellCard padding="compact" className="flex items-center gap-3">
-                        <div className="w-4 h-4 rounded-md border border-[var(--dw-border)]" />
-                        <span className="text-xs font-medium text-[var(--dw-text-primary)] flex-1">
-                          Review portfolio case study
-                        </span>
-                        <span className="text-[10px] text-[var(--dw-on-warning-container)] font-bold">Sample 10:00</span>
-                      </DaywellCard>
-                    </div>
-                  </div>
-                </div>
-              )}
 
               {/* SCREEN 05: GOALS (DEPRECATED PROTOTYPE) */}
               {activeScreen === 'goals' && (
@@ -1771,7 +1602,9 @@ export default function App() {
                       <DaywellCard padding="compact" onClick={() => navigateTo('projects')} className="space-y-1">
                         <Layers className="w-4 h-4 text-[var(--dw-primary)]" />
                         <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Projects</h4>
-                        <p className="text-[10px] text-[var(--dw-text-muted)]">Deprecated prototype</p>
+                        <p className="text-[10px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                          {activeProjectsCount} active {activeProjectsCount === 1 ? 'project' : 'projects'}
+                        </p>
                       </DaywellCard>
 
                       <DaywellCard padding="compact" onClick={() => navigateTo('goals')} className="space-y-1">
@@ -2508,8 +2341,6 @@ export default function App() {
                   tab.id === 'more'
                     ? [
                         'more',
-                        'projects',
-                        'project_detail',
                         'goals',
                         'relationships',
                         'priorities',
@@ -2522,7 +2353,13 @@ export default function App() {
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => navigateTo(tab.id)}
+                    onClick={() => {
+                      if (tab.id === 'tasks' && activeScreen === 'tasks' && selectedProjectId) {
+                        setSelectedProjectId(null);
+                      } else {
+                        navigateTo(tab.id);
+                      }
+                    }}
                     aria-label={tab.aria}
                     aria-current={isSelected ? 'page' : undefined}
                     className="flex flex-col items-center justify-center min-h-[48px] py-1 group cursor-pointer active:scale-95 transition-transform"

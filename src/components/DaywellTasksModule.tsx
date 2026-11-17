@@ -15,6 +15,9 @@ import {
   Loader2,
 } from 'lucide-react';
 import { validateTaskForm, isFormDirty } from '../domain/formValidationAndNavigation';
+import { SharedProject } from '../domain/sharedFoundation';
+import { projectsService } from '../services/projectsService';
+import { ProjectsWorkspaceView } from './projects';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import {
   DaywellButton,
@@ -48,6 +51,7 @@ export interface DaywellTask {
   isRecurring?: boolean;
   recurringRule?: 'daily' | 'weekly' | 'monthly';
   subtasks: TaskSubItem[];
+  projectId?: string;
   projectName?: string;
   createdAt: string;
 }
@@ -57,6 +61,10 @@ interface DaywellTasksModuleProps {
   onUpdateTasks: (updated: DaywellTask[]) => void;
   onRequestQuickCapture?: () => void;
   onNavigateToCalendar?: (dateStr: string) => void;
+  activeSubTab?: 'tasks' | 'projects';
+  onSubTabChange?: (tab: 'tasks' | 'projects') => void;
+  selectedProjectId?: string | null;
+  onSelectProjectId?: (projectId: string | null) => void;
 }
 
 const DEFAULT_SAMPLE_TASKS: DaywellTask[] = [
@@ -168,7 +176,28 @@ const DEFAULT_SAMPLE_TASKS: DaywellTask[] = [
 export function DaywellTasksModule({
   tasks,
   onUpdateTasks,
+  activeSubTab: controlledSubTab,
+  onSubTabChange,
+  selectedProjectId: controlledProjectId,
+  onSelectProjectId,
 }: DaywellTasksModuleProps) {
+  const [internalSubTab, setInternalSubTab] = useState<'tasks' | 'projects'>('tasks');
+  const [internalProjectId, setInternalProjectId] = useState<string | null>(null);
+  const [projectCreateTrigger, setProjectCreateTrigger] = useState(0);
+
+  const subTab = controlledSubTab ?? internalSubTab;
+  const setSubTab = (next: 'tasks' | 'projects') => {
+    if (onSubTabChange) onSubTabChange(next);
+    else setInternalSubTab(next);
+  };
+
+  const selectedProjectId =
+    controlledProjectId !== undefined ? controlledProjectId : internalProjectId;
+  const setSelectedProjectId = (next: string | null) => {
+    if (onSelectProjectId) onSelectProjectId(next);
+    else setInternalProjectId(next);
+  };
+
   // Filter tab: 'today' | 'inbox' | 'upcoming' | 'completed'
   const [activeFilter, setActiveFilter] = useState<'today' | 'inbox' | 'upcoming' | 'completed'>('today');
 
@@ -188,6 +217,7 @@ export function DaywellTasksModule({
   const [formScheduledDate, setFormScheduledDate] = useState<string>('');
   const [formScheduledTime, setFormScheduledTime] = useState<string>('');
   const [formProject, setFormProject] = useState<string>('Personal');
+  const [formProjectId, setFormProjectId] = useState<string>('');
   const [formHasReminder, setFormHasReminder] = useState<boolean>(false);
   const [formIsRecurring, setFormIsRecurring] = useState<boolean>(false);
   const [formRecurringRule, setFormRecurringRule] = useState<'daily' | 'weekly' | 'monthly'>('daily');
@@ -200,6 +230,11 @@ export function DaywellTasksModule({
   const [showUnsavedPrompt, setShowUnsavedPrompt] = useState(false);
   const [initialTaskValues, setInitialTaskValues] = useState<Record<string, unknown> | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
+
+  const availableProjects: SharedProject[] = useMemo(() => {
+    if (!isModalOpen) return [];
+    return projectsService.listProjects({ includeArchived: false });
+  }, [isModalOpen]);
 
   // Undo Toast state
   const [undoToast, setUndoToast] = useState<{ message: string; undoAction: () => void } | null>(null);
@@ -315,6 +350,7 @@ export function DaywellTasksModule({
     scheduledDate: formScheduledDate,
     scheduledTime: formScheduledTime,
     projectName: formProject,
+    projectId: formProjectId,
     hasReminder: formHasReminder,
     isRecurring: formIsRecurring,
     recurringRule: formRecurringRule,
@@ -342,6 +378,7 @@ export function DaywellTasksModule({
     setFormScheduledDate(initScheduledDate);
     setFormScheduledTime('');
     setFormProject('Personal');
+    setFormProjectId('');
     setFormHasReminder(false);
     setFormIsRecurring(false);
     setFormRecurringRule('daily');
@@ -358,6 +395,7 @@ export function DaywellTasksModule({
       scheduledDate: initScheduledDate,
       scheduledTime: '',
       projectName: 'Personal',
+      projectId: '',
       hasReminder: false,
       isRecurring: false,
       recurringRule: 'daily',
@@ -380,6 +418,7 @@ export function DaywellTasksModule({
     setFormScheduledDate(task.scheduledDate || '');
     setFormScheduledTime(task.scheduledTime || '');
     setFormProject(task.projectName || 'Personal');
+    setFormProjectId(task.projectId || '');
     setFormHasReminder(task.hasReminder);
     setFormIsRecurring(task.isRecurring || false);
     setFormRecurringRule(task.recurringRule || 'daily');
@@ -397,6 +436,7 @@ export function DaywellTasksModule({
       scheduledDate: task.scheduledDate || '',
       scheduledTime: task.scheduledTime || '',
       projectName: task.projectName || 'Personal',
+      projectId: task.projectId || '',
       hasReminder: task.hasReminder,
       isRecurring: task.isRecurring || false,
       recurringRule: task.recurringRule || 'daily',
@@ -433,6 +473,12 @@ export function DaywellTasksModule({
     setIsSubmitting(true);
 
     const prev = [...tasks];
+    const cleanProjectId = formProjectId.trim() || undefined;
+    const matchedProject = cleanProjectId
+      ? projectsService.getProject(cleanProjectId)
+      : undefined;
+    const resolvedProjectName =
+      matchedProject?.title ?? (formProject.trim() || 'Personal');
 
     if (editingTaskId) {
       const updated = tasks.map((t) =>
@@ -445,7 +491,8 @@ export function DaywellTasksModule({
               dueDate: formDueDate || undefined,
               scheduledDate: formScheduledDate || undefined,
               scheduledTime: formScheduledTime || undefined,
-              projectName: formProject.trim() || 'Personal',
+              projectId: cleanProjectId,
+              projectName: resolvedProjectName,
               hasReminder: formHasReminder,
               isRecurring: formIsRecurring,
               recurringRule: formIsRecurring ? formRecurringRule : undefined,
@@ -463,13 +510,14 @@ export function DaywellTasksModule({
         id: `t-${Date.now()}`,
         title: formTitle.trim(),
         description: formDescription.trim() || undefined,
-        category: formProject.trim() || 'Personal',
+        category: resolvedProjectName,
         priority: formPriority,
         completed: false,
         dueDate: formDueDate || undefined,
         scheduledDate: formScheduledDate || undefined,
         scheduledTime: formScheduledTime || undefined,
-        projectName: formProject.trim() || 'Personal',
+        projectId: cleanProjectId,
+        projectName: resolvedProjectName,
         hasReminder: formHasReminder,
         isRecurring: formIsRecurring,
         recurringRule: formIsRecurring ? formRecurringRule : undefined,
@@ -532,90 +580,144 @@ export function DaywellTasksModule({
         </div>
       )}
 
-      {/* Top Bar */}
-      <div className="flex items-start justify-between pt-1">
-        <div>
-          <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
-            A CLEAR NEXT STEP
+      {/* Top Bar & Segmented Switcher (hidden while drilled into a specific ProjectDetailView) */}
+      {!(subTab === 'projects' && selectedProjectId) && (
+        <>
+          <div className="flex items-start justify-between pt-1">
+            <div>
+              <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                {subTab === 'projects'
+                  ? 'MAKE ROOM FOR THE MEANINGFUL'
+                  : 'A CLEAR NEXT STEP'}
+              </div>
+              <h1 className="dw-type-display text-[var(--dw-text-primary)]">
+                {subTab === 'projects' ? 'Projects' : 'Tasks'}
+              </h1>
+            </div>
+            <DaywellIconButton
+              label={subTab === 'projects' ? 'New Project' : 'Add New Task'}
+              tone="primary"
+              onClick={() => {
+                if (subTab === 'projects') {
+                  setProjectCreateTrigger((n) => n + 1);
+                } else {
+                  handleOpenCreate();
+                }
+              }}
+              icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
+              className="bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] hover:opacity-90"
+            />
           </div>
-          <h1 className="dw-type-display text-[var(--dw-text-primary)]">
-            Tasks
-          </h1>
-        </div>
-        <DaywellIconButton
-          label="Add New Task"
-          tone="primary"
-          onClick={handleOpenCreate}
-          icon={<Plus className="w-5 h-5 stroke-[2.5]" />}
-          className="bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] hover:opacity-90"
-        />
-      </div>
 
-      {/* Search Bar & Sorter */}
-      <div className="flex items-center gap-2">
-        <DaywellSearchField
-          value={searchQuery}
-          onChange={setSearchQuery}
-          placeholder="Search your tasks and projects..."
-          ariaLabel="Search tasks and projects"
-          className="flex-1"
-        />
-        <select
-          aria-label="Sort tasks by"
-          value={sortBy}
-          onChange={(e) => setSortBy(e.target.value as 'priority' | 'time' | 'title')}
-          className="min-h-[42px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-3 py-2 text-[var(--dw-text-secondary)] outline-none focus:border-[var(--dw-primary)]"
-        >
-          <option value="priority">Priority</option>
-          <option value="time">Time</option>
-          <option value="title">Alphabetical</option>
-        </select>
-      </div>
+          <div
+            role="tablist"
+            aria-label="Tasks module sections"
+            className="grid grid-cols-2 gap-1 p-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]"
+          >
+            {(
+              [
+                { id: 'tasks', label: 'Tasks' },
+                { id: 'projects', label: 'Projects' },
+              ] as const
+            ).map((tab) => {
+              const active = subTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => {
+                    setSubTab(tab.id);
+                    if (tab.id === 'tasks') setSelectedProjectId(null);
+                  }}
+                  className={`min-h-[38px] text-xs font-bold rounded-[var(--dw-radius-sm)] transition-all cursor-pointer ${
+                    active
+                      ? 'bg-[var(--dw-card)] text-[var(--dw-text-primary)] shadow-xs border border-[var(--dw-border)]'
+                      : 'text-[var(--dw-text-secondary)] hover:text-[var(--dw-text-primary)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+        </>
+      )}
 
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" role="tablist" aria-label="Task views">
-        {(
-          [
-            { id: 'today', label: `Today (${tabCounts.todayCount})` },
-            { id: 'inbox', label: `Inbox (${tabCounts.inboxCount})` },
-            { id: 'upcoming', label: `Upcoming (${tabCounts.upcomingCount})` },
-            { id: 'completed', label: `Completed (${tabCounts.completedCount})` },
-          ] as const
-        ).map((tab) => {
-          const active = activeFilter === tab.id;
-          return (
-            <button
-              key={tab.id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => setActiveFilter(tab.id)}
-              className={`min-h-[36px] text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 cursor-pointer ${
-                active
-                  ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
-                  : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)] hover:bg-[var(--dw-surface-subtle)]'
-              }`}
+      {subTab === 'projects' ? (
+        <ProjectsWorkspaceView
+          selectedProjectId={selectedProjectId}
+          onSelectProjectId={setSelectedProjectId}
+          externalCreateTrigger={projectCreateTrigger}
+        />
+      ) : (
+        <>
+          {/* Search Bar & Sorter */}
+          <div className="flex items-center gap-2">
+            <DaywellSearchField
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder="Search your tasks and projects..."
+              ariaLabel="Search tasks and projects"
+              className="flex-1"
+            />
+            <select
+              aria-label="Sort tasks by"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'priority' | 'time' | 'title')}
+              className="min-h-[42px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-3 py-2 text-[var(--dw-text-secondary)] outline-none focus:border-[var(--dw-primary)]"
             >
-              {tab.label}
-            </button>
-          );
-        })}
-      </div>
+              <option value="priority">Priority</option>
+              <option value="time">Time</option>
+              <option value="title">Alphabetical</option>
+            </select>
+          </div>
 
-      {/* Status Progress Header */}
-      <div className="flex items-center justify-between pt-1">
-        <div>
-          <span className="dw-type-numeric-body text-xl font-bold text-[var(--dw-text-primary)]">
-            {tabCounts.completedCount} of {tasks.length}
-          </span>
-          <p className="dw-type-label text-[var(--dw-text-muted)]">total tasks completed</p>
-        </div>
-        <DaywellStatusBadge
-          tone="neutral"
-          showIcon={false}
-          label={`${activeFilter.toUpperCase()} · ${filteredTasks.length} ITEMS`}
-        />
-      </div>
+          {/* Filter Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" role="tablist" aria-label="Task views">
+            {(
+              [
+                { id: 'today', label: `Today (${tabCounts.todayCount})` },
+                { id: 'inbox', label: `Inbox (${tabCounts.inboxCount})` },
+                { id: 'upcoming', label: `Upcoming (${tabCounts.upcomingCount})` },
+                { id: 'completed', label: `Completed (${tabCounts.completedCount})` },
+              ] as const
+            ).map((tab) => {
+              const active = activeFilter === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setActiveFilter(tab.id)}
+                  className={`min-h-[36px] text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 cursor-pointer ${
+                    active
+                      ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
+                      : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)] hover:bg-[var(--dw-surface-subtle)]'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Status Progress Header */}
+          <div className="flex items-center justify-between pt-1">
+            <div>
+              <span className="dw-type-numeric-body text-xl font-bold text-[var(--dw-text-primary)]">
+                {tabCounts.completedCount} of {tasks.length}
+              </span>
+              <p className="dw-type-label text-[var(--dw-text-muted)]">total tasks completed</p>
+            </div>
+            <DaywellStatusBadge
+              tone="neutral"
+              showIcon={false}
+              label={`${activeFilter.toUpperCase()} · ${filteredTasks.length} ITEMS`}
+            />
+          </div>
 
       {/* Task List */}
       <div className="space-y-2 pt-1">
@@ -777,6 +879,8 @@ export function DaywellTasksModule({
         title="Capture first. Organize later."
         message="Your Inbox holds unorganized thoughts. Assign projects, due dates, and checklist items when you are ready to focus."
       />
+        </>
+      )}
 
       {/* TASK MODAL (Create & Edit) */}
       {isModalOpen && (
@@ -863,15 +967,35 @@ export function DaywellTasksModule({
 
                 <div>
                   <label className="block dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)] mb-1">
-                    Project / Area (Optional)
+                    {availableProjects.length > 0 ? 'Linked Project (Optional)' : 'Project / Area (Optional)'}
                   </label>
-                  <input
-                    type="text"
-                    value={formProject}
-                    onChange={(e) => setFormProject(e.target.value)}
-                    placeholder="e.g. Portfolio refresh"
-                    className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
-                  />
+                  {availableProjects.length > 0 ? (
+                    <select
+                      value={formProjectId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setFormProjectId(nextId);
+                        const found = availableProjects.find((p) => p.id === nextId);
+                        setFormProject(found ? found.title : 'Personal');
+                      }}
+                      className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                    >
+                      <option value="">Personal / Inbox</option>
+                      {availableProjects.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      type="text"
+                      value={formProject}
+                      onChange={(e) => setFormProject(e.target.value)}
+                      placeholder="e.g. Portfolio refresh"
+                      className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                    />
+                  )}
                 </div>
               </div>
 

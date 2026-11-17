@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../application/projects/projects_controller.dart';
 import '../../application/tasks/tasks_controller.dart';
 import '../../application/tasks/tasks_state.dart';
 import '../../core/date/shared_date.dart';
@@ -7,15 +8,19 @@ import '../../core/shared_foundation.dart';
 import '../../domain/tasks/task_models.dart';
 import '../app_state.dart';
 import '../widgets/shared_ui_widgets.dart';
+import 'projects/project_form_sheet.dart';
+import 'projects/projects_workspace_tab.dart';
 
 class TasksView extends StatefulWidget {
   final AppStateManager? state;
   final TasksController? controller;
+  final ProjectsController? projectsController;
 
   const TasksView({
     super.key,
     this.state,
     this.controller,
+    this.projectsController,
   }) : assert(
           state != null || controller != null,
           'Either state or controller must be provided to TasksView',
@@ -23,6 +28,9 @@ class TasksView extends StatefulWidget {
 
   TasksController get effectiveController =>
       controller ?? state!.tasksController;
+
+  ProjectsController? get effectiveProjectsController =>
+      projectsController ?? state?.projectsController;
 
   @override
   State<TasksView> createState() => _TasksViewState();
@@ -591,7 +599,20 @@ class _TasksViewState extends State<TasksView>
           ),
           floatingActionButton: FloatingActionButton.extended(
             onPressed: _tabController.index == 1
-                ? () => _showAddProjectModal(controller)
+                ? () {
+                    final projectsCtrl = widget.effectiveProjectsController;
+                    if (projectsCtrl != null) {
+                      unawaited(
+                        ProjectFormSheet.show(
+                          context,
+                          projectsController: projectsCtrl,
+                          tasksController: controller,
+                        ),
+                      );
+                    } else {
+                      _showAddProjectModal(controller);
+                    }
+                  }
                 : _showQuickAddModal,
             backgroundColor: primary,
             foregroundColor: isDark ? Colors.black : Colors.white,
@@ -674,7 +695,10 @@ class _TasksViewState extends State<TasksView>
                   ),
                 ],
               ),
-              _buildProjectsTab(moduleState),
+              ProjectsWorkspaceTab(
+                projectsController: widget.effectiveProjectsController,
+                tasksController: controller,
+              ),
             ],
           ),
         );
@@ -782,39 +806,4 @@ class _TasksViewState extends State<TasksView>
     );
   }
 
-  Widget _buildProjectsTab(TasksModuleState moduleState) {
-    final projects = moduleState.projects;
-    if (projects.isEmpty) {
-      return const Center(
-          child: Text('No projects yet. Tap + New Project to create one.'));
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(12),
-      itemCount: projects.length,
-      itemBuilder: (_, i) {
-        final p = projects[i];
-        final count = moduleState.tasks
-            .where((t) => t.projectId == p.id && !t.isCompleted)
-            .length;
-        final progress = moduleState.getProjectProgress(p.id);
-        return Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(SharedDesignTokens.radiusMd),
-            side: BorderSide(color: Colors.grey.withOpacity(0.2)),
-          ),
-          child: ListTile(
-            leading: const Icon(Icons.folder_outlined,
-                color: SharedDesignTokens.primaryEmerald),
-            title: Text(p.title,
-                style: const TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text('$progress% complete',
-                style: const TextStyle(fontSize: 11)),
-            trailing: Text('$count active',
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          ),
-        );
-      },
-    );
-  }
 }
