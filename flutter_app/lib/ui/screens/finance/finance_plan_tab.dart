@@ -2789,7 +2789,7 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                           },
                   ),
                 ],
-              ),
+              ],
             ),
           ),
         ),
