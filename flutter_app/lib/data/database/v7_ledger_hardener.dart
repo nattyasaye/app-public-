@@ -725,7 +725,10 @@ class V7LedgerHardener {
         id: a.id,
         name: a.name,
         type: accountType,
-        subType: AccountSubType.fromDbValue(a.subType, fallbackType: accountType),
+        subType: AccountSubType.fromDbValue(
+          a.subType,
+          fallbackType: accountType,
+        ),
         isSystem: a.isSystem,
         currencyCode: a.currencyCode,
         isArchived: a.isArchived,

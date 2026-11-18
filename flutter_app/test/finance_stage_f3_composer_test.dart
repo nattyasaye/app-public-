@@ -367,8 +367,9 @@ void main() {
         final categories = await repo.getAllCategories();
         final byId = {for (final c in categories) c.id: c};
         // Remove legacy row from lookup map to simulate alias-only historical posting.
-        final canonicalOnlyMap = Map<String, TransactionCategoryModel>.from(byId)
-          ..remove('cat-communication');
+        final canonicalOnlyMap =
+            Map<String, TransactionCategoryModel>.from(byId)
+              ..remove('cat-communication');
 
         expect(
           FinanceUiFormatters.formatCategoryBreadcrumb(

@@ -4193,8 +4193,7 @@ class DriftFinanceRepository implements IFinanceRepository {
           'Cannot restore settlement because its debt record no longer exists.',
         );
       }
-      final originMatches =
-          allEntries.where((e) => e.id == debt.originEntryId);
+      final originMatches = allEntries.where((e) => e.id == debt.originEntryId);
       final origin = originMatches.isEmpty ? null : originMatches.first;
       if (origin == null || origin.isVoided || debt.status == 'voided') {
         throw DoubleEntryValidationError(
@@ -4263,9 +4262,9 @@ class DriftFinanceRepository implements IFinanceRepository {
     }
 
     // Guard 7: Commitment settlement cannot be restored if doing so would over-settle its commitment.
-    final targetCmSettlements = await (_db.select(_db.commitmentSettlementsTable)
-          ..where((tbl) => tbl.entryId.equals(entryId)))
-        .get();
+    final cmQuery = _db.select(_db.commitmentSettlementsTable)
+      ..where((tbl) => tbl.entryId.equals(entryId));
+    final targetCmSettlements = await cmQuery.get();
     for (final cs in targetCmSettlements) {
       final commitment = await (_db.select(_db.financialCommitments)
             ..where((tbl) => tbl.id.equals(cs.commitmentId)))

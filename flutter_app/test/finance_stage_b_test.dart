@@ -11,7 +11,8 @@ import 'support/sqlite_test_helper.dart';
 void main() {
   setUpAll(configureSqliteForHostTests);
 
-  group('Finance Stage B (F1) — Ledger Mutation Guards, Vault Sync & Refunds', () {
+  group('Finance Stage B (F1) — Ledger Mutation Guards, Vault Sync & Refunds',
+      () {
     late AppDatabase db;
     late DriftFinanceRepository repo;
 
@@ -308,7 +309,8 @@ void main() {
         // deleteTransaction removes FinancialTransactions row and voids ledger entry;
         // unvoidJournalEntry recreates the dual-write mirror row cleanly
         await repo.deleteTransaction(newTxAfter.id);
-        final entriesAfterDel = await repo.getJournalEntries(includeVoided: true);
+        final entriesAfterDel =
+            await repo.getJournalEntries(includeVoided: true);
         expect(
           entriesAfterDel.firstWhere((e) => e.id == corrEntry.id).isVoided,
           isTrue,
@@ -318,8 +320,9 @@ void main() {
           isFalse,
         );
         await repo.unvoidJournalEntry(corrEntry.id);
+        final txsAfterUnvoid = await repo.getTransactions();
         final restoredDual =
-            (await repo.getTransactions()).firstWhere((t) => t.id == newTxAfter.id);
+            txsAfterUnvoid.firstWhere((t) => t.id == newTxAfter.id);
         expect(restoredDual.isSuperseded, isFalse);
         expect(restoredDual.amountCents, 14000);
 
@@ -517,8 +520,10 @@ void main() {
           originalEntryId: expEntry.id,
           entries: await repo.getJournalEntries(includeVoided: true),
           postings: await repo.getPostings(),
-          accounts:
-              await repo.getAccounts(includeArchived: true, includeSystem: true),
+          accounts: await repo.getAccounts(
+            includeArchived: true,
+            includeSystem: true,
+          ),
           debts: await repo.getDebts(),
           allocations: await repo.getSettlementAllocations(),
         );

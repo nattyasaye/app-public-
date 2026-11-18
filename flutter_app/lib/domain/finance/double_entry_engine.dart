@@ -4236,7 +4236,8 @@ class DoubleEntryEngine {
       }
     }
 
-    final remainingRefundableCents = max(0, originalAmountCents - refundedCents);
+    final remainingRefundableCents =
+        max(0, originalAmountCents - refundedCents);
     String? categoryId;
     for (final p in expenseDebits) {
       if (p.categoryId != null && p.categoryId!.isNotEmpty) {
@@ -4532,8 +4533,7 @@ class DoubleEntryEngine {
     String? customEndIso,
     String? todayIso,
   }) {
-    final today =
-        CalendarDate.tryParse(todayIso) ?? CalendarDate.today();
+    final today = CalendarDate.tryParse(todayIso) ?? CalendarDate.today();
 
     if (mode == ReportPeriodMode.thisMonth) {
       final currStart = today.startOfGregorianMonth;
@@ -4966,13 +4966,15 @@ class DoubleEntryEngine {
             !acc.name.toLowerCase().contains('receivable')) {
           liquidAccounts.add(item);
         }
-      } else if (acc.type == AccountType.liability && acc.subType.isCreditCard) {
+      } else if (acc.type == AccountType.liability &&
+          acc.subType.isCreditCard) {
         creditCardAccounts.add(item);
       }
     }
 
     return AccountBalancesReport(
-      liquidAccounts: List<AccountBalanceReportItem>.unmodifiable(liquidAccounts),
+      liquidAccounts:
+          List<AccountBalanceReportItem>.unmodifiable(liquidAccounts),
       vaultAccounts: List<AccountBalanceReportItem>.unmodifiable(vaultAccounts),
       creditCardAccounts:
           List<AccountBalanceReportItem>.unmodifiable(creditCardAccounts),

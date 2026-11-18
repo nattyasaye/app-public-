@@ -20,7 +20,8 @@ import 'support/sqlite_test_helper.dart';
 void main() {
   setUpAll(configureSqliteForHostTests);
 
-  group('Finance Stage F4 — Reporting, Exports, Portability & Verification', () {
+  group('Finance Stage F4 — Reporting, Exports, Portability & Verification',
+      () {
     late AppDatabase db;
     late DriftFinanceRepository repo;
     late FinanceController controller;
@@ -105,7 +106,8 @@ void main() {
       'Workflow 1 & 2: Dual-calendar Pagume 5/6 resolution, safe deltas, and Occurrence P&L vs Cash Flow separation',
       () async {
         // Pagume 2018 E.C. (2018 % 4 == 2 -> 5 days) vs 2019 E.C. (2019 % 4 == 3 -> 6 days)
-        final nonLeapPagume = DoubleEntryEngine.resolveReportPeriodWithComparison(
+        final nonLeapPagume =
+            DoubleEntryEngine.resolveReportPeriodWithComparison(
           mode: ReportPeriodMode.ethiopianMonth,
           ethYear: 2018,
           ethMonth: 13,
@@ -161,9 +163,11 @@ void main() {
         expect(cmp.currentCashFlow.outflowCents, 175000);
 
         // Safe zero-baseline percentage change verification
-        final zeroBasePos = DoubleEntryEngine.calculateSafePercentageChange(0, 50000);
+        final zeroBasePos =
+            DoubleEntryEngine.calculateSafePercentageChange(0, 50000);
         expect(zeroBasePos.percentageDisplay, '+100% (New)');
-        final dropToZero = DoubleEntryEngine.calculateSafePercentageChange(75000, 0);
+        final dropToZero =
+            DoubleEntryEngine.calculateSafePercentageChange(75000, 0);
         expect(dropToZero.percentageDisplay, '-100.0%');
       },
     );
@@ -217,7 +221,11 @@ void main() {
             );
         await (db.update(db.financialCategories)
               ..where((t) => t.id.equals('cat-cycle-a')))
-            .write(const FinancialCategoriesCompanion(parentId: Value('cat-cycle-b')));
+            .write(
+              const FinancialCategoriesCompanion(
+                parentId: Value('cat-cycle-b'),
+              ),
+            );
 
         await controller.recordDirectExpense(
           accountId: 'acc-bank',
@@ -410,19 +418,42 @@ void main() {
 
         final st = controller.state;
         final csvOutputs = [
-          FinanceExportService.exportAccountsCsv(st.accounts, st.postings, entries: st.journalEntries),
+          FinanceExportService.exportAccountsCsv(
+            st.accounts,
+            st.postings,
+            entries: st.journalEntries,
+          ),
           FinanceExportService.exportCategoriesCsv(st.categories),
           FinanceExportService.exportPartiesCsv(st.parties),
-          FinanceExportService.exportJournalEntriesCsv(st.journalEntries, postings: st.postings, accounts: st.accounts),
+          FinanceExportService.exportJournalEntriesCsv(
+            st.journalEntries,
+            postings: st.postings,
+            accounts: st.accounts,
+          ),
           FinanceExportService.exportPostingsCsv(st.postings),
-          FinanceExportService.exportDebtsCsv(st.debts, entries: st.journalEntries, postings: st.postings, accounts: st.accounts),
-          FinanceExportService.exportSettlementAllocationsCsv(st.settlementAllocations),
-          FinanceExportService.exportCommitmentsCsv(st.commitments, accounts: st.accounts),
-          FinanceExportService.exportCommitmentSettlementsCsv(st.commitmentSettlements),
+          FinanceExportService.exportDebtsCsv(
+            st.debts,
+            entries: st.journalEntries,
+            postings: st.postings,
+            accounts: st.accounts,
+          ),
+          FinanceExportService.exportSettlementAllocationsCsv(
+            st.settlementAllocations,
+          ),
+          FinanceExportService.exportCommitmentsCsv(
+            st.commitments,
+            accounts: st.accounts,
+          ),
+          FinanceExportService.exportCommitmentSettlementsCsv(
+            st.commitmentSettlements,
+          ),
           FinanceExportService.exportSavingsGoalsCsv(st.savingsGoals),
           FinanceExportService.exportBudgetsCsv(st.budgets),
           FinanceExportService.exportRecurringRulesCsv(st.recurringRules),
-          FinanceExportService.exportTransactionsCsv(st.transactions, entries: st.journalEntries),
+          FinanceExportService.exportTransactionsCsv(
+            st.transactions,
+            entries: st.journalEntries,
+          ),
         ];
         expect(csvOutputs.length, 13);
         for (final csv in csvOutputs) {
@@ -466,8 +497,10 @@ void main() {
           expect(sql.contains('CREATE TABLE IF NOT EXISTS $table'), isTrue);
         }
         expect(sql.contains('a.is_system = 0'), isTrue);
-        final parentIdx = sql.indexOf("INSERT INTO categories VALUES ('cat-food'");
-        final childIdx = sql.indexOf("INSERT INTO categories VALUES ('cat-amharic'");
+        final parentIdx =
+            sql.indexOf("INSERT INTO categories VALUES ('cat-food'");
+        final childIdx =
+            sql.indexOf("INSERT INTO categories VALUES ('cat-amharic'");
         expect(parentIdx, greaterThan(0));
         expect(childIdx, greaterThan(parentIdx));
       },
@@ -478,8 +511,20 @@ void main() {
       () async {
         // Seed non-Finance tables that MUST remain completely untouched across Finance-only restore.
         final nowUtc = DateTime.utc(2026, 11, 1);
-        await db.into(db.goals).insert(GoalsCompanion.insert(id: 'goal-1', title: 'Preserve Goal', createdAt: nowUtc));
-        await db.into(db.projects).insert(ProjectsCompanion.insert(id: 'proj-1', title: 'Preserve Project', createdAt: nowUtc));
+        await db.into(db.goals).insert(
+              GoalsCompanion.insert(
+                id: 'goal-1',
+                title: 'Preserve Goal',
+                createdAt: nowUtc,
+              ),
+            );
+        await db.into(db.projects).insert(
+              ProjectsCompanion.insert(
+                id: 'proj-1',
+                title: 'Preserve Project',
+                createdAt: nowUtc,
+              ),
+            );
         await db.into(db.projectTrackingBlocks).insert(
               ProjectTrackingBlocksCompanion.insert(
                 id: 'blk-1',
@@ -501,13 +546,65 @@ void main() {
                 updatedAt: nowUtc,
               ),
             );
-        await db.into(db.milestones).insert(MilestonesCompanion.insert(id: 'ms-1', projectId: 'proj-1', title: 'Preserve Milestone', createdAt: nowUtc));
-        await db.into(db.tasks).insert(TasksCompanion.insert(id: 'task-1', title: 'Preserve Task', projectId: const Value('proj-1'), createdAt: nowUtc, updatedAt: nowUtc));
-        await db.into(db.notes).insert(NotesCompanion.insert(id: 'note-1', title: 'Preserve Note', content: 'Keep content', createdAt: nowUtc, updatedAt: nowUtc));
-        await db.into(db.inboxItems).insert(InboxItemsCompanion.insert(id: 'inb-1', rawText: 'Keep Inbox', createdAt: nowUtc));
-        await db.into(db.calendarEvents).insert(CalendarEventsCompanion.insert(id: 'ev-1', title: 'Keep Event', dateIso: '2026-11-20', createdAt: nowUtc, updatedAt: nowUtc));
-        await db.into(db.reminders).insert(RemindersCompanion.insert(id: 'rem-1', targetId: 'task-1', targetType: 'task', title: const Value('Keep Reminder'), triggerTimeUtc: nowUtc, createdAt: nowUtc));
-        await db.into(db.appSettings).insert(AppSettingsCompanion.insert(key: 'theme_mode', value: 'dark', updatedAt: nowUtc));
+        await db.into(db.milestones).insert(
+              MilestonesCompanion.insert(
+                id: 'ms-1',
+                projectId: 'proj-1',
+                title: 'Preserve Milestone',
+                createdAt: nowUtc,
+              ),
+            );
+        await db.into(db.tasks).insert(
+              TasksCompanion.insert(
+                id: 'task-1',
+                title: 'Preserve Task',
+                projectId: const Value('proj-1'),
+                createdAt: nowUtc,
+                updatedAt: nowUtc,
+              ),
+            );
+        await db.into(db.notes).insert(
+              NotesCompanion.insert(
+                id: 'note-1',
+                title: 'Preserve Note',
+                content: 'Keep content',
+                createdAt: nowUtc,
+                updatedAt: nowUtc,
+              ),
+            );
+        await db.into(db.inboxItems).insert(
+              InboxItemsCompanion.insert(
+                id: 'inb-1',
+                rawText: 'Keep Inbox',
+                createdAt: nowUtc,
+              ),
+            );
+        await db.into(db.calendarEvents).insert(
+              CalendarEventsCompanion.insert(
+                id: 'ev-1',
+                title: 'Keep Event',
+                dateIso: '2026-11-20',
+                createdAt: nowUtc,
+                updatedAt: nowUtc,
+              ),
+            );
+        await db.into(db.reminders).insert(
+              RemindersCompanion.insert(
+                id: 'rem-1',
+                targetId: 'task-1',
+                targetType: 'task',
+                title: const Value('Keep Reminder'),
+                triggerTimeUtc: nowUtc,
+                createdAt: nowUtc,
+              ),
+            );
+        await db.into(db.appSettings).insert(
+              AppSettingsCompanion.insert(
+                key: 'theme_mode',
+                value: 'dark',
+                updatedAt: nowUtc,
+              ),
+            );
 
         await controller.recordDirectExpense(
           accountId: 'acc-bank',
@@ -545,27 +642,54 @@ void main() {
           date: CalendarDate(year: 2026, month: 11, day: 16),
           description: 'Ephemeral Expense Before Restore',
         );
-        expect(controller.state.journalEntries.any((e) => e.description == 'Ephemeral Expense Before Restore'), isTrue);
+        expect(
+          controller.state.journalEntries.any(
+            (e) => e.description == 'Ephemeral Expense Before Restore',
+          ),
+          isTrue,
+        );
 
         final ok = await controller.importFinanceOnlyJson(exportedRaw);
         expect(ok, isTrue);
         expect(controller.state.errorMessage, isNull);
-        expect(controller.state.journalEntries.any((e) => e.description == 'Ephemeral Expense Before Restore'), isFalse);
-        expect(controller.state.journalEntries.any((e) => e.description == 'Exported Expense'), isTrue);
+        expect(
+          controller.state.journalEntries.any(
+            (e) => e.description == 'Ephemeral Expense Before Restore',
+          ),
+          isFalse,
+        );
+        expect(
+          controller.state.journalEntries.any(
+            (e) => e.description == 'Exported Expense',
+          ),
+          isTrue,
+        );
 
         // Verify ALL non-Finance tables survived intact + foreign keys valid
         expect((await db.select(db.tasks).get()).single.id, 'task-1');
         expect((await db.select(db.notes).get()).single.id, 'note-1');
         expect((await db.select(db.projects).get()).single.id, 'proj-1');
-        expect((await db.select(db.projectTrackingBlocks).get()).single.id, 'blk-1');
-        expect((await db.select(db.projectTrackingRecords).get()).single.id, 'rec-1');
+        expect(
+          (await db.select(db.projectTrackingBlocks).get()).single.id,
+          'blk-1',
+        );
+        expect(
+          (await db.select(db.projectTrackingRecords).get()).single.id,
+          'rec-1',
+        );
         expect((await db.select(db.milestones).get()).single.id, 'ms-1');
         expect((await db.select(db.goals).get()).single.id, 'goal-1');
         expect((await db.select(db.inboxItems).get()).single.id, 'inb-1');
         expect((await db.select(db.calendarEvents).get()).single.id, 'ev-1');
         expect((await db.select(db.reminders).get()).single.id, 'rem-1');
-        expect((await (db.select(db.appSettings)..where((t) => t.key.equals('theme_mode'))).getSingle()).value, 'dark');
-        expect((await db.customSelect('PRAGMA foreign_key_check').get()).isEmpty, isTrue);
+        final savedTheme = await (db.select(db.appSettings)
+              ..where((t) => t.key.equals('theme_mode')))
+            .getSingle();
+        expect(savedTheme.value, 'dark');
+        expect(
+          (await db.customSelect('PRAGMA foreign_key_check').get()).isEmpty,
+          isTrue,
+        );
 
         // Reject full cross-module backup
         final fullBackup = jsonEncode(await coordinator.exportSnapshot());
@@ -578,10 +702,19 @@ void main() {
 
         // Reject unbalanced journal entries fail-closed without touching DB
         final unbalancedMap = Map<String, dynamic>.from(exportedMap);
-        final rawPostings = List<dynamic>.from(exportedMap['postings'] as List<dynamic>);
+        final rawPostings =
+            List<dynamic>.from(exportedMap['postings'] as List<dynamic>);
         unbalancedMap['postings'] = [rawPostings.first];
-        expect(await controller.importFinanceOnlyJson(jsonEncode(unbalancedMap)), isFalse);
-        expect(controller.state.journalEntries.any((e) => e.description == 'Exported Expense'), isTrue);
+        expect(
+          await controller.importFinanceOnlyJson(jsonEncode(unbalancedMap)),
+          isFalse,
+        );
+        expect(
+          controller.state.journalEntries.any(
+            (e) => e.description == 'Exported Expense',
+          ),
+          isTrue,
+        );
 
         // Workflow 8: Accept Web-exported v5 / legacy schemaVersion 4 Finance-only snapshot cleanly
         final legacyWebJson = jsonEncode({
@@ -614,7 +747,10 @@ void main() {
           'transactions': [],
         });
         expect(await controller.importFinanceOnlyJson(legacyWebJson), isTrue);
-        expect(controller.state.accounts.any((a) => a.id == 'acc-web-etb'), isTrue);
+        expect(
+          controller.state.accounts.any((a) => a.id == 'acc-web-etb'),
+          isTrue,
+        );
       },
     );
 

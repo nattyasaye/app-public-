@@ -255,7 +255,8 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
           builder: (context, constraints) {
             final isWide = constraints.maxWidth >= 640;
             final cashCard = _buildCashFlowCard(context, period, comparison);
-            final pnlCard = _buildOccurrencePnlCard(context, period, comparison);
+            final pnlCard =
+                _buildOccurrencePnlCard(context, period, comparison);
             if (isWide) {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1415,8 +1416,7 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
             label: 'Restore Finance',
             variant: DaywellButtonVariant.primary,
             size: DaywellButtonSize.compact,
-            onPressed: () =>
-                Navigator.of(dialogCtx).pop(textCtrl.text.trim()),
+            onPressed: () => Navigator.of(dialogCtx).pop(textCtrl.text.trim()),
           ),
         ],
       ),

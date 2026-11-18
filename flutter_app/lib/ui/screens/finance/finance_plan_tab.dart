@@ -1352,7 +1352,8 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
           : '',
     );
     var dueDate = existing?.dueDate ?? CalendarDate.today();
-    final catItems = FinanceUiFormatters.buildCategoryDropdownItemsWithPreserved(
+    final catItems =
+        FinanceUiFormatters.buildCategoryDropdownItemsWithPreserved(
       state.categories,
       type: 'expense',
       preserveCategoryId: existing?.categoryId,
@@ -2852,7 +2853,8 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                 const SizedBox(height: SharedDesignTokens.spacingCompact),
                 if (accounts.isEmpty)
                   const DaywellStatusBanner(
-                    message: 'Add an active spendable ETB account to settle debt.',
+                    message:
+                        'Add an active spendable ETB account to settle debt.',
                     tone: DaywellStatusTone.warning,
                   )
                 else ...[

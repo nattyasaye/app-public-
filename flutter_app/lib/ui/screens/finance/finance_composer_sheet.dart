@@ -173,8 +173,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   }
 
   void _syncAccountsForMode() {
-    final eligible =
-        _eligibleAccountsForMode(widget.controller.state, _mode);
+    final eligible = _eligibleAccountsForMode(widget.controller.state, _mode);
     if (eligible.isEmpty) {
       _accountId = null;
       _destinationAccountId = null;
@@ -380,7 +379,9 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
 
     if (_accountId == null ||
         !eligibleAccounts.any((a) => a.id == _accountId)) {
-      setState(() => _validationError = 'Select an active verified ETB account.');
+      setState(
+        () => _validationError = 'Select an active verified ETB account.',
+      );
       return;
     }
 
@@ -851,8 +852,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                   ChoiceChip(
                     label: const Text('Expense'),
                     selected: _mode == FinanceComposerMode.expense,
-                    onSelected: (_) =>
-                        _switchMode(FinanceComposerMode.expense),
+                    onSelected: (_) => _switchMode(FinanceComposerMode.expense),
                   ),
                   ChoiceChip(
                     label: const Text('Income'),

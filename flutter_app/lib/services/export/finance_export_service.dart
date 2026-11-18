@@ -458,8 +458,9 @@ class FinanceExportService {
       );
     }
     for (final c in orderedCats) {
-      final safeParent =
-          (c.parentId != null && catIds.contains(c.parentId)) ? c.parentId : null;
+      final safeParent = (c.parentId != null && catIds.contains(c.parentId))
+          ? c.parentId
+          : null;
       buffer.writeln(
         'INSERT INTO categories VALUES (${_sqlText(c.id)}, ${_sqlText(c.name)}, ${_sqlText(c.type)}, ${_sqlText(safeParent)}, ${_sqlText(c.colorHex)}, ${c.sortOrder}, ${c.isDefault ? 1 : 0}, ${c.isArchived ? 1 : 0});',
       );
