@@ -574,7 +574,7 @@ class V6LedgerMigrator {
           : max(0, debt.principalCents - actualPaid);
       final String expectedStatus;
       if (originVoided) {
-        expectedStatus = 'writtenOff';
+        expectedStatus = 'written_off';
       } else if (isWrittenOff) {
         expectedStatus = debt.status;
       } else {

@@ -16,6 +16,8 @@
  */
 
 import {
+  CANONICAL_DEBT_STATUSES,
+  CANONICAL_ENTRY_TYPES,
   calculateSharedAccountBalance,
   calculateSharedCombinedBalance,
   calculateSharedTotalIncome,
@@ -26,6 +28,8 @@ import {
   SYSTEM_CONTROL_ACCOUNT_IDS,
   SharedCommitment,
   SharedCommitmentSettlement,
+  SharedDebtStatus,
+  SharedEntryType,
   SharedRecurringRule,
   SharedSavingsGoal,
 } from './sharedFoundation';
@@ -42,6 +46,8 @@ import {
 } from './financialEngine';
 
 export {
+  CANONICAL_DEBT_STATUSES,
+  CANONICAL_ENTRY_TYPES,
   type CurrencyValidationTier,
   normalizeCurrencyCode,
   classifyCurrencyCode,
@@ -53,17 +59,106 @@ export {
 };
 
 export type AccountType = 'asset' | 'liability' | 'equity' | 'income' | 'expense';
-export type EntryType =
-  | 'standard'
-  | 'transfer'
-  | 'debt_issuance'
-  | 'settlement'
-  | 'split_expense'
-  | 'adjustment'
-  | 'write_off';
+export type EntryType = SharedEntryType;
 export type Direction = 'debit' | 'credit';
 export type DebtType = 'receivable' | 'payable';
-export type DebtStatus = 'active' | 'settled' | 'written_off' | 'voided';
+export type DebtStatus = SharedDebtStatus;
+
+export const ENTRY_TYPE_LEGACY_ALIASES: Readonly<Record<string, EntryType>> = {
+  debtIssuance: 'debt_issuance',
+  splitExpense: 'split_expense',
+  writeOff: 'write_off',
+  debt_origin: 'debt_issuance',
+  debt_settlement: 'settlement',
+  opening_balance: 'adjustment',
+  opening: 'adjustment',
+  correction: 'adjustment',
+  void_reversal: 'adjustment',
+};
+
+export const DEBT_STATUS_LEGACY_ALIASES: Readonly<Record<string, DebtStatus>> = {
+  partially_settled: 'active',
+  writtenOff: 'written_off',
+};
+
+const CANONICAL_ENTRY_TYPE_SET = new Set<string>(CANONICAL_ENTRY_TYPES);
+const CANONICAL_DEBT_STATUS_SET = new Set<string>(CANONICAL_DEBT_STATUSES);
+
+export function tryNormalizeEntryType(raw: string | null | undefined): EntryType | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (CANONICAL_ENTRY_TYPE_SET.has(trimmed)) {
+    return trimmed as EntryType;
+  }
+  return ENTRY_TYPE_LEGACY_ALIASES[trimmed] ?? null;
+}
+
+export function normalizeEntryType(
+  raw: unknown,
+  options?: { defaultIfOmitted?: EntryType }
+): EntryType {
+  if (raw === undefined || raw === null) {
+    if (options?.defaultIfOmitted !== undefined) {
+      return options.defaultIfOmitted;
+    }
+    throw new DoubleEntryValidationError('Invalid entryType: expected a non-empty string.');
+  }
+  if (typeof raw !== 'string') {
+    throw new DoubleEntryValidationError(
+      `Invalid entryType: expected string, got ${typeof raw}.`
+    );
+  }
+  const normalized = tryNormalizeEntryType(raw);
+  if (!normalized) {
+    throw new DoubleEntryValidationError(
+      `Unsupported entryType "${raw.trim()}".`
+    );
+  }
+  return normalized;
+}
+
+export function parseEntryType(raw: unknown): EntryType {
+  return normalizeEntryType(raw);
+}
+
+export function tryNormalizeDebtStatus(raw: string | null | undefined): DebtStatus | null {
+  if (raw == null) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  if (CANONICAL_DEBT_STATUS_SET.has(trimmed)) {
+    return trimmed as DebtStatus;
+  }
+  return DEBT_STATUS_LEGACY_ALIASES[trimmed] ?? null;
+}
+
+export function normalizeDebtStatus(
+  raw: unknown,
+  options?: { defaultIfOmitted?: DebtStatus }
+): DebtStatus {
+  if (raw === undefined || raw === null) {
+    if (options?.defaultIfOmitted !== undefined) {
+      return options.defaultIfOmitted;
+    }
+    throw new DoubleEntryValidationError('Invalid debt status: expected a non-empty string.');
+  }
+  if (typeof raw !== 'string') {
+    throw new DoubleEntryValidationError(
+      `Invalid debt status: expected string, got ${typeof raw}.`
+    );
+  }
+  const normalized = tryNormalizeDebtStatus(raw);
+  if (!normalized) {
+    throw new DoubleEntryValidationError(
+      `Unsupported debt status "${raw.trim()}".`
+    );
+  }
+  return normalized;
+}
+
+export function parseDebtStatus(raw: unknown): DebtStatus {
+  return normalizeDebtStatus(raw);
+}
 export type AccountSubType =
   | 'cash'
   | 'bank'

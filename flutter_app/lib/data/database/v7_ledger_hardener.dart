@@ -166,7 +166,7 @@ class V7LedgerHardener {
     for (final debt in debts) {
       final originVoided = voidedEntryIds.contains(debt.originEntryId);
       final normalizedRawStatus =
-          debt.status == 'writtenOff' ? 'written_off' : debt.status;
+          DebtStatus.tryParse(debt.status)?.dbValue ?? debt.status;
 
       final linkedWriteOffId = debt.writeOffEntryId;
       final writeOffEntry =
@@ -254,10 +254,7 @@ class V7LedgerHardener {
         .map(
           (e) => JournalEntryModel(
             id: e.id,
-            entryType: EntryType.values.firstWhere(
-              (t) => t.name == e.entryType,
-              orElse: () => EntryType.standard,
-            ),
+            entryType: EntryType.fromDbValue(e.entryType),
             description: e.description,
             occurrenceDate: e.occurrenceDate,
             isVoided: e.isVoided,
@@ -481,6 +478,31 @@ class V7LedgerHardener {
       "UPDATE debts_table SET status = 'written_off' "
       "WHERE status = 'writtenOff';",
     );
+    await db.customStatement(
+      "UPDATE debts_table SET status = 'active' "
+      "WHERE status = 'partially_settled';",
+    );
+    await db.customStatement(
+      "UPDATE journal_entries_table SET entry_type = 'debt_issuance' "
+      "WHERE entry_type IN ('debtIssuance', 'debt_origin');",
+    );
+    await db.customStatement(
+      "UPDATE journal_entries_table SET entry_type = 'split_expense' "
+      "WHERE entry_type = 'splitExpense';",
+    );
+    await db.customStatement(
+      "UPDATE journal_entries_table SET entry_type = 'write_off' "
+      "WHERE entry_type = 'writeOff';",
+    );
+    await db.customStatement(
+      "UPDATE journal_entries_table SET entry_type = 'settlement' "
+      "WHERE entry_type = 'debt_settlement';",
+    );
+    await db.customStatement(
+      "UPDATE journal_entries_table SET entry_type = 'adjustment' "
+      "WHERE entry_type IN "
+      "('opening_balance', 'opening', 'correction', 'void_reversal');",
+    );
 
     final debts = await db.select(db.debtsTable).get();
     final entries = await db.select(db.journalEntriesTable).get();
@@ -500,8 +522,14 @@ class V7LedgerHardener {
       for (final d in debts)
         if (d.writeOffEntryId != null) d.writeOffEntryId!,
     };
-    final activeWriteOffEntries =
-        entries.where((e) => e.entryType == 'writeOff' && !e.isVoided).toList();
+    final activeWriteOffEntries = entries
+        .where(
+          (e) =>
+              (e.entryType == EntryType.writeOff.dbValue ||
+                  e.entryType == 'writeOff') &&
+              !e.isVoided,
+        )
+        .toList();
 
     for (final debt in debts) {
       if (voidedEntryIds.contains(debt.originEntryId)) {
@@ -854,7 +882,7 @@ class V7LedgerHardener {
         await db.into(db.journalEntriesTable).insert(
               JournalEntriesTableCompanion.insert(
                 id: entry.id,
-                entryType: entry.entryType.name,
+                entryType: entry.entryType.dbValue,
                 description: entry.description,
                 occurrenceDate: entry.occurrenceDate,
                 isVoided: Value(entry.isVoided),

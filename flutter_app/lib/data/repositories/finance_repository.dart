@@ -3311,7 +3311,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     await _db.into(_db.journalEntriesTable).insert(
           JournalEntriesTableCompanion.insert(
             id: entry.id,
-            entryType: entry.entryType.name,
+            entryType: entry.entryType.dbValue,
             description: entry.description,
             occurrenceDate: entry.occurrenceDate,
             isVoided: Value(entry.isVoided),
@@ -3577,10 +3577,7 @@ class DriftFinanceRepository implements IFinanceRepository {
   }
 
   JournalEntryModel _mapJournalEntryRow(JournalEntriesTableData row) {
-    final entryType = EntryType.values.firstWhere(
-      (e) => e.name == row.entryType,
-      orElse: () => EntryType.standard,
-    );
+    final entryType = EntryType.fromDbValue(row.entryType);
     return JournalEntryModel(
       id: row.id,
       entryType: entryType,

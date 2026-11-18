@@ -32,13 +32,24 @@ import {
   validateRecord,
 } from '../domain/projectsEngine';
 import {
+  CANONICAL_DEBT_STATUSES,
+  CANONICAL_ENTRY_TYPES,
+  DEBT_STATUS_LEGACY_ALIASES,
   Debt,
+  DebtStatus,
+  ENTRY_TYPE_LEGACY_ALIASES,
+  EntryType,
   isEtbCurrency,
+  isValidCurrencyCode,
   JournalEntry,
   normalizeCurrencyCode,
+  normalizeDebtStatus,
+  normalizeEntryType,
   Party,
   Posting,
   SettlementAllocation,
+  tryNormalizeDebtStatus,
+  tryNormalizeEntryType,
 } from '../domain/doubleEntryFinance';
 import { EthiopiaClock, LocalDateTime, SharedDateFormatter } from '../domain/date';
 import { BackupFailureKind, BackupValidationError } from '../domain/backupTypes';
@@ -192,22 +203,6 @@ export class SharedStateBridge {
     NonNullable<SharedSavingsGoal['status']>
   >(['active', 'completed', 'archived']);
 
-  private static readonly VALID_JOURNAL_ENTRY_TYPES = new Set<string>([
-    'standard',
-    'opening_balance',
-    'void_reversal',
-    'correction',
-    'debt_origin',
-    'debt_settlement',
-    'write_off',
-    'transfer',
-  ]);
-
-  private static readonly JOURNAL_ENTRY_TYPE_ALIASES: Record<string, string> = {
-    adjustment: 'correction',
-    opening: 'opening_balance',
-  };
-
   private static readonly VALID_POSTING_DIRECTIONS = new Set<string>([
     'debit',
     'credit',
@@ -216,13 +211,6 @@ export class SharedStateBridge {
   private static readonly VALID_DEBT_TYPES = new Set<string>([
     'payable',
     'receivable',
-  ]);
-
-  private static readonly VALID_DEBT_STATUSES = new Set<string>([
-    'active',
-    'partially_settled',
-    'settled',
-    'written_off',
   ]);
 
   private static readonly SYSTEM_CONTROL_ACCOUNT_ID_SET = new Set<string>(
@@ -1144,18 +1132,32 @@ export class SharedStateBridge {
         'daywell_parties',
         canonicalStored?.parties
       );
-      const journalEntries = readCollectionWithCanonicalFallback<JournalEntry>(
+      const rawJournalEntries = readCollectionWithCanonicalFallback<JournalEntry>(
         'daywell_journal_entries',
         canonicalStored?.journalEntries
       );
+      const journalEntries = rawJournalEntries.map((entry) => {
+        if (!entry || typeof entry !== 'object') return entry;
+        const normalized = tryNormalizeEntryType(
+          typeof entry.entryType === 'string' ? entry.entryType : undefined
+        );
+        return normalized ? { ...entry, entryType: normalized } : entry;
+      });
       const postings = readCollectionWithCanonicalFallback<Posting>(
         'daywell_postings',
         canonicalStored?.postings
       );
-      const debts = readCollectionWithCanonicalFallback<Debt>(
+      const rawDebts = readCollectionWithCanonicalFallback<Debt>(
         'daywell_debts',
         canonicalStored?.debts
       );
+      const debts = rawDebts.map((debt) => {
+        if (!debt || typeof debt !== 'object') return debt;
+        const normalized = tryNormalizeDebtStatus(
+          typeof debt.status === 'string' ? debt.status : undefined
+        );
+        return normalized ? { ...debt, status: normalized } : debt;
+      });
       const settlementAllocations = readCollectionWithCanonicalFallback<SettlementAllocation>(
         'daywell_settlement_allocations',
         canonicalStored?.settlementAllocations
@@ -2038,7 +2040,6 @@ export class SharedStateBridge {
 
       // 2. Accounts
       const accountSeenIds = new Set<string>();
-      const requiresExplicitAccountCurrency = usesModernFinanceV7Rules;
       const validatedAccounts = (parsed.accounts as Record<string, any>[]).map((a, idx) => {
         const ctx = `accounts[${idx}]`;
         const id = this.requireUniqueId(a, 'accounts', idx, accountSeenIds);
@@ -2056,29 +2057,32 @@ export class SharedStateBridge {
 
         let currencyCode: string;
         if (isSystemAccount) {
-          if (hasCurrencyField && !isEtbCurrency(rawCurrency)) {
-            throw new BackupValidationError(
-              'invalid_payload',
-              `Invalid ${ctx}.currencyCode: system control account "${name}" must use ETB.`
-            );
+          if (hasCurrencyField) {
+            const trimmedSys = (rawCurrency ?? '').trim();
+            if (trimmedSys !== '' && !isEtbCurrency(trimmedSys)) {
+              throw new BackupValidationError(
+                'invalid_payload',
+                `Invalid ${ctx}.currencyCode: system control account "${name}" must use ETB.`
+              );
+            }
           }
           currencyCode = 'ETB';
         } else if (hasCurrencyField) {
-          if (!isEtbCurrency(rawCurrency)) {
-            const label = normalizeCurrencyCode(rawCurrency) || 'Unverified';
+          const trimmed = (rawCurrency ?? '').trim();
+          if (trimmed === '') {
+            currencyCode = '';
+          } else if (isEtbCurrency(trimmed)) {
+            currencyCode = 'ETB';
+          } else if (isValidCurrencyCode(trimmed)) {
+            currencyCode = normalizeCurrencyCode(trimmed);
+          } else {
             throw new BackupValidationError(
               'invalid_payload',
-              `First-release Finance supports ETB accounts only; snapshot ${ctx} ("${name}") uses unsupported currency "${label}".`
+              `Invalid ${ctx}.currencyCode on snapshot ${ctx} ("${name}"): unrecognized currency code "${normalizeCurrencyCode(trimmed)}".`
             );
           }
-          currencyCode = 'ETB';
-        } else if (requiresExplicitAccountCurrency) {
-          throw new BackupValidationError(
-            'invalid_payload',
-            `First-release Finance requires explicit currencyCode "ETB" on snapshot ${ctx} ("${name}").`
-          );
         } else {
-          // Legacy pre-v7 snapshot without currencyCode: keep empty (unverified) rather than fabricating ETB.
+          // Omitted currencyCode on user account across snapshots: preserve empty (unverified) without converting to ETB.
           currencyCode = '';
         }
 
@@ -2978,15 +2982,18 @@ export class SharedStateBridge {
         (e, idx) => {
           const ctx = `journalEntries[${idx}]`;
           const id = this.requireUniqueId(e, 'journalEntries', idx, entrySeenIds);
-          const rawEntryType = this.optionalString(e, 'entryType', ctx);
-          const entryType =
-            rawEntryType === undefined
-              ? 'standard'
-              : (this.JOURNAL_ENTRY_TYPE_ALIASES[rawEntryType] ?? rawEntryType);
-          if (!this.VALID_JOURNAL_ENTRY_TYPES.has(entryType)) {
+          const rawEntryType = this.optionalString(e, 'entryType', ctx, {
+            allowEmpty: true,
+          });
+          let entryType: EntryType;
+          try {
+            entryType = normalizeEntryType(rawEntryType, {
+              defaultIfOmitted: 'standard',
+            });
+          } catch (err) {
             throw new BackupValidationError(
               'invalid_payload',
-              `Invalid field "${ctx}.entryType": "${entryType}" is not supported.`
+              `Invalid field "${ctx}.entryType": ${err instanceof Error ? err.message : String(rawEntryType)}`
             );
           }
           const occurrenceDate = normalizeRequiredDate(
@@ -3117,17 +3124,18 @@ export class SharedStateBridge {
         }
         const debtType =
           this.optionalEnum(d, 'debtType', this.VALID_DEBT_TYPES, ctx) ?? 'payable';
-        const rawStatus = this.optionalString(d, 'status', ctx);
-        const normalizedStatus =
-          rawStatus === undefined
-            ? 'active'
-            : rawStatus === 'writtenOff'
-              ? 'written_off'
-              : rawStatus;
-        if (!this.VALID_DEBT_STATUSES.has(normalizedStatus)) {
+        const rawStatus = this.optionalString(d, 'status', ctx, {
+          allowEmpty: true,
+        });
+        let normalizedStatus: DebtStatus;
+        try {
+          normalizedStatus = normalizeDebtStatus(rawStatus, {
+            defaultIfOmitted: 'active',
+          });
+        } catch (err) {
           throw new BackupValidationError(
             'invalid_payload',
-            `Invalid field "${ctx}.status": "${normalizedStatus}".`
+            `Invalid field "${ctx}.status": ${err instanceof Error ? err.message : String(rawStatus)}`
           );
         }
         const rawWriteOff = this.optionalString(d, 'writeOffEntryId', ctx);

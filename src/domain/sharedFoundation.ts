@@ -524,6 +524,12 @@ export interface SharedTransaction {
   isSuperseded?: boolean;
 }
 
+export const CANONICAL_ENTRY_TYPES = ["standard","transfer","debt_issuance","settlement","split_expense","adjustment","write_off"] as const;
+export type SharedEntryType = (typeof CANONICAL_ENTRY_TYPES)[number];
+
+export const CANONICAL_DEBT_STATUSES = ["active","settled","written_off","voided"] as const;
+export type SharedDebtStatus = (typeof CANONICAL_DEBT_STATUSES)[number];
+
 export interface SharedCommitment {
   id: string;
   title: string;

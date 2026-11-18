@@ -245,6 +245,25 @@ class SharedBusinessRules {
   }
 }
 
+class SharedFinanceContracts {
+  static const List<String> canonicalEntryTypes = [
+    'standard',
+    'transfer',
+    'debt_issuance',
+    'settlement',
+    'split_expense',
+    'adjustment',
+    'write_off',
+  ];
+
+  static const List<String> canonicalDebtStatuses = [
+    'active',
+    'settled',
+    'written_off',
+    'voided',
+  ];
+}
+
 class SharedProjectRules {
   static const List<String> statuses = ['active', 'completed', 'on_hold'];
   static const List<String> blockTypes = [

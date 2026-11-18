@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import {
   CANONICAL_SEED_DATABASE,
+  SYSTEM_CONTROL_ACCOUNT_IDS,
   SharedGoal,
   SharedInboxItem,
   SharedProject,
@@ -1343,6 +1344,11 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
       assert.strictEqual(exported1.ledgerMigrationReportV7, '{"migratedCount":1}');
       assert.strictEqual(exported1.accounts[0].currencyCode, 'ETB');
       assert.strictEqual(Object.prototype.hasOwnProperty.call(exported1.accounts[0], 'isActive'), false);
+      assert.deepStrictEqual(
+        exported1.journalEntries.map((j: any) => j.entryType),
+        ['debt_issuance', 'settlement']
+      );
+      assert.strictEqual(exported1.debts[0].status, 'active');
       assert.strictEqual(exported1.categories[1].parentId, 'cat-root-exp');
       assert.strictEqual(exported1.milestones[0].projectId, 'proj-10');
       assert.strictEqual(exported1.tasks[0].milestoneId, 'ms-10');
@@ -2180,7 +2186,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
       assert.deepStrictEqual(exported.savingsGoals.map((s: any) => s.id), ['sav-from-goal']);
       assert.deepStrictEqual(
         exported.journalEntries.map((j: any) => j.entryType),
-        ['opening_balance', 'correction']
+        ['adjustment', 'adjustment']
       );
       assert.strictEqual(exported.debts[0].status, 'written_off');
       assert.strictEqual(exported.calendarEvents[0].date, '2026-11-22');
@@ -2212,7 +2218,7 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
     });
   });
 
-  it('7. Stage 2.2 ETB-only snapshot validation rejects non-ETB, empty, or v7-omitted currencies pre-mutation', () => {
+  it('7. Finance Stage A preserves valid non-ETB & unverified legacy accounts across all snapshots while rejecting malformed currencies pre-mutation', () => {
     withMockBrowserStorage((store) => {
       const seedRes = SharedStateBridge.importFromAndroidJson(
         JSON.stringify({
@@ -2226,22 +2232,6 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
 
       const invalidAccountPayloads: Array<{ label: string; payload: Record<string, unknown> }> = [
         {
-          label: 'explicit USD account on v7 snapshot',
-          payload: {
-            schemaVersion: 7,
-            accounts: [{ id: 'acc-usd', name: 'USD Wallet', type: 'asset', currencyCode: 'USD' }],
-            transactions: [],
-          },
-        },
-        {
-          label: 'explicit EUR account on legacy v5 snapshot',
-          payload: {
-            schemaVersion: 5,
-            accounts: [{ id: 'acc-eur', name: 'Euro Bank', type: 'asset', currencyCode: 'EUR' }],
-            transactions: [],
-          },
-        },
-        {
           label: 'unrecognized XYZ currency code',
           payload: {
             schemaVersion: 7,
@@ -2250,27 +2240,34 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
           },
         },
         {
-          label: 'explicit blank currencyCode',
+          label: 'numeric/invalid BAD123 currency code',
           payload: {
-            schemaVersion: 7,
-            accounts: [{ id: 'acc-empty', name: 'Blank', type: 'asset', currencyCode: '   ' }],
+            schemaVersion: 8,
+            accounts: [{ id: 'acc-bad123', name: 'Malformed', type: 'asset', currencyCode: 'BAD123' }],
             transactions: [],
           },
         },
         {
-          label: 'omitted currencyCode on v7+ snapshot',
+          label: 'non-string currencyCode',
           payload: {
             schemaVersion: 7,
-            accounts: [{ id: 'acc-v7-missing', name: 'Cash', type: 'asset' }],
+            accounts: [{ id: 'acc-num', name: 'Numeric', type: 'asset', currencyCode: 840 }],
             transactions: [],
           },
         },
         {
-          label: 'omitted currencyCode when financeSchemaVersion is 7',
+          label: 'system account with non-ETB currency',
           payload: {
-            schemaVersion: 5,
-            financeSchemaVersion: 7,
-            accounts: [{ id: 'acc-fin7-missing', name: 'Cash', type: 'asset' }],
+            schemaVersion: 7,
+            accounts: [
+              {
+                id: SYSTEM_CONTROL_ACCOUNT_IDS.equity,
+                name: 'System Equity',
+                type: 'equity',
+                isSystem: true,
+                currencyCode: 'USD',
+              },
+            ],
             transactions: [],
           },
         },
@@ -2288,18 +2285,32 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
         );
       }
 
-      // Lowercase 'etb' normalizes cleanly to 'ETB'
-      const normalizedRes = SharedStateBridge.importFromAndroidJson(
+      // Valid non-ETB ISO codes, empty/whitespace currencyCode, omitted currencyCode,
+      // and lowercase 'etb' are normalized/preserved cleanly across v5 and v7+ snapshots.
+      const preservedRes = SharedStateBridge.importFromAndroidJson(
         JSON.stringify({
           schemaVersion: 7,
           accounts: [
             { id: 'acc-etb-lower', name: 'Birr Cash', type: 'asset', currencyCode: ' etb ' },
+            { id: 'acc-usd', name: 'USD Wallet', type: 'asset', currencyCode: ' usd ' },
+            { id: 'acc-eur', name: 'Euro Bank', type: 'asset', currencyCode: 'EUR' },
+            { id: 'acc-blank', name: 'Blank', type: 'asset', currencyCode: '   ' },
+            { id: 'acc-omitted', name: 'Legacy Cash', type: 'asset' },
           ],
           transactions: [],
         })
       );
-      assert.strictEqual(normalizedRes.success, true, normalizedRes.error);
-      assert.strictEqual(normalizedRes.state?.accounts[0].currencyCode, 'ETB');
+      assert.strictEqual(preservedRes.success, true, preservedRes.error);
+      assert.deepStrictEqual(
+        preservedRes.state?.accounts.map((a) => [a.id, a.currencyCode]),
+        [
+          ['acc-etb-lower', 'ETB'],
+          ['acc-usd', 'USD'],
+          ['acc-eur', 'EUR'],
+          ['acc-blank', ''],
+          ['acc-omitted', ''],
+        ]
+      );
     });
   });
 });

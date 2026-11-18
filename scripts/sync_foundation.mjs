@@ -783,7 +783,28 @@ function renderDartTypographyToken(roleName, token) {
   );`;
 }
 
-export function buildTypeScriptFoundation({ tokens, rules, seedDb }) {
+const DEFAULT_CANONICAL_ENTRY_TYPES = [
+  'standard',
+  'transfer',
+  'debt_issuance',
+  'settlement',
+  'split_expense',
+  'adjustment',
+  'write_off',
+];
+
+const DEFAULT_CANONICAL_DEBT_STATUSES = [
+  'active',
+  'settled',
+  'written_off',
+  'voided',
+];
+
+export function buildTypeScriptFoundation({ tokens, rules, seedDb, contracts = null }) {
+  const entryTypeEnum =
+    contracts?.entities?.JournalEntry?.fields?.entryType?.enum ?? DEFAULT_CANONICAL_ENTRY_TYPES;
+  const debtStatusEnum =
+    contracts?.entities?.Debt?.fields?.status?.enum ?? DEFAULT_CANONICAL_DEBT_STATUSES;
   return `/**
  * SHARED FOUNDATION CORE (Single Source of Truth)
  * Generated automatically from /shared_foundation/*.json
@@ -910,6 +931,12 @@ export interface SharedTransaction {
   payee?: string;
   isSuperseded?: boolean;
 }
+
+export const CANONICAL_ENTRY_TYPES = ${JSON.stringify(entryTypeEnum)} as const;
+export type SharedEntryType = (typeof CANONICAL_ENTRY_TYPES)[number];
+
+export const CANONICAL_DEBT_STATUSES = ${JSON.stringify(debtStatusEnum)} as const;
+export type SharedDebtStatus = (typeof CANONICAL_DEBT_STATUSES)[number];
 
 export interface SharedCommitment {
   id: string;
@@ -1427,7 +1454,15 @@ ${typeClass('dw-type-mono', t.scale.mono)}
 `;
 }
 
-export function buildDartFoundationCore({ seedDb, rules }) {
+export function buildDartFoundationCore({ seedDb, rules, contracts = null }) {
+  const entryTypeEnum =
+    contracts?.entities?.JournalEntry?.fields?.entryType?.enum ?? DEFAULT_CANONICAL_ENTRY_TYPES;
+  const debtStatusEnum =
+    contracts?.entities?.Debt?.fields?.status?.enum ?? DEFAULT_CANONICAL_DEBT_STATUSES;
+  const renderDartEnumList = (fieldName, values) =>
+    `  static const List<String> ${fieldName} = [\n${values
+      .map((v) => `    '${escapeDartString(v)}',`)
+      .join('\n')}\n  ];`;
   return `// SHARED FOUNDATION CORE — PURE DART (Single Source of Truth)
 // Generated automatically from /shared_foundation/*.json
 // DO NOT EDIT DIRECTLY. Run "npm run sync-foundation" to regenerate.
@@ -1569,6 +1604,12 @@ class SharedBusinessRules {
     }
     return null;
   }
+}
+
+class SharedFinanceContracts {
+${renderDartEnumList('canonicalEntryTypes', entryTypeEnum)}
+
+${renderDartEnumList('canonicalDebtStatuses', debtStatusEnum)}
 }
 
 class SharedProjectRules {
@@ -2623,9 +2664,9 @@ function prepareAndValidateFoundation({
 
   validateSchemaVersionGuard({ rootDir, contracts, requireAppDatabase: mustHaveAppDb });
 
-  const tsContent = buildTypeScriptFoundation({ tokens, rules, seedDb });
+  const tsContent = buildTypeScriptFoundation({ tokens, rules, seedDb, contracts });
   const cssContent = buildCssTokensFoundation({ tokens });
-  const dartCoreContent = buildDartFoundationCore({ seedDb, rules });
+  const dartCoreContent = buildDartFoundationCore({ seedDb, rules, contracts });
   const dartContent = buildDartFoundation({ tokens });
 
   if (baseline) {

@@ -97,13 +97,52 @@ class SystemControlAccounts {
 }
 
 enum EntryType {
-  standard,
-  transfer,
-  debtIssuance,
-  settlement,
-  splitExpense,
-  adjustment,
-  writeOff
+  standard('standard'),
+  transfer('transfer'),
+  debtIssuance('debt_issuance'),
+  settlement('settlement'),
+  splitExpense('split_expense'),
+  adjustment('adjustment'),
+  writeOff('write_off');
+
+  final String dbValue;
+  const EntryType(this.dbValue);
+
+  static const Map<String, EntryType> legacyAliases = {
+    'debtIssuance': EntryType.debtIssuance,
+    'splitExpense': EntryType.splitExpense,
+    'writeOff': EntryType.writeOff,
+    'debt_origin': EntryType.debtIssuance,
+    'debt_settlement': EntryType.settlement,
+    'opening_balance': EntryType.adjustment,
+    'opening': EntryType.adjustment,
+    'correction': EntryType.adjustment,
+    'void_reversal': EntryType.adjustment,
+  };
+
+  static EntryType? tryParse(String? raw) {
+    if (raw == null) return null;
+    final normalized = raw.trim();
+    if (normalized.isEmpty) return null;
+    for (final value in EntryType.values) {
+      if (value.dbValue == normalized) {
+        return value;
+      }
+    }
+    return legacyAliases[normalized];
+  }
+
+  static EntryType fromDbValue(String? raw) {
+    final parsed = tryParse(raw);
+    if (parsed == null) {
+      throw ArgumentError.value(
+        raw,
+        'entryType',
+        'Unsupported EntryType value',
+      );
+    }
+    return parsed;
+  }
 }
 
 enum PostingDirection { debit, credit }
@@ -119,15 +158,33 @@ enum DebtStatus {
   final String dbValue;
   const DebtStatus(this.dbValue);
 
-  static DebtStatus fromDbValue(String? raw) {
-    final normalized = raw?.trim() ?? '';
+  static const Map<String, DebtStatus> legacyAliases = {
+    'partially_settled': DebtStatus.active,
+    'writtenOff': DebtStatus.writtenOff,
+  };
+
+  static DebtStatus? tryParse(String? raw) {
+    if (raw == null) return null;
+    final normalized = raw.trim();
+    if (normalized.isEmpty) return null;
     for (final s in DebtStatus.values) {
-      if (s.dbValue == normalized || s.name == normalized) {
+      if (s.dbValue == normalized) {
         return s;
       }
     }
-    if (normalized == 'writtenOff') return DebtStatus.writtenOff;
-    return DebtStatus.active;
+    return legacyAliases[normalized];
+  }
+
+  static DebtStatus fromDbValue(String? raw) {
+    final parsed = tryParse(raw);
+    if (parsed == null) {
+      throw ArgumentError.value(
+        raw,
+        'status',
+        'Unsupported DebtStatus value',
+      );
+    }
+    return parsed;
   }
 }
 
@@ -448,7 +505,7 @@ class JournalEntryModel {
 
   Map<String, dynamic> toJson() => {
         'id': id,
-        'entryType': entryType.name,
+        'entryType': entryType.dbValue,
         'description': description,
         'occurrenceDate': occurrenceDate,
         'isVoided': isVoided,
@@ -458,22 +515,31 @@ class JournalEntryModel {
         'createdAt': EthiopiaClock.toUtcIsoString(createdAt),
       };
 
-  factory JournalEntryModel.fromJson(Map<String, dynamic> json) =>
-      JournalEntryModel(
-        id: json['id']?.toString() ?? '',
-        entryType: EntryType.values.firstWhere(
-          (e) => e.name == json['entryType'],
-          orElse: () => EntryType.standard,
-        ),
-        description: json['description']?.toString() ?? '',
-        occurrenceDate: json['occurrenceDate'].toString(),
-        isVoided: (json['isVoided'] as bool?) ?? false,
-        voidReason: json['voidReason']?.toString(),
-        legacySourceTxId: json['legacySourceTxId']?.toString(),
-        correctedFromEntryId: json['correctedFromEntryId']?.toString(),
-        createdAt:
-            EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
+  factory JournalEntryModel.fromJson(Map<String, dynamic> json) {
+    final rawEntryType = json['entryType'];
+    if (rawEntryType != null && rawEntryType is! String) {
+      throw ArgumentError.value(
+        rawEntryType,
+        'entryType',
+        'Expected string for entryType',
       );
+    }
+    final parsedEntryType = rawEntryType == null
+        ? EntryType.standard
+        : EntryType.fromDbValue(rawEntryType as String);
+    return JournalEntryModel(
+      id: json['id']?.toString() ?? '',
+      entryType: parsedEntryType,
+      description: json['description']?.toString() ?? '',
+      occurrenceDate: json['occurrenceDate'].toString(),
+      isVoided: (json['isVoided'] as bool?) ?? false,
+      voidReason: json['voidReason']?.toString(),
+      legacySourceTxId: json['legacySourceTxId']?.toString(),
+      correctedFromEntryId: json['correctedFromEntryId']?.toString(),
+      createdAt:
+          EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
+    );
+  }
 }
 
 class PostingModel {
@@ -596,19 +662,32 @@ class DebtModel {
         'createdAt': EthiopiaClock.toUtcIsoString(createdAt),
       };
 
-  factory DebtModel.fromJson(Map<String, dynamic> json) => DebtModel(
-        id: json['id'],
-        originEntryId: json['originEntryId'],
-        partyId: json['partyId'],
-        debtType: DebtType.values.firstWhere((e) => e.name == json['debtType']),
-        principalCents: json['principalCents'],
-        outstandingCents: json['outstandingCents'],
-        dueDate: json['dueDate']?.toString(),
-        status: DebtStatus.fromDbValue(json['status']?.toString()),
-        writeOffEntryId: json['writeOffEntryId']?.toString(),
-        createdAt:
-            EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
+  factory DebtModel.fromJson(Map<String, dynamic> json) {
+    final rawStatus = json['status'];
+    if (rawStatus != null && rawStatus is! String) {
+      throw ArgumentError.value(
+        rawStatus,
+        'status',
+        'Expected string for status',
       );
+    }
+    final parsedStatus = rawStatus == null
+        ? DebtStatus.active
+        : DebtStatus.fromDbValue(rawStatus as String);
+    return DebtModel(
+      id: json['id'],
+      originEntryId: json['originEntryId'],
+      partyId: json['partyId'],
+      debtType: DebtType.values.firstWhere((e) => e.name == json['debtType']),
+      principalCents: json['principalCents'],
+      outstandingCents: json['outstandingCents'],
+      dueDate: json['dueDate']?.toString(),
+      status: parsedStatus,
+      writeOffEntryId: json['writeOffEntryId']?.toString(),
+      createdAt:
+          EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
+    );
+  }
 }
 
 class SettlementAllocationModel {

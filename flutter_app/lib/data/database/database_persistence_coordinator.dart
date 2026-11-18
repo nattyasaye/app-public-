@@ -302,7 +302,8 @@ class DatabasePersistenceCoordinator {
       'journalEntries': journalEntries
           .map((e) => {
                 'id': e.id,
-                'entryType': e.entryType,
+                'entryType': EntryType.tryParse(e.entryType)?.dbValue ??
+                    e.entryType,
                 'description': e.description,
                 'occurrenceDate': e.occurrenceDate,
                 'isVoided': e.isVoided,
@@ -333,7 +334,7 @@ class DatabasePersistenceCoordinator {
                 'principalCents': d.principalCents,
                 'outstandingCents': d.outstandingCents,
                 'dueDate': d.dueDate,
-                'status': d.status,
+                'status': DebtStatus.tryParse(d.status)?.dbValue ?? d.status,
                 'writeOffEntryId': d.writeOffEntryId,
                 'createdAt': EthiopiaClock.toUtcIsoString(d.createdAt),
               })
@@ -612,27 +613,7 @@ class DatabasePersistenceCoordinator {
     'general',
   };
   static const Set<String> _postingDirections = <String>{'debit', 'credit'};
-  static const Set<String> _journalEntryTypes = <String>{
-    'standard',
-    'transfer',
-    'debtIssuance',
-    'settlement',
-    'splitExpense',
-    'adjustment',
-    'writeOff',
-  };
-  static const Map<String, String> _journalEntryTypeAliases = <String, String>{
-    'debt_issuance': 'debtIssuance',
-    'split_expense': 'splitExpense',
-    'write_off': 'writeOff',
-  };
   static const Set<String> _debtTypes = <String>{'receivable', 'payable'};
-  static const Set<String> _debtStatuses = <String>{
-    'active',
-    'settled',
-    'written_off',
-    'voided',
-  };
   static const Set<String> _savingsStatuses = <String>{
     'active',
     'completed',
@@ -868,47 +849,57 @@ class DatabasePersistenceCoordinator {
           ctx,
           allowEmpty: true,
         );
+        final trimmedCurrency = rawCurrency.trim();
         if (classified.isSystem) {
-          if (rawCurrency.trim().isEmpty) {
+          if (trimmedCurrency.isEmpty ||
+              DoubleEntryEngine.isEtb(trimmedCurrency)) {
             currencyCode = 'ETB';
-          } else if (!DoubleEntryEngine.isEtb(rawCurrency)) {
-            throw BackupValidationException(
-              BackupFailureKind.invalidPayload,
-              'Unsupported currencyCode "${DoubleEntryEngine.normalizeCurrencyCode(rawCurrency)}" on system account $ctx ("$name"): ETB only.',
-            );
           } else {
-            currencyCode = 'ETB';
-          }
-        } else {
-          if (!DoubleEntryEngine.isEtb(rawCurrency)) {
-            final label = rawCurrency.trim().isEmpty
-                ? 'empty'
-                : DoubleEntryEngine.normalizeCurrencyCode(rawCurrency);
+            final badCode =
+                DoubleEntryEngine.normalizeCurrencyCode(trimmedCurrency);
             throw BackupValidationException(
               BackupFailureKind.invalidPayload,
-              'Unsupported currencyCode "$label" on $ctx ("$name"): first-release Finance supports ETB only.',
+              'Unsupported currencyCode "$badCode" on system account '
+              '$ctx ("$name"): ETB only.',
             );
           }
+        } else if (trimmedCurrency.isEmpty) {
+          currencyCode = '';
+          diagnostics.add(
+            SnapshotImportDiagnostic(
+              code: 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
+              message:
+                  'Snapshot provided empty currencyCode on account "$name" '
+                  '($id); preserved as Unverified for Currency Review.',
+              table: 'accounts',
+              recordId: id,
+              field: 'currencyCode',
+              severity: SnapshotDiagnosticSeverity.warning,
+            ),
+          );
+        } else if (DoubleEntryEngine.isEtb(trimmedCurrency)) {
           currencyCode = 'ETB';
+        } else if (DoubleEntryEngine.isValidCurrencyCode(trimmedCurrency)) {
+          currencyCode =
+              DoubleEntryEngine.normalizeCurrencyCode(trimmedCurrency);
+        } else {
+          final badCode =
+              DoubleEntryEngine.normalizeCurrencyCode(trimmedCurrency);
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Unrecognized currencyCode "$badCode" on $ctx ("$name").',
+          );
         }
       } else if (classified.isSystem) {
         currencyCode = 'ETB';
-      } else if (versionInterpretation.usesModernFinanceV7Rules) {
-        final formatLabel = versionInterpretation.snapshotFormatVersion >=
-                SnapshotVersionPolicy.supportedSnapshotFormatVersion
-            ? 'format-2'
-            : 'v$snapshotVersion';
-        throw BackupValidationException(
-          BackupFailureKind.invalidPayload,
-          'Missing required field "$ctx.currencyCode" on $formatLabel snapshot: first-release Finance requires explicit "ETB" currencyCode on all accounts.',
-        );
       } else {
         currencyCode = '';
         diagnostics.add(
           SnapshotImportDiagnostic(
             code: 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
             message:
-                'Legacy snapshot omitted currencyCode on account "$name" ($id); preserved as Unverified for Currency Review instead of assuming ETB.',
+                'Snapshot omitted currencyCode on account "$name" ($id); '
+                'preserved as Unverified for Currency Review.',
             table: 'accounts',
             recordId: id,
             field: 'currencyCode',
@@ -2083,15 +2074,20 @@ class DatabasePersistenceCoordinator {
       final e = rawEntries[i];
       final ctx = 'journalEntries[$i]';
       final id = _reqUniqueId(e, 'journalEntries', i, entrySeenIds);
-      final rawEntryType = _optString(e, 'entryType', ctx, allowEmpty: false);
-      final entryType = rawEntryType == null
-          ? 'standard'
-          : (_journalEntryTypeAliases[rawEntryType] ?? rawEntryType);
-      if (!_journalEntryTypes.contains(entryType)) {
-        throw BackupValidationException(
-          BackupFailureKind.invalidPayload,
-          'Invalid field "$ctx.entryType": "$entryType" is not one of ${_journalEntryTypes.join(', ')}.',
-        );
+      final rawEntryType = _optString(e, 'entryType', ctx, allowEmpty: true);
+      final String entryType;
+      if (rawEntryType == null) {
+        entryType = EntryType.standard.dbValue;
+      } else {
+        final parsed = EntryType.tryParse(rawEntryType);
+        if (parsed == null) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid field "$ctx.entryType": "$rawEntryType" is not one of '
+            '${SharedFinanceContracts.canonicalEntryTypes.join(', ')}.',
+          );
+        }
+        entryType = parsed.dbValue;
       }
       final description =
           _optString(e, 'description', ctx, allowEmpty: true) ?? '';
@@ -2259,15 +2255,20 @@ class DatabasePersistenceCoordinator {
       final principalCents = _reqInt(d, 'principalCents', ctx, min: 1);
       final outstandingCents = _optInt(d, 'outstandingCents', ctx, min: 0) ?? 0;
       final dueDate = _optCanonicalDate(d, 'dueDate', ctx);
-      final rawStatus = _optString(d, 'status', ctx, allowEmpty: false);
-      final normalizedStatus = rawStatus == null
-          ? 'active'
-          : (rawStatus == 'writtenOff' ? 'written_off' : rawStatus);
-      if (!_debtStatuses.contains(normalizedStatus)) {
-        throw BackupValidationException(
-          BackupFailureKind.invalidPayload,
-          'Invalid field "$ctx.status": "$normalizedStatus" is not one of ${_debtStatuses.join(', ')}.',
-        );
+      final rawStatus = _optString(d, 'status', ctx, allowEmpty: true);
+      final String normalizedStatus;
+      if (rawStatus == null) {
+        normalizedStatus = DebtStatus.active.dbValue;
+      } else {
+        final parsed = DebtStatus.tryParse(rawStatus);
+        if (parsed == null) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid field "$ctx.status": "$rawStatus" is not one of '
+            '${SharedFinanceContracts.canonicalDebtStatuses.join(', ')}.',
+          );
+        }
+        normalizedStatus = parsed.dbValue;
       }
       final rawWriteOffId =
           _optString(d, 'writeOffEntryId', ctx, allowEmpty: false);

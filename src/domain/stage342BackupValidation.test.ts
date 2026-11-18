@@ -415,13 +415,12 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
         assertStoreUnchanged(store, baseline, tc.name);
       }
 
-      // Format-2 enforces modern Finance v7 rules (explicit currencyCode & categoryId)
-      // even when financeSchemaVersion is omitted (Flutter-exported format-2).
+      // Format-2 preserves omitted/valid non-ETB user account currencies per Finance Stage A
+      // while still enforcing Finance v7 categoryId and rejecting unrecognized currency codes.
       for (const extra of [
         { databaseSchemaVersion: 9 },
         { financeSchemaVersion: 7 },
       ]) {
-        const baselineMissingCur = seedAllDaywellStores(store);
         const missingCurRes = SharedStateBridge.importFromAndroidJson(
           JSON.stringify({
             schemaVersion: 5,
@@ -431,9 +430,24 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
             transactions: [],
           })
         );
-        assert.strictEqual(missingCurRes.success, false);
-        assert.strictEqual(missingCurRes.errorKind, 'invalid_payload');
-        assertStoreUnchanged(store, baselineMissingCur, 'format-2 missing currencyCode');
+        assert.strictEqual(missingCurRes.success, true, missingCurRes.error);
+        assert.strictEqual(missingCurRes.state?.accounts[0].currencyCode, '');
+
+        const baselineBadCur = seedAllDaywellStores(store);
+        const badCurRes = SharedStateBridge.importFromAndroidJson(
+          JSON.stringify({
+            schemaVersion: 5,
+            snapshotFormatVersion: 2,
+            ...extra,
+            accounts: [
+              { id: 'acc-f2-xyz', name: 'Cash', type: 'asset', currencyCode: 'XYZ' },
+            ],
+            transactions: [],
+          })
+        );
+        assert.strictEqual(badCurRes.success, false);
+        assert.strictEqual(badCurRes.errorKind, 'invalid_payload');
+        assertStoreUnchanged(store, baselineBadCur, 'format-2 malformed currencyCode');
 
         const baselineMissingCat = seedAllDaywellStores(store);
         const missingCatRes = SharedStateBridge.importFromAndroidJson(

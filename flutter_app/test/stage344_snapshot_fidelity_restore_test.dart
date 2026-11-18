@@ -1875,16 +1875,14 @@ void main() {
             isTrue,
           );
 
-          // 4. Stage 2.2 strict ETB-only snapshot currency enforcement:
-          // Rejects explicit non-ETB, unrecognized, blank, and v7/v8 omitted currencyCode;
-          // preserves pre-v7 omitted currencyCode as '' + CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT.
+          // 4. Finance Stage A snapshot currency preservation & fail-closed
+          // malformed currency enforcement:
+          // - Rejects unrecognized ISO ('XYZ'), numeric/invalid ('BAD123'), and
+          //   non-ETB system accounts.
+          // - Preserves valid ISO non-ETB ('USD') and blank/omitted
+          //   currencyCode as '' + CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT
+          //   across v6/v7/v8.
           for (final badAccount in const <Map<String, dynamic>>[
-            <String, dynamic>{
-              'id': 'acc-usd',
-              'name': 'USD Cash',
-              'type': 'asset',
-              'currencyCode': 'USD',
-            },
             <String, dynamic>{
               'id': 'acc-xyz',
               'name': 'Bad ISO',
@@ -1892,10 +1890,17 @@ void main() {
               'currencyCode': 'XYZ',
             },
             <String, dynamic>{
-              'id': 'acc-empty',
-              'name': 'Empty Code',
+              'id': 'acc-bad123',
+              'name': 'Malformed Code',
               'type': 'asset',
-              'currencyCode': '  ',
+              'currencyCode': 'BAD123',
+            },
+            <String, dynamic>{
+              'id': 'acc-sys-equity',
+              'name': 'System Equity',
+              'type': 'equity',
+              'isSystem': true,
+              'currencyCode': 'USD',
             },
           ]) {
             expect(
@@ -1909,33 +1914,22 @@ void main() {
             );
           }
 
-          for (final v in const <int>[7, 8]) {
-            expect(
-              () => DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
-                _baseV7Snapshot(
-                  schemaVersion: v,
-                  accounts: const <Map<String, dynamic>>[
-                    <String, dynamic>{
-                      'id': 'acc-missing-cur',
-                      'name': 'Cash',
-                      'type': 'asset',
-                    },
-                  ],
-                ),
-              ),
-              _throwsValidationKind(BackupFailureKind.invalidPayload),
-            );
-          }
-
-          final legacyUnverifiedCurrencyPrepared =
+          final v8UsdPrepared =
               DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
             _baseV7Snapshot(
-              schemaVersion: 6,
+              schemaVersion: 8,
               accounts: const <Map<String, dynamic>>[
                 <String, dynamic>{
-                  'id': 'acc-legacy-unv',
-                  'name': 'Legacy Wallet',
+                  'id': 'acc-usd',
+                  'name': 'USD Cash',
                   'type': 'asset',
+                  'currencyCode': ' usd ',
+                },
+                <String, dynamic>{
+                  'id': 'acc-empty',
+                  'name': 'Empty Code',
+                  'type': 'asset',
+                  'currencyCode': '  ',
                 },
               ],
               journalEntries: const <Map<String, dynamic>>[],
@@ -1943,15 +1937,40 @@ void main() {
             ),
           );
           expect(
-            legacyUnverifiedCurrencyPrepared.accounts.single.currencyCode.value,
-            '',
+            v8UsdPrepared.accounts.map((a) => a.currencyCode.value).toList(),
+            <String>['USD', ''],
           );
           expect(
-            legacyUnverifiedCurrencyPrepared.preImportDiagnostics.any(
+            v8UsdPrepared.preImportDiagnostics.any(
               (d) => d.code == 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
             ),
             isTrue,
           );
+
+          for (final v in const <int>[6, 7, 8]) {
+            final legacyPrepared =
+                DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
+              _baseV7Snapshot(
+                schemaVersion: v,
+                accounts: const <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'id': 'acc-legacy-unv',
+                    'name': 'Legacy Wallet',
+                    'type': 'asset',
+                  },
+                ],
+                journalEntries: const <Map<String, dynamic>>[],
+                postings: const <Map<String, dynamic>>[],
+              ),
+            );
+            expect(legacyPrepared.accounts.single.currencyCode.value, '');
+            expect(
+              legacyPrepared.preImportDiagnostics.any(
+                (d) => d.code == 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
+              ),
+              isTrue,
+            );
+          }
 
           // AppStateManager quick capture currency parity check
           expect(
@@ -2011,9 +2030,10 @@ void main() {
             return snap;
           }
 
-          // Both Flutter-style (databaseSchemaVersion: 9, omitted financeSchemaVersion)
-          // and Web-style (financeSchemaVersion: 7, omitted databaseSchemaVersion)
-          // enforce Finance v7 rules on currencyCode & categoryId.
+          // Both Flutter-style (databaseSchemaVersion: 9, omitted
+          // financeSchemaVersion) and Web-style (financeSchemaVersion: 7,
+          // omitted databaseSchemaVersion) enforce Finance v7 rules on
+          // categoryId while preserving Stage A legacy currencies.
           final format2Variants = <Map<String, dynamic> Function({
             List<Map<String, dynamic>>? accounts,
             List<Map<String, dynamic>>? transactions,
@@ -2040,14 +2060,39 @@ void main() {
           ];
 
           for (final makeSnap in format2Variants) {
+            final preparedUnverified =
+                DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
+              makeSnap(
+                accounts: const <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'id': 'acc-f2-missing-cur',
+                    'name': 'Wallet Cash',
+                    'type': 'asset',
+                  },
+                ],
+                journalEntries: const <Map<String, dynamic>>[],
+                postings: const <Map<String, dynamic>>[],
+              ),
+            );
+            expect(
+              preparedUnverified.accounts.single.currencyCode.value,
+              '',
+            );
+            expect(
+              preparedUnverified.preImportDiagnostics.any(
+                (d) => d.code == 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
+              ),
+              isTrue,
+            );
             expect(
               () => DatabasePersistenceCoordinator.validateAndPrepareSnapshot(
                 makeSnap(
                   accounts: const <Map<String, dynamic>>[
                     <String, dynamic>{
-                      'id': 'acc-f2-missing-cur',
-                      'name': 'Wallet Cash',
+                      'id': 'acc-f2-bad-cur',
+                      'name': 'Bad ISO',
                       'type': 'asset',
+                      'currencyCode': 'XYZ',
                     },
                   ],
                   journalEntries: const <Map<String, dynamic>>[],

@@ -255,6 +255,47 @@
         "isSuperseded": { "type": "boolean" }
       }
     },
+    "JournalEntry": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "entryType": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "transfer",
+            "debt_issuance",
+            "settlement",
+            "split_expense",
+            "adjustment",
+            "write_off"
+          ]
+        },
+        "description": { "type": "string", "required": true },
+        "occurrenceDate": { "type": "string", "required": true },
+        "isVoided": { "type": "boolean" },
+        "voidReason": { "type": "string" },
+        "legacySourceTxId": { "type": "string" },
+        "correctedFromEntryId": { "type": "string" },
+        "createdAt": { "type": "string", "required": true }
+      }
+    },
+    "Debt": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "originEntryId": { "type": "string", "required": true },
+        "partyId": { "type": "string", "required": true },
+        "debtType": { "type": "string", "required": true, "enum": ["receivable", "payable"] },
+        "principalCents": { "type": "integer", "required": true },
+        "outstandingCents": { "type": "integer", "required": true },
+        "dueDate": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["active", "settled", "written_off", "voided"]
+        },
+        "writeOffEntryId": { "type": "string" },
+        "createdAt": { "type": "string", "required": true }
+      }
+    },
     "Project": {
       "fields": {
         "id": { "type": "string", "required": true },

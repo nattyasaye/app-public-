@@ -113,7 +113,7 @@ class FinanceExportService {
                       ? 'INACTIVE_OR_VOIDED'
                       : 'CURRENCY_REVIEW';
       buffer.writeln(
-        '${_csvCell(j.id)},${_csvCell(j.entryType.name)},${_csvCell(j.description)},${_csvCell(j.occurrenceDate)},${_csvCell(currency)},${_csvCell(reportingStatus)},${j.isVoided ? 'TRUE' : 'FALSE'},${_csvCell(j.voidReason)},${_csvCell(j.correctedFromEntryId)},${_csvCell(j.legacySourceTxId)},${_csvCell(EthiopiaClock.toUtcIsoString(j.createdAt))}',
+        '${_csvCell(j.id)},${_csvCell(j.entryType.dbValue)},${_csvCell(j.description)},${_csvCell(j.occurrenceDate)},${_csvCell(currency)},${_csvCell(reportingStatus)},${j.isVoided ? 'TRUE' : 'FALSE'},${_csvCell(j.voidReason)},${_csvCell(j.correctedFromEntryId)},${_csvCell(j.legacySourceTxId)},${_csvCell(EthiopiaClock.toUtcIsoString(j.createdAt))}',
       );
     }
     return buffer.toString();
@@ -182,7 +182,7 @@ class FinanceExportService {
                   ? 'EXCLUDED_${originCls!.nativeCurrencyCode ?? 'FOREIGN'}'
                   : 'CURRENCY_REVIEW');
       buffer.writeln(
-        '${_csvCell(d.id)},${_csvCell(d.originEntryId)},${_csvCell(d.partyId)},${_csvCell(d.debtType.name)},${_csvCell(currency)},${_csvCell(reportingStatus)},${d.principalCents},"${(d.principalCents / 100).toStringAsFixed(2)}",${d.outstandingCents},"${(d.outstandingCents / 100).toStringAsFixed(2)}",${_csvCell(d.dueDate)},${_csvCell(d.status.name)},${_csvCell(EthiopiaClock.toUtcIsoString(d.createdAt))}',
+        '${_csvCell(d.id)},${_csvCell(d.originEntryId)},${_csvCell(d.partyId)},${_csvCell(d.debtType.name)},${_csvCell(currency)},${_csvCell(reportingStatus)},${d.principalCents},"${(d.principalCents / 100).toStringAsFixed(2)}",${d.outstandingCents},"${(d.outstandingCents / 100).toStringAsFixed(2)}",${_csvCell(d.dueDate)},${_csvCell(d.status.dbValue)},${_csvCell(EthiopiaClock.toUtcIsoString(d.createdAt))}',
       );
     }
     return buffer.toString();
@@ -370,7 +370,7 @@ class FinanceExportService {
     }
     for (final j in entries) {
       buffer.writeln(
-        'INSERT INTO journal_entries VALUES (${_sqlText(j.id)}, ${_sqlText(j.entryType.name)}, ${_sqlText(j.description)}, ${_sqlText(j.occurrenceDate)}, ${j.isVoided ? 1 : 0}, ${_sqlText(j.voidReason)}, ${_sqlText(j.correctedFromEntryId)}, ${_sqlText(j.legacySourceTxId)}, ${_sqlText(EthiopiaClock.toUtcIsoString(j.createdAt))});',
+        'INSERT INTO journal_entries VALUES (${_sqlText(j.id)}, ${_sqlText(j.entryType.dbValue)}, ${_sqlText(j.description)}, ${_sqlText(j.occurrenceDate)}, ${j.isVoided ? 1 : 0}, ${_sqlText(j.voidReason)}, ${_sqlText(j.correctedFromEntryId)}, ${_sqlText(j.legacySourceTxId)}, ${_sqlText(EthiopiaClock.toUtcIsoString(j.createdAt))});',
       );
     }
     for (final p in postings) {
@@ -380,7 +380,7 @@ class FinanceExportService {
     }
     for (final d in debts) {
       buffer.writeln(
-        'INSERT INTO debts VALUES (${_sqlText(d.id)}, ${_sqlText(d.originEntryId)}, ${_sqlText(d.partyId)}, ${_sqlText(d.debtType.name)}, ${d.principalCents}, ${d.outstandingCents}, ${_sqlText(d.dueDate)}, ${_sqlText(d.status.name)}, ${_sqlText(EthiopiaClock.toUtcIsoString(d.createdAt))});',
+        'INSERT INTO debts VALUES (${_sqlText(d.id)}, ${_sqlText(d.originEntryId)}, ${_sqlText(d.partyId)}, ${_sqlText(d.debtType.name)}, ${d.principalCents}, ${d.outstandingCents}, ${_sqlText(d.dueDate)}, ${_sqlText(d.status.dbValue)}, ${_sqlText(EthiopiaClock.toUtcIsoString(d.createdAt))});',
       );
     }
     for (final s in allocations) {
