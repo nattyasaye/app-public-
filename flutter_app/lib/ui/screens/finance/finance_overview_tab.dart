@@ -527,8 +527,20 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                     await _openAccountEditorSheet(context, existing: account);
                   } else if (value == 'archive') {
                     await widget.controller.archiveAccount(account.id);
+                    final err = widget.controller.state.errorMessage;
+                    if (err != null && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(err)),
+                      );
+                    }
                   } else if (value == 'unarchive') {
                     await widget.controller.unarchiveAccount(account.id);
+                    final err = widget.controller.state.errorMessage;
+                    if (err != null && context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(err)),
+                      );
+                    }
                   } else if (value == 'delete') {
                     final confirmed = await DaywellConfirmationDialog.show(
                       context,
@@ -541,6 +553,12 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                     );
                     if (confirmed) {
                       await widget.controller.deleteAccount(account.id);
+                      final err = widget.controller.state.errorMessage;
+                      if (err != null && context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(err)),
+                        );
+                      }
                     }
                   }
                 },

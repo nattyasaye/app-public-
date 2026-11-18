@@ -183,6 +183,7 @@ class DriftFinanceRepository implements IFinanceRepository {
       if (!isProtectedSystem && saved.openingBalanceCents != 0) {
         await _syncOpeningBalanceEntryInTx(saved);
       }
+      await _syncVaultGoalsInTx();
     });
     return saved;
   }
@@ -220,6 +221,10 @@ class DriftFinanceRepository implements IFinanceRepository {
             );
           }
 
+          if (!existing.isArchived && account.isArchived) {
+            await _assertVaultZeroBalanceBeforeArchiveInTx(existing);
+          }
+
           await (_db.update(_db.accountsTable)
                 ..where((tbl) => tbl.id.equals(account.id)))
               .write(
@@ -242,6 +247,9 @@ class DriftFinanceRepository implements IFinanceRepository {
             'Cannot change an ETB account currency to '
             '"${account.currencyCode}" in first-release ETB mode.',
           );
+        }
+        if (!existing.isArchived && account.isArchived) {
+          await _assertVaultZeroBalanceBeforeArchiveInTx(existing);
         }
       } else if (!isProtectedSystem &&
           !DoubleEntryEngine.isEtb(account.currencyCode)) {
@@ -277,6 +285,7 @@ class DriftFinanceRepository implements IFinanceRepository {
       if (!isProtectedSystem && openingChanged) {
         await _syncOpeningBalanceEntryInTx(saved);
       }
+      await _syncVaultGoalsInTx();
     });
     return saved;
   }
@@ -324,6 +333,7 @@ class DriftFinanceRepository implements IFinanceRepository {
         reason:
             reason.trim().isEmpty ? 'Updated opening balance' : reason.trim(),
       );
+      await _syncVaultGoalsInTx();
     });
     return updated;
   }
@@ -346,15 +356,19 @@ class DriftFinanceRepository implements IFinanceRepository {
   @override
   Future<void> archiveAccount(String id) async {
     if (SystemControlAccounts.isSystemControlId(id)) return;
-    final row = await (_db.select(_db.accountsTable)
-          ..where((tbl) => tbl.id.equals(id)))
-        .getSingleOrNull();
-    if (row == null || row.isSystem) return;
+    await _db.transaction(() async {
+      final row = await (_db.select(_db.accountsTable)
+            ..where((tbl) => tbl.id.equals(id)))
+          .getSingleOrNull();
+      if (row == null || row.isSystem) return;
 
-    await (_db.update(_db.accountsTable)..where((tbl) => tbl.id.equals(id)))
-        .write(
-      const AccountsTableCompanion(isArchived: Value(true)),
-    );
+      await _assertVaultZeroBalanceBeforeArchiveInTx(row);
+
+      await (_db.update(_db.accountsTable)..where((tbl) => tbl.id.equals(id)))
+          .write(
+        const AccountsTableCompanion(isArchived: Value(true)),
+      );
+    });
   }
 
   @override
@@ -645,6 +659,7 @@ class DriftFinanceRepository implements IFinanceRepository {
 
     await _db.transaction(() async {
       await _insertEntryAndPostingsInTx(entry, postings);
+      await _syncVaultGoalsInTx();
     });
 
     return entry;
@@ -681,6 +696,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
       await _insertEntryAndPostingsInTx(entry, postings);
+      await _syncVaultGoalsInTx();
     });
     return entry;
   }
@@ -716,6 +732,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
       await _insertEntryAndPostingsInTx(entry, postings);
+      await _syncVaultGoalsInTx();
     });
     return entry;
   }
@@ -792,6 +809,7 @@ class DriftFinanceRepository implements IFinanceRepository {
         );
       }
       await _insertEntryAndPostingsInTx(entry, postings);
+      await _syncVaultGoalsInTx();
     });
     return entry;
   }
@@ -871,8 +889,49 @@ class DriftFinanceRepository implements IFinanceRepository {
               createdAt: debt.createdAt,
             ),
           );
+      await _syncVaultGoalsInTx();
     });
     return entry;
+  }
+
+  @override
+  Future<JournalEntryModel> recordExpenseRefund({
+    required String originalEntryId,
+    required String refundAccountId,
+    required int refundCents,
+    required CalendarDate date,
+    String? note,
+  }) async {
+    late JournalEntryModel created;
+    await _db.transaction(() async {
+      await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+      final accounts =
+          await getAccounts(includeArchived: true, includeSystem: true);
+      final entries = await getJournalEntries(includeVoided: true);
+      final postings = await getPostings();
+      final debts = await getDebts();
+      final allocations = await getSettlementAllocations();
+
+      final refundEntryId = 'entry-refund-${_uuid.v4()}';
+      final built = DoubleEntryEngine.buildExpenseRefund(
+        refundEntryId: refundEntryId,
+        originalEntryId: originalEntryId,
+        refundAccountId: refundAccountId,
+        refundCents: refundCents,
+        refundDateIso: date.toIsoString(),
+        note: note,
+        entries: entries,
+        postings: postings,
+        accounts: accounts,
+        debts: debts,
+        allocations: allocations,
+      );
+      created = built['entry'] as JournalEntryModel;
+      final refundPostings = built['postings'] as List<PostingModel>;
+      await _insertEntryAndPostingsInTx(created, refundPostings);
+      await _syncVaultGoalsInTx();
+    });
+    return created;
   }
 
   @override
@@ -883,17 +942,50 @@ class DriftFinanceRepository implements IFinanceRepository {
     required String correctionReason,
   }) async {
     DoubleEntryEngine.validateBalancedEntry(replacementPostings);
+    if (!DoubleEntryEngine.isCorrectableEntryType(replacementEntry.entryType)) {
+      throw DoubleEntryValidationError(
+        'Replacement entry type "${replacementEntry.entryType.dbValue}" is '
+        'not supported during correction.',
+      );
+    }
+    if (DoubleEntryEngine.isRefundEntry(replacementEntry)) {
+      throw DoubleEntryValidationError(
+        'Cannot convert an entry into a refund via correction.',
+      );
+    }
     final linkedEntry = replacementEntry.copyWith(
       correctedFromEntryId: originalEntryId,
+      isVoided: false,
     );
 
     await _db.transaction(() async {
-      final classifications = await _classifyAllEntriesInTx();
-      final origClass = classifications[originalEntryId];
-      if (origClass == null || !origClass.isEligibleEtb) {
+      final accounts =
+          await getAccounts(includeArchived: true, includeSystem: true);
+      final entries = await getJournalEntries(includeVoided: true);
+      final postings = await getPostings();
+      final debts = await getDebts();
+      final allocations = await getSettlementAllocations();
+      final cmSettlements = await getCommitmentSettlements();
+
+      final origMatches = entries.where((e) => e.id == originalEntryId);
+      if (origMatches.isEmpty) {
         throw DoubleEntryValidationError(
-          'Only active ETB journal entries can be corrected or replaced '
-          'in first-release ETB mode.',
+          'Original journal entry "$originalEntryId" not found.',
+        );
+      }
+      final original = origMatches.first;
+      final check = DoubleEntryEngine.canCorrectEntry(
+        entry: original,
+        entries: entries,
+        postings: postings,
+        accounts: accounts,
+        debts: debts,
+        allocations: allocations,
+        commitmentSettlements: cmSettlements,
+      );
+      if (!check.ok) {
+        throw DoubleEntryValidationError(
+          check.error ?? 'Entry cannot be replaced.',
         );
       }
 
@@ -905,9 +997,15 @@ class DriftFinanceRepository implements IFinanceRepository {
           voidReason: Value('Corrected: ${correctionReason.trim()}'),
         ),
       );
+      await _syncDualWriteSupersededInTx(
+        entryId: original.id,
+        legacySourceTxId: original.legacySourceTxId,
+        isSuperseded: true,
+      );
       await _syncCommitmentsForEntryInTx(originalEntryId);
       await _insertEntryAndPostingsInTx(linkedEntry, replacementPostings);
       await V7LedgerHardener.reconcileAllDebtsV7(_db);
+      await _syncVaultGoalsInTx();
     });
     return linkedEntry;
   }
@@ -927,44 +1025,7 @@ class DriftFinanceRepository implements IFinanceRepository {
   @override
   Future<void> unvoidJournalEntry(String entryId) async {
     await _db.transaction(() async {
-      final entryRow = await (_db.select(_db.journalEntriesTable)
-            ..where((tbl) => tbl.id.equals(entryId)))
-          .getSingleOrNull();
-      if (entryRow == null) {
-        throw DoubleEntryValidationError(
-          'Journal entry "$entryId" not found.',
-        );
-      }
-
-      final entryPostings = await getPostings(entryId: entryId);
-      if (entryPostings
-          .any((p) => p.accountId == SystemControlAccounts.legacyOffset)) {
-        throw DoubleEntryValidationError(
-          'Legacy clearing offset entries cannot be restored in first-release ETB mode.',
-        );
-      }
-      await _assertEtbAccountsInTx(entryPostings.map((p) => p.accountId));
-
-      await (_db.update(_db.journalEntriesTable)
-            ..where((tbl) => tbl.id.equals(entryId)))
-          .write(
-        const JournalEntriesTableCompanion(
-          isVoided: Value(false),
-          voidReason: Value(null),
-        ),
-      );
-
-      final classifications = await _classifyAllEntriesInTx();
-      final cls = classifications[entryId];
-      if (cls == null || !cls.isEligibleEtb) {
-        throw DoubleEntryValidationError(
-          cls?.reason ??
-              'Restored journal entry must be verified ETB in first-release mode.',
-        );
-      }
-
-      await _syncCommitmentsForEntryInTx(entryId);
-      await V7LedgerHardener.reconcileAllDebtsV7(_db);
+      await _unvoidEntryInternalInTx(entryId);
     });
   }
 
@@ -1166,6 +1227,7 @@ class DriftFinanceRepository implements IFinanceRepository {
         DoubleEntryEngine.validateBalancedEntry(postings);
         await _insertEntryAndPostingsInTx(entry, postings);
       }
+      await _syncVaultGoalsInTx();
     });
     return tx;
   }
@@ -1188,10 +1250,25 @@ class DriftFinanceRepository implements IFinanceRepository {
             ..where((tbl) => tbl.id.equals(originalId)))
           .getSingle();
 
+      if (original.isSuperseded) {
+        throw DoubleEntryValidationError(
+          'This transaction has already been superseded and cannot be replaced again.',
+        );
+      }
       if (original.accountId == null || original.accountId!.trim().isEmpty) {
         throw DoubleEntryValidationError(
           'Legacy unlinked transactions cannot be corrected in ETB mode.',
         );
+      }
+      if (original.type == 'transfer') {
+        final destId = original.destinationAccountId?.trim();
+        if (destId == null ||
+            destId.isEmpty ||
+            destId == original.accountId!.trim()) {
+          throw DoubleEntryValidationError(
+            'Transfer replacement requires distinct source and destination ETB accounts.',
+          );
+        }
       }
       await _assertEtbAccountsInTx([
         original.accountId!,
@@ -1203,15 +1280,30 @@ class DriftFinanceRepository implements IFinanceRepository {
             ..where((tbl) =>
                 tbl.legacySourceTxId.equals(originalId) |
                 tbl.id.equals(originalId) |
-                tbl.id.equals('entry-$originalId'))
+                tbl.id.equals('entry-$originalId') |
+                tbl.id.equals('entry-tx-$originalId'))
             ..limit(1))
           .getSingleOrNull();
       if (originalLedgerPreCheck != null) {
-        final classifications = await _classifyAllEntriesInTx();
-        final cls = classifications[originalLedgerPreCheck.id];
-        if (cls != null && !cls.isEligibleEtb) {
+        final accounts =
+            await getAccounts(includeArchived: true, includeSystem: true);
+        final entries = await getJournalEntries(includeVoided: true);
+        final postings = await getPostings();
+        final debts = await getDebts();
+        final allocations = await getSettlementAllocations();
+        final cmSettlements = await getCommitmentSettlements();
+        final check = DoubleEntryEngine.canCorrectEntry(
+          entry: _mapJournalEntryRow(originalLedgerPreCheck),
+          entries: entries,
+          postings: postings,
+          accounts: accounts,
+          debts: debts,
+          allocations: allocations,
+          commitmentSettlements: cmSettlements,
+        );
+        if (!check.ok) {
           throw DoubleEntryValidationError(
-            'Only active ETB transactions can be corrected in ETB mode.',
+            check.error ?? 'Only active ETB transactions can be corrected.',
           );
         }
       }
@@ -1221,8 +1313,13 @@ class DriftFinanceRepository implements IFinanceRepository {
       final prefixLen = original.id.length < 8 ? original.id.length : 8;
       final newPrefixLen = newId.length < 8 ? newId.length : 8;
 
-      await _ensureCategoryExists(
-          newCategoryId, newCategoryName, original.type);
+      if (original.type != 'transfer') {
+        await _ensureCategoryExists(
+          newCategoryId,
+          newCategoryName,
+          original.type,
+        );
+      }
 
       final correctionNote =
           '[Corrected from ${original.id.substring(0, prefixLen)}: $correctionReason] ${newNote ?? original.note ?? ''}';
@@ -1265,6 +1362,7 @@ class DriftFinanceRepository implements IFinanceRepository {
             voidReason: Value('Corrected: $correctionReason'),
           ),
         );
+        await _syncCommitmentsForEntryInTx(originalLedger.id);
       }
 
       if (newAmountCents.abs() > 0) {
@@ -1275,7 +1373,21 @@ class DriftFinanceRepository implements IFinanceRepository {
           payee: newPayee ?? original.payee,
         );
         late Map<String, dynamic> built;
-        if (original.type == 'income') {
+        if (original.type == 'transfer') {
+          built = DoubleEntryEngine.buildTransfer(
+            entryId: replacementId,
+            fromAssetAccountId: effectiveAccountId,
+            toAssetAccountId: original.destinationAccountId!,
+            amountCents: newAmountCents.abs(),
+            date: original.transactionDate,
+            description: desc,
+            note: correctionNote.trim(),
+          );
+          final rawEntry = built['entry'] as JournalEntryModel;
+          built['entry'] = rawEntry.copyWith(
+            correctedFromEntryId: originalLedger?.id,
+          );
+        } else if (original.type == 'income') {
           built = DoubleEntryEngine.buildDirectIncome(
             entryId: replacementId,
             destAccountId: effectiveAccountId,
@@ -1307,6 +1419,9 @@ class DriftFinanceRepository implements IFinanceRepository {
             replacementEntry, replacementPostings);
       }
 
+      await V7LedgerHardener.reconcileAllDebtsV7(_db);
+      await _syncVaultGoalsInTx();
+
       result = TransactionModel(
         id: newId,
         categoryId: newCategoryId,
@@ -1332,21 +1447,21 @@ class DriftFinanceRepository implements IFinanceRepository {
   @override
   Future<void> deleteTransaction(String id) async {
     await _db.transaction(() async {
-      await (_db.delete(_db.financialTransactions)
-            ..where((tbl) => tbl.id.equals(id)))
-          .go();
-      await (_db.update(_db.journalEntriesTable)
+      final linkedEntries = await (_db.select(_db.journalEntriesTable)
             ..where((tbl) =>
                 tbl.id.equals(id) |
                 tbl.id.equals('entry-$id') |
+                tbl.id.equals('entry-tx-$id') |
                 tbl.legacySourceTxId.equals(id)))
-          .write(
-        const JournalEntriesTableCompanion(
-          isVoided: Value(true),
-          voidReason: Value('Deleted via Finance UI'),
-        ),
-      );
+          .get();
+      for (final linked in linkedEntries) {
+        await _voidEntryInternalInTx(linked.id, 'Deleted via Finance UI');
+      }
+      await (_db.delete(_db.financialTransactions)
+            ..where((tbl) => tbl.id.equals(id)))
+          .go();
       await V7LedgerHardener.reconcileAllDebtsV7(_db);
+      await _syncVaultGoalsInTx();
     });
   }
 
@@ -1373,51 +1488,12 @@ class DriftFinanceRepository implements IFinanceRepository {
                 tbl.legacySourceTxId.equals(tx.id)))
           .get();
       for (final linked in existingLinked) {
-        final postings = await getPostings(entryId: linked.id);
-        if (postings
-            .any((p) => p.accountId == SystemControlAccounts.legacyOffset)) {
-          throw DoubleEntryValidationError(
-            'Legacy clearing offset entries cannot be restored in '
-            'first-release ETB mode.',
-          );
-        }
-        await _assertEtbAccountsInTx(postings.map((p) => p.accountId));
+        await _unvoidEntryInternalInTx(linked.id);
       }
 
-      await recordTransaction(tx);
-      final linkedEntries = await (_db.select(_db.journalEntriesTable)
-            ..where((tbl) =>
-                tbl.id.equals(tx.id) |
-                tbl.id.equals('entry-${tx.id}') |
-                tbl.id.equals('entry-tx-${tx.id}') |
-                tbl.legacySourceTxId.equals(tx.id)))
-          .get();
-      await (_db.update(_db.journalEntriesTable)
-            ..where((tbl) =>
-                tbl.id.equals(tx.id) |
-                tbl.id.equals('entry-${tx.id}') |
-                tbl.id.equals('entry-tx-${tx.id}') |
-                tbl.legacySourceTxId.equals(tx.id)))
-          .write(
-        const JournalEntriesTableCompanion(
-          isVoided: Value(false),
-          voidReason: Value(null),
-        ),
-      );
-      if (linkedEntries.isNotEmpty) {
-        final classifications = await _classifyAllEntriesInTx();
-        for (final linked in linkedEntries) {
-          final cls = classifications[linked.id];
-          if (cls == null || !cls.isEligibleEtb) {
-            throw DoubleEntryValidationError(
-              cls?.reason ??
-                  'Restored transaction entry must be verified ETB in '
-                      'first-release mode.',
-            );
-          }
-        }
-      }
+      await recordTransaction(tx.copyWith(isSuperseded: false));
       await V7LedgerHardener.reconcileAllDebtsV7(_db);
+      await _syncVaultGoalsInTx();
     });
   }
 
@@ -2322,63 +2398,90 @@ class DriftFinanceRepository implements IFinanceRepository {
 
   @override
   Future<SavingsGoalModel> createSavingsGoal(SavingsGoalModel goal) async {
+    late SavingsGoalModel saved;
     await _db.transaction(() async {
       final vaultId = goal.linkedAccountId?.trim();
-      if (vaultId != null && vaultId.isNotEmpty) {
-        await _assertEtbVaultAccountInTx(vaultId);
+      final effectiveVaultId =
+          (vaultId != null && vaultId.isNotEmpty) ? vaultId : null;
+      if (effectiveVaultId != null) {
+        await _assertEtbVaultAccountInTx(effectiveVaultId);
       }
+      final targetCents = goal.targetCents.abs();
+      final allocated = goal.currentAllocatedCents.abs();
+      final initialStatus = goal.status == SavingsGoalStatus.archived
+          ? 'archived'
+          : ((targetCents > 0 && allocated >= targetCents)
+              ? 'completed'
+              : 'active');
       await _db.into(_db.savingsGoals).insertOnConflictUpdate(
             SavingsGoalsCompanion.insert(
               id: goal.id,
               title: goal.title.trim(),
-              targetCents: goal.targetCents.abs(),
-              currentAllocatedCents: Value(goal.currentAllocatedCents.abs()),
+              targetCents: targetCents,
+              currentAllocatedCents: Value(allocated),
               targetDate: Value(goal.targetDate?.toIsoString()),
-              linkedAccountId: Value(
-                (vaultId != null && vaultId.isNotEmpty) ? vaultId : null,
-              ),
-              status: Value(goal.status.name),
+              linkedAccountId: Value(effectiveVaultId),
+              status: Value(initialStatus),
               createdAt: EthiopiaClock.nowUtc(),
             ),
           );
+      await _syncVaultGoalsInTx();
+      final row = await (_db.select(_db.savingsGoals)
+            ..where((tbl) => tbl.id.equals(goal.id)))
+          .getSingle();
+      saved = _mapSavingsGoalRow(row);
     });
-    return goal;
+    return saved;
   }
 
   @override
   Future<SavingsGoalModel> updateSavingsGoal(SavingsGoalModel goal) async {
+    late SavingsGoalModel updated;
     await _db.transaction(() async {
       final existing = await (_db.select(_db.savingsGoals)
             ..where((tbl) => tbl.id.equals(goal.id)))
           .getSingleOrNull();
       final vaultId = goal.linkedAccountId?.trim();
+      final effectiveVaultId =
+          (vaultId != null && vaultId.isNotEmpty) ? vaultId : null;
       if (existing != null &&
           existing.linkedAccountId != null &&
-          (vaultId == null || vaultId.isEmpty) &&
+          effectiveVaultId == null &&
           existing.currentAllocatedCents > 0) {
         throw StateError(
           'Withdraw vault balance to 0 before unlinking this savings goal.',
         );
       }
-      if (vaultId != null && vaultId.isNotEmpty) {
-        await _assertEtbVaultAccountInTx(vaultId);
+      if (effectiveVaultId != null) {
+        await _assertEtbVaultAccountInTx(effectiveVaultId);
       }
+      final targetCents = goal.targetCents.abs();
+      final allocated = goal.currentAllocatedCents.abs();
+      final nextStatus = goal.status == SavingsGoalStatus.archived ||
+              existing?.status == 'archived'
+          ? goal.status.name
+          : ((targetCents > 0 && allocated >= targetCents)
+              ? 'completed'
+              : 'active');
       await (_db.update(_db.savingsGoals)
             ..where((tbl) => tbl.id.equals(goal.id)))
           .write(
         SavingsGoalsCompanion(
           title: Value(goal.title.trim()),
-          targetCents: Value(goal.targetCents.abs()),
-          currentAllocatedCents: Value(goal.currentAllocatedCents.abs()),
+          targetCents: Value(targetCents),
+          currentAllocatedCents: Value(allocated),
           targetDate: Value(goal.targetDate?.toIsoString()),
-          linkedAccountId: Value(
-            (vaultId != null && vaultId.isNotEmpty) ? vaultId : null,
-          ),
-          status: Value(goal.status.name),
+          linkedAccountId: Value(effectiveVaultId),
+          status: Value(nextStatus),
         ),
       );
+      await _syncVaultGoalsInTx();
+      final row = await (_db.select(_db.savingsGoals)
+            ..where((tbl) => tbl.id.equals(goal.id)))
+          .getSingle();
+      updated = _mapSavingsGoalRow(row);
     });
-    return goal;
+    return updated;
   }
 
   @override
@@ -2401,6 +2504,7 @@ class DriftFinanceRepository implements IFinanceRepository {
   Future<SavingsGoalModel> releaseAndArchiveSavingsGoal(String goalId) async {
     late SavingsGoalModel result;
     await _db.transaction(() async {
+      await _syncVaultGoalsInTx();
       final row = await (_db.select(_db.savingsGoals)
             ..where((tbl) => tbl.id.equals(goalId)))
           .getSingleOrNull();
@@ -2487,6 +2591,40 @@ class DriftFinanceRepository implements IFinanceRepository {
         await _assertEtbAccountsInTx([sourceAccountId]);
         await _assertEtbVaultAccountInTx(linkedVaultId);
 
+        final liquidAccRow = await (_db.select(_db.accountsTable)
+              ..where((tbl) => tbl.id.equals(sourceAccountId)))
+            .getSingle();
+        final liquidAcc = _mapAccountRow(liquidAccRow);
+        if (liquidAcc.type != AccountType.asset ||
+            !liquidAcc.subType.isLiquid) {
+          throw DoubleEntryValidationError(
+            'Vault transfers must use an active Verified ETB liquid asset '
+            'account (Cash, Bank, or Mobile Money).',
+          );
+        }
+
+        final vaultAccRow = await (_db.select(_db.accountsTable)
+              ..where((tbl) => tbl.id.equals(linkedVaultId)))
+            .getSingle();
+        final vaultAcc = _mapAccountRow(vaultAccRow);
+        final vaultPostingsBefore = await getPostings(accountId: linkedVaultId);
+        final entriesBefore = await getJournalEntries(includeVoided: true);
+        final vaultBalanceBefore = max(
+          0,
+          DoubleEntryEngine.calculateAccountBalance(
+            account: vaultAcc,
+            postings: vaultPostingsBefore,
+            entries: entriesBefore,
+          ),
+        );
+
+        if (deltaCents < 0 && deltaCents.abs() > vaultBalanceBefore) {
+          throw DoubleEntryValidationError(
+            'Cannot withdraw ${deltaCents.abs()} cents from vault '
+            '"${vaultAcc.name}": available balance is $vaultBalanceBefore cents.',
+          );
+        }
+
         final entryId = 'entry-sav-${_uuid.v4()}';
         final dateIso = (date ?? CalendarDate.today()).toIsoString();
         final built = deltaCents > 0
@@ -2513,40 +2651,19 @@ class DriftFinanceRepository implements IFinanceRepository {
           built['entry'] as JournalEntryModel,
           built['postings'] as List<PostingModel>,
         );
+        await _syncVaultGoalsInTx();
 
-        final vaultAccRow = await (_db.select(_db.accountsTable)
-              ..where((tbl) => tbl.id.equals(linkedVaultId)))
-            .getSingle();
-        final vaultAcc = _mapAccountRow(vaultAccRow);
-        final vaultPostings = await getPostings(accountId: linkedVaultId);
-        final entries = await getJournalEntries(includeVoided: true);
-        final vaultBalance = DoubleEntryEngine.calculateAccountBalance(
-          account: vaultAcc,
-          postings: vaultPostings,
-          entries: entries,
-        );
-        final syncedAllocated = max(0, vaultBalance);
-        final nextStatus =
-            (row.targetCents > 0 && syncedAllocated >= row.targetCents)
-                ? 'completed'
-                : 'active';
-
-        await (_db.update(_db.savingsGoals)
+        final updatedRow = await (_db.select(_db.savingsGoals)
               ..where((tbl) => tbl.id.equals(goalId)))
-            .write(
-          SavingsGoalsCompanion(
-            currentAllocatedCents: Value(syncedAllocated),
-            status: Value(nextStatus),
-          ),
-        );
-
-        result = _mapSavingsGoalRow(row).copyWith(
-          currentAllocatedCents: syncedAllocated,
-          status: nextStatus == 'completed'
-              ? SavingsGoalStatus.completed
-              : SavingsGoalStatus.active,
-        );
+            .getSingle();
+        result = _mapSavingsGoalRow(updatedRow);
       } else {
+        if (deltaCents < 0 && deltaCents.abs() > row.currentAllocatedCents) {
+          throw DoubleEntryValidationError(
+            'Cannot release more than the currently allocated reserve '
+            '(${row.currentAllocatedCents} cents).',
+          );
+        }
         final nextAllocated = max(0, row.currentAllocatedCents + deltaCents);
         final nextStatus =
             (row.targetCents > 0 && nextAllocated >= row.targetCents)
@@ -3017,6 +3134,9 @@ class DriftFinanceRepository implements IFinanceRepository {
           ),
         );
       }
+      if (processedCount > 0) {
+        await _syncVaultGoalsInTx();
+      }
     });
 
     return processedCount;
@@ -3338,10 +3458,178 @@ class DriftFinanceRepository implements IFinanceRepository {
     }
   }
 
+  Future<void> _assertVaultZeroBalanceBeforeArchiveInTx(
+    AccountsTableData row,
+  ) async {
+    final mapped = _mapAccountRow(row);
+    if (!mapped.subType.isSavingsVault) return;
+    final accountPostings = await getPostings(accountId: row.id);
+    final entries = await getJournalEntries(includeVoided: true);
+    final balanceCents = DoubleEntryEngine.calculateAccountBalance(
+      account: mapped,
+      postings: accountPostings,
+      entries: entries,
+    );
+    if (balanceCents != 0) {
+      throw DoubleEntryValidationError(
+        'Cannot archive Savings Vault "${row.name}" while its balance is '
+        'non-zero (${(balanceCents / 100).toStringAsFixed(2)} ETB). '
+        'Withdraw remaining funds first.',
+      );
+    }
+  }
+
+  Future<void> _syncVaultGoalsInTx() async {
+    final goals = await _db.select(_db.savingsGoals).get();
+    final vaultGoals = goals
+        .where(
+          (g) =>
+              g.status != 'archived' &&
+              g.linkedAccountId != null &&
+              g.linkedAccountId!.trim().isNotEmpty,
+        )
+        .toList();
+    if (vaultGoals.isEmpty) return;
+
+    final accounts =
+        await getAccounts(includeArchived: true, includeSystem: true);
+    final accountById = {for (final a in accounts) a.id: a};
+    final postings = await getPostings();
+    final entries = await getJournalEntries(includeVoided: true);
+
+    for (final goal in vaultGoals) {
+      final acc = accountById[goal.linkedAccountId!.trim()];
+      if (acc == null) continue;
+      final balance = max(
+        0,
+        DoubleEntryEngine.calculateAccountBalance(
+          account: acc,
+          postings: postings,
+          entries: entries,
+        ),
+      );
+      final nextStatus =
+          (goal.targetCents > 0 && balance >= goal.targetCents)
+              ? 'completed'
+              : 'active';
+      if (goal.currentAllocatedCents != balance || goal.status != nextStatus) {
+        await (_db.update(_db.savingsGoals)
+              ..where((tbl) => tbl.id.equals(goal.id)))
+            .write(
+          SavingsGoalsCompanion(
+            currentAllocatedCents: Value(balance),
+            status: Value(nextStatus),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _syncDualWriteSupersededInTx({
+    required String entryId,
+    String? legacySourceTxId,
+    required bool isSuperseded,
+  }) async {
+    final candidateIds = <String>{
+      entryId,
+      if (entryId.startsWith('entry-tx-'))
+        entryId.substring('entry-tx-'.length),
+      if (entryId.startsWith('entry-')) entryId.substring('entry-'.length),
+      if (legacySourceTxId != null && legacySourceTxId.trim().isNotEmpty)
+        legacySourceTxId.trim(),
+    }.toList();
+    if (candidateIds.isEmpty) return;
+    await (_db.update(_db.financialTransactions)
+          ..where((tbl) => tbl.id.isIn(candidateIds)))
+        .write(
+      FinancialTransactionsCompanion(isSuperseded: Value(isSuperseded)),
+    );
+  }
+
   Future<JournalEntryModel> _voidEntryInternalInTx(
     String entryId,
     String voidReason,
   ) async {
+    final targetRow = await (_db.select(_db.journalEntriesTable)
+          ..where((tbl) => tbl.id.equals(entryId)))
+        .getSingleOrNull();
+    if (targetRow == null) {
+      throw DoubleEntryValidationError('Journal entry "$entryId" not found.');
+    }
+    if (targetRow.isVoided) {
+      return _mapJournalEntryRow(targetRow);
+    }
+
+    final allEntries = await _db.select(_db.journalEntriesTable).get();
+    final voidedEntryIds = {
+      for (final e in allEntries)
+        if (e.isVoided) e.id,
+    };
+
+    // Guard 1: Debt-origin entries cannot be voided while active settlements or active write-off exist.
+    final linkedOriginDebts = await (_db.select(_db.debtsTable)
+          ..where((tbl) => tbl.originEntryId.equals(entryId)))
+        .get();
+    for (final debt in linkedOriginDebts) {
+      final allocs = await (_db.select(_db.settlementAllocationsTable)
+            ..where((tbl) => tbl.debtId.equals(debt.id)))
+          .get();
+      if (allocs.any((a) => !voidedEntryIds.contains(a.settlementEntryId))) {
+        throw DoubleEntryValidationError(
+          'Cannot void a debt-origin entry that has active settlements. '
+          'Void the settlement entries first.',
+        );
+      }
+      if (debt.writeOffEntryId != null &&
+          !voidedEntryIds.contains(debt.writeOffEntryId!)) {
+        throw DoubleEntryValidationError(
+          'Cannot void a debt-origin entry with an active write-off. '
+          'Void the write-off entry first.',
+        );
+      }
+    }
+
+    // Guard 2: Settlements cannot be voided while target debt has an active write-off.
+    final targetAllocs = await (_db.select(_db.settlementAllocationsTable)
+          ..where((tbl) => tbl.settlementEntryId.equals(entryId)))
+        .get();
+    for (final alloc in targetAllocs) {
+      final debt = await (_db.select(_db.debtsTable)
+            ..where((tbl) => tbl.id.equals(alloc.debtId)))
+          .getSingleOrNull();
+      if (debt?.writeOffEntryId != null &&
+          !voidedEntryIds.contains(debt!.writeOffEntryId!)) {
+        throw DoubleEntryValidationError(
+          'Cannot void a settlement while its debt has an active write-off. '
+          'Void the write-off first.',
+        );
+      }
+    }
+
+    // Guard 3: Standard expense cannot be voided while active refunds reference it.
+    final hasActiveRefund = allEntries.any(
+      (e) =>
+          !e.isVoided &&
+          DoubleEntryEngine.extractRefundOriginEntryId(
+                _mapJournalEntryRow(e),
+              ) ==
+              entryId,
+    );
+    if (hasActiveRefund) {
+      throw DoubleEntryValidationError(
+        'Cannot void an expense entry that has active refunds. '
+        'Void the refund entries first.',
+      );
+    }
+
+    // Guard 4: Opening-balance entries must be revised via reviseOpeningBalance.
+    if (targetRow.legacySourceTxId?.startsWith('open:') ?? false) {
+      throw DoubleEntryValidationError(
+        'Opening balance entries cannot be voided directly. '
+        'Edit the account opening balance instead.',
+      );
+    }
+
     await (_db.update(_db.journalEntriesTable)
           ..where((tbl) => tbl.id.equals(entryId)))
         .write(
@@ -3351,13 +3639,191 @@ class DriftFinanceRepository implements IFinanceRepository {
       ),
     );
 
+    await _syncDualWriteSupersededInTx(
+      entryId: targetRow.id,
+      legacySourceTxId: targetRow.legacySourceTxId,
+      isSuperseded: true,
+    );
     await _syncCommitmentsForEntryInTx(entryId);
     await V7LedgerHardener.reconcileAllDebtsV7(_db);
+    await _syncVaultGoalsInTx();
 
     final row = await (_db.select(_db.journalEntriesTable)
           ..where((tbl) => tbl.id.equals(entryId)))
         .getSingle();
     return _mapJournalEntryRow(row);
+  }
+
+  Future<void> _unvoidEntryInternalInTx(String entryId) async {
+    final entryRow = await (_db.select(_db.journalEntriesTable)
+          ..where((tbl) => tbl.id.equals(entryId)))
+        .getSingleOrNull();
+    if (entryRow == null) {
+      throw DoubleEntryValidationError(
+        'Journal entry "$entryId" not found.',
+      );
+    }
+
+    final mappedTarget = _mapJournalEntryRow(entryRow);
+    final entryPostings = await getPostings(entryId: entryId);
+    if (entryPostings
+        .any((p) => p.accountId == SystemControlAccounts.legacyOffset)) {
+      throw DoubleEntryValidationError(
+        'Legacy clearing offset entries cannot be restored in first-release ETB mode.',
+      );
+    }
+    await _assertEtbAccountsInTx(entryPostings.map((p) => p.accountId));
+
+    if (!entryRow.isVoided) {
+      await _syncDualWriteSupersededInTx(
+        entryId: entryRow.id,
+        legacySourceTxId: entryRow.legacySourceTxId,
+        isSuperseded: false,
+      );
+      return;
+    }
+
+    final allEntries = await _db.select(_db.journalEntriesTable).get();
+    final voidedEntryIds = {
+      for (final e in allEntries)
+        if (e.isVoided) e.id,
+    };
+
+    // Guard: Do not restore an entry that already has an active replacement.
+    final hasActiveReplacement = allEntries.any(
+      (e) => !e.isVoided && e.correctedFromEntryId == entryId,
+    );
+    if (hasActiveReplacement) {
+      throw DoubleEntryValidationError(
+        'Cannot restore an entry that has an active replacement. '
+        'Void the replacement entry first.',
+      );
+    }
+
+    // Guard: Opening balance entries must use reviseOpeningBalance.
+    if (entryRow.legacySourceTxId?.startsWith('open:') ?? false) {
+      throw DoubleEntryValidationError(
+        'Opening balance entries cannot be restored directly. '
+        'Edit the account opening balance instead.',
+      );
+    }
+
+    // Guard: Write-off entries cannot be unvoided directly.
+    if (mappedTarget.entryType == EntryType.writeOff) {
+      throw DoubleEntryValidationError(
+        'Write-off entries cannot be restored directly. '
+        'Record a new write-off from the debt record if needed.',
+      );
+    }
+
+    // Guard: If settlement entry, verify target debt origin is active, not written off, and won't over-settle.
+    final targetAllocs = await (_db.select(_db.settlementAllocationsTable)
+          ..where((tbl) => tbl.settlementEntryId.equals(entryId)))
+        .get();
+    for (final alloc in targetAllocs) {
+      final debt = await (_db.select(_db.debtsTable)
+            ..where((tbl) => tbl.id.equals(alloc.debtId)))
+          .getSingleOrNull();
+      if (debt == null) {
+        throw DoubleEntryValidationError(
+          'Cannot restore settlement because its debt record no longer exists.',
+        );
+      }
+      final originMatches =
+          allEntries.where((e) => e.id == debt.originEntryId);
+      final origin = originMatches.isEmpty ? null : originMatches.first;
+      if (origin == null || origin.isVoided || debt.status == 'voided') {
+        throw DoubleEntryValidationError(
+          'Cannot restore settlement because the underlying debt origin is voided.',
+        );
+      }
+      if (debt.writeOffEntryId != null &&
+          !voidedEntryIds.contains(debt.writeOffEntryId!)) {
+        throw DoubleEntryValidationError(
+          'Cannot restore settlement while the debt has an active write-off.',
+        );
+      }
+      final debtAllocs = await (_db.select(_db.settlementAllocationsTable)
+            ..where((tbl) => tbl.debtId.equals(debt.id)))
+          .get();
+      final currentSettled = debtAllocs
+          .where((a) => !voidedEntryIds.contains(a.settlementEntryId))
+          .fold<int>(0, (sum, a) => sum + a.allocatedCents);
+      if (currentSettled + alloc.allocatedCents > debt.principalCents) {
+        throw DoubleEntryValidationError(
+          'Cannot restore settlement because total settled principal would '
+          'exceed the debt principal.',
+        );
+      }
+    }
+
+    // Guard: If refund entry, verify original expense is active and remaining refundable covers this refund.
+    final refundOriginId =
+        DoubleEntryEngine.extractRefundOriginEntryId(mappedTarget);
+    if (refundOriginId != null) {
+      final accounts =
+          await getAccounts(includeArchived: true, includeSystem: true);
+      final mappedEntries = allEntries.map(_mapJournalEntryRow).toList();
+      final postings = await getPostings();
+      final debts = await getDebts();
+      final allocations = await getSettlementAllocations();
+      final summary = DoubleEntryEngine.getExpenseRefundSummary(
+        originalEntryId: refundOriginId,
+        entries: mappedEntries,
+        postings: postings,
+        accounts: accounts,
+        debts: debts,
+        allocations: allocations,
+      );
+      if (!summary.eligible) {
+        throw DoubleEntryValidationError(
+          summary.reason ??
+              'Cannot restore refund because the original expense is no longer active or eligible.',
+        );
+      }
+      final accountById = {for (final a in accounts) a.id: a};
+      final refundAmount = entryPostings
+          .where(
+            (p) =>
+                p.direction == PostingDirection.credit &&
+                (p.accountId == SystemControlAccounts.expense ||
+                    accountById[p.accountId]?.type == AccountType.expense),
+          )
+          .fold<int>(0, (sum, p) => sum + p.amountCents);
+      if (refundAmount > summary.remainingRefundableCents) {
+        throw DoubleEntryValidationError(
+          'Cannot restore refund because total refunded amount would exceed '
+          'the original expense.',
+        );
+      }
+    }
+
+    await (_db.update(_db.journalEntriesTable)
+          ..where((tbl) => tbl.id.equals(entryId)))
+        .write(
+      const JournalEntriesTableCompanion(
+        isVoided: Value(false),
+        voidReason: Value(null),
+      ),
+    );
+
+    final classifications = await _classifyAllEntriesInTx();
+    final cls = classifications[entryId];
+    if (cls == null || !cls.isEligibleEtb) {
+      throw DoubleEntryValidationError(
+        cls?.reason ??
+            'Restored journal entry must be verified ETB in first-release mode.',
+      );
+    }
+
+    await _syncDualWriteSupersededInTx(
+      entryId: entryRow.id,
+      legacySourceTxId: entryRow.legacySourceTxId,
+      isSuperseded: false,
+    );
+    await _syncCommitmentsForEntryInTx(entryId);
+    await V7LedgerHardener.reconcileAllDebtsV7(_db);
+    await _syncVaultGoalsInTx();
   }
 
   Future<int> _verifiedCommitmentSettledCentsInTx(String commitmentId) async {

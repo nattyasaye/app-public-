@@ -61,7 +61,7 @@ interface FinanceOverviewTabProps {
     openingBalanceCents: number;
     openingBalanceDate: string;
   }) => { ok: boolean; error?: string };
-  onToggleArchiveAccount: (accountId: string) => void;
+  onToggleArchiveAccount: (accountId: string) => { ok: boolean; error?: string } | void;
   onDeleteAccount: (accountId: string) => { ok: boolean; error?: string };
   onSaveCategory: (payload: {
     editingCategory?: TransactionCategory & { parentId?: string };
@@ -587,7 +587,12 @@ export function FinanceOverviewTab({
                       label={acc.isArchived ? 'Restore account' : 'Archive account'}
                       size="compact"
                       tone="muted"
-                      onClick={() => onToggleArchiveAccount(acc.id)}
+                      onClick={() => {
+                        const res = onToggleArchiveAccount(acc.id);
+                        if (res && !res.ok && res.error) {
+                          setNoticeBanner(res.error);
+                        }
+                      }}
                       icon={acc.isArchived ? <RotateCcw className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
                     />
                     <DaywellIconButton

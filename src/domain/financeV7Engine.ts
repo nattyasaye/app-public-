@@ -859,39 +859,225 @@ export function voidDebtWriteOffV7(params: {
 }
 
 /**
- * Funds a Savings Goal:
- * - Virtual (no linkedAccountId): increments currentAllocatedCents without touching cash postings.
- * - Vault-linked (linkedAccountId present): builds a balanced vault transfer (Dr Vault / Cr Source).
+ * Returns the target vault account balance for a vault-linked Savings Goal, or
+ * its allocated reserve for a virtual goal.
+ */
+export function getSavingsGoalEffectiveBalanceV7(params: {
+  goal: SharedSavingsGoal;
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+}): number {
+  if (!params.goal.linkedAccountId) {
+    return Math.max(0, params.goal.currentAllocatedCents);
+  }
+  const vaultAcc = params.accounts.find((a) => a.id === params.goal.linkedAccountId);
+  if (!vaultAcc) {
+    return Math.max(0, params.goal.currentAllocatedCents);
+  }
+  return Math.max(0, calculateV7AccountBalance(vaultAcc, params.postings, params.entries));
+}
+
+/**
+ * Synchronizes vault-linked SavingsGoal currentAllocatedCents and completion status
+ * from the authoritative ledger balance of their linked savings_vault account.
+ * Archived goals preserve their archived status and 0 allocation.
+ */
+export function syncVaultSavingsGoalsV7(params: {
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  savingsGoals: SharedSavingsGoal[];
+}): SharedSavingsGoal[] {
+  const accountById = new Map(params.accounts.map((a) => [a.id, a]));
+  return params.savingsGoals.map((goal) => {
+    if (!goal.linkedAccountId || goal.status === 'archived') {
+      return goal;
+    }
+    const vaultAcc = accountById.get(goal.linkedAccountId);
+    if (!vaultAcc || vaultAcc.subType !== 'savings_vault') {
+      return goal;
+    }
+    const nextAllocated = Math.max(
+      0,
+      calculateV7AccountBalance(vaultAcc, params.postings, params.entries)
+    );
+    const nextStatus: SharedSavingsGoal['status'] =
+      goal.targetCents > 0 && nextAllocated >= goal.targetCents ? 'completed' : 'active';
+    if (
+      goal.currentAllocatedCents === nextAllocated &&
+      goal.status === nextStatus
+    ) {
+      return goal;
+    }
+    return {
+      ...goal,
+      currentAllocatedCents: nextAllocated,
+      status: nextStatus,
+    };
+  });
+}
+
+/**
+ * Reconciles every Debt's status and outstandingCents from active journal entries
+ * and active SettlementAllocations.
+ */
+export function reconcileDebtsV7(params: {
+  debts: Debt[];
+  entries: JournalEntry[];
+  allocations: SettlementAllocation[];
+}): Debt[] {
+  const entryById = new Map(params.entries.map((e) => [e.id, e]));
+  const voidedIds = new Set(params.entries.filter((e) => e.isVoided).map((e) => e.id));
+
+  return params.debts.map((debt) => {
+    const originEntry = entryById.get(debt.originEntryId);
+    if (originEntry?.isVoided) {
+      if (debt.status === 'voided' && debt.outstandingCents === 0 && !debt.writeOffEntryId) {
+        return debt;
+      }
+      return {
+        ...debt,
+        status: 'voided',
+        outstandingCents: 0,
+        writeOffEntryId: undefined,
+      };
+    }
+
+    const settledPrincipal = params.allocations
+      .filter((a) => a.debtId === debt.id && !voidedIds.has(a.settlementEntryId))
+      .reduce((sum, a) => sum + Math.max(0, a.allocatedCents), 0);
+    const clampedSettled = Math.min(debt.principalCents, settledPrincipal);
+    const remaining = Math.max(0, debt.principalCents - clampedSettled);
+
+    const writeOffId = debt.writeOffEntryId;
+    const hasActiveWriteOff =
+      Boolean(writeOffId) &&
+      !voidedIds.has(writeOffId!) &&
+      entryById.has(writeOffId!);
+
+    if (hasActiveWriteOff) {
+      if (debt.status === 'written_off' && debt.outstandingCents === 0) {
+        return debt;
+      }
+      return {
+        ...debt,
+        status: 'written_off',
+        outstandingCents: 0,
+      };
+    }
+
+    const nextStatus: Debt['status'] = remaining === 0 ? 'settled' : 'active';
+    if (
+      debt.status === nextStatus &&
+      debt.outstandingCents === remaining &&
+      debt.writeOffEntryId === undefined
+    ) {
+      return debt;
+    }
+    return {
+      ...debt,
+      writeOffEntryId: undefined,
+      outstandingCents: remaining,
+      status: nextStatus,
+    };
+  });
+}
+
+/**
+ * Prevents archiving a savings_vault account while its ledger balance is nonzero.
+ */
+export function assertCanArchiveAccountV7(params: {
+  account: Account;
+  entries: JournalEntry[];
+  postings: Posting[];
+}): void {
+  if (params.account.isArchived) return;
+  if (params.account.subType === 'savings_vault') {
+    const bal = calculateV7AccountBalance(params.account, params.postings, params.entries);
+    if (bal !== 0) {
+      throw new DoubleEntryValidationError(
+        `Cannot archive savings vault "${params.account.name}" while its balance is nonzero (${formatCurrencyCents(bal, params.account.currencyCode)}). Withdraw or transfer all funds to zero first.`
+      );
+    }
+  }
+}
+
+/**
+ * Funds or withdraws from a Savings Goal:
+ * - Virtual (no linkedAccountId): increments/decrements currentAllocatedCents without touching cash postings.
+ * - Vault-linked (linkedAccountId present): builds a balanced transfer between liquid account and vault.
  */
 export function fundSavingsGoalV7(params: {
   goal: SharedSavingsGoal;
   amountCents: number;
+  direction?: 'deposit' | 'withdraw';
   sourceAccountId?: string;
   dateIso: string;
   accounts?: Account[];
+  entries?: JournalEntry[];
+  postings?: Posting[];
 }): {
   updatedGoal: SharedSavingsGoal;
   entry?: JournalEntry;
   postings?: Posting[];
   simpleTransaction?: SimpleTransaction;
 } {
+  const direction = params.direction ?? 'deposit';
   if (!Number.isInteger(params.amountCents) || params.amountCents <= 0) {
-    throw new DoubleEntryValidationError('Funding amount must be a positive integer.');
+    throw new DoubleEntryValidationError('Amount must be a positive integer.');
+  }
+  if (params.goal.status === 'archived') {
+    throw new DoubleEntryValidationError('Cannot modify an archived savings goal.');
+  }
+
+  const currentVaultOrAllocatedCents =
+    params.goal.linkedAccountId &&
+    params.accounts &&
+    params.entries &&
+    params.postings
+      ? getSavingsGoalEffectiveBalanceV7({
+          goal: params.goal,
+          accounts: params.accounts,
+          entries: params.entries,
+          postings: params.postings,
+        })
+      : Math.max(0, params.goal.currentAllocatedCents);
+
+  if (direction === 'withdraw' && params.amountCents > currentVaultOrAllocatedCents) {
+    throw new DoubleEntryValidationError(
+      `Withdrawal amount (${params.amountCents}) exceeds available savings balance (${currentVaultOrAllocatedCents}).`
+    );
   }
 
   if (params.goal.linkedAccountId) {
     if (!params.sourceAccountId) {
-      throw new DoubleEntryValidationError('Source account is required to fund a vault-linked goal.');
+      throw new DoubleEntryValidationError(
+        direction === 'withdraw'
+          ? 'Destination liquid account is required to withdraw from a vault-linked goal.'
+          : 'Source account is required to fund a vault-linked goal.'
+      );
     }
     if (params.sourceAccountId === params.goal.linkedAccountId) {
-      throw new DoubleEntryValidationError('Source account cannot be identical to target vault.');
+      throw new DoubleEntryValidationError(
+        'Liquid account cannot be identical to target vault.'
+      );
     }
     if (params.accounts) {
       assertEtbPostingAccounts({
         accounts: params.accounts,
         accountIds: [params.sourceAccountId, params.goal.linkedAccountId],
-        roleLabels: ['Source account', 'Savings vault account'],
+        roleLabels: [
+          direction === 'withdraw' ? 'Destination liquid account' : 'Source account',
+          'Savings vault account',
+        ],
       });
+      const liquidAcc = params.accounts.find((a) => a.id === params.sourceAccountId);
+      if (direction === 'withdraw' && (!liquidAcc || !isLiquidSubType(liquidAcc))) {
+        throw new DoubleEntryValidationError(
+          `Withdrawal destination "${liquidAcc?.name || params.sourceAccountId}" must be an active ETB liquid asset account.`
+        );
+      }
       const vaultAcc = params.accounts.find((a) => a.id === params.goal.linkedAccountId);
       if (!vaultAcc || vaultAcc.subType !== 'savings_vault') {
         throw new DoubleEntryValidationError(
@@ -901,8 +1087,12 @@ export function fundSavingsGoalV7(params: {
     }
   }
 
-  const nextAllocated = params.goal.currentAllocatedCents + params.amountCents;
-  const nextStatus = nextAllocated >= params.goal.targetCents ? 'completed' : 'active';
+  const signedDelta = direction === 'withdraw' ? -params.amountCents : params.amountCents;
+  const nextAllocated = Math.max(0, currentVaultOrAllocatedCents + signedDelta);
+  const nextStatus: SharedSavingsGoal['status'] =
+    params.goal.targetCents > 0 && nextAllocated >= params.goal.targetCents
+      ? 'completed'
+      : 'active';
   const updatedGoal: SharedSavingsGoal = {
     ...params.goal,
     currentAllocatedCents: nextAllocated,
@@ -910,22 +1100,30 @@ export function fundSavingsGoalV7(params: {
   };
 
   if (params.goal.linkedAccountId && params.sourceAccountId) {
-    const entryId = `entry-sav-${params.goal.id}-${Date.now()}`;
+    const stamp = `${params.goal.id}-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+    const entryId = `entry-sav-${stamp}`;
+    const isWithdraw = direction === 'withdraw';
+    const fromId = isWithdraw ? params.goal.linkedAccountId : params.sourceAccountId;
+    const toId = isWithdraw ? params.sourceAccountId : params.goal.linkedAccountId;
+    const description = isWithdraw
+      ? `Savings Withdrawal: ${params.goal.title}`
+      : `Savings Funding: ${params.goal.title}`;
+
     const built = buildTransfer({
       id: entryId,
-      fromAssetAccountId: params.sourceAccountId,
-      toAssetAccountId: params.goal.linkedAccountId,
+      fromAssetAccountId: fromId,
+      toAssetAccountId: toId,
       amountCents: params.amountCents,
       date: params.dateIso,
-      description: `Savings Funding: ${params.goal.title}`,
+      description,
     });
     const nowIso = EthiopiaClock.nowUtc().toISOString();
     const simpleTransaction: SimpleTransaction = {
-      id: `tx-sav-${Date.now()}`,
+      id: `tx-sav-${stamp}`,
       type: 'transfer',
       amountCents: params.amountCents,
-      accountId: params.sourceAccountId,
-      destinationAccountId: params.goal.linkedAccountId,
+      accountId: fromId,
+      destinationAccountId: toId,
       description: built.entry.description,
       transactionDate: params.dateIso,
       createdAt: nowIso,
@@ -936,6 +1134,837 @@ export function fundSavingsGoalV7(params: {
   }
 
   return { updatedGoal };
+}
+
+export const EXPENSE_REFUND_TAG_PREFIX = 'refund:';
+
+export function extractRefundOriginEntryId(entry: JournalEntry): string | null {
+  const tag = entry.legacySourceTxId;
+  if (!tag || !tag.startsWith(EXPENSE_REFUND_TAG_PREFIX)) return null;
+  const remainder = tag.slice(EXPENSE_REFUND_TAG_PREFIX.length);
+  if (!remainder) return null;
+  const lastColon = remainder.lastIndexOf(':');
+  if (lastColon <= 0) return remainder;
+  return remainder.slice(0, lastColon);
+}
+
+export function isRefundEntry(entry: JournalEntry): boolean {
+  return extractRefundOriginEntryId(entry) !== null;
+}
+
+export function isCorrectableEntryTypeV7(entryType: JournalEntry['entryType']): boolean {
+  return entryType === 'standard' || entryType === 'transfer';
+}
+
+export interface ExpenseRefundSummaryV7 {
+  eligible: boolean;
+  reason?: string;
+  originalAmountCents: number;
+  refundedCents: number;
+  remainingRefundableCents: number;
+  categoryId?: string;
+  originalAccountId?: string;
+  originalOccurrenceDate?: string;
+}
+
+export function getExpenseRefundSummaryV7(params: {
+  originalEntryId: string;
+  entries: JournalEntry[];
+  postings: Posting[];
+  accounts: Account[];
+  debts?: Debt[];
+  allocations?: SettlementAllocation[];
+}): ExpenseRefundSummaryV7 {
+  const original = params.entries.find((e) => e.id === params.originalEntryId);
+  if (!original) {
+    return {
+      eligible: false,
+      reason: 'Original expense entry not found.',
+      originalAmountCents: 0,
+      refundedCents: 0,
+      remainingRefundableCents: 0,
+    };
+  }
+  if (original.isVoided) {
+    return {
+      eligible: false,
+      reason: 'Voided entries cannot be refunded.',
+      originalAmountCents: 0,
+      refundedCents: 0,
+      remainingRefundableCents: 0,
+    };
+  }
+  if (original.entryType !== 'standard') {
+    return {
+      eligible: false,
+      reason: `Only standard direct expense entries support expense refunds (got ${original.entryType}).`,
+      originalAmountCents: 0,
+      refundedCents: 0,
+      remainingRefundableCents: 0,
+    };
+  }
+  if (isRefundEntry(original) || original.legacySourceTxId?.startsWith('open:')) {
+    return {
+      eligible: false,
+      reason: 'Opening balance adjustments and refund entries cannot themselves be refunded.',
+      originalAmountCents: 0,
+      refundedCents: 0,
+      remainingRefundableCents: 0,
+    };
+  }
+
+  const accountById = new Map(params.accounts.map((a) => [a.id, a]));
+  const origPostings = params.postings.filter((p) => p.entryId === original.id);
+  const cls = classifyJournalEntryCurrency({
+    entry: original,
+    entryPostings: origPostings,
+    accountById,
+    debts: params.debts,
+    allocations: params.allocations,
+    allEntries: params.entries,
+    allPostings: params.postings,
+  });
+  if (cls.status !== 'eligible_etb') {
+    return {
+      eligible: false,
+      reason: 'Only active Verified ETB expenses can be refunded in first-release ETB mode.',
+      originalAmountCents: 0,
+      refundedCents: 0,
+      remainingRefundableCents: 0,
+    };
+  }
+
+  const isExpenseAcc = (accId: string) =>
+    accId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
+    accountById.get(accId)?.type === 'expense';
+  const isIncomeOrDebtAcc = (accId: string) => {
+    const acc = accountById.get(accId);
+    return (
+      accId === SYSTEM_CONTROL_ACCOUNT_IDS.income ||
+      accId === SYSTEM_CONTROL_ACCOUNT_IDS.receivable ||
+      accId === SYSTEM_CONTROL_ACCOUNT_IDS.payable ||
+      acc?.type === 'income' ||
+      acc?.subType === 'receivable' ||
+      acc?.subType === 'payable'
+    );
+  };
+
+  if (origPostings.some((p) => isIncomeOrDebtAcc(p.accountId))) {
+    return {
+      eligible: false,
+      reason: 'Income and receivable/payable entries cannot be refunded as direct expenses.',
+      originalAmountCents: 0,
+      refundedCents: 0,
+      remainingRefundableCents: 0,
+    };
+  }
+
+  const expenseDebits = origPostings.filter(
+    (p) => p.direction === 'debit' && isExpenseAcc(p.accountId)
+  );
+  const expenseCredits = origPostings.filter(
+    (p) => p.direction === 'credit' && isExpenseAcc(p.accountId)
+  );
+  const paidCreditPosting = origPostings.find(
+    (p) => p.direction === 'credit' && !accountById.get(p.accountId)?.isSystem
+  );
+  if (expenseDebits.length === 0 || expenseCredits.length > 0 || !paidCreditPosting) {
+    return {
+      eligible: false,
+      reason: 'Entry is not a standard direct expense.',
+      originalAmountCents: 0,
+      refundedCents: 0,
+      remainingRefundableCents: 0,
+    };
+  }
+
+  const originalAmountCents = expenseDebits.reduce((sum, p) => sum + p.amountCents, 0);
+  const activeRefundEntries = params.entries.filter(
+    (e) => !e.isVoided && extractRefundOriginEntryId(e) === original.id
+  );
+  let refundedCents = 0;
+  for (const rEntry of activeRefundEntries) {
+    const rPostings = params.postings.filter((p) => p.entryId === rEntry.id);
+    const creditExp = rPostings
+      .filter((p) => p.direction === 'credit' && isExpenseAcc(p.accountId))
+      .reduce((s, p) => s + p.amountCents, 0);
+    refundedCents += creditExp;
+  }
+
+  const remainingRefundableCents = Math.max(0, originalAmountCents - refundedCents);
+  const categoryId = expenseDebits.find((p) => p.categoryId)?.categoryId;
+
+  return {
+    eligible: true,
+    originalAmountCents,
+    refundedCents,
+    remainingRefundableCents,
+    categoryId,
+    originalAccountId: paidCreditPosting.accountId,
+    originalOccurrenceDate: original.occurrenceDate,
+  };
+}
+
+export function canCorrectJournalEntryV7(params: {
+  entry: JournalEntry;
+  entries: JournalEntry[];
+  postings: Posting[];
+  accounts: Account[];
+  debts?: Debt[];
+  allocations?: SettlementAllocation[];
+  commitmentSettlements?: SharedCommitmentSettlement[];
+}): { ok: boolean; error?: string } {
+  const { entry } = params;
+  if (entry.isVoided) {
+    return { ok: false, error: 'Voided entries cannot be replaced.' };
+  }
+  const alreadySuperseded = params.entries.some(
+    (e) => !e.isVoided && e.correctedFromEntryId === entry.id
+  );
+  if (alreadySuperseded) {
+    return { ok: false, error: 'This entry already has an active replacement.' };
+  }
+  const accountById = new Map(params.accounts.map((a) => [a.id, a]));
+  const entryPostings = params.postings.filter((p) => p.entryId === entry.id);
+  const cls = classifyJournalEntryCurrency({
+    entry,
+    entryPostings,
+    accountById,
+    debts: params.debts,
+    allocations: params.allocations,
+    allEntries: params.entries,
+    allPostings: params.postings,
+  });
+  if (cls.status !== 'eligible_etb') {
+    return {
+      ok: false,
+      error:
+        'Excluded non-ETB or currency-review entries cannot be replaced in first-release ETB mode.',
+    };
+  }
+  if (!isCorrectableEntryTypeV7(entry.entryType)) {
+    return {
+      ok: false,
+      error: `Cannot replace ${entry.entryType} entries directly. Void the entry safely and record a new transaction instead.`,
+    };
+  }
+  if (entry.legacySourceTxId?.startsWith('open:')) {
+    return {
+      ok: false,
+      error: 'Opening balance adjustments must be revised via the account opening balance editor.',
+    };
+  }
+  if (isRefundEntry(entry)) {
+    return {
+      ok: false,
+      error: 'Expense refund entries cannot be replaced directly. Void the refund and record a new refund if needed.',
+    };
+  }
+  if (params.commitmentSettlements?.some((s) => s.entryId === entry.id)) {
+    return {
+      ok: false,
+      error:
+        'Commitment settlement entries cannot be replaced directly. Void the installment in Plan and record a new settlement.',
+    };
+  }
+  const hasActiveRefund = params.entries.some(
+    (e) => !e.isVoided && extractRefundOriginEntryId(e) === entry.id
+  );
+  if (hasActiveRefund) {
+    return {
+      ok: false,
+      error: 'Cannot replace an expense that has active refunds. Void the active refund(s) first.',
+    };
+  }
+  if (params.debts?.some((d) => d.originEntryId === entry.id)) {
+    return {
+      ok: false,
+      error: 'Cannot replace a debt-linked entry directly. Void the debt origin and re-issue.',
+    };
+  }
+  return { ok: true };
+}
+
+export function recordExpenseRefundV7(params: {
+  refundEntryId?: string;
+  originalEntryId: string;
+  refundAccountId: string;
+  refundCents: number;
+  refundDateIso: string;
+  note?: string;
+  entries: JournalEntry[];
+  postings: Posting[];
+  accounts: Account[];
+  debts?: Debt[];
+  allocations?: SettlementAllocation[];
+}): {
+  entry: JournalEntry;
+  postings: Posting[];
+  updatedSummary: ExpenseRefundSummaryV7;
+} {
+  if (!Number.isInteger(params.refundCents) || params.refundCents <= 0) {
+    throw new DoubleEntryValidationError('Refund amount must be a positive integer in cents.');
+  }
+  if (!CalendarDate.tryParse(params.refundDateIso)) {
+    throw new DoubleEntryValidationError('Refund date must be a valid YYYY-MM-DD civil date.');
+  }
+
+  const summary = getExpenseRefundSummaryV7({
+    originalEntryId: params.originalEntryId,
+    entries: params.entries,
+    postings: params.postings,
+    accounts: params.accounts,
+    debts: params.debts,
+    allocations: params.allocations,
+  });
+  if (!summary.eligible) {
+    throw new DoubleEntryValidationError(summary.reason || 'Original entry is not refundable.');
+  }
+  if (summary.remainingRefundableCents <= 0) {
+    throw new DoubleEntryValidationError('This expense has already been fully refunded.');
+  }
+  if (params.refundCents > summary.remainingRefundableCents) {
+    throw new DoubleEntryValidationError(
+      `Refund amount (${params.refundCents}) exceeds remaining refundable balance (${summary.remainingRefundableCents}).`
+    );
+  }
+  if (
+    summary.originalOccurrenceDate &&
+    params.refundDateIso < summary.originalOccurrenceDate
+  ) {
+    throw new DoubleEntryValidationError(
+      `Refund date (${params.refundDateIso}) cannot precede the original expense date (${summary.originalOccurrenceDate}).`
+    );
+  }
+
+  assertEtbPostingAccounts({
+    accounts: params.accounts,
+    accountIds: [params.refundAccountId],
+    roleLabels: ['Refund destination account'],
+  });
+  const destAcc = params.accounts.find((a) => a.id === params.refundAccountId);
+  const sub = destAcc ? getAccountSubType(destAcc) : 'bank';
+  if (
+    !destAcc ||
+    sub === 'savings_vault' ||
+    sub === 'receivable' ||
+    sub === 'payable' ||
+    (destAcc.type !== 'asset' && !(destAcc.type === 'liability' && sub === 'credit_card'))
+  ) {
+    throw new DoubleEntryValidationError(
+      'Refunds must return to an active Verified ETB liquid asset or credit card account.'
+    );
+  }
+
+  const original = params.entries.find((e) => e.id === params.originalEntryId)!;
+  const entryId =
+    params.refundEntryId ||
+    `entry-refund-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`;
+  const entry: JournalEntry = {
+    id: entryId,
+    entryType: 'standard',
+    description: `Refund: ${original.description}`,
+    occurrenceDate: params.refundDateIso,
+    isVoided: false,
+    legacySourceTxId: `${EXPENSE_REFUND_TAG_PREFIX}${original.id}:${entryId}`,
+    createdAt: EthiopiaClock.nowUtc().toISOString(),
+  };
+
+  const refundPostings: Posting[] = [
+    {
+      id: `${entryId}-post-dr`,
+      entryId,
+      accountId: params.refundAccountId,
+      amountCents: params.refundCents,
+      direction: 'debit',
+      accountMovementDate: params.refundDateIso,
+      note: params.note || `Refund for ${original.description}`,
+    },
+    {
+      id: `${entryId}-post-cr`,
+      entryId,
+      accountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      amountCents: params.refundCents,
+      direction: 'credit',
+      accountMovementDate: params.refundDateIso,
+      categoryId: summary.categoryId,
+      note: params.note || `Refund for ${original.description}`,
+    },
+  ];
+  validateBalancedEntry(refundPostings);
+
+  const nextEntries = [entry, ...params.entries];
+  const nextPostings = [...refundPostings, ...params.postings];
+  const updatedSummary = getExpenseRefundSummaryV7({
+    originalEntryId: original.id,
+    entries: nextEntries,
+    postings: nextPostings,
+    accounts: params.accounts,
+    debts: params.debts,
+    allocations: params.allocations,
+  });
+
+  return { entry, postings: refundPostings, updatedSummary };
+}
+
+export function voidJournalEntryGuardedV7(params: {
+  entryId: string;
+  reason: string;
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  debts: Debt[];
+  allocations: SettlementAllocation[];
+  commitments: SharedCommitment[];
+  commitmentSettlements: SharedCommitmentSettlement[];
+  savingsGoals: SharedSavingsGoal[];
+  simpleTransactions: SimpleTransaction[];
+}): {
+  updatedEntries: JournalEntry[];
+  updatedDebts: Debt[];
+  updatedCommitments: SharedCommitment[];
+  updatedSavingsGoals: SharedSavingsGoal[];
+  updatedSimpleTransactions: SimpleTransaction[];
+} {
+  const target = params.entries.find((e) => e.id === params.entryId);
+  if (!target) {
+    throw new DoubleEntryValidationError('Journal entry not found.');
+  }
+  if (target.isVoided) {
+    return {
+      updatedEntries: params.entries,
+      updatedDebts: params.debts,
+      updatedCommitments: params.commitments,
+      updatedSavingsGoals: params.savingsGoals,
+      updatedSimpleTransactions: params.simpleTransactions,
+    };
+  }
+
+  const voidedIds = new Set(params.entries.filter((e) => e.isVoided).map((e) => e.id));
+
+  // Guard 1: Debt origin cannot be voided while active settlements or active write-off exist.
+  const linkedOriginDebt = params.debts.find((d) => d.originEntryId === target.id);
+  if (linkedOriginDebt) {
+    const hasActiveSettlement = params.allocations.some(
+      (a) => a.debtId === linkedOriginDebt.id && !voidedIds.has(a.settlementEntryId)
+    );
+    if (hasActiveSettlement) {
+      throw new DoubleEntryValidationError(
+        'Cannot void a debt-origin entry that has active settlements. Void the settlement entries first.'
+      );
+    }
+    if (linkedOriginDebt.writeOffEntryId && !voidedIds.has(linkedOriginDebt.writeOffEntryId)) {
+      throw new DoubleEntryValidationError(
+        'Cannot void a debt-origin entry with an active write-off. Void the write-off entry first.'
+      );
+    }
+  }
+
+  // Guard 2: Debt settlement cannot be voided while target debt has an active write-off.
+  const targetAllocs = params.allocations.filter((a) => a.settlementEntryId === target.id);
+  for (const alloc of targetAllocs) {
+    const debt = params.debts.find((d) => d.id === alloc.debtId);
+    if (debt?.writeOffEntryId && !voidedIds.has(debt.writeOffEntryId)) {
+      throw new DoubleEntryValidationError(
+        'Cannot void a settlement while its debt has an active write-off. Void the write-off first.'
+      );
+    }
+  }
+
+  // Guard 3: Standard expense cannot be voided while active refunds reference it.
+  const hasActiveRefund = params.entries.some(
+    (e) => !e.isVoided && extractRefundOriginEntryId(e) === target.id
+  );
+  if (hasActiveRefund) {
+    throw new DoubleEntryValidationError(
+      'Cannot void an expense entry that has active refunds. Void the refund entries first.'
+    );
+  }
+
+  // Guard 4: Opening-balance adjustment entries must only be changed via opening balance revision.
+  if (target.legacySourceTxId?.startsWith('open:')) {
+    throw new DoubleEntryValidationError(
+      'Opening balance entries cannot be voided directly. Edit the account opening balance instead.'
+    );
+  }
+
+  const updatedEntries = params.entries.map((e) =>
+    e.id === target.id
+      ? { ...e, isVoided: true, voidReason: params.reason || 'Voided by user' }
+      : e
+  );
+
+  // Sync commitments if target was a commitment settlement
+  const linkedCmSettlement = params.commitmentSettlements.find((s) => s.entryId === target.id);
+  const updatedCommitments = linkedCmSettlement
+    ? params.commitments.map((c) => {
+        if (c.id !== linkedCmSettlement.commitmentId) return c;
+        const remainingSettled = calculateCommitmentSettledCents(
+          c.id,
+          params.commitmentSettlements,
+          updatedEntries
+        );
+        const nowPaid = remainingSettled >= c.amountCents;
+        return {
+          ...c,
+          isPaid: nowPaid,
+          settlementEntryId: nowPaid ? c.settlementEntryId : undefined,
+        };
+      })
+    : params.commitments;
+
+  const updatedDebts = reconcileDebtsV7({
+    debts: params.debts,
+    entries: updatedEntries,
+    allocations: params.allocations,
+  });
+
+  const updatedSimpleTransactions = params.simpleTransactions.map((t) =>
+    t.journalEntryId === target.id ||
+    (target.legacySourceTxId && t.id === target.legacySourceTxId)
+      ? { ...t, isSuperseded: true }
+      : t
+  );
+
+  const updatedSavingsGoals = syncVaultSavingsGoalsV7({
+    accounts: params.accounts,
+    entries: updatedEntries,
+    postings: params.postings,
+    savingsGoals: params.savingsGoals,
+  });
+
+  return {
+    updatedEntries,
+    updatedDebts,
+    updatedCommitments,
+    updatedSavingsGoals,
+    updatedSimpleTransactions,
+  };
+}
+
+export function unvoidJournalEntryGuardedV7(params: {
+  entryId: string;
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  debts: Debt[];
+  allocations: SettlementAllocation[];
+  commitments: SharedCommitment[];
+  commitmentSettlements: SharedCommitmentSettlement[];
+  savingsGoals: SharedSavingsGoal[];
+  simpleTransactions: SimpleTransaction[];
+}): {
+  updatedEntries: JournalEntry[];
+  updatedDebts: Debt[];
+  updatedCommitments: SharedCommitment[];
+  updatedSavingsGoals: SharedSavingsGoal[];
+  updatedSimpleTransactions: SimpleTransaction[];
+} {
+  const target = params.entries.find((e) => e.id === params.entryId);
+  if (!target) {
+    throw new DoubleEntryValidationError('Journal entry not found.');
+  }
+  if (!target.isVoided) {
+    return {
+      updatedEntries: params.entries,
+      updatedDebts: params.debts,
+      updatedCommitments: params.commitments,
+      updatedSavingsGoals: params.savingsGoals,
+      updatedSimpleTransactions: params.simpleTransactions,
+    };
+  }
+
+  const accountById = new Map(params.accounts.map((a) => [a.id, a]));
+  const entryPostings = params.postings.filter((p) => p.entryId === target.id);
+
+  // Guard 1: ETB eligibility & no legacy clearing postings
+  if (
+    entryPostings.some(
+      (p) => accountById.get(p.accountId)?.subType === 'legacy_clearing'
+    )
+  ) {
+    throw new DoubleEntryValidationError(
+      'Legacy clearing entries cannot be restored in ETB mode.'
+    );
+  }
+  const cls = classifyJournalEntryCurrency({
+    entry: target,
+    entryPostings,
+    accountById,
+    debts: params.debts,
+    allocations: params.allocations,
+    allEntries: params.entries,
+    allPostings: params.postings,
+    ignoreVoidFlag: true,
+  });
+  if (cls.status !== 'eligible_etb') {
+    throw new DoubleEntryValidationError(
+      'Only Verified ETB entries can be restored in first-release ETB mode.'
+    );
+  }
+
+  // Guard 2: Do not restore an entry that has an active replacement entry.
+  const hasActiveReplacement = params.entries.some(
+    (e) => !e.isVoided && e.correctedFromEntryId === target.id
+  );
+  if (hasActiveReplacement) {
+    throw new DoubleEntryValidationError(
+      'Cannot restore an entry that has an active replacement. Void the replacement entry first.'
+    );
+  }
+
+  // Guard 3: Opening balance entries must only be changed via reviseAccountOpeningBalanceV7.
+  if (target.legacySourceTxId?.startsWith('open:')) {
+    throw new DoubleEntryValidationError(
+      'Opening balance entries cannot be restored directly. Edit the account opening balance instead.'
+    );
+  }
+
+  // Guard 4: Write-off entries cannot be unvoided safely without breaking write-off linkage.
+  if (target.entryType === 'write_off') {
+    throw new DoubleEntryValidationError(
+      'Write-off entries cannot be restored directly. Record a new write-off from the debt record if needed.'
+    );
+  }
+
+  const voidedIds = new Set(params.entries.filter((e) => e.isVoided).map((e) => e.id));
+
+  // Guard 5: If settlement entry, verify target debt origin is active, not written off, and won't over-settle.
+  const targetAllocs = params.allocations.filter((a) => a.settlementEntryId === target.id);
+  for (const alloc of targetAllocs) {
+    const debt = params.debts.find((d) => d.id === alloc.debtId);
+    if (!debt) {
+      throw new DoubleEntryValidationError(
+        'Cannot restore settlement because its debt record no longer exists.'
+      );
+    }
+    const origin = params.entries.find((e) => e.id === debt.originEntryId);
+    if (!origin || origin.isVoided || debt.status === 'voided') {
+      throw new DoubleEntryValidationError(
+        'Cannot restore settlement because the underlying debt origin is voided.'
+      );
+    }
+    if (debt.writeOffEntryId && !voidedIds.has(debt.writeOffEntryId)) {
+      throw new DoubleEntryValidationError(
+        'Cannot restore settlement while the debt has an active write-off.'
+      );
+    }
+    const currentSettled = params.allocations
+      .filter((a) => a.debtId === debt.id && !voidedIds.has(a.settlementEntryId))
+      .reduce((sum, a) => sum + a.allocatedCents, 0);
+    if (currentSettled + alloc.allocatedCents > debt.principalCents) {
+      throw new DoubleEntryValidationError(
+        'Cannot restore settlement because total settled principal would exceed the debt principal.'
+      );
+    }
+  }
+
+  // Guard 6: If refund entry, verify original expense is active and remaining refundable covers this refund.
+  const refundOriginId = extractRefundOriginEntryId(target);
+  if (refundOriginId) {
+    const summary = getExpenseRefundSummaryV7({
+      originalEntryId: refundOriginId,
+      entries: params.entries,
+      postings: params.postings,
+      accounts: params.accounts,
+      debts: params.debts,
+      allocations: params.allocations,
+    });
+    if (!summary.eligible) {
+      throw new DoubleEntryValidationError(
+        summary.reason ||
+          'Cannot restore refund because the original expense is no longer active or eligible.'
+      );
+    }
+    const refundAmount = entryPostings
+      .filter(
+        (p) =>
+          p.direction === 'credit' &&
+          (p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
+            accountById.get(p.accountId)?.type === 'expense')
+      )
+      .reduce((sum, p) => sum + p.amountCents, 0);
+    if (refundAmount > summary.remainingRefundableCents) {
+      throw new DoubleEntryValidationError(
+        'Cannot restore refund because total refunded amount would exceed the original expense.'
+      );
+    }
+  }
+
+  const updatedEntries = params.entries.map((e) =>
+    e.id === target.id ? { ...e, isVoided: false, voidReason: undefined } : e
+  );
+
+  // Sync commitments if target was a commitment settlement
+  const linkedCmSettlement = params.commitmentSettlements.find((s) => s.entryId === target.id);
+  const updatedCommitments = linkedCmSettlement
+    ? params.commitments.map((c) => {
+        if (c.id !== linkedCmSettlement.commitmentId) return c;
+        const settled = calculateCommitmentSettledCents(
+          c.id,
+          params.commitmentSettlements,
+          updatedEntries
+        );
+        const nowPaid = settled >= c.amountCents;
+        return {
+          ...c,
+          isPaid: nowPaid,
+          settlementEntryId: nowPaid ? target.id : c.settlementEntryId,
+        };
+      })
+    : params.commitments;
+
+  const updatedDebts = reconcileDebtsV7({
+    debts: params.debts,
+    entries: updatedEntries,
+    allocations: params.allocations,
+  });
+
+  const updatedSimpleTransactions = params.simpleTransactions.map((t) =>
+    t.journalEntryId === target.id ||
+    (target.legacySourceTxId && t.id === target.legacySourceTxId)
+      ? { ...t, isSuperseded: false }
+      : t
+  );
+
+  const updatedSavingsGoals = syncVaultSavingsGoalsV7({
+    accounts: params.accounts,
+    entries: updatedEntries,
+    postings: params.postings,
+    savingsGoals: params.savingsGoals,
+  });
+
+  return {
+    updatedEntries,
+    updatedDebts,
+    updatedCommitments,
+    updatedSavingsGoals,
+    updatedSimpleTransactions,
+  };
+}
+
+export function correctJournalEntryV7(params: {
+  originalEntryId: string;
+  replacementEntry: JournalEntry;
+  replacementPostings: Posting[];
+  correctionReason?: string;
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  debts: Debt[];
+  allocations: SettlementAllocation[];
+  commitments: SharedCommitment[];
+  commitmentSettlements?: SharedCommitmentSettlement[];
+  savingsGoals: SharedSavingsGoal[];
+  simpleTransactions: SimpleTransaction[];
+  replacementSimpleTx?: SimpleTransaction;
+}): {
+  updatedEntries: JournalEntry[];
+  updatedPostings: Posting[];
+  updatedDebts: Debt[];
+  updatedCommitments: SharedCommitment[];
+  updatedSavingsGoals: SharedSavingsGoal[];
+  updatedSimpleTransactions: SimpleTransaction[];
+} {
+  const original = params.entries.find((e) => e.id === params.originalEntryId);
+  if (!original) {
+    throw new DoubleEntryValidationError('Original entry to replace was not found.');
+  }
+
+  const check = canCorrectJournalEntryV7({
+    entry: original,
+    entries: params.entries,
+    postings: params.postings,
+    accounts: params.accounts,
+    debts: params.debts,
+    allocations: params.allocations,
+    commitmentSettlements: params.commitmentSettlements,
+  });
+  if (!check.ok) {
+    throw new DoubleEntryValidationError(check.error || 'Entry cannot be replaced.');
+  }
+  if (!isCorrectableEntryTypeV7(params.replacementEntry.entryType)) {
+    throw new DoubleEntryValidationError(
+      `Replacement entry type "${params.replacementEntry.entryType}" is not supported during correction.`
+    );
+  }
+  if (isRefundEntry(params.replacementEntry)) {
+    throw new DoubleEntryValidationError(
+      'Cannot convert an entry into a refund via correction.'
+    );
+  }
+
+  const accountById = new Map(params.accounts.map((a) => [a.id, a]));
+  const nonSystemAccountIds = Array.from(
+    new Set(
+      params.replacementPostings
+        .map((p) => p.accountId)
+        .filter((id) => !accountById.get(id)?.isSystem)
+    )
+  );
+  if (nonSystemAccountIds.length === 0) {
+    throw new DoubleEntryValidationError(
+      'Replacement entry must include at least one active Verified ETB account.'
+    );
+  }
+  assertEtbPostingAccounts({
+    accounts: params.accounts,
+    accountIds: nonSystemAccountIds,
+    roleLabels: nonSystemAccountIds.map(() => 'Posting account'),
+  });
+  validateBalancedEntry(params.replacementPostings);
+
+  const replacementWithLink: JournalEntry = {
+    ...params.replacementEntry,
+    correctedFromEntryId: original.id,
+    isVoided: false,
+  };
+
+  const updatedEntries = [
+    replacementWithLink,
+    ...params.entries.map((e) =>
+      e.id === original.id
+        ? {
+            ...e,
+            isVoided: true,
+            voidReason: params.correctionReason || `Replaced by ${replacementWithLink.id}`,
+          }
+        : e
+    ),
+  ];
+  const updatedPostings = [...params.replacementPostings, ...params.postings];
+
+  const updatedSimpleTransactionsBase = params.simpleTransactions.map((t) =>
+    t.journalEntryId === original.id ||
+    (original.legacySourceTxId && t.id === original.legacySourceTxId)
+      ? { ...t, isSuperseded: true }
+      : t
+  );
+  const updatedSimpleTransactions = params.replacementSimpleTx
+    ? [params.replacementSimpleTx, ...updatedSimpleTransactionsBase]
+    : updatedSimpleTransactionsBase;
+
+  const updatedDebts = reconcileDebtsV7({
+    debts: params.debts,
+    entries: updatedEntries,
+    allocations: params.allocations,
+  });
+
+  const updatedSavingsGoals = syncVaultSavingsGoalsV7({
+    accounts: params.accounts,
+    entries: updatedEntries,
+    postings: updatedPostings,
+    savingsGoals: params.savingsGoals,
+  });
+
+  return {
+    updatedEntries,
+    updatedPostings,
+    updatedDebts,
+    updatedCommitments: params.commitments,
+    updatedSavingsGoals,
+    updatedSimpleTransactions,
+  };
 }
 
 function addGregorianMonthsClamped(cal: CalendarDate, monthsToAdd: number): CalendarDate {

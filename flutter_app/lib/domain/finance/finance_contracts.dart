@@ -124,6 +124,15 @@ abstract class ITransactionRepositoryContract {
     String? note,
   });
 
+  /// Atomically records a full or partial refund for an active direct ETB expense.
+  Future<JournalEntryModel> recordExpenseRefund({
+    required String originalEntryId,
+    required String refundAccountId,
+    required int refundCents,
+    required CalendarDate date,
+    String? note,
+  });
+
   /// Atomically voids the original journal entry and records a replacement.
   Future<JournalEntryModel> correctJournalEntry({
     required String originalEntryId,

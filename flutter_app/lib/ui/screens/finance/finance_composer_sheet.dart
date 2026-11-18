@@ -66,6 +66,8 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   String? _accountId;
   String? _destinationAccountId;
   String? _categoryId;
+  String? _transferFeeCategoryId;
+  String? _originalMovementDate;
   String? _partyId;
 
   late final TextEditingController _amountCtrl;
@@ -133,12 +135,15 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     _selectedDate = SharedDateFormatter.parseFlexibleToCalendarDate(
       entry.occurrenceDate,
     );
-    _descriptionCtrl.text = entry.description;
     final entryPostings =
         state.postings.where((p) => p.entryId == entry.id).toList();
 
     if (entry.entryType == EntryType.transfer) {
       _mode = FinanceComposerMode.transfer;
+      _descriptionCtrl.text = entry.description.replaceFirst(
+        RegExp(r'\s*\(Fee:\s*[0-9.,]+\s*ETB\)\s*$'),
+        '',
+      );
       PostingModel? src;
       PostingModel? dst;
       PostingModel? fee;
@@ -153,6 +158,9 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       }
       _accountId = src?.accountId ?? _accountId;
       _destinationAccountId = dst?.accountId ?? _destinationAccountId;
+      _transferFeeCategoryId = fee?.categoryId;
+      _originalMovementDate =
+          dst?.accountMovementDate ?? src?.accountMovementDate;
       if (dst != null) {
         _amountCtrl.text =
             FinanceUiFormatters.formatCentsAsInput(dst.amountCents);
@@ -162,6 +170,16 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       }
       _noteCtrl.text = src?.note ?? dst?.note ?? '';
       return;
+    }
+
+    const payeeSep = ' — ';
+    final sepIdx = entry.description.indexOf(payeeSep);
+    if (sepIdx > 0) {
+      _payeeCtrl.text = entry.description.substring(0, sepIdx).trim();
+      _descriptionCtrl.text =
+          entry.description.substring(sepIdx + payeeSep.length).trim();
+    } else {
+      _descriptionCtrl.text = entry.description;
     }
 
     final isIncome = entryPostings.any(
@@ -351,6 +369,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           toAssetAccountId: _destinationAccountId!,
           amountCents: amountCents,
           transferFeeCents: feeCents,
+          feeCategoryId: feeCents > 0 ? _transferFeeCategoryId : null,
           date: _selectedDate.toIsoString(),
           description: description,
           note: note,
@@ -399,6 +418,12 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     final replacementId = 'entry-corr-${_uuid.v4()}';
     final dateIso = _selectedDate.toIsoString();
     final note = _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim();
+    final cleanPayee = _payeeCtrl.text.trim();
+    final effectiveDescription = (cleanPayee.isNotEmpty &&
+            _mode != FinanceComposerMode.transfer &&
+            !description.toLowerCase().contains(cleanPayee.toLowerCase()))
+        ? '$cleanPayee — $description'
+        : description;
 
     Map<String, dynamic> built;
     if (_mode == FinanceComposerMode.transfer) {
@@ -412,6 +437,12 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       if (feeCents == null || feeCents < 0) {
         throw ArgumentError('Enter a valid non-negative transfer fee.');
       }
+      final effectiveFeeCategoryId = feeCents > 0
+          ? (_transferFeeCategoryId ?? SystemControlAccounts.feeCategoryId)
+          : null;
+      final preservedMovementDate = dateIso == original.occurrenceDate
+          ? (_originalMovementDate ?? dateIso)
+          : dateIso;
       built = DoubleEntryEngine.buildTransfer(
         entryId: replacementId,
         fromAssetAccountId: _accountId!,
@@ -420,7 +451,9 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         transferFeeCents: feeCents,
         feeExpenseAccountId:
             feeCents > 0 ? SystemControlAccounts.expense : null,
+        feeCategoryId: effectiveFeeCategoryId,
         date: dateIso,
+        movementDate: preservedMovementDate,
         description: description,
         note: note,
       );
@@ -436,7 +469,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         categoryId: _categoryId!,
         amountCents: amountCents,
         date: dateIso,
-        description: description,
+        description: effectiveDescription,
         note: note,
         correctedFromEntryId: original.id,
       );
@@ -450,7 +483,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         categoryId: _categoryId!,
         amountCents: amountCents,
         date: dateIso,
-        description: description,
+        description: effectiveDescription,
         note: note,
         correctedFromEntryId: original.id,
       );

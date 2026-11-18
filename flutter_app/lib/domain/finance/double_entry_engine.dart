@@ -303,6 +303,28 @@ class DebtControlAuditReport {
       payableControlBalanceCents - activePayableSumCents;
 }
 
+class ExpenseRefundSummary {
+  final bool eligible;
+  final String? reason;
+  final int originalAmountCents;
+  final int refundedCents;
+  final int remainingRefundableCents;
+  final String? categoryId;
+  final String? originalAccountId;
+  final String? originalOccurrenceDate;
+
+  const ExpenseRefundSummary({
+    required this.eligible,
+    this.reason,
+    required this.originalAmountCents,
+    required this.refundedCents,
+    required this.remainingRefundableCents,
+    this.categoryId,
+    this.originalAccountId,
+    this.originalOccurrenceDate,
+  });
+}
+
 class AccountModel {
   final String id;
   final String name;
@@ -3093,11 +3115,14 @@ class DoubleEntryEngine {
     required String toAssetAccountId,
     required int amountCents,
     required String date,
+    String? movementDate,
     required String description,
     int transferFeeCents = 0,
     String? feeExpenseAccountId,
+    String? feeCategoryId,
     String? note,
   }) {
+    final effectiveMovementDate = movementDate ?? date;
     final entry = JournalEntryModel(
       id: entryId,
       entryType: EntryType.transfer,
@@ -3114,7 +3139,7 @@ class DoubleEntryEngine {
         accountId: toAssetAccountId,
         amountCents: amountCents,
         direction: PostingDirection.debit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
         note: note,
       ),
     ];
@@ -3127,7 +3152,8 @@ class DoubleEntryEngine {
           accountId: feeExpenseAccountId,
           amountCents: transferFeeCents,
           direction: PostingDirection.debit,
-          accountMovementDate: date,
+          accountMovementDate: effectiveMovementDate,
+          categoryId: feeCategoryId,
           note: 'Transfer service fee',
         ),
       );
@@ -3140,7 +3166,7 @@ class DoubleEntryEngine {
         accountId: fromAssetAccountId,
         amountCents: amountCents + transferFeeCents,
         direction: PostingDirection.credit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
         note: note,
       ),
     );
@@ -3604,5 +3630,410 @@ class DoubleEntryEngine {
       description: 'Savings Funding: $goalTitle',
       note: note,
     );
+  }
+
+  // --------------------------------------------------------------------------
+  // Stage B: Mutation Guards & Expense Refund Workflow
+  // --------------------------------------------------------------------------
+
+  static const String refundTagPrefix = 'refund:';
+
+  static String? extractRefundOriginEntryId(JournalEntryModel entry) {
+    final tag = entry.legacySourceTxId;
+    if (tag == null || !tag.startsWith(refundTagPrefix)) return null;
+    final remainder = tag.substring(refundTagPrefix.length).trim();
+    if (remainder.isEmpty) return null;
+    final sepIndex = remainder.indexOf(':');
+    final originId =
+        sepIndex == -1 ? remainder : remainder.substring(0, sepIndex).trim();
+    return originId.isEmpty ? null : originId;
+  }
+
+  static bool isRefundEntry(JournalEntryModel entry) =>
+      extractRefundOriginEntryId(entry) != null;
+
+  static bool isCorrectableEntryType(EntryType type) =>
+      type == EntryType.standard || type == EntryType.transfer;
+
+  static ExpenseRefundSummary getExpenseRefundSummary({
+    required String originalEntryId,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    required List<AccountModel> accounts,
+    List<DebtModel>? debts,
+    List<SettlementAllocationModel>? allocations,
+  }) {
+    final matches = entries.where((e) => e.id == originalEntryId);
+    if (matches.isEmpty) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason: 'Expense entry not found.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+    final original = matches.first;
+    if (original.isVoided) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason: 'Voided expenses cannot be refunded.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+    if (original.entryType != EntryType.standard) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason: 'Only standard direct expense entries can be refunded.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+    if (isRefundEntry(original)) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason: 'A refund entry cannot itself be refunded.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+    if (original.legacySourceTxId?.startsWith('open:') ?? false) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason: 'Opening balance adjustments cannot be refunded.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+
+    final classifications = classifyAllEntries(
+      accounts: accounts,
+      entries: entries,
+      postings: postings,
+      debts: debts,
+      allocations: allocations,
+    );
+    if (!(classifications[original.id]?.isEligibleEtb ?? false)) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason:
+            'Only active Verified ETB expenses can be refunded in first-release mode.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+
+    final accountById = {for (final a in accounts) a.id: a};
+    bool isExpenseAcc(String id) =>
+        id == SystemControlAccounts.expense ||
+        accountById[id]?.type == AccountType.expense;
+    bool isIncomeOrDebtAcc(String id) {
+      final acc = accountById[id];
+      return id == SystemControlAccounts.income ||
+          id == SystemControlAccounts.receivable ||
+          id == SystemControlAccounts.payable ||
+          acc?.type == AccountType.income ||
+          acc?.subType == AccountSubType.receivable ||
+          acc?.subType == AccountSubType.payable;
+    }
+
+    final origPostings =
+        postings.where((p) => p.entryId == original.id).toList();
+    if (origPostings.any((p) => isIncomeOrDebtAcc(p.accountId))) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason:
+            'Income and receivable/payable entries cannot be refunded as direct expenses.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+
+    final expenseDebits = origPostings
+        .where(
+          (p) =>
+              p.direction == PostingDirection.debit &&
+              isExpenseAcc(p.accountId),
+        )
+        .toList();
+    final expenseCredits = origPostings
+        .where(
+          (p) =>
+              p.direction == PostingDirection.credit &&
+              isExpenseAcc(p.accountId),
+        )
+        .toList();
+    PostingModel? paidCreditPosting;
+    for (final p in origPostings) {
+      final isSys = SystemControlAccounts.isSystemControlId(p.accountId) ||
+          (accountById[p.accountId]?.isSystem ?? false);
+      if (p.direction == PostingDirection.credit && !isSys) {
+        paidCreditPosting = p;
+        break;
+      }
+    }
+
+    if (expenseDebits.isEmpty ||
+        expenseCredits.isNotEmpty ||
+        paidCreditPosting == null) {
+      return const ExpenseRefundSummary(
+        eligible: false,
+        reason: 'Entry is not a standard direct expense.',
+        originalAmountCents: 0,
+        refundedCents: 0,
+        remainingRefundableCents: 0,
+      );
+    }
+
+    final originalAmountCents =
+        expenseDebits.fold<int>(0, (sum, p) => sum + p.amountCents);
+    var refundedCents = 0;
+    for (final e in entries) {
+      if (e.isVoided || extractRefundOriginEntryId(e) != original.id) {
+        continue;
+      }
+      for (final p in postings) {
+        if (p.entryId == e.id &&
+            p.direction == PostingDirection.credit &&
+            isExpenseAcc(p.accountId)) {
+          refundedCents += p.amountCents;
+        }
+      }
+    }
+
+    final remainingRefundableCents = max(0, originalAmountCents - refundedCents);
+    String? categoryId;
+    for (final p in expenseDebits) {
+      if (p.categoryId != null && p.categoryId!.isNotEmpty) {
+        categoryId = p.categoryId;
+        break;
+      }
+    }
+
+    return ExpenseRefundSummary(
+      eligible: true,
+      originalAmountCents: originalAmountCents,
+      refundedCents: refundedCents,
+      remainingRefundableCents: remainingRefundableCents,
+      categoryId: categoryId,
+      originalAccountId: paidCreditPosting.accountId,
+      originalOccurrenceDate: original.occurrenceDate,
+    );
+  }
+
+  static ({bool ok, String? error}) canCorrectEntry({
+    required JournalEntryModel entry,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    required List<AccountModel> accounts,
+    List<DebtModel> debts = const [],
+    List<SettlementAllocationModel> allocations = const [],
+    List<CommitmentSettlementModel> commitmentSettlements = const [],
+  }) {
+    if (entry.isVoided) {
+      return (ok: false, error: 'Voided entries cannot be replaced.');
+    }
+    final alreadySuperseded = entries.any(
+      (e) => !e.isVoided && e.correctedFromEntryId == entry.id,
+    );
+    if (alreadySuperseded) {
+      return (
+        ok: false,
+        error: 'This entry already has an active replacement.',
+      );
+    }
+
+    final accountById = {for (final a in accounts) a.id: a};
+    final entryPostings =
+        postings.where((p) => p.entryId == entry.id).toList(growable: false);
+    final cls = classifyEntryCurrency(
+      entry: entry,
+      entryPostings: entryPostings,
+      accountById: accountById,
+      debts: debts,
+      allocations: allocations,
+      allEntries: entries,
+      allPostings: postings,
+    );
+    if (!cls.isEligibleEtb) {
+      return (
+        ok: false,
+        error:
+            'Excluded non-ETB or currency-review entries cannot be replaced in first-release ETB mode.',
+      );
+    }
+    if (!isCorrectableEntryType(entry.entryType)) {
+      return (
+        ok: false,
+        error:
+            'Cannot replace ${entry.entryType.dbValue} entries directly. Void the entry safely and record a new transaction instead.',
+      );
+    }
+    if (entry.legacySourceTxId?.startsWith('open:') ?? false) {
+      return (
+        ok: false,
+        error:
+            'Opening balance adjustments must be revised via the account opening balance editor.',
+      );
+    }
+    if (isRefundEntry(entry)) {
+      return (
+        ok: false,
+        error:
+            'Expense refund entries cannot be replaced directly. Void the refund and record a new refund if needed.',
+      );
+    }
+    if (commitmentSettlements.any((s) => s.entryId == entry.id)) {
+      return (
+        ok: false,
+        error:
+            'Commitment settlement entries cannot be replaced directly. Void the installment in Plan and record a new settlement.',
+      );
+    }
+    final hasActiveRefund = entries.any(
+      (e) => !e.isVoided && extractRefundOriginEntryId(e) == entry.id,
+    );
+    if (hasActiveRefund) {
+      return (
+        ok: false,
+        error:
+            'Cannot replace an expense that has active refunds. Void the active refund(s) first.',
+      );
+    }
+    if (debts.any((d) => d.originEntryId == entry.id)) {
+      return (
+        ok: false,
+        error:
+            'Cannot replace a debt-linked entry directly. Void the debt origin and re-issue.',
+      );
+    }
+    return (ok: true, error: null);
+  }
+
+  static Map<String, dynamic> buildExpenseRefund({
+    required String refundEntryId,
+    required String originalEntryId,
+    required String refundAccountId,
+    required int refundCents,
+    required String refundDateIso,
+    String? note,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    required List<AccountModel> accounts,
+    List<DebtModel>? debts,
+    List<SettlementAllocationModel>? allocations,
+  }) {
+    if (refundCents <= 0) {
+      throw DoubleEntryValidationError(
+        'Refund amount must be a positive integer in cents.',
+      );
+    }
+    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(refundDateIso) ||
+        SharedDateFormatter.tryParseFlexibleToCalendarDate(refundDateIso) ==
+            null) {
+      throw DoubleEntryValidationError(
+        'Refund date must be a valid YYYY-MM-DD civil date.',
+      );
+    }
+
+    final summary = getExpenseRefundSummary(
+      originalEntryId: originalEntryId,
+      entries: entries,
+      postings: postings,
+      accounts: accounts,
+      debts: debts,
+      allocations: allocations,
+    );
+    if (!summary.eligible) {
+      throw DoubleEntryValidationError(
+        summary.reason ?? 'Original entry is not refundable.',
+      );
+    }
+    if (summary.remainingRefundableCents <= 0) {
+      throw DoubleEntryValidationError(
+        'This expense has already been fully refunded.',
+      );
+    }
+    if (refundCents > summary.remainingRefundableCents) {
+      throw DoubleEntryValidationError(
+        'Refund amount ($refundCents) exceeds remaining refundable balance (${summary.remainingRefundableCents}).',
+      );
+    }
+    if (summary.originalOccurrenceDate != null &&
+        refundDateIso.compareTo(summary.originalOccurrenceDate!) < 0) {
+      throw DoubleEntryValidationError(
+        'Refund date ($refundDateIso) cannot precede the original expense date (${summary.originalOccurrenceDate}).',
+      );
+    }
+
+    final accMatches = accounts.where((a) => a.id == refundAccountId);
+    if (accMatches.isEmpty) {
+      throw DoubleEntryValidationError(
+        'Refund destination account "$refundAccountId" not found.',
+      );
+    }
+    final destAcc = accMatches.first;
+    assertVerifiedEtbAccount(destAcc, roleLabel: 'Refund destination account');
+    if (destAcc.isArchived) {
+      throw DoubleEntryValidationError(
+        'Refund destination account "${destAcc.name}" is archived.',
+      );
+    }
+    if (destAcc.subType.isSavingsVault ||
+        destAcc.subType == AccountSubType.receivable ||
+        destAcc.subType == AccountSubType.payable ||
+        (destAcc.type != AccountType.asset &&
+            !(destAcc.type == AccountType.liability &&
+                destAcc.subType == AccountSubType.creditCard))) {
+      throw DoubleEntryValidationError(
+        'Refunds must return to an active Verified ETB liquid asset or credit card account.',
+      );
+    }
+
+    final original = entries.firstWhere((e) => e.id == originalEntryId);
+    final entry = JournalEntryModel(
+      id: refundEntryId,
+      entryType: EntryType.standard,
+      description: 'Refund: ${original.description}',
+      occurrenceDate: refundDateIso,
+      legacySourceTxId: '$refundTagPrefix${original.id}:$refundEntryId',
+    );
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
+    final refundPostings = [
+      PostingModel(
+        id: '$refundEntryId-post-dr',
+        entryId: refundEntryId,
+        accountId: refundAccountId,
+        amountCents: refundCents,
+        direction: PostingDirection.debit,
+        accountMovementDate: refundDateIso,
+        note: cleanNote ?? 'Refund for ${original.description}',
+      ),
+      PostingModel(
+        id: '$refundEntryId-post-cr',
+        entryId: refundEntryId,
+        accountId: SystemControlAccounts.expense,
+        amountCents: refundCents,
+        direction: PostingDirection.credit,
+        accountMovementDate: refundDateIso,
+        categoryId: summary.categoryId,
+        note: cleanNote ?? 'Refund for ${original.description}',
+      ),
+    ];
+    validateBalancedEntry(refundPostings);
+
+    return {
+      'entry': entry,
+      'postings': refundPostings,
+      'summary': summary,
+    };
   }
 }

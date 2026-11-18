@@ -23,6 +23,7 @@ interface FinanceComposerModalProps {
     amountCents: number;
     theirShareCents?: number;
     feeCents?: number;
+    feeCategoryId?: string;
     accountId: string;
     destinationAccountId?: string;
     categoryId?: string;
@@ -31,6 +32,7 @@ interface FinanceComposerModalProps {
     movementDate: string;
     dueDate?: string;
     description: string;
+    payee?: string;
     note?: string;
     correctedFromEntryId?: string;
   }) => { ok: boolean; error?: string };
@@ -70,6 +72,7 @@ export function FinanceComposerModal({
   const [movementDate, setMovementDate] = useState(todayIso);
   const [dueDate, setDueDate] = useState('');
   const [description, setDescription] = useState('');
+  const [payee, setPayee] = useState('');
   const [note, setNote] = useState('');
   const [correctedFromEntryId, setCorrectedFromEntryId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +83,7 @@ export function FinanceComposerModal({
     setKind(targetKind);
     setAmountStr(prefill?.amountText || '');
     setTheirShareStr('');
-    setFeeStr('0');
+    setFeeStr(prefill?.feeText || '0');
     const prefillValidId =
       prefill?.accountId && activeAccounts.some((a) => a.id === prefill.accountId)
         ? prefill.accountId
@@ -91,8 +94,14 @@ export function FinanceComposerModal({
       activeAccounts[0]?.id ||
       '';
     setAccountId(defaultFromId);
+    const prefillDestId =
+      prefill?.destinationAccountId &&
+      activeAccounts.some((a) => a.id === prefill.destinationAccountId)
+        ? prefill.destinationAccountId
+        : undefined;
     setDestAccountId(
-      activeAccounts.find((a) => a.id !== defaultFromId)?.id ||
+      prefillDestId ||
+        activeAccounts.find((a) => a.id !== defaultFromId)?.id ||
         activeAccounts[0]?.id ||
         ''
     );
@@ -104,11 +113,12 @@ export function FinanceComposerModal({
     );
     setPartyId(parties[0]?.id || '');
     setNewPartyName('');
-    setOccurrenceDate(todayIso);
-    setMovementDate(todayIso);
+    setOccurrenceDate(prefill?.occurrenceDate || todayIso);
+    setMovementDate(prefill?.movementDate || prefill?.occurrenceDate || todayIso);
     setDueDate('');
     setDescription(prefill?.description || '');
-    setNote('');
+    setPayee(prefill?.payee || '');
+    setNote(prefill?.note || '');
     setCorrectedFromEntryId(prefill?.correctedFromEntryId);
     setError(null);
   }, [isOpen, prefill?.nonce]);
@@ -176,6 +186,7 @@ export function FinanceComposerModal({
       amountCents,
       theirShareCents: theirShareCents ?? undefined,
       feeCents,
+      feeCategoryId: kind === 'transfer' ? prefill?.feeCategoryId : undefined,
       accountId,
       destinationAccountId: kind === 'transfer' ? destAccountId : undefined,
       categoryId,
@@ -184,6 +195,7 @@ export function FinanceComposerModal({
       movementDate: movementDate || occurrenceDate || todayIso,
       dueDate: dueDate || undefined,
       description: description.trim() || `${kind} entry`,
+      payee: payee.trim() || undefined,
       note: note.trim() || undefined,
       correctedFromEntryId,
     });
@@ -226,7 +238,7 @@ export function FinanceComposerModal({
           />
         </div>
 
-        {/* Mode selector */}
+        {/* Mode selector (locked when replacing an existing entry to prevent unsafe type/debt conversion) */}
         <div className="flex flex-wrap gap-1.5">
           {(
             [
@@ -237,23 +249,30 @@ export function FinanceComposerModal({
               ['lend', 'Lend'],
               ['borrow', 'Borrow'],
             ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              type="button"
-              onClick={() => {
-                setKind(k);
-                setError(null);
-              }}
-              className={`px-2.5 py-1.5 rounded-[var(--dw-radius-sm)] font-semibold whitespace-nowrap shrink-0 cursor-pointer transition-colors ${
-                kind === k
-                  ? 'bg-[var(--dw-primary)] text-[var(--dw-on-primary)]'
-                  : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] hover:text-[var(--dw-text-primary)]'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+          ).map(([k, label]) => {
+            const isLocked = Boolean(correctedFromEntryId) && k !== kind;
+            return (
+              <button
+                key={k}
+                type="button"
+                disabled={isLocked}
+                onClick={() => {
+                  if (correctedFromEntryId) return;
+                  setKind(k);
+                  setError(null);
+                }}
+                className={`px-2.5 py-1.5 rounded-[var(--dw-radius-sm)] font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                  kind === k
+                    ? 'bg-[var(--dw-primary)] text-[var(--dw-on-primary)] cursor-pointer'
+                    : isLocked
+                    ? 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-disabled)] opacity-50 cursor-not-allowed'
+                    : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] hover:text-[var(--dw-text-primary)] cursor-pointer'
+                }`}
+              >
+                {label}
+              </button>
+            );
+          })}
         </div>
 
         {error && <DaywellStatusBanner tone="error" message={error} />}
@@ -453,6 +472,21 @@ export function FinanceComposerModal({
             placeholder="What was this for?"
           />
         </div>
+
+        {(kind === 'expense' || kind === 'income') && (
+          <div>
+            <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+              Payee / Source (Optional)
+            </label>
+            <input
+              type="text"
+              value={payee}
+              onChange={(e) => setPayee(e.target.value)}
+              className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
+              placeholder="Merchant, employer, or person"
+            />
+          </div>
+        )}
 
         <div>
           <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">Notes (Optional)</label>

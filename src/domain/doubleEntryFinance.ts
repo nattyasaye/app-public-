@@ -1945,12 +1945,15 @@ export function buildTransfer(params: {
   toAssetAccountId: string;
   amountCents: number;
   date: string;
+  movementDate?: string;
   description: string;
   transferFeeCents?: number;
   feeExpenseAccountId?: string;
+  feeCategoryId?: string;
   note?: string;
 }): { entry: JournalEntry; postings: Posting[] } {
   const fee = params.transferFeeCents || 0;
+  const effectiveMovementDate = params.movementDate || params.date;
   const entry: JournalEntry = {
     id: params.id,
     entryType: 'transfer',
@@ -1967,7 +1970,7 @@ export function buildTransfer(params: {
       accountId: params.toAssetAccountId,
       amountCents: params.amountCents,
       direction: 'debit',
-      accountMovementDate: params.date,
+      accountMovementDate: effectiveMovementDate,
       note: params.note,
     },
   ];
@@ -1980,6 +1983,7 @@ export function buildTransfer(params: {
       amountCents: fee,
       direction: 'debit',
       accountMovementDate: params.date,
+      categoryId: params.feeCategoryId,
       note: 'Transfer service fee',
     });
   }
@@ -1990,7 +1994,7 @@ export function buildTransfer(params: {
     accountId: params.fromAssetAccountId,
     amountCents: params.amountCents + fee,
     direction: 'credit',
-    accountMovementDate: params.date,
+    accountMovementDate: effectiveMovementDate,
     note: params.note,
   });
 
@@ -3016,14 +3020,16 @@ export function calculatePeriodComparison(params: {
       activeEntryIds.add(p.entryId);
       const accType = accountTypeMap.get(p.accountId);
 
-      if (accType === 'expense' && p.direction === 'debit') {
-        expenseCents += p.amountCents;
+      if (accType === 'expense') {
+        const netExpense = p.direction === 'debit' ? p.amountCents : -p.amountCents;
+        expenseCents += netExpense;
         const catId = p.categoryId || 'cat-other';
-        categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + p.amountCents);
-      } else if (accType === 'income' && p.direction === 'credit') {
-        incomeCents += p.amountCents;
+        categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + netExpense);
+      } else if (accType === 'income') {
+        const netIncome = p.direction === 'credit' ? p.amountCents : -p.amountCents;
+        incomeCents += netIncome;
         const catId = p.categoryId || 'cat-inc-other';
-        categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + p.amountCents);
+        categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + netIncome);
       }
     }
 
@@ -3217,6 +3223,7 @@ export interface SimpleTransaction {
   categoryId?: string; // mandatory for expense and income
   destinationAccountId?: string; // mandatory for transfer
   description?: string; // optional
+  payee?: string; // optional
   transactionDate: string; // YYYY-MM-DD
   createdAt: string; // ISO 8601
   updatedAt?: string;

@@ -95,10 +95,11 @@ interface FinancePlanTabProps {
   onFundSavingsGoal: (payload: {
     goalId: string;
     amountCents: number;
+    direction: 'deposit' | 'withdraw';
     sourceAccountId?: string;
     dateIso: string;
   }) => { ok: boolean; error?: string };
-  onReleaseAndArchiveGoal: (goalId: string) => void;
+  onReleaseAndArchiveGoal: (goalId: string) => { ok: boolean; error?: string } | void;
   onUpsertBudget: (payload: { categoryId: string; limitCents: number; rolloverEnabled: boolean }) => void;
   onAddRecurringRule: (
     r: Omit<SharedRecurringRule, 'id' | 'createdAt' | 'isActive'>
@@ -256,8 +257,9 @@ export function FinancePlanTab({
   const [goalDate, setGoalDate] = useState('');
   const [goalVaultId, setGoalVaultId] = useState('');
 
-  // Fund Goal modal state
+  // Fund / Withdraw Goal modal state
   const [fundGoalTarget, setFundGoalTarget] = useState<SharedSavingsGoal | null>(null);
+  const [fundGoalDirection, setFundGoalDirection] = useState<'deposit' | 'withdraw'>('deposit');
   const [fundGoalAmtStr, setFundGoalAmtStr] = useState('');
   const [fundGoalSourceId, setFundGoalSourceId] = useState('');
 
@@ -299,8 +301,9 @@ export function FinancePlanTab({
     setSettleDebtDate(todayIso);
   };
 
-  const openFundGoal = (g: SharedSavingsGoal) => {
+  const openFundGoal = (g: SharedSavingsGoal, direction: 'deposit' | 'withdraw' = 'deposit') => {
     setFundGoalTarget(g);
+    setFundGoalDirection(direction);
     setFundGoalAmtStr('');
     setFundGoalSourceId(liquidEtbAccounts[0]?.id || '');
   };
@@ -419,14 +422,21 @@ export function FinancePlanTab({
       setBanner('Enter a valid positive ETB amount.');
       return;
     }
+    if (fundGoalDirection === 'withdraw' && amountCents > fundGoalTarget.currentAllocatedCents) {
+      setBanner(
+        `Withdrawal exceeds goal balance (${formatBirr(fundGoalTarget.currentAllocatedCents)}).`
+      );
+      return;
+    }
     const res = onFundSavingsGoal({
       goalId: fundGoalTarget.id,
       amountCents,
+      direction: fundGoalDirection,
       sourceAccountId: fundGoalTarget.linkedAccountId ? fundGoalSourceId : undefined,
       dateIso: todayIso,
     });
     if (!res.ok) {
-      setBanner(res.error || 'Could not fund goal.');
+      setBanner(res.error || 'Could not update savings goal.');
       return;
     }
     setFundGoalTarget(null);
@@ -931,29 +941,46 @@ export function FinancePlanTab({
                       {g.status !== 'archived' && (
                         <>
                           {canFundGoal ? (
-                            <DaywellButton
-                              label="Fund"
-                              variant="primary"
-                              size="compact"
-                              onClick={() => openFundGoal(g)}
-                            />
+                            <>
+                              <DaywellButton
+                                label="Fund"
+                                variant="primary"
+                                size="compact"
+                                onClick={() => openFundGoal(g, 'deposit')}
+                              />
+                              {g.currentAllocatedCents > 0 && (
+                                <DaywellButton
+                                  label="Withdraw"
+                                  variant="outlined"
+                                  size="compact"
+                                  onClick={() => openFundGoal(g, 'withdraw')}
+                                />
+                              )}
+                            </>
                           ) : (
                             <span className="text-[11px] text-[var(--dw-on-warning-container)] font-medium">
                               Read-only
                             </span>
                           )}
                           <DaywellButton
-                            label="Release & Archive"
+                            label={g.linkedAccountId ? 'Archive Goal' : 'Release & Archive'}
                             variant="outlined"
                             size="compact"
                             leadingIcon={<Archive className="w-3 h-3" />}
                             onClick={() =>
                               onRequestConfirm(
-                                'Release & Archive Goal?',
-                                `Release ${formatCurrencyCents(g.currentAllocatedCents, goalCurrency)} reserved for "${g.title}" and archive it?`,
-                                'Release & Archive',
+                                g.linkedAccountId ? 'Archive Vault Goal?' : 'Release & Archive Goal?',
+                                g.linkedAccountId
+                                  ? `Archive goal "${g.title}"? Cash stays safely in the linked Savings Vault account until withdrawn.`
+                                  : `Release ${formatCurrencyCents(g.currentAllocatedCents, goalCurrency)} reserved for "${g.title}" and archive it?`,
+                                g.linkedAccountId ? 'Archive Goal' : 'Release & Archive',
                                 'primary',
-                                () => onReleaseAndArchiveGoal(g.id)
+                                () => {
+                                  const res = onReleaseAndArchiveGoal(g.id);
+                                  if (res && !res.ok && res.error) {
+                                    setBanner(res.error);
+                                  }
+                                }
                               )
                             }
                           />
@@ -1456,15 +1483,17 @@ export function FinancePlanTab({
         </div>
       )}
 
-      {/* Fund Goal Modal */}
+      {/* Fund / Withdraw Goal Modal */}
       {fundGoalTarget && (
-        <div role="dialog" aria-modal="true" aria-label="Fund Goal" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
+        <div role="dialog" aria-modal="true" aria-label="Savings Goal Transfer" className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
           <form
             onSubmit={handleSubmitFundGoal}
             className="w-full max-w-md rounded-[var(--dw-radius-lg)] bg-[var(--dw-card)] border border-[var(--dw-border)] p-5 space-y-3 text-xs shadow-xl"
           >
             <div className="flex items-center justify-between">
-              <h3 className="dw-type-title text-[var(--dw-text-primary)]">Fund Goal · {fundGoalTarget.title}</h3>
+              <h3 className="dw-type-title text-[var(--dw-text-primary)]">
+                {fundGoalDirection === 'withdraw' ? 'Withdraw from Goal' : 'Fund Goal'} · {fundGoalTarget.title}
+              </h3>
               <DaywellIconButton
                 label="Close"
                 size="compact"
@@ -1473,9 +1502,46 @@ export function FinancePlanTab({
                 icon={<X className="w-4 h-4" />}
               />
             </div>
+
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                onClick={() => setFundGoalDirection('deposit')}
+                className={`flex-1 py-1.5 px-2.5 rounded-[var(--dw-radius-sm)] font-semibold cursor-pointer ${
+                  fundGoalDirection === 'deposit'
+                    ? 'bg-[var(--dw-primary)] text-[var(--dw-on-primary)]'
+                    : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)]'
+                }`}
+              >
+                Deposit / Allocate
+              </button>
+              <button
+                type="button"
+                disabled={fundGoalTarget.currentAllocatedCents <= 0}
+                onClick={() => setFundGoalDirection('withdraw')}
+                className={`flex-1 py-1.5 px-2.5 rounded-[var(--dw-radius-sm)] font-semibold ${
+                  fundGoalDirection === 'withdraw'
+                    ? 'bg-[var(--dw-primary)] text-[var(--dw-on-primary)] cursor-pointer'
+                    : fundGoalTarget.currentAllocatedCents <= 0
+                    ? 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-disabled)] opacity-50 cursor-not-allowed'
+                    : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] cursor-pointer'
+                }`}
+              >
+                Withdraw
+              </button>
+            </div>
+
+            <div className="text-[11px] text-[var(--dw-text-muted)]">
+              Current balance: <span className="font-mono font-semibold text-[var(--dw-text-primary)]">{formatBirr(fundGoalTarget.currentAllocatedCents)}</span>
+            </div>
+
             {fundGoalTarget.linkedAccountId && (
               <div>
-                <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">Transfer From Liquid Account</label>
+                <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+                  {fundGoalDirection === 'withdraw'
+                    ? 'Return Funds To Liquid Account'
+                    : 'Transfer From Liquid Account'}
+                </label>
                 <select
                   value={fundGoalSourceId}
                   onChange={(e) => setFundGoalSourceId(e.target.value)}
@@ -1501,7 +1567,12 @@ export function FinancePlanTab({
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <DaywellButton label="Cancel" variant="text" size="compact" onClick={() => setFundGoalTarget(null)} />
-              <DaywellButton type="submit" label="Allocate" variant="primary" size="compact" />
+              <DaywellButton
+                type="submit"
+                label={fundGoalDirection === 'withdraw' ? 'Withdraw' : 'Allocate'}
+                variant="primary"
+                size="compact"
+              />
             </div>
           </form>
         </div>

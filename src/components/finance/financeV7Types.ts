@@ -10,7 +10,14 @@ export interface FinanceComposerPrefill {
   amountText?: string;
   description?: string;
   accountId?: string;
+  destinationAccountId?: string;
   categoryId?: string;
+  occurrenceDate?: string;
+  movementDate?: string;
+  feeText?: string;
+  feeCategoryId?: string;
+  note?: string;
+  payee?: string;
   correctedFromEntryId?: string;
 }
 

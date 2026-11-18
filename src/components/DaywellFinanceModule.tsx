@@ -12,6 +12,7 @@ import {
 import {
   Account,
   AccountSubType,
+  assertCanArchiveAccountV7,
   assertEtbDebtEligible,
   assertEtbPostingAccounts,
   buildBorrowMoney,
@@ -24,7 +25,8 @@ import {
   buildThirdPartyPaidExpense,
   buildTransfer,
   calculateAvailableToSpendBreakdownV7,
-  classifyJournalEntryCurrency,
+  canCorrectJournalEntryV7,
+  correctJournalEntryV7,
   Debt,
   ensureSystemControlAccounts,
   fundSavingsGoalV7,
@@ -37,6 +39,7 @@ import {
   Posting,
   processDueRecurringRulesV7,
   recordCommitmentSettlementV7,
+  recordExpenseRefundV7,
   reviseAccountOpeningBalanceV7,
   SettlementAllocation,
   SharedBudget,
@@ -46,11 +49,14 @@ import {
   SharedSavingsGoal,
   SimpleTransaction,
   skipNextRecurringOccurrenceV7,
+  syncVaultSavingsGoalsV7,
   TransactionCategory,
+  unvoidJournalEntryGuardedV7,
   verifyFinanceV7Integrity,
   voidCommitmentSettlementV7,
   voidDebtOriginV7,
   voidDebtWriteOffV7,
+  voidJournalEntryGuardedV7,
 } from '../domain/financeV7Engine';
 import {
   DoubleEntryValidationError,
@@ -396,12 +402,7 @@ export function DaywellFinanceModule({
   const openComposer = (
     kind: ComposerKind,
     correctedFromEntryId?: string,
-    prefill?: {
-      amountText?: string;
-      description?: string;
-      accountId?: string;
-      categoryId?: string;
-    }
+    prefill?: Omit<FinanceComposerPrefill, 'nonce' | 'kind' | 'correctedFromEntryId'>
   ) => {
     setActivePrefill({
       nonce: Date.now(),
@@ -410,7 +411,13 @@ export function DaywellFinanceModule({
       amountText: prefill?.amountText,
       description: prefill?.description,
       accountId: prefill?.accountId,
+      destinationAccountId: prefill?.destinationAccountId,
       categoryId: prefill?.categoryId,
+      occurrenceDate: prefill?.occurrenceDate,
+      movementDate: prefill?.movementDate,
+      feeText: prefill?.feeText,
+      feeCategoryId: prefill?.feeCategoryId,
+      note: prefill?.note,
     });
     setComposerOpen(true);
   };
@@ -588,9 +595,20 @@ export function DaywellFinanceModule({
             entries,
             postings,
           });
-          setAccounts((prev) => prev.map((a) => (a.id === target.id ? rev.updatedAccount : a)));
+          const nextAccounts = accounts.map((a) =>
+            a.id === target.id ? rev.updatedAccount : a
+          );
+          setAccounts(nextAccounts);
           setEntries(rev.updatedEntries);
           setPostings(rev.updatedPostings);
+          setSavingsGoals((prev) =>
+            syncVaultSavingsGoalsV7({
+              accounts: nextAccounts,
+              entries: rev.updatedEntries,
+              postings: rev.updatedPostings,
+              savingsGoals: prev,
+            })
+          );
           showToast(`Revised opening balance for ${payload.name} (:rev provenance updated).`);
         } catch (err: unknown) {
           return {
@@ -652,11 +670,33 @@ export function DaywellFinanceModule({
     return { ok: true };
   };
 
-  const handleToggleArchiveAccount = (accountId: string) => {
+  const handleToggleArchiveAccount = (
+    accountId: string
+  ): { ok: boolean; error?: string } => {
+    const target = accounts.find((a) => a.id === accountId);
+    if (!target) {
+      return { ok: false, error: 'Account not found.' };
+    }
+    if (!target.isArchived) {
+      try {
+        assertCanArchiveAccountV7({
+          account: target,
+          entries,
+          postings,
+        });
+      } catch (err: unknown) {
+        const msg =
+          err instanceof Error ? err.message : 'Cannot archive account with nonzero balance.';
+        showToast(msg);
+        return { ok: false, error: msg };
+      }
+    }
     setAccounts((prev) =>
       prev.map((a) => (a.id === accountId ? { ...a, isArchived: !a.isArchived } : a))
     );
+    showToast(target.isArchived ? `Restored account ${target.name}.` : `Archived account ${target.name}.`);
     setTimeout(notifyCanonicalSynced, 0);
+    return { ok: true };
   };
 
   const handleDeleteAccount = (accountId: string): { ok: boolean; error?: string } => {
@@ -781,6 +821,7 @@ export function DaywellFinanceModule({
     amountCents: number;
     theirShareCents?: number;
     feeCents?: number;
+    feeCategoryId?: string;
     accountId: string;
     destinationAccountId?: string;
     categoryId?: string;
@@ -795,22 +836,26 @@ export function DaywellFinanceModule({
     try {
       if (payload.correctedFromEntryId) {
         const orig = entries.find((e) => e.id === payload.correctedFromEntryId);
-        if (orig) {
-          const origClass = classifyJournalEntryCurrency({
-            entry: orig,
-            entryPostings: postings.filter((p) => p.entryId === orig.id),
-            accountById: new Map(accounts.map((a) => [a.id, a])),
-            debts,
-            allocations,
-            allEntries: entries,
-            allPostings: postings,
-          });
-          if (origClass.status !== 'eligible_etb') {
-            return {
-              ok: false,
-              error: 'Excluded non-ETB or currency-review entries cannot be replaced in first-release ETB mode.',
-            };
-          }
+        if (!orig) {
+          return { ok: false, error: 'Original entry to replace was not found.' };
+        }
+        const check = canCorrectJournalEntryV7({
+          entry: orig,
+          entries,
+          postings,
+          accounts,
+          debts,
+          allocations,
+        });
+        if (!check.ok) {
+          return { ok: false, error: check.error || 'This entry cannot be replaced directly.' };
+        }
+        if (payload.kind !== 'expense' && payload.kind !== 'income' && payload.kind !== 'transfer') {
+          return {
+            ok: false,
+            error:
+              'Replacing an entry into a debt or split transaction is disabled. Void the entry and record a new transaction instead.',
+          };
         }
       }
 
@@ -904,7 +949,9 @@ export function DaywellFinanceModule({
           amountCents: payload.amountCents,
           transferFeeCents: payload.feeCents || 0,
           feeExpenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+          feeCategoryId: payload.feeCategoryId,
           date: payload.occurrenceDate,
+          movementDate: payload.movementDate,
           description: payload.description,
           note: payload.note,
         });
@@ -1001,33 +1048,47 @@ export function DaywellFinanceModule({
       }
 
       if (payload.correctedFromEntryId) {
-        newEntry = { ...newEntry, correctedFromEntryId: payload.correctedFromEntryId };
+        const res = correctJournalEntryV7({
+          originalEntryId: payload.correctedFromEntryId,
+          replacementEntry: newEntry,
+          replacementPostings: newPostings,
+          correctionReason: `Replaced by ${entryId}`,
+          accounts,
+          entries,
+          postings,
+          debts,
+          allocations,
+          commitments,
+          savingsGoals,
+          simpleTransactions,
+          replacementSimpleTx: newSimpleTx,
+        });
+        setEntries(res.updatedEntries);
+        setPostings(res.updatedPostings);
+        setDebts(res.updatedDebts);
+        setCommitments(res.updatedCommitments);
+        setSavingsGoals(res.updatedSavingsGoals);
+        setSimpleTransactions(res.updatedSimpleTransactions);
+      } else {
+        const nextEntries = [newEntry, ...entries];
+        const nextPostings = [...newPostings, ...postings];
+        setEntries(nextEntries);
+        setPostings(nextPostings);
+        if (newDebt) {
+          setDebts((prev) => [newDebt!, ...prev]);
+        }
+        if (newSimpleTx) {
+          setSimpleTransactions((prev) => [newSimpleTx!, ...prev]);
+        }
+        setSavingsGoals((prev) =>
+          syncVaultSavingsGoalsV7({
+            accounts,
+            entries: nextEntries,
+            postings: nextPostings,
+            savingsGoals: prev,
+          })
+        );
       }
-
-      setEntries((prev) => {
-        const voidedPrev = payload.correctedFromEntryId
-          ? prev.map((e) =>
-              e.id === payload.correctedFromEntryId
-                ? { ...e, isVoided: true, voidReason: `Replaced by ${entryId}` }
-                : e
-            )
-          : prev;
-        return [newEntry, ...voidedPrev];
-      });
-      setPostings((prev) => [...newPostings, ...prev]);
-
-      if (newDebt) {
-        setDebts((prev) => [newDebt!, ...prev]);
-      }
-
-      setSimpleTransactions((prev) => {
-        const updated = payload.correctedFromEntryId
-          ? prev.map((t) =>
-              t.journalEntryId === payload.correctedFromEntryId ? { ...t, isSuperseded: true } : t
-            )
-          : prev;
-        return newSimpleTx ? [newSimpleTx, ...updated] : updated;
-      });
 
       showToast(
         payload.correctedFromEntryId ? 'Entry replaced with audit trail.' : `Saved: ${payload.description}`
@@ -1043,57 +1104,98 @@ export function DaywellFinanceModule({
   };
 
   // -------------------------------------------------------------
-  // Void / Restore Entry
+  // Void / Restore / Refund Entry
   // -------------------------------------------------------------
-  const handleVoidEntry = (entryId: string, reason: string) => {
-    const linkedSettlement = commitmentSettlements.find((s) => s.entryId === entryId);
-    if (linkedSettlement) {
-      handleVoidCommitmentSettlement(linkedSettlement.id, linkedSettlement.commitmentId);
-      return;
+  const handleVoidEntry = (entryId: string, reason: string): { ok: boolean; error?: string } => {
+    try {
+      const res = voidJournalEntryGuardedV7({
+        entryId,
+        reason,
+        accounts,
+        entries,
+        postings,
+        debts,
+        allocations,
+        commitments,
+        commitmentSettlements,
+        savingsGoals,
+        simpleTransactions,
+      });
+      setEntries(res.updatedEntries);
+      setDebts(res.updatedDebts);
+      setCommitments(res.updatedCommitments);
+      setSavingsGoals(res.updatedSavingsGoals);
+      setSimpleTransactions(res.updatedSimpleTransactions);
+      showToast('Journal entry voided.');
+      setTimeout(notifyCanonicalSynced, 0);
+      return { ok: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Cannot void journal entry.';
+      showToast(msg);
+      return { ok: false, error: msg };
     }
-
-    const writeOffDebt = debts.find((d) => d.writeOffEntryId === entryId);
-    if (writeOffDebt) {
-      handleVoidDebtWriteOff(writeOffDebt.id);
-      return;
-    }
-
-    setEntries((prev) =>
-      prev.map((e) => (e.id === entryId ? { ...e, isVoided: true, voidReason: reason } : e))
-    );
-    setSimpleTransactions((prev) =>
-      prev.map((t) => (t.journalEntryId === entryId ? { ...t, isSuperseded: true } : t))
-    );
-    showToast('Journal entry voided.');
-    setTimeout(notifyCanonicalSynced, 0);
   };
 
-  const handleRestoreEntry = (entryId: string) => {
-    const targetEntry = entries.find((e) => e.id === entryId);
-    if (!targetEntry) return;
-    const entryPostings = postings.filter((p) => p.entryId === entryId);
-    const cls = classifyJournalEntryCurrency({
-      entry: targetEntry,
-      entryPostings,
-      accountById: new Map(accounts.map((a) => [a.id, a])),
-      debts,
-      allocations,
-      allEntries: entries,
-      allPostings: postings,
-      ignoreVoidFlag: true,
-    });
-    if (cls.status !== 'eligible_etb') {
-      showToast('Only Verified ETB entries can be restored in first-release ETB mode.');
-      return;
+  const handleRestoreEntry = (entryId: string): { ok: boolean; error?: string } => {
+    try {
+      const res = unvoidJournalEntryGuardedV7({
+        entryId,
+        accounts,
+        entries,
+        postings,
+        debts,
+        allocations,
+        commitments,
+        commitmentSettlements,
+        savingsGoals,
+        simpleTransactions,
+      });
+      setEntries(res.updatedEntries);
+      setDebts(res.updatedDebts);
+      setCommitments(res.updatedCommitments);
+      setSavingsGoals(res.updatedSavingsGoals);
+      setSimpleTransactions(res.updatedSimpleTransactions);
+      showToast('Journal entry restored.');
+      setTimeout(notifyCanonicalSynced, 0);
+      return { ok: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Only Verified ETB entries can be restored.';
+      showToast(msg);
+      return { ok: false, error: msg };
     }
-    setEntries((prev) =>
-      prev.map((e) => (e.id === entryId ? { ...e, isVoided: false, voidReason: undefined } : e))
-    );
-    setSimpleTransactions((prev) =>
-      prev.map((t) => (t.journalEntryId === entryId ? { ...t, isSuperseded: false } : t))
-    );
-    showToast('Journal entry restored.');
-    setTimeout(notifyCanonicalSynced, 0);
+  };
+
+  const handleExpenseRefund = (payload: {
+    originalEntryId: string;
+    refundAccountId: string;
+    refundCents: number;
+    refundDateIso: string;
+    note?: string;
+  }): { ok: boolean; error?: string } => {
+    try {
+      const res = recordExpenseRefundV7({
+        originalEntryId: payload.originalEntryId,
+        refundAccountId: payload.refundAccountId,
+        refundCents: payload.refundCents,
+        refundDateIso: payload.refundDateIso,
+        note: payload.note,
+        entries,
+        postings,
+        accounts,
+        debts,
+        allocations,
+      });
+      const nextEntries = [res.entry, ...entries];
+      const nextPostings = [...res.postings, ...postings];
+      setEntries(nextEntries);
+      setPostings(nextPostings);
+      showToast(`Recorded refund: ${res.entry.description}`);
+      setTimeout(notifyCanonicalSynced, 0);
+      return { ok: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to record expense refund.';
+      return { ok: false, error: msg };
+    }
   };
 
   // -------------------------------------------------------------
@@ -1419,14 +1521,20 @@ export function DaywellFinanceModule({
           };
         }
       }
-      const goal: SharedSavingsGoal = {
+      const rawGoal: SharedSavingsGoal = {
         ...g,
         linkedAccountId: vaultId || undefined,
         id: `sav-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
         currentAllocatedCents: 0,
         status: 'active',
       };
-      setSavingsGoals((prev) => [goal, ...prev]);
+      const [syncedGoal] = syncVaultSavingsGoalsV7({
+        accounts,
+        entries,
+        postings,
+        savingsGoals: [rawGoal],
+      });
+      setSavingsGoals((prev) => [syncedGoal, ...prev]);
       showToast(`Created savings goal "${g.title}".`);
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1441,6 +1549,7 @@ export function DaywellFinanceModule({
   const handleFundSavingsGoal = (payload: {
     goalId: string;
     amountCents: number;
+    direction: 'deposit' | 'withdraw';
     sourceAccountId?: string;
     dateIso: string;
   }): { ok: boolean; error?: string } => {
@@ -1450,35 +1559,59 @@ export function DaywellFinanceModule({
       const res = fundSavingsGoalV7({
         goal: target,
         amountCents: payload.amountCents,
+        direction: payload.direction,
         sourceAccountId: payload.sourceAccountId,
         dateIso: payload.dateIso,
         accounts,
+        entries,
+        postings,
       });
-      setSavingsGoals((prev) => prev.map((g) => (g.id === target.id ? res.updatedGoal : g)));
+      const nextEntries = res.entry ? [res.entry, ...entries] : entries;
+      const nextPostings = res.postings ? [...res.postings, ...postings] : postings;
+      const nextGoals = syncVaultSavingsGoalsV7({
+        accounts,
+        entries: nextEntries,
+        postings: nextPostings,
+        savingsGoals: savingsGoals.map((g) => (g.id === target.id ? res.updatedGoal : g)),
+      });
+      setSavingsGoals(nextGoals);
       if (res.entry && res.postings) {
-        setEntries((prev) => [res.entry!, ...prev]);
-        setPostings((prev) => [...res.postings!, ...prev]);
+        setEntries(nextEntries);
+        setPostings(nextPostings);
       }
       if (res.simpleTransaction) {
         setSimpleTransactions((prev) => [res.simpleTransaction!, ...prev]);
       }
-      showToast(`Funded "${target.title}".`);
+      showToast(
+        payload.direction === 'withdraw'
+          ? `Withdrew from "${target.title}".`
+          : `Funded "${target.title}".`
+      );
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
     } catch (err: unknown) {
-      return { ok: false, error: err instanceof Error ? err.message : 'Funding failed.' };
+      return { ok: false, error: err instanceof Error ? err.message : 'Savings goal update failed.' };
     }
   };
 
   const handleReleaseAndArchiveGoal = (goalId: string) => {
+    const target = savingsGoals.find((g) => g.id === goalId);
     setSavingsGoals((prev) =>
       prev.map((g) =>
         g.id === goalId
-          ? { ...g, status: 'archived', currentAllocatedCents: 0 }
+          ? {
+              ...g,
+              status: 'archived',
+              currentAllocatedCents: g.linkedAccountId ? g.currentAllocatedCents : 0,
+            }
           : g
       )
     );
-    showToast('Released virtual reserve back to Available to Spend and archived goal.');
+    showToast(
+      target?.linkedAccountId
+        ? `Archived goal "${target.title}". Funds remain in the linked vault.`
+        : 'Released virtual reserve back to Available to Spend and archived goal.'
+    );
     setTimeout(notifyCanonicalSynced, 0);
   };
 
@@ -1642,8 +1775,18 @@ export function DaywellFinanceModule({
     const count = res.createdEntries.length + res.createdCommitments.length;
     setRecurringRules(res.updatedRules);
     if (res.createdEntries.length > 0) {
-      setEntries((prev) => [...res.createdEntries, ...prev]);
-      setPostings((prev) => [...res.createdPostings, ...prev]);
+      const nextEntries = [...res.createdEntries, ...entries];
+      const nextPostings = [...res.createdPostings, ...postings];
+      setEntries(nextEntries);
+      setPostings(nextPostings);
+      setSavingsGoals((prev) =>
+        syncVaultSavingsGoalsV7({
+          accounts,
+          entries: nextEntries,
+          postings: nextPostings,
+          savingsGoals: prev,
+        })
+      );
     }
     if (res.createdCommitments.length > 0) {
       setCommitments((prev) => [...res.createdCommitments, ...prev]);
@@ -1957,6 +2100,7 @@ export function DaywellFinanceModule({
           onOpenComposer={openComposer}
           onVoidEntry={handleVoidEntry}
           onRestoreEntry={handleRestoreEntry}
+          onRefundExpense={handleExpenseRefund}
           onRequestConfirm={requestConfirm}
         />
       )}

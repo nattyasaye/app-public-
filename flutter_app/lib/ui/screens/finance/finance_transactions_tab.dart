@@ -599,6 +599,12 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   label: 'Currency Review',
                   tone: DaywellStatusTone.warning,
                 ),
+              if (DoubleEntryEngine.isRefundEntry(entry))
+                const DaywellStatusBadge(
+                  label: 'Refund',
+                  tone: DaywellStatusTone.success,
+                  showIcon: false,
+                ),
               if (entry.correctedFromEntryId != null)
                 const DaywellStatusBadge(
                   label: 'CORRECTED',
@@ -619,11 +625,28 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     required Map<String, TransactionCategoryModel> categoryById,
     required Map<String, AccountModel> accountById,
   }) async {
-    final classification = widget.controller.state.classifyEntry(entry);
-    final canEdit = !entry.isVoided &&
-        classification.isEligibleEtb &&
-        (entry.entryType == EntryType.standard ||
-            entry.entryType == EntryType.transfer);
+    final state = widget.controller.state;
+    final classification = state.classifyEntry(entry);
+    final correctCheck = DoubleEntryEngine.canCorrectEntry(
+      entry: entry,
+      entries: state.journalEntries,
+      postings: state.postings,
+      accounts: state.accounts,
+      debts: state.debts,
+      allocations: state.settlementAllocations,
+      commitmentSettlements: state.commitmentSettlements,
+    );
+    final refundSummary = DoubleEntryEngine.getExpenseRefundSummary(
+      originalEntryId: entry.id,
+      entries: state.journalEntries,
+      postings: state.postings,
+      accounts: state.accounts,
+      debts: state.debts,
+      allocations: state.settlementAllocations,
+    );
+    final canEdit = correctCheck.ok;
+    final canRefund =
+        refundSummary.eligible && refundSummary.remainingRefundableCents > 0;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -797,6 +820,20 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                           );
                         },
                       ),
+                    if (canRefund)
+                      DaywellButton(
+                        label: 'Refund Expense',
+                        leadingIcon: Icons.undo_outlined,
+                        variant: DaywellButtonVariant.outlined,
+                        onPressed: () async {
+                          Navigator.of(sheetCtx).pop();
+                          await _openExpenseRefundSheet(
+                            context,
+                            entry: entry,
+                            summary: refundSummary,
+                          );
+                        },
+                      ),
                     if (!entry.isVoided)
                       DaywellButton(
                         label: 'Void Entry',
@@ -816,6 +853,12 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                         onPressed: () async {
                           Navigator.of(sheetCtx).pop();
                           await widget.controller.unvoidJournalEntry(entry.id);
+                          final err = widget.controller.state.errorMessage;
+                          if (err != null && context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(err)),
+                            );
+                          }
                         },
                       ),
                   ],
@@ -869,11 +912,247 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   : reasonCtrl.text.trim();
               Navigator.of(dialogCtx).pop();
               await widget.controller.voidJournalEntry(entry.id, reason);
+              final err = widget.controller.state.errorMessage;
+              if (err != null && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(err)),
+                );
+              }
             },
           ),
         ],
       ),
     );
     reasonCtrl.dispose();
+  }
+
+  Future<void> _openExpenseRefundSheet(
+    BuildContext context, {
+    required JournalEntryModel entry,
+    required ExpenseRefundSummary summary,
+  }) async {
+    final state = widget.controller.state;
+    final spendableAccounts = state.activeEtbSpendableAccounts;
+    if (spendableAccounts.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No active ETB liquid or credit card account available to receive the refund.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    String selectedAccountId = spendableAccounts.any(
+      (a) => a.id == summary.originalAccountId,
+    )
+        ? summary.originalAccountId!
+        : spendableAccounts.first.id;
+    final amountCtrl = TextEditingController(
+      text: FinanceUiFormatters.formatCentsAsInput(
+        summary.remainingRefundableCents,
+      ),
+    );
+    final noteCtrl = TextEditingController();
+    final minDate = SharedDateFormatter.parseFlexibleToCalendarDate(
+      summary.originalOccurrenceDate ?? entry.occurrenceDate,
+    );
+    var refundDate = CalendarDate.today();
+    if (refundDate.jdn < minDate.jdn) {
+      refundDate = minDate;
+    }
+    String? validationError;
+    var isSaving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (sheetCtx, setSheetState) {
+            final semantic = Theme.of(sheetCtx).brightness == Brightness.dark
+                ? const DaywellSemanticColors.dark()
+                : const DaywellSemanticColors.light();
+            final textTheme = Theme.of(sheetCtx).textTheme;
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: SharedDesignTokens.spacingMd,
+                right: SharedDesignTokens.spacingMd,
+                top: SharedDesignTokens.spacingMd,
+                bottom: MediaQuery.viewInsetsOf(sheetCtx).bottom +
+                    SharedDesignTokens.spacingMd,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Refund Expense',
+                            style: textTheme.titleLarge?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                        DaywellIconButton(
+                          icon: Icons.close,
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.of(sheetCtx).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingXs),
+                    Text(
+                      '${entry.description} · Remaining refundable: ${FinanceUiFormatters.formatEtbCents(summary.remainingRefundableCents)}',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: semantic.textSecondary,
+                      ),
+                    ),
+                    if (validationError != null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                      DaywellStatusBanner(
+                        message: validationError!,
+                        tone: DaywellStatusTone.error,
+                        onDismiss: () =>
+                            setSheetState(() => validationError = null),
+                      ),
+                    ],
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellDropdownField<String>(
+                      label: 'Refund To Account',
+                      value: selectedAccountId,
+                      items: [
+                        for (final acc in spendableAccounts)
+                          DropdownMenuItem(
+                            value: acc.id,
+                            child: Text(
+                              '${acc.name} (${FinanceUiFormatters.formatEtbCents(state.getAccountBalanceCents(acc))})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) {
+                          setSheetState(() => selectedAccountId = val);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: amountCtrl,
+                      label: 'Refund Amount (ETB)',
+                      hintText: '0.00',
+                      isRequired: true,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: noteCtrl,
+                      label: 'Note (optional)',
+                      hintText: 'e.g. Returned defective item',
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'Refund Date: ${SharedDateFormatter.formatDual(refundDate, useAmharic: false)}',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textSecondary,
+                          ),
+                        ),
+                        DaywellButton(
+                          label: 'Pick Date',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: () async {
+                            final picked =
+                                await FinanceUiFormatters.pickCalendarDate(
+                              sheetCtx,
+                              initialDate: refundDate,
+                              firstDate: minDate,
+                            );
+                            if (picked != null && sheetCtx.mounted) {
+                              setSheetState(() => refundDate = picked);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    DaywellButton(
+                      label: 'Record Expense Refund',
+                      leadingIcon: Icons.undo_outlined,
+                      isLoading: isSaving,
+                      fullWidth: true,
+                      onPressed: isSaving
+                          ? null
+                          : () async {
+                              final refundCents =
+                                  FinanceUiFormatters.parseEtbToCents(
+                                amountCtrl.text,
+                              );
+                              if (refundCents == null || refundCents <= 0) {
+                                setSheetState(() {
+                                  validationError =
+                                      'Enter a refund amount greater than 0.';
+                                });
+                                return;
+                              }
+                              if (refundCents >
+                                  summary.remainingRefundableCents) {
+                                setSheetState(() {
+                                  validationError =
+                                      'Refund exceeds remaining refundable balance (${FinanceUiFormatters.formatEtbCents(summary.remainingRefundableCents)}).';
+                                });
+                                return;
+                              }
+                              setSheetState(() {
+                                isSaving = true;
+                                validationError = null;
+                              });
+                              final created = await widget.controller
+                                  .recordExpenseRefund(
+                                originalEntryId: entry.id,
+                                refundAccountId: selectedAccountId,
+                                refundCents: refundCents,
+                                date: refundDate,
+                                note: noteCtrl.text.trim().isEmpty
+                                    ? null
+                                    : noteCtrl.text.trim(),
+                              );
+                              if (!sheetCtx.mounted) return;
+                              if (created == null) {
+                                setSheetState(() {
+                                  isSaving = false;
+                                  validationError =
+                                      widget.controller.state.errorMessage ??
+                                          'Could not record refund.';
+                                });
+                                return;
+                              }
+                              Navigator.of(sheetCtx).pop();
+                            },
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+    amountCtrl.dispose();
+    noteCtrl.dispose();
   }
 }

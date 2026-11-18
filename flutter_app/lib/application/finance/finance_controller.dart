@@ -524,15 +524,40 @@ class FinanceController extends ChangeNotifier {
     required List<PostingModel> replacementPostings,
     required String correctionReason,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
+      if (!DoubleEntryEngine.isCorrectableEntryType(
+            replacementEntry.entryType,
+          ) ||
+          DoubleEntryEngine.isRefundEntry(replacementEntry)) {
+        throw DoubleEntryValidationError(
+          'Replacement entry type "${replacementEntry.entryType.dbValue}" is '
+          'not supported during correction.',
+        );
+      }
       final origMatches =
           _state.journalEntries.where((e) => e.id == originalEntryId);
       if (origMatches.isNotEmpty) {
-        final origCls = _state.classifyEntry(origMatches.first);
+        final orig = origMatches.first;
+        final origCls = _state.classifyEntry(orig);
         if (!origCls.isEligibleEtb) {
           throw DoubleEntryValidationError(
             'Only active ETB journal entries can be corrected or replaced '
             'in first-release ETB mode.',
+          );
+        }
+        final check = DoubleEntryEngine.canCorrectEntry(
+          entry: orig,
+          entries: _state.journalEntries,
+          postings: _state.postings,
+          accounts: _state.accounts,
+          debts: _state.debts,
+          allocations: _state.settlementAllocations,
+          commitmentSettlements: _state.commitmentSettlements,
+        );
+        if (!check.ok) {
+          throw DoubleEntryValidationError(
+            check.error ?? 'Entry cannot be replaced.',
           );
         }
       }
@@ -544,6 +569,35 @@ class FinanceController extends ChangeNotifier {
         replacementEntry: replacementEntry,
         replacementPostings: replacementPostings,
         correctionReason: correctionReason,
+      );
+      await _refreshAccountsAndLedger();
+      return entry;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<JournalEntryModel?> recordExpenseRefund({
+    required String originalEntryId,
+    required String refundAccountId,
+    required int refundCents,
+    CalendarDate? date,
+    String? note,
+  }) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      _preflightAssertEtbAccountIfLoaded(
+        refundAccountId,
+        roleLabel: 'Refund destination account',
+      );
+      final entry = await _repository.recordExpenseRefund(
+        originalEntryId: originalEntryId,
+        refundAccountId: refundAccountId,
+        refundCents: refundCents,
+        date: date ?? CalendarDate.today(),
+        note: note,
       );
       await _refreshAccountsAndLedger();
       return entry;

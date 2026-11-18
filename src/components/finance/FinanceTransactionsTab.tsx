@@ -1,18 +1,31 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, X, RotateCcw, Edit3, Ban, ReceiptText } from 'lucide-react';
+import { Plus, X, RotateCcw, Edit3, Ban, ReceiptText, CornerDownLeft } from 'lucide-react';
 import {
   Account,
+  canCorrectJournalEntryV7,
   classifyAllJournalEntries,
   Debt,
   formatCurrencyCents,
+  getAccountSubType,
+  getExpenseRefundSummaryV7,
+  isActiveVerifiedEtbAccount,
+  isRefundEntry,
   JournalEntry,
   Posting,
   SettlementAllocation,
+  SharedCommitmentSettlement,
+  SimpleTransaction,
   TransactionCategory,
 } from '../../domain/financeV7Engine';
 import { CalendarDate } from '../../domain/date';
 import { SYSTEM_CONTROL_ACCOUNT_IDS } from '../../domain/sharedFoundation';
-import { centsToInputText, ComposerKind, formatDualDateLabel } from './financeV7Types';
+import {
+  centsToInputText,
+  ComposerKind,
+  FinanceComposerPrefill,
+  formatDualDateLabel,
+  tryParseStrictDecimalToCents,
+} from './financeV7Types';
 import {
   DaywellButton,
   DaywellCard,
@@ -30,14 +43,22 @@ interface FinanceTransactionsTabProps {
   categories: TransactionCategory[];
   debts?: Debt[];
   allocations?: SettlementAllocation[];
-  onOpenComposer: (kind: ComposerKind, correctedFromEntryId?: string, prefill?: {
-    amountText?: string;
-    description?: string;
-    accountId?: string;
-    categoryId?: string;
-  }) => void;
-  onVoidEntry: (entryId: string, reason: string) => void;
-  onRestoreEntry: (entryId: string) => void;
+  commitmentSettlements?: SharedCommitmentSettlement[];
+  simpleTransactions?: SimpleTransaction[];
+  onOpenComposer: (
+    kind: ComposerKind,
+    correctedFromEntryId?: string,
+    prefill?: Omit<FinanceComposerPrefill, 'nonce' | 'kind' | 'correctedFromEntryId'>
+  ) => void;
+  onVoidEntry: (entryId: string, reason: string) => { ok: boolean; error?: string } | void;
+  onRestoreEntry: (entryId: string) => { ok: boolean; error?: string } | void;
+  onRefundExpense?: (payload: {
+    originalEntryId: string;
+    refundAccountId: string;
+    refundCents: number;
+    refundDateIso: string;
+    note?: string;
+  }) => { ok: boolean; error?: string };
   onRequestConfirm: (
     title: string,
     message: string,
@@ -54,9 +75,12 @@ export function FinanceTransactionsTab({
   categories,
   debts = [],
   allocations = [],
+  commitmentSettlements = [],
+  simpleTransactions = [],
   onOpenComposer,
   onVoidEntry,
   onRestoreEntry,
+  onRefundExpense,
   onRequestConfirm,
 }: FinanceTransactionsTabProps) {
   const [query, setQuery] = useState('');
@@ -68,6 +92,28 @@ export function FinanceTransactionsTab({
   const [customEnd, setCustomEnd] = useState('');
   const [showVoided, setShowVoided] = useState(false);
   const [inspectEntry, setInspectEntry] = useState<JournalEntry | null>(null);
+  const [inspectError, setInspectError] = useState<string | null>(null);
+
+  // Refund Expense modal state
+  const [refundTargetEntry, setRefundTargetEntry] = useState<JournalEntry | null>(null);
+  const [refundAccId, setRefundAccId] = useState('');
+  const [refundAmtStr, setRefundAmtStr] = useState('');
+  const [refundDate, setRefundDate] = useState(CalendarDate.today().toIsoString());
+  const [refundNote, setRefundNote] = useState('');
+  const [refundError, setRefundError] = useState<string | null>(null);
+
+  const refundableEtbAccounts = useMemo(
+    () =>
+      accounts.filter((a) => {
+        if (!isActiveVerifiedEtbAccount(a)) return false;
+        const sub = getAccountSubType(a);
+        return (
+          (a.type === 'asset' && sub !== 'savings_vault' && sub !== 'receivable') ||
+          (a.type === 'liability' && sub === 'credit_card')
+        );
+      }),
+    [accounts]
+  );
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
   const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
@@ -172,17 +218,31 @@ export function FinanceTransactionsTab({
 
   const summarizeEntry = (entry: JournalEntry) => {
     const list = postingsByEntry.get(entry.id) || [];
-    const maxAmount = list.reduce((m, p) => Math.max(m, p.amountCents), 0);
-    const hasExpense = list.some(
+    const destTransferPosting =
+      entry.entryType === 'transfer'
+        ? list.find((p) => p.direction === 'debit' && !accountById.get(p.accountId)?.isSystem)
+        : undefined;
+    const maxAmount = destTransferPosting
+      ? destTransferPosting.amountCents
+      : list.reduce((m, p) => Math.max(m, p.amountCents), 0);
+    const hasExpenseDebit = list.some(
       (p) =>
-        p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
-        accountById.get(p.accountId)?.type === 'expense'
+        p.direction === 'debit' &&
+        (p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
+          accountById.get(p.accountId)?.type === 'expense')
+    );
+    const hasExpenseCredit = list.some(
+      (p) =>
+        p.direction === 'credit' &&
+        (p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
+          accountById.get(p.accountId)?.type === 'expense')
     );
     const hasIncome = list.some(
       (p) =>
         p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.income ||
         accountById.get(p.accountId)?.type === 'income'
     );
+    const isRefund = isRefundEntry(entry);
     const catPosting = list.find((p) => p.categoryId);
     const catName = catPosting?.categoryId ? categoryById.get(catPosting.categoryId)?.name : undefined;
     const primaryUserPosting = list.find((p) => {
@@ -194,9 +254,11 @@ export function FinanceTransactionsTab({
       : undefined;
 
     let polarity: 'expense' | 'income' | 'neutral' = 'neutral';
-    if (entry.entryType === 'standard' || entry.entryType === 'split_expense') {
-      if (hasExpense && !hasIncome) polarity = 'expense';
-      else if (hasIncome && !hasExpense) polarity = 'income';
+    if (isRefund) {
+      polarity = 'income';
+    } else if (entry.entryType === 'standard' || entry.entryType === 'split_expense') {
+      if (hasExpenseDebit && !hasIncome) polarity = 'expense';
+      else if ((hasIncome || hasExpenseCredit) && !hasExpenseDebit) polarity = 'income';
     }
     const classification = classificationsByEntryId.get(entry.id);
     const displayCurrency =
@@ -232,6 +294,7 @@ export function FinanceTransactionsTab({
       amountCents: maxAmount,
       formattedAmount,
       isMixed,
+      isRefund,
       classification,
       catName,
       accName,
@@ -241,23 +304,128 @@ export function FinanceTransactionsTab({
   };
 
   const handleCorrectAndReplace = (entry: JournalEntry) => {
-    const cls = classificationsByEntryId.get(entry.id);
-    if (cls && cls.status !== 'eligible_etb') return;
+    const check = canCorrectJournalEntryV7({
+      entry,
+      entries,
+      postings,
+      accounts,
+      debts,
+      allocations,
+      commitmentSettlements,
+    });
+    if (!check.ok) {
+      setInspectError(check.error || 'This entry cannot be replaced.');
+      return;
+    }
+
+    const matchedTx = simpleTransactions.find(
+      (t) =>
+        t.journalEntryId === entry.id ||
+        (entry.legacySourceTxId && t.id === entry.legacySourceTxId)
+    );
     const info = summarizeEntry(entry);
+    if (entry.entryType === 'transfer') {
+      const sourceCr = info.postings.find(
+        (p) => p.direction === 'credit' && !accountById.get(p.accountId)?.isSystem
+      );
+      const destDr = info.postings.find(
+        (p) => p.direction === 'debit' && !accountById.get(p.accountId)?.isSystem
+      );
+      const feeDr = info.postings.find(
+        (p) =>
+          p.direction === 'debit' &&
+          (p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
+            accountById.get(p.accountId)?.type === 'expense')
+      );
+      const cleanedDescription = entry.description.replace(/\s*\(Fee:\s*[^)]*\)\s*$/, '').trim();
+      onOpenComposer('transfer', entry.id, {
+        amountText: centsToInputText(destDr?.amountCents ?? info.amountCents),
+        description: cleanedDescription,
+        accountId: sourceCr?.accountId,
+        destinationAccountId: destDr?.accountId,
+        occurrenceDate: entry.occurrenceDate,
+        movementDate:
+          destDr?.accountMovementDate || sourceCr?.accountMovementDate || entry.occurrenceDate,
+        feeText: feeDr ? centsToInputText(feeDr.amountCents) : '0',
+        feeCategoryId: feeDr?.categoryId,
+        note: destDr?.note || sourceCr?.note,
+      });
+      setInspectEntry(null);
+      return;
+    }
+
     const primaryUserPosting = info.postings.find((p) => !accountById.get(p.accountId)?.isSystem);
+    const nominalPosting = info.postings.find((p) => accountById.get(p.accountId)?.isSystem);
     const catPosting = info.postings.find((p) => p.categoryId);
-    let kind: ComposerKind = 'expense';
-    if (entry.entryType === 'transfer') kind = 'transfer';
-    else if (entry.entryType === 'split_expense') kind = 'split';
-    else if (info.polarity === 'income') kind = 'income';
+    const kind: ComposerKind = info.polarity === 'income' ? 'income' : 'expense';
 
     onOpenComposer(kind, entry.id, {
       amountText: centsToInputText(info.amountCents),
       description: entry.description,
       accountId: primaryUserPosting?.accountId,
-      categoryId: catPosting?.categoryId,
+      categoryId: nominalPosting?.categoryId || catPosting?.categoryId,
+      occurrenceDate: entry.occurrenceDate,
+      movementDate: primaryUserPosting?.accountMovementDate || entry.occurrenceDate,
+      note: primaryUserPosting?.note || nominalPosting?.note,
+      payee: matchedTx?.payee,
     });
     setInspectEntry(null);
+  };
+
+  const openRefundModal = (entry: JournalEntry) => {
+    const summary = getExpenseRefundSummaryV7({
+      originalEntryId: entry.id,
+      entries,
+      postings,
+      accounts,
+      debts,
+      allocations,
+    });
+    if (!summary.eligible || summary.remainingRefundableCents <= 0) {
+      setInspectError(summary.reason || 'This expense has no remaining refundable balance.');
+      return;
+    }
+    const todayIso = CalendarDate.today().toIsoString();
+    const defaultDate =
+      entry.occurrenceDate > todayIso ? entry.occurrenceDate : todayIso;
+    const defaultAccId =
+      summary.originalAccountId &&
+      refundableEtbAccounts.some((a) => a.id === summary.originalAccountId)
+        ? summary.originalAccountId
+        : refundableEtbAccounts[0]?.id || '';
+    setRefundTargetEntry(entry);
+    setRefundAccId(defaultAccId);
+    setRefundAmtStr(centsToInputText(summary.remainingRefundableCents));
+    setRefundDate(defaultDate);
+    setRefundNote('');
+    setRefundError(null);
+    setInspectEntry(null);
+  };
+
+  const handleSubmitRefund = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!refundTargetEntry || !onRefundExpense) return;
+    const cents = tryParseStrictDecimalToCents(refundAmtStr);
+    if (cents === null || cents <= 0) {
+      setRefundError('Enter a valid positive ETB refund amount.');
+      return;
+    }
+    if (!refundAccId) {
+      setRefundError('Select a valid active Verified ETB refund account.');
+      return;
+    }
+    const res = onRefundExpense({
+      originalEntryId: refundTargetEntry.id,
+      refundAccountId: refundAccId,
+      refundCents: cents,
+      refundDateIso: refundDate,
+      note: refundNote.trim() || undefined,
+    });
+    if (!res.ok) {
+      setRefundError(res.error || 'Could not record expense refund.');
+      return;
+    }
+    setRefundTargetEntry(null);
   };
 
   return (
@@ -378,12 +546,16 @@ export function FinanceTransactionsTab({
             return (
               <div
                 key={entry.id}
-                onClick={() => setInspectEntry(entry)}
+                onClick={() => {
+                  setInspectError(null);
+                  setInspectEntry(entry);
+                }}
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
+                    setInspectError(null);
                     setInspectEntry(entry);
                   }
                 }}
@@ -408,6 +580,9 @@ export function FinanceTransactionsTab({
                         <span aria-hidden="true">·</span>
                         <span>{info.catName}</span>
                       </>
+                    )}
+                    {info.isRefund && (
+                      <DaywellStatusBadge tone="income" showIcon={false} label="Refund" />
                     )}
                     {entry.isVoided && (
                       <DaywellStatusBadge tone="error" showIcon={false} label="Voided" />
@@ -529,54 +704,127 @@ export function FinanceTransactionsTab({
               </div>
             </div>
 
-            {!inspectEntry.isVoided &&
-              classificationsByEntryId.get(inspectEntry.id)?.status !== 'eligible_etb' && (
+            {inspectError && <DaywellStatusBanner tone="error" message={inspectError} />}
+
+            {!inspectEntry.isVoided && (() => {
+              const cls = classificationsByEntryId.get(inspectEntry.id);
+              if (cls?.status !== 'eligible_etb') {
+                return (
+                  <DaywellStatusBanner
+                    tone="warning"
+                    message={`This entry is excluded from ETB totals (${cls?.reason || 'Non-ETB / Currency Review'}). Correct & Replace is disabled; you may inspect or void it.`}
+                  />
+                );
+              }
+              const correctCheck = canCorrectJournalEntryV7({
+                entry: inspectEntry,
+                entries,
+                postings,
+                accounts,
+                debts,
+                allocations,
+                commitmentSettlements,
+              });
+              if (!correctCheck.ok && correctCheck.error) {
+                return <DaywellStatusBanner tone="info" message={correctCheck.error} />;
+              }
+              return null;
+            })()}
+
+            {(() => {
+              const refundSum = getExpenseRefundSummaryV7({
+                originalEntryId: inspectEntry.id,
+                entries,
+                postings,
+                accounts,
+                debts,
+                allocations,
+              });
+              if (!refundSum.eligible || refundSum.refundedCents <= 0) return null;
+              return (
                 <DaywellStatusBanner
-                  tone="warning"
-                  message={`This entry is excluded from ETB totals (${classificationsByEntryId.get(inspectEntry.id)?.reason || 'Non-ETB / Currency Review'}). Correct & Replace is disabled; you may inspect or void it.`}
+                  tone="info"
+                  message={`Refunded so far: ${formatCurrencyCents(refundSum.refundedCents, 'ETB')} of ${formatCurrencyCents(refundSum.originalAmountCents, 'ETB')} (${formatCurrencyCents(refundSum.remainingRefundableCents, 'ETB')} remaining refundable).`}
                 />
-              )}
+              );
+            })()}
 
             <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-[var(--dw-divider)]">
-              {!inspectEntry.isVoided ? (
-                <>
-                  {classificationsByEntryId.get(inspectEntry.id)?.status === 'eligible_etb' && (
+              {!inspectEntry.isVoided ? (() => {
+                const correctCheck = canCorrectJournalEntryV7({
+                  entry: inspectEntry,
+                  entries,
+                  postings,
+                  accounts,
+                  debts,
+                  allocations,
+                  commitmentSettlements,
+                });
+                const refundSum = getExpenseRefundSummaryV7({
+                  originalEntryId: inspectEntry.id,
+                  entries,
+                  postings,
+                  accounts,
+                  debts,
+                  allocations,
+                });
+                return (
+                  <>
+                    {refundSum.eligible && refundSum.remainingRefundableCents > 0 && onRefundExpense && (
+                      <DaywellButton
+                        label="Refund Expense"
+                        variant="secondary"
+                        size="compact"
+                        leadingIcon={<CornerDownLeft className="w-3.5 h-3.5" />}
+                        onClick={() => openRefundModal(inspectEntry)}
+                      />
+                    )}
+                    {correctCheck.ok && (
+                      <DaywellButton
+                        label="Correct / Replace"
+                        variant="outlined"
+                        size="compact"
+                        leadingIcon={<Edit3 className="w-3.5 h-3.5" />}
+                        onClick={() => handleCorrectAndReplace(inspectEntry)}
+                      />
+                    )}
                     <DaywellButton
-                      label="Correct / Replace"
-                      variant="outlined"
+                      label="Void Entry"
+                      variant="destructive"
                       size="compact"
-                      leadingIcon={<Edit3 className="w-3.5 h-3.5" />}
-                      onClick={() => handleCorrectAndReplace(inspectEntry)}
+                      leadingIcon={<Ban className="w-3.5 h-3.5" />}
+                      onClick={() =>
+                        onRequestConfirm(
+                          'Void Journal Entry?',
+                          `Void "${inspectEntry.description}"? This reverses its cash and report impact without deleting audit history.`,
+                          'Void Entry',
+                          'danger',
+                          () => {
+                            const res = onVoidEntry(inspectEntry.id, 'Voided by user');
+                            if (res && !res.ok) {
+                              setInspectError(res.error || 'Could not void journal entry.');
+                            } else {
+                              setInspectEntry(null);
+                            }
+                          }
+                        )
+                      }
                     />
-                  )}
-                  <DaywellButton
-                    label="Void Entry"
-                    variant="destructive"
-                    size="compact"
-                    leadingIcon={<Ban className="w-3.5 h-3.5" />}
-                    onClick={() =>
-                      onRequestConfirm(
-                        'Void Journal Entry?',
-                        `Void "${inspectEntry.description}"? This reverses its cash and report impact without deleting audit history.`,
-                        'Void Entry',
-                        'danger',
-                        () => {
-                          onVoidEntry(inspectEntry.id, 'Voided by user');
-                          setInspectEntry(null);
-                        }
-                      )
-                    }
-                  />
-                </>
-              ) : classificationsByEntryId.get(inspectEntry.id)?.status === 'eligible_etb' ? (
+                  </>
+                );
+              })() : classificationsByEntryId.get(inspectEntry.id)?.status === 'eligible_etb' ? (
                 <DaywellButton
                   label="Restore Entry"
                   variant="primary"
                   size="compact"
                   leadingIcon={<RotateCcw className="w-3.5 h-3.5" />}
                   onClick={() => {
-                    onRestoreEntry(inspectEntry.id);
-                    setInspectEntry(null);
+                    const res = onRestoreEntry(inspectEntry.id);
+                    if (res && !res.ok) {
+                      setInspectError(res.error || 'Could not restore journal entry.');
+                    } else {
+                      setInspectEntry(null);
+                    }
                   }}
                 />
               ) : (
@@ -586,6 +834,101 @@ export function FinanceTransactionsTab({
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Expense Refund Modal */}
+      {refundTargetEntry && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Record Expense Refund"
+          className="fixed inset-0 z-50 bg-black/55 flex items-center justify-center p-4"
+        >
+          <form
+            onSubmit={handleSubmitRefund}
+            className="w-full max-w-md rounded-[var(--dw-radius-lg)] bg-[var(--dw-card)] border border-[var(--dw-border)] p-5 space-y-3 text-xs shadow-xl"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="dw-type-title text-[var(--dw-text-primary)]">Record Expense Refund</h3>
+                <p className="text-[11px] text-[var(--dw-text-muted)] mt-0.5">
+                  {refundTargetEntry.description} · Original date {refundTargetEntry.occurrenceDate}
+                </p>
+              </div>
+              <DaywellIconButton
+                label="Close refund dialog"
+                size="compact"
+                tone="muted"
+                onClick={() => setRefundTargetEntry(null)}
+                icon={<X className="w-4 h-4" />}
+              />
+            </div>
+
+            {refundError && <DaywellStatusBanner tone="error" message={refundError} />}
+
+            <div>
+              <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+                Refund To Account (Verified ETB)
+              </label>
+              <select
+                value={refundAccId}
+                onChange={(e) => setRefundAccId(e.target.value)}
+                className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
+              >
+                {refundableEtbAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} ({a.currencyCode})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+                  Refund Amount (ETB)
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={refundAmtStr}
+                  onChange={(e) => setRefundAmtStr(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)] font-mono tabular-nums"
+                />
+              </div>
+              <div>
+                <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+                  Refund Date
+                </label>
+                <input
+                  type="date"
+                  value={refundDate}
+                  min={refundTargetEntry.occurrenceDate}
+                  onChange={(e) => setRefundDate(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)] font-mono"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+                Note (Optional)
+              </label>
+              <input
+                type="text"
+                value={refundNote}
+                onChange={(e) => setRefundNote(e.target.value)}
+                placeholder="Merchant credit or returned item"
+                className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-[var(--dw-divider)]">
+              <DaywellButton label="Cancel" variant="text" size="compact" onClick={() => setRefundTargetEntry(null)} />
+              <DaywellButton type="submit" label="Record Refund" variant="primary" size="compact" />
+            </div>
+          </form>
         </div>
       )}
     </div>

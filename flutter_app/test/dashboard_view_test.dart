@@ -494,6 +494,22 @@ class _FakeFinanceRepository implements IFinanceRepository {
       );
 
   @override
+  Future<JournalEntryModel> recordExpenseRefund({
+    required String originalEntryId,
+    required String refundAccountId,
+    required int refundCents,
+    required CalendarDate date,
+    String? note,
+  }) async =>
+      JournalEntryModel(
+        id: 'entry-refund',
+        entryType: EntryType.standard,
+        description: 'Refund',
+        occurrenceDate: date.toIsoString(),
+        legacySourceTxId: 'refund:$originalEntryId:entry-refund',
+      );
+
+  @override
   Future<JournalEntryModel> correctJournalEntry({
     required String originalEntryId,
     required JournalEntryModel replacementEntry,
