@@ -5,6 +5,7 @@ import {
   canCorrectJournalEntryV7,
   classifyAllJournalEntries,
   Debt,
+  findCategoryByIdOrAlias,
   formatCurrencyCents,
   getAccountSubType,
   getExpenseRefundSummaryV7,
@@ -12,6 +13,7 @@ import {
   isRefundEntry,
   JournalEntry,
   Posting,
+  resolveCategoryDisplayName,
   SettlementAllocation,
   SharedCommitmentSettlement,
   SimpleTransaction,
@@ -116,7 +118,6 @@ export function FinanceTransactionsTab({
   );
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
-  const categoryById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
   const userAccounts = useMemo(() => accounts.filter((a) => !a.isSystem), [accounts]);
 
   const postingsByEntry = useMemo(() => {
@@ -194,7 +195,7 @@ export function FinanceTransactionsTab({
             (accountById.get(p.accountId)?.name || '').toLowerCase().includes(q)
           );
           const matchCat = entryPostings.some((p) =>
-            (p.categoryId ? categoryById.get(p.categoryId)?.name || '' : '').toLowerCase().includes(q)
+            (p.categoryId ? resolveCategoryDisplayName(categories, p.categoryId) : '').toLowerCase().includes(q)
           );
           if (!matchDesc && !matchAcc && !matchCat) return false;
         }
@@ -213,7 +214,7 @@ export function FinanceTransactionsTab({
     query,
     postingsByEntry,
     accountById,
-    categoryById,
+    categories,
   ]);
 
   const summarizeEntry = (entry: JournalEntry) => {
@@ -244,7 +245,9 @@ export function FinanceTransactionsTab({
     );
     const isRefund = isRefundEntry(entry);
     const catPosting = list.find((p) => p.categoryId);
-    const catName = catPosting?.categoryId ? categoryById.get(catPosting.categoryId)?.name : undefined;
+    const catName = catPosting?.categoryId
+      ? resolveCategoryDisplayName(categories, catPosting.categoryId)
+      : undefined;
     const primaryUserPosting = list.find((p) => {
       const a = accountById.get(p.accountId);
       return a && !a.isSystem;
@@ -371,11 +374,16 @@ export function FinanceTransactionsTab({
       }
     }
 
+    const rawCatId = nominalPosting?.categoryId || catPosting?.categoryId;
+    const matchedCatId = rawCatId
+      ? findCategoryByIdOrAlias(categories, rawCatId)?.id || rawCatId
+      : undefined;
+
     onOpenComposer(kind, entry.id, {
       amountText: centsToInputText(info.amountCents),
       description: prefillDesc,
       accountId: primaryUserPosting?.accountId,
-      categoryId: nominalPosting?.categoryId || catPosting?.categoryId,
+      categoryId: matchedCatId,
       occurrenceDate: entry.occurrenceDate,
       movementDate: primaryUserPosting?.accountMovementDate || entry.occurrenceDate,
       note: primaryUserPosting?.note || nominalPosting?.note,
@@ -702,8 +710,8 @@ export function FinanceTransactionsTab({
                         </div>
                         <div className="text-[11px] text-[var(--dw-text-muted)]">
                           {p.direction.toUpperCase()} · Movement: {p.accountMovementDate}
-                          {p.categoryId && categoryById.get(p.categoryId)
-                            ? ` · ${categoryById.get(p.categoryId)?.name}`
+                          {p.categoryId
+                            ? ` · ${resolveCategoryDisplayName(categories, p.categoryId)}`
                             : ''}
                         </div>
                       </div>

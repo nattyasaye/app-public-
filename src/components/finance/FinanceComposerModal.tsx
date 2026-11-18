@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import {
   Account,
+  findCategoryByIdOrAlias,
   isActiveVerifiedEtbAccount,
   Party,
   TransactionCategory,
@@ -105,11 +106,12 @@ export function FinanceComposerModal({
         activeAccounts[0]?.id ||
         ''
     );
+    const targetCategories = targetKind === 'income' ? incomeCategories : expenseCategories;
+    const matchedPrefillCat = findCategoryByIdOrAlias(targetCategories, prefill?.categoryId);
     setCategoryId(
-      prefill?.categoryId ||
-        (targetKind === 'income'
-          ? incomeCategories[0]?.id || 'cat-other-inc'
-          : expenseCategories[0]?.id || 'cat-other-exp')
+      matchedPrefillCat?.id ||
+        targetCategories[0]?.id ||
+        (targetKind === 'income' ? 'cat-other-inc' : 'cat-other-exp')
     );
     setPartyId(parties[0]?.id || '');
     setNewPartyName('');

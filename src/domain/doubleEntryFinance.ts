@@ -249,12 +249,61 @@ export interface TransactionCategory {
   subcategories?: string[];
 }
 
+export const CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID = 'cat-other-exp';
+export const CANONICAL_DEFAULT_INCOME_CATEGORY_ID = 'cat-other-inc';
+
+export const LEGACY_CATEGORY_ID_ALIASES: Readonly<Record<string, string>> = {
+  'cat-other': CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID,
+  'cat-misc': CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID,
+  'cat-inc-other': CANONICAL_DEFAULT_INCOME_CATEGORY_ID,
+  'cat-from-asaye': 'cat-asaye',
+  'cat-communication': 'cat-comm',
+};
+
+export function resolveCanonicalCategoryId(categoryId: string): string {
+  return LEGACY_CATEGORY_ID_ALIASES[categoryId] ?? categoryId;
+}
+
+export function categoryIdsMatchOrAlias(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return resolveCanonicalCategoryId(a) === resolveCanonicalCategoryId(b);
+}
+
+export function findCategoryByIdOrAlias(
+  categories: TransactionCategory[],
+  categoryId?: string
+): TransactionCategory | undefined {
+  if (!categoryId) return undefined;
+  const exact = categories.find((c) => c.id === categoryId);
+  if (exact) return exact;
+  const canonicalId = resolveCanonicalCategoryId(categoryId);
+  const canonicalMatch = categories.find((c) => c.id === canonicalId);
+  if (canonicalMatch) return canonicalMatch;
+  return categories.find((c) => resolveCanonicalCategoryId(c.id) === canonicalId);
+}
+
+export function resolveCategoryDisplayName(
+  categories: TransactionCategory[],
+  categoryId?: string
+): string {
+  if (!categoryId) return '';
+  const found = findCategoryByIdOrAlias(categories, categoryId);
+  if (found) return found.name;
+  const canonicalDefaults = [
+    ...FOUNDATION_DEFAULT_EXPENSE_CATEGORIES,
+    ...FOUNDATION_DEFAULT_INCOME_CATEGORIES,
+  ];
+  const fallback = findCategoryByIdOrAlias(canonicalDefaults, categoryId);
+  return fallback?.name || categoryId;
+}
+
 export const DEFAULT_EXPENSE_CATEGORIES: TransactionCategory[] = [
   { id: 'cat-food', name: 'Food', type: 'expense', colorHex: '#EF4444' },
   { id: 'cat-transport', name: 'Transport', type: 'expense', colorHex: '#F97316' },
   { id: 'cat-housing', name: 'Housing', type: 'expense', colorHex: '#F59E0B' },
   { id: 'cat-utilities', name: 'Utilities', type: 'expense', colorHex: '#EAB308' },
-  { id: 'cat-communication', name: 'Communication', type: 'expense', colorHex: '#84CC16' },
+  { id: 'cat-comm', name: 'Communication', type: 'expense', colorHex: '#84CC16' },
   { id: 'cat-clothing', name: 'Clothing', type: 'expense', colorHex: '#10B981' },
   { id: 'cat-personal-care', name: 'Personal Care', type: 'expense', colorHex: '#06B6D4' },
   { id: 'cat-hygiene', name: 'Hygiene', type: 'expense', colorHex: '#3B82F6' },
@@ -265,7 +314,7 @@ export const DEFAULT_EXPENSE_CATEGORIES: TransactionCategory[] = [
   { id: 'cat-entertainment', name: 'Entertainment', type: 'expense', colorHex: '#A855F7' },
   { id: 'cat-shopping', name: 'Shopping', type: 'expense', colorHex: '#14B8A6' },
   { id: 'cat-fees', name: 'Financial Fees', type: 'expense', colorHex: '#64748B' },
-  { id: 'cat-other', name: 'Other', type: 'expense', colorHex: '#94A3B8', isDefault: true },
+  { id: 'cat-other-exp', name: 'Other', type: 'expense', colorHex: '#94A3B8', isDefault: true },
 ];
 
 export const DEFAULT_INCOME_CATEGORIES: TransactionCategory[] = [
@@ -275,7 +324,7 @@ export const DEFAULT_INCOME_CATEGORIES: TransactionCategory[] = [
   { id: 'cat-inc-family-support', name: 'Family Support', type: 'income', colorHex: '#8B5CF6' },
   { id: 'cat-inc-gifts', name: 'Gifts', type: 'income', colorHex: '#EC4899' },
   { id: 'cat-inc-investment', name: 'Investment', type: 'income', colorHex: '#F59E0B' },
-  { id: 'cat-inc-other', name: 'Other', type: 'income', colorHex: '#64748B' },
+  { id: 'cat-other-inc', name: 'Other', type: 'income', colorHex: '#64748B', isDefault: true },
 ];
 
 export const DEFAULT_ACCOUNTS: Account[] = [
@@ -1722,7 +1771,6 @@ export function generateOccurrenceReport(params: {
   endDate: string; // YYYY-MM-DD
 }): OccurrenceReportSummary {
   const accountMap = new Map(params.accounts.map((a) => [a.id, a]));
-  const catMap = new Map(params.categories.map((c) => [c.id, c.name]));
   const entryMap = new Map(params.entries.map((e) => [e.id, e]));
   const classifications = classifyAllJournalEntries({
     accounts: params.accounts,
@@ -1752,12 +1800,16 @@ export function generateOccurrenceReport(params: {
     if (acc.type === 'expense') {
       const netExpense = p.direction === 'debit' ? p.amountCents : -p.amountCents;
       totalExpense += netExpense;
-      const catName = (p.categoryId && catMap.get(p.categoryId)) || acc.name;
+      const catName =
+        (p.categoryId && findCategoryByIdOrAlias(params.categories, p.categoryId)?.name) ||
+        acc.name;
       breakdown[catName] = (breakdown[catName] || 0) + netExpense;
     } else if (acc.type === 'income') {
       const netIncome = p.direction === 'credit' ? p.amountCents : -p.amountCents;
       totalIncome += netIncome;
-      const catName = (p.categoryId && catMap.get(p.categoryId)) || acc.name;
+      const catName =
+        (p.categoryId && findCategoryByIdOrAlias(params.categories, p.categoryId)?.name) ||
+        acc.name;
       breakdown[catName] = (breakdown[catName] || 0) + netIncome;
     }
   }
@@ -2638,14 +2690,33 @@ export function parseQuickCaptureExpense(
   categories: TransactionCategory[] = []
 ): QuickCaptureParsedExpense {
   const text = rawText.trim();
+  const rawExpenseCategories = (
+    categories.length > 0 ? categories : FOUNDATION_DEFAULT_EXPENSE_CATEGORIES
+  ).filter((c) => c.type === 'expense' && !c.isArchived);
+  const activeCategories: TransactionCategory[] =
+    rawExpenseCategories.length > 0
+      ? rawExpenseCategories
+      : FOUNDATION_DEFAULT_EXPENSE_CATEGORIES;
+  const fallbackCategory: TransactionCategory =
+    activeCategories.find((c) => c.id === CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID) ||
+    activeCategories.find((c) => resolveCanonicalCategoryId(c.id) === CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID) ||
+    activeCategories.find((c) => c.isDefault) ||
+    activeCategories[0] || {
+      id: CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID,
+      name: 'Other',
+      type: 'expense',
+      colorHex: '#94A3B8',
+      isDefault: true,
+    };
+
   const rejectedCurrency = detectUnsupportedCurrencyToken(text);
   if (rejectedCurrency) {
     return {
       amountCents: 0,
       description: text,
       assetAccountId: '',
-      categoryId: 'cat-misc',
-      categoryName: 'General & Miscellaneous',
+      categoryId: fallbackCategory.id,
+      categoryName: fallbackCategory.name,
       rejectedCurrency,
       error: `Only ETB amounts are supported in Quick Capture (detected ${rejectedCurrency}).`,
     };
@@ -2702,51 +2773,110 @@ export function parseQuickCaptureExpense(
     .trim();
   if (!cleanedDesc) cleanedDesc = 'Quick expense';
 
-  // Fallback default categories if empty
-  const activeCategories: TransactionCategory[] = categories.length > 0 ? categories : [
-    { id: 'cat-dining', name: 'Food & Dining', type: 'expense', colorHex: '#E57373' },
-    { id: 'cat-groceries', name: 'Groceries & Household', type: 'expense', colorHex: '#81C784' },
-    { id: 'cat-transport', name: 'Transport & Fuel', type: 'expense', colorHex: '#64B5F6' },
-    { id: 'cat-rent', name: 'Rent & Housing', type: 'expense', colorHex: '#FFB74D' },
-    { id: 'cat-misc', name: 'General & Miscellaneous', type: 'expense', colorHex: '#90A4AE', isDefault: true },
-  ];
+  // Detect active non-archived expense category using canonical keywords + custom category names
+  let matchedCategoryId = fallbackCategory.id;
+  let matchedCategoryName = fallbackCategory.name;
+  const dLower = cleanedDesc.toLowerCase();
 
-  // Detect category
-  let matchedCategoryId = 'cat-misc';
-  let matchedCategoryName = 'General & Miscellaneous';
+  const findCat = (predicate: (c: TransactionCategory, cLower: string) => boolean) =>
+    activeCategories.find((c) => predicate(c, c.name.toLowerCase()));
 
-  for (const cat of activeCategories) {
-    const cLower = cat.name.toLowerCase();
-    const dLower = cleanedDesc.toLowerCase();
-    if (
-      (dLower.includes('lunch') || dLower.includes('dinner') || dLower.includes('food') || dLower.includes('dining') || dLower.includes('coffee') || dLower.includes('ሻይ') || dLower.includes('ምግብ')) &&
-      (cLower.includes('dining') || cLower.includes('food') || cLower.includes('ምግብ'))
-    ) {
-      matchedCategoryId = cat.id;
-      matchedCategoryName = cat.name;
-      break;
-    } else if (
-      (dLower.includes('grocery') || dLower.includes('market') || dLower.includes('teff') || dLower.includes('ዘይት') || dLower.includes('ሽንኩርት')) &&
-      (cLower.includes('grocer') || cLower.includes('ሸቀጥ'))
-    ) {
-      matchedCategoryId = cat.id;
-      matchedCategoryName = cat.name;
-      break;
-    } else if (
-      (dLower.includes('rent') || dLower.includes('ቤት') || dLower.includes('ኪራይ')) &&
-      (cLower.includes('rent') || cLower.includes('ኪራይ'))
-    ) {
-      matchedCategoryId = cat.id;
-      matchedCategoryName = cat.name;
-      break;
-    } else if (
-      (dLower.includes('transport') || dLower.includes('ride') || dLower.includes('fuel') || dLower.includes('ነዳጅ') || dLower.includes('ታክሲ')) &&
-      (cLower.includes('transport') || cLower.includes('ነዳጅ'))
-    ) {
-      matchedCategoryId = cat.id;
-      matchedCategoryName = cat.name;
-      break;
-    }
+  let matchedCat: TransactionCategory | undefined;
+  if (
+    dLower.includes('lunch') ||
+    dLower.includes('dinner') ||
+    dLower.includes('food') ||
+    dLower.includes('dining') ||
+    dLower.includes('coffee') ||
+    dLower.includes('breakfast') ||
+    dLower.includes('ሻይ') ||
+    dLower.includes('ምግብ')
+  ) {
+    matchedCat =
+      findCat((_, cl) => cl.includes('dining')) ||
+      findCat((c, cl) => c.id === 'cat-food' || cl.includes('food') || cl.includes('ምግብ'));
+  } else if (
+    dLower.includes('grocery') ||
+    dLower.includes('groceries') ||
+    dLower.includes('market') ||
+    dLower.includes('teff') ||
+    dLower.includes('ዘይት') ||
+    dLower.includes('ሽንኩርት')
+  ) {
+    matchedCat =
+      findCat((_, cl) => cl.includes('grocer') || cl.includes('ሸቀጥ')) ||
+      findCat((c, cl) => c.id === 'cat-food' || cl.includes('food') || cl.includes('ምግብ'));
+  } else if (
+    dLower.includes('rent') ||
+    dLower.includes('housing') ||
+    dLower.includes('house') ||
+    dLower.includes('ቤት') ||
+    dLower.includes('ኪራይ')
+  ) {
+    matchedCat = findCat(
+      (c, cl) =>
+        c.id === 'cat-housing' ||
+        cl.includes('housing') ||
+        cl.includes('rent') ||
+        cl.includes('ኪራይ')
+    );
+  } else if (
+    dLower.includes('transport') ||
+    dLower.includes('taxi') ||
+    dLower.includes('ride') ||
+    dLower.includes('fuel') ||
+    dLower.includes('bajaj') ||
+    dLower.includes('ነዳጅ') ||
+    dLower.includes('ታክሲ')
+  ) {
+    matchedCat = findCat(
+      (c, cl) => c.id === 'cat-transport' || cl.includes('transport') || cl.includes('ነዳጅ')
+    );
+  } else if (
+    dLower.includes('electric') ||
+    dLower.includes('water') ||
+    dLower.includes('utility') ||
+    dLower.includes('utilities') ||
+    dLower.includes('power') ||
+    dLower.includes('ውሃ') ||
+    dLower.includes('መብራት')
+  ) {
+    matchedCat = findCat((c, cl) => c.id === 'cat-utilities' || cl.includes('utilit'));
+  } else if (
+    dLower.includes('internet') ||
+    dLower.includes('airtime') ||
+    dLower.includes('telecom') ||
+    dLower.includes('ethio') ||
+    dLower.includes('data') ||
+    dLower.includes('phone') ||
+    dLower.includes('wifi') ||
+    dLower.includes('ካርድ') ||
+    dLower.includes('ስልክ')
+  ) {
+    matchedCat = findCat(
+      (c, cl) => c.id === 'cat-comm' || cl.includes('comm') || cl.includes('telecom')
+    );
+  }
+
+  if (!matchedCat) {
+    matchedCat = activeCategories.find((c) => {
+      if (
+        c.isDefault ||
+        resolveCanonicalCategoryId(c.id) === CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID
+      ) {
+        return false;
+      }
+      const tokens = c.name
+        .toLowerCase()
+        .split(/[^a-z0-9\u1200-\u137f]+/)
+        .filter((t) => t.length >= 3);
+      return tokens.some((token) => dLower.includes(token));
+    });
+  }
+
+  if (matchedCat) {
+    matchedCategoryId = matchedCat.id;
+    matchedCategoryName = matchedCat.name;
   }
 
   return {
@@ -2812,7 +2942,9 @@ export function filterJournalEntries(
     }
 
     if (params.categoryId) {
-      const hasCategory = entryPostings.some((p) => p.categoryId === params.categoryId);
+      const hasCategory = entryPostings.some((p) =>
+        categoryIdsMatchOrAlias(p.categoryId, params.categoryId)
+      );
       if (!hasCategory) return false;
     }
 
@@ -3023,12 +3155,12 @@ export function calculatePeriodComparison(params: {
       if (accType === 'expense') {
         const netExpense = p.direction === 'debit' ? p.amountCents : -p.amountCents;
         expenseCents += netExpense;
-        const catId = p.categoryId || 'cat-other';
+        const catId = p.categoryId || CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID;
         categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + netExpense);
       } else if (accType === 'income') {
         const netIncome = p.direction === 'credit' ? p.amountCents : -p.amountCents;
         incomeCents += netIncome;
-        const catId = p.categoryId || 'cat-inc-other';
+        const catId = p.categoryId || CANONICAL_DEFAULT_INCOME_CATEGORY_ID;
         categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + netIncome);
       }
     }
@@ -3076,7 +3208,7 @@ export function calculatePeriodComparison(params: {
   const catComparisons: CategoryComparisonItem[] = [];
 
   for (const catId of allCategoryIds) {
-    const catObj = params.categories.find((c) => c.id === catId);
+    const catObj = findCategoryByIdOrAlias(params.categories, catId);
     const catName = catObj ? catObj.name : catId;
     const catType = catObj ? catObj.type : 'expense';
 
@@ -3103,9 +3235,11 @@ export function calculatePeriodComparison(params: {
 
   let selectedCategoryResult: CategoryComparisonItem | undefined;
   if (params.selectedCategoryId) {
-    selectedCategoryResult = catComparisons.find((c) => c.categoryId === params.selectedCategoryId);
+    selectedCategoryResult = catComparisons.find((c) =>
+      categoryIdsMatchOrAlias(c.categoryId, params.selectedCategoryId)
+    );
     if (!selectedCategoryResult) {
-      const catObj = params.categories.find((c) => c.id === params.selectedCategoryId);
+      const catObj = findCategoryByIdOrAlias(params.categories, params.selectedCategoryId);
       const catName = catObj ? catObj.name : params.selectedCategoryId;
       const catType = catObj ? catObj.type : 'expense';
       const pCents = prev.categoryTotals.get(params.selectedCategoryId) || 0;
@@ -3239,14 +3373,16 @@ export const FOUNDATION_DEFAULT_EXPENSE_CATEGORIES: TransactionCategory[] = [
   { id: 'cat-transport', name: 'Transport', type: 'expense', colorHex: '#F97316' },
   { id: 'cat-housing', name: 'Housing', type: 'expense', colorHex: '#F59E0B' },
   { id: 'cat-utilities', name: 'Utilities', type: 'expense', colorHex: '#EAB308' },
-  { id: 'cat-communication', name: 'Communication', type: 'expense', colorHex: '#84CC16' },
-  { id: 'cat-other', name: 'Other', type: 'expense', colorHex: '#94A3B8', isDefault: true },
+  { id: 'cat-comm', name: 'Communication', type: 'expense', colorHex: '#84CC16' },
+  { id: 'cat-other-exp', name: 'Other', type: 'expense', colorHex: '#94A3B8', isDefault: true },
 ];
 
 export const FOUNDATION_DEFAULT_INCOME_CATEGORIES: TransactionCategory[] = [
-  { id: 'cat-salary', name: 'Salary', type: 'income', colorHex: '#10B981', isDefault: true },
-  { id: 'cat-from-asaye', name: 'From Asaye', type: 'income', colorHex: '#3B82F6' },
-  { id: 'cat-inc-other', name: 'Other', type: 'income', colorHex: '#64748B' },
+  { id: 'cat-salary', name: 'Salary', type: 'income', colorHex: '#10B981' },
+  { id: 'cat-freelance', name: 'Freelance & Business', type: 'income', colorHex: '#06B6D4' },
+  { id: 'cat-asaye', name: 'From Asaye', type: 'income', colorHex: '#3B82F6' },
+  { id: 'cat-invest', name: 'Investments & Returns', type: 'income', colorHex: '#8B5CF6' },
+  { id: 'cat-other-inc', name: 'Other', type: 'income', colorHex: '#64748B', isDefault: true },
 ];
 
 /**
@@ -3362,7 +3498,7 @@ export function validateSimpleTransaction(
     if (!categoryId) {
       errors.category = 'Category is required.';
     } else if (availableCategories.length > 0) {
-      const cat = availableCategories.find((c) => c.id === categoryId);
+      const cat = findCategoryByIdOrAlias(availableCategories, categoryId);
       if (!cat) {
         errors.category = 'Selected category does not exist.';
       } else if (cat.type !== type) {

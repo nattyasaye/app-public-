@@ -45,6 +45,9 @@ import {
   calculateAccountBalance,
   calculateTotalPayables,
   calculateTotalReceivables,
+  CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID,
+  CANONICAL_DEFAULT_INCOME_CATEGORY_ID,
+  categoryIdsMatchOrAlias,
   classifyAllJournalEntries,
   classifyCurrencyCode,
   classifyJournalEntryCurrency,
@@ -54,7 +57,10 @@ import {
   DoubleEntryValidationError,
   EntryCurrencyClassification,
   EntryCurrencyStatus,
+  findCategoryByIdOrAlias,
   formatCurrencyCents,
+  FOUNDATION_DEFAULT_EXPENSE_CATEGORIES,
+  FOUNDATION_DEFAULT_INCOME_CATEGORIES,
   generateCashFlowReport,
   generateOccurrenceReport,
   isActiveVerifiedEtbAccount,
@@ -62,9 +68,14 @@ import {
   isEtbCurrency,
   isValidCurrencyCode,
   JournalEntry,
+  LEGACY_CATEGORY_ID_ALIASES,
   normalizeCurrencyCode,
+  parseQuickCaptureExpense,
   Party,
   Posting,
+  QuickCaptureParsedExpense,
+  resolveCanonicalCategoryId,
+  resolveCategoryDisplayName,
   resolveCommitmentCurrencyStatus,
   SettlementAllocation,
   SimpleTransaction,
@@ -2505,6 +2516,278 @@ export function verifyFinanceV7Integrity(params: {
   };
 }
 
+/**
+ * Resolves a candidate expense category ID against active non-archived expense categories
+ * (or canonical defaults when none exist), supporting legacy alias matching non-destructively.
+ */
+export function resolveActiveExpenseCategoryIdV7(
+  categories: TransactionCategory[],
+  candidateCategoryId?: string
+): string {
+  const effectiveCategories =
+    categories.length > 0
+      ? categories
+      : [...FOUNDATION_DEFAULT_EXPENSE_CATEGORIES, ...FOUNDATION_DEFAULT_INCOME_CATEGORIES];
+  const activeExpenses = effectiveCategories.filter(
+    (c) => c.type === 'expense' && !c.isArchived
+  );
+
+  if (candidateCategoryId) {
+    const matched = findCategoryByIdOrAlias(activeExpenses, candidateCategoryId);
+    if (matched) return matched.id;
+  }
+
+  const canonicalOther =
+    activeExpenses.find((c) => c.id === CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID) ||
+    activeExpenses.find(
+      (c) => resolveCanonicalCategoryId(c.id) === CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID
+    );
+  if (canonicalOther) return canonicalOther.id;
+
+  const flaggedDefault = activeExpenses.find((c) => c.isDefault);
+  if (flaggedDefault) return flaggedDefault.id;
+
+  return activeExpenses[0]?.id || CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID;
+}
+
+export interface BuildQuickCaptureExpenseResult {
+  ok: boolean;
+  error?: string;
+  rejectedCurrency?: string;
+  entry?: JournalEntry;
+  postings?: Posting[];
+  simpleTransaction?: SimpleTransaction;
+  accountsWithControls?: Account[];
+  targetAccount?: Account;
+  resolvedCategoryId?: string;
+  resolvedCategoryName?: string;
+  parsed?: QuickCaptureParsedExpense;
+}
+
+/**
+ * Pure Quick Capture expense builder shared by Web App Quick Capture and unit tests.
+ * Uses live categories (falling back to canonical defaults), builds balanced double-entry postings,
+ * keeps SimpleTransaction and debit Posting categoryId identical, and marks isSuperseded: false.
+ */
+export function buildQuickCaptureExpenseEntryV7(params: {
+  rawText: string;
+  accountHint?: string;
+  accounts: Account[];
+  categories: TransactionCategory[];
+  occurrenceDateIso?: string;
+  nowIso?: string;
+  entryId?: string;
+  txId?: string;
+}): BuildQuickCaptureExpenseResult {
+  const text = params.rawText.trim();
+  if (!text) {
+    return { ok: false, error: 'Please enter something to capture.' };
+  }
+
+  const liquidEtbAccounts = params.accounts.filter(
+    (a) =>
+      isActiveVerifiedEtbAccount(a) &&
+      a.type === 'asset' &&
+      a.subType !== 'savings_vault' &&
+      a.subType !== 'receivable'
+  );
+  const fallbackEtbAccounts = params.accounts.filter((a) => isActiveVerifiedEtbAccount(a));
+  const candidateAccounts = liquidEtbAccounts.length > 0 ? liquidEtbAccounts : fallbackEtbAccounts;
+
+  const hint = (params.accountHint || '').trim().toLowerCase();
+  const matchedAccount =
+    (hint ? candidateAccounts.find((a) => a.name.toLowerCase().includes(hint)) : undefined) ||
+    candidateAccounts[0];
+
+  if (!matchedAccount) {
+    return {
+      ok: false,
+      error:
+        'No active Verified ETB account is available. Add or activate an ETB account in Finance before recording expenses.',
+    };
+  }
+
+  const effectiveCategories =
+    params.categories.length > 0
+      ? params.categories
+      : [...FOUNDATION_DEFAULT_EXPENSE_CATEGORIES, ...FOUNDATION_DEFAULT_INCOME_CATEGORIES];
+
+  const parsed = parseQuickCaptureExpense(
+    text,
+    matchedAccount.id,
+    params.accounts,
+    effectiveCategories
+  );
+  if (parsed.rejectedCurrency) {
+    return {
+      ok: false,
+      rejectedCurrency: parsed.rejectedCurrency,
+      parsed,
+      error:
+        parsed.error ||
+        `Only ETB amounts are supported in Quick Capture (detected ${parsed.rejectedCurrency}).`,
+    };
+  }
+  if (!Number.isInteger(parsed.amountCents) || parsed.amountCents <= 0) {
+    return {
+      ok: false,
+      parsed,
+      error: 'Enter a valid expense amount greater than 0.',
+    };
+  }
+
+  const targetAccount =
+    candidateAccounts.find((a) => a.id === parsed.assetAccountId) || matchedAccount;
+
+  assertEtbPostingAccounts({
+    accounts: params.accounts,
+    accountIds: [targetAccount.id],
+    roleLabels: ['Posting account'],
+  });
+
+  const resolvedCategoryId = resolveActiveExpenseCategoryIdV7(
+    effectiveCategories,
+    parsed.categoryId
+  );
+  const resolvedCategoryName =
+    resolveCategoryDisplayName(effectiveCategories, resolvedCategoryId) || parsed.categoryName;
+
+  const occurrenceDateIso = params.occurrenceDateIso || CalendarDate.today().toIsoString();
+  const nowIso = params.nowIso || EthiopiaClock.nowUtc().toISOString();
+  const entryId = params.entryId || `entry-qc-${Date.now()}`;
+  const txId = params.txId || `tx-qc-${Date.now()}`;
+  const description = (parsed.description || text).trim();
+
+  const accountsWithControls = ensureSystemControlAccounts(params.accounts);
+  const { entry, postings } = buildDirectExpense({
+    id: entryId,
+    assetAccountId: targetAccount.id,
+    expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+    categoryId: resolvedCategoryId,
+    amountCents: parsed.amountCents,
+    occurrenceDate: occurrenceDateIso,
+    movementDate: occurrenceDateIso,
+    description,
+    note: 'Quick capture',
+  });
+  entry.legacySourceTxId = txId;
+  entry.createdAt = nowIso;
+
+  validateBalancedEntry(postings);
+
+  const simpleTransaction: SimpleTransaction = {
+    id: txId,
+    type: 'expense',
+    amountCents: parsed.amountCents,
+    accountId: targetAccount.id,
+    categoryId: resolvedCategoryId,
+    description,
+    transactionDate: occurrenceDateIso,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    journalEntryId: entry.id,
+    isSuperseded: false,
+  };
+
+  return {
+    ok: true,
+    entry,
+    postings,
+    simpleTransaction,
+    accountsWithControls,
+    targetAccount,
+    resolvedCategoryId,
+    resolvedCategoryName,
+    parsed,
+  };
+}
+
+/**
+ * Upserts a monthly category budget keyed uniquely by (categoryId, monthIso) so saving
+ * a category budget in one month never overwrites budgets from another month.
+ */
+export function upsertMonthlyBudgetV7(params: {
+  budgets: SharedBudget[];
+  categoryId: string;
+  monthIso: string;
+  limitCents: number;
+  rolloverEnabled: boolean;
+  nowIso?: string;
+  budgetId?: string;
+}): {
+  ok: boolean;
+  error?: string;
+  budgets: SharedBudget[];
+  savedBudget?: SharedBudget;
+  updatedExisting?: boolean;
+} {
+  const categoryId = params.categoryId.trim();
+  const monthIso = params.monthIso.trim();
+  if (!categoryId) {
+    return { ok: false, error: 'Category is required for a monthly budget.', budgets: params.budgets };
+  }
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(monthIso)) {
+    return {
+      ok: false,
+      error: `Invalid budget month "${monthIso}" (expected YYYY-MM).`,
+      budgets: params.budgets,
+    };
+  }
+  if (!Number.isInteger(params.limitCents) || params.limitCents <= 0) {
+    return {
+      ok: false,
+      error: 'Budget limit must be a positive integer in cents.',
+      budgets: params.budgets,
+    };
+  }
+
+  const nowIso = params.nowIso || EthiopiaClock.nowUtc().toISOString();
+  const existingIdx = (() => {
+    const exact = params.budgets.findIndex(
+      (b) => b.monthIso === monthIso && b.categoryId === categoryId
+    );
+    if (exact >= 0) return exact;
+    return params.budgets.findIndex(
+      (b) => b.monthIso === monthIso && categoryIdsMatchOrAlias(b.categoryId, categoryId)
+    );
+  })();
+
+  if (existingIdx >= 0) {
+    const existing = params.budgets[existingIdx];
+    const savedBudget: SharedBudget = {
+      ...existing,
+      categoryId,
+      monthIso,
+      limitCents: params.limitCents,
+      rolloverEnabled: params.rolloverEnabled,
+      updatedAt: nowIso,
+    };
+    const nextBudgets = params.budgets.map((b, idx) => (idx === existingIdx ? savedBudget : b));
+    return {
+      ok: true,
+      budgets: nextBudgets,
+      savedBudget,
+      updatedExisting: true,
+    };
+  }
+
+  const savedBudget: SharedBudget = {
+    id: params.budgetId || `bud-${Date.now()}`,
+    categoryId,
+    monthIso,
+    limitCents: params.limitCents,
+    rolloverEnabled: params.rolloverEnabled,
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+  return {
+    ok: true,
+    budgets: [savedBudget, ...params.budgets],
+    savedBudget,
+    updatedExisting: false,
+  };
+}
+
 export {
   assertEtbDebtEligible,
   assertEtbPostingAccounts,
@@ -2520,17 +2803,27 @@ export {
   buildThirdPartyPaidExpense,
   buildTransfer,
   calculateAccountBalance,
+  CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID,
+  CANONICAL_DEFAULT_INCOME_CATEGORY_ID,
+  categoryIdsMatchOrAlias,
   classifyAllJournalEntries,
   classifyCurrencyCode,
   classifyJournalEntryCurrency,
+  findCategoryByIdOrAlias,
   formatCurrencyCents,
+  FOUNDATION_DEFAULT_EXPENSE_CATEGORIES,
+  FOUNDATION_DEFAULT_INCOME_CATEGORIES,
   generateCashFlowReport,
   generateOccurrenceReport,
   isActiveVerifiedEtbAccount,
   isDebtEligibleEtb,
   isEtbCurrency,
   isValidCurrencyCode,
+  LEGACY_CATEGORY_ID_ALIASES,
   normalizeCurrencyCode,
+  parseQuickCaptureExpense,
+  resolveCanonicalCategoryId,
+  resolveCategoryDisplayName,
   resolveCommitmentCurrencyStatus,
 };
 export type {
@@ -2544,6 +2837,7 @@ export type {
   JournalEntry,
   Party,
   Posting,
+  QuickCaptureParsedExpense,
   SettlementAllocation,
   SimpleTransaction,
   TransactionCategory,

@@ -60,15 +60,18 @@ import {
   SimpleTransaction,
 } from './domain/doubleEntryFinance';
 import {
+  buildQuickCaptureExpenseEntryV7,
   calculateAvailableToSpendBreakdownV7,
   classifyAllJournalEntries,
   formatCurrencyCents,
   hydrateLedgerFromSimpleTransactions,
   isActiveVerifiedEtbAccount,
+  resolveActiveExpenseCategoryIdV7,
   SharedCommitment,
   SharedCommitmentSettlement,
   SharedRecurringRule,
   SharedSavingsGoal,
+  TransactionCategory,
 } from './domain/financeV7Engine';
 import { FinanceComposerPrefill } from './components/finance/financeV7Types';
 import { DaywellFinanceModule } from './components/DaywellFinanceModule';
@@ -79,7 +82,7 @@ import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWi
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { SharedStateBridge } from './services/sharedStateBridge';
 import { projectsService } from './services/projectsService';
-import { SHARED_DESIGN_TOKENS, SYSTEM_CONTROL_ACCOUNT_IDS } from './domain/sharedFoundation';
+import { SHARED_DESIGN_TOKENS } from './domain/sharedFoundation';
 import {
   DaywellButton,
   DaywellCard,
@@ -555,119 +558,40 @@ export default function App() {
     setQuickCaptureError(null);
 
     if (quickCaptureType === 'expense') {
-      let storedAccounts: Account[] = [];
-      try {
-        const rawAcc = localStorage.getItem('daywell_accounts');
-        const parsedAcc = rawAcc ? JSON.parse(rawAcc) : [];
-        if (Array.isArray(parsedAcc)) storedAccounts = parsedAcc;
-      } catch {
-        storedAccounts = [];
-      }
-      const etbUserAccounts = storedAccounts.filter(
-        (a) =>
-          isActiveVerifiedEtbAccount(a) &&
-          a.type === 'asset' &&
-          a.subType !== 'savings_vault' &&
-          a.subType !== 'receivable'
-      );
-      const fallbackEtbAccounts = storedAccounts.filter((a) => isActiveVerifiedEtbAccount(a));
-      const candidateAccounts = etbUserAccounts.length > 0 ? etbUserAccounts : fallbackEtbAccounts;
-      const hint = quickCaptureExpenseAccount.trim().toLowerCase();
-      const matchedAccount =
-        candidateAccounts.find((a) => a.name.toLowerCase().includes(hint)) ||
-        candidateAccounts[0];
+      const canonical = SharedStateBridge.loadCanonicalState();
+      const built = buildQuickCaptureExpenseEntryV7({
+        rawText: text,
+        accountHint: quickCaptureExpenseAccount,
+        accounts: (canonical.accounts || []) as Account[],
+        categories: (canonical.categories || []) as TransactionCategory[],
+      });
 
-      if (!matchedAccount) {
+      if (!built.ok || !built.entry || !built.postings || !built.simpleTransaction || !built.targetAccount) {
         setIsSubmittingQuickCapture(false);
         setQuickCaptureError(
-          'No active Verified ETB account is available. Add or activate an ETB account in Finance before recording expenses.'
+          built.error || 'Could not validate expense capture against active ETB accounts.'
         );
         return;
       }
 
-      const parsed = parseQuickCaptureExpense(text, matchedAccount.id, storedAccounts);
-      if (parsed.rejectedCurrency) {
-        setIsSubmittingQuickCapture(false);
-        setQuickCaptureError(
-          parsed.error ||
-            `Only ETB amounts are supported in Quick Capture (detected ${parsed.rejectedCurrency}).`
-        );
-        return;
-      }
-      if (parsed.amountCents <= 0) {
-        setIsSubmittingQuickCapture(false);
-        setQuickCaptureError('Enter a valid expense amount greater than 0.');
-        return;
-      }
-      const targetAccountId =
-        candidateAccounts.find((a) => a.id === parsed.assetAccountId)?.id ||
-        matchedAccount.id;
       try {
-        const savedEntries = localStorage.getItem('daywell_journal_entries');
-        const entries = savedEntries ? JSON.parse(savedEntries) : [];
-        const entryId = `entry-qc-${Date.now()}`;
-        const todayIso = CalendarDate.today().toIsoString();
-        const newEntry = {
-          id: entryId,
-          entryType: 'standard',
-          description: parsed.description || text,
-          occurrenceDate: todayIso,
-          isVoided: false,
-          createdAt: EthiopiaClock.nowUtc().toISOString(),
-        };
-        const savedPostings = localStorage.getItem('daywell_postings');
-        const postings = savedPostings ? JSON.parse(savedPostings) : [];
-        const newPostings = [
-          {
-            id: `${entryId}-dr`,
-            entryId,
-            accountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
-            amountCents: parsed.amountCents,
-            direction: 'debit',
-            accountMovementDate: todayIso,
-            categoryId: parsed.categoryId || 'cat-other-exp',
-            note: 'Quick capture',
-          },
-          {
-            id: `${entryId}-cr`,
-            entryId,
-            accountId: targetAccountId,
-            amountCents: parsed.amountCents,
-            direction: 'credit',
-            accountMovementDate: todayIso,
-            note: 'Quick capture',
-          },
-        ];
-        localStorage.setItem('daywell_journal_entries', JSON.stringify([newEntry, ...entries]));
-        localStorage.setItem('daywell_postings', JSON.stringify([...newPostings, ...postings]));
-
-        // Synchronize with simplified Finance transactions
-        const savedSimpleTxs = localStorage.getItem('daywell_finance_transactions');
-        const simpleTxs = savedSimpleTxs ? JSON.parse(savedSimpleTxs) : [];
-        const newSimpleTx = {
-          id: `tx-qc-${Date.now()}`,
-          type: 'expense',
-          amountCents: parsed.amountCents,
-          accountId: targetAccountId,
-          categoryId: parsed.categoryId || 'cat-food',
-          description: parsed.description || text,
-          transactionDate: todayIso,
-          createdAt: EthiopiaClock.nowUtc().toISOString(),
-          updatedAt: EthiopiaClock.nowUtc().toISOString(),
-          journalEntryId: entryId,
-        };
-        const nextSimple = [newSimpleTx, ...simpleTxs];
-        localStorage.setItem('daywell_finance_transactions', JSON.stringify(nextSimple));
-        localStorage.setItem('daywell_transactions', JSON.stringify(nextSimple));
-        window.dispatchEvent(new CustomEvent(SharedStateBridge.SYNC_EVENT_NAME));
+        SharedStateBridge.saveCanonicalState({
+          ...canonical,
+          isFinanceSetupCompleted: true,
+          accounts: (built.accountsWithControls || canonical.accounts) as any,
+          journalEntries: [built.entry, ...(canonical.journalEntries || [])],
+          postings: [...built.postings, ...(canonical.postings || [])],
+          transactions: [built.simpleTransaction as any, ...(canonical.transactions || [])],
+        });
       } catch (err) {
         console.error(err);
       }
+
       setIsSubmittingQuickCapture(false);
       setIsQuickCaptureOpen(false);
       setQuickCaptureInput('');
       setQuickCaptureToast(
-        `Recorded ${formatBirr(parsed.amountCents)}: "${parsed.description}" to ${matchedAccount.name}`
+        `Recorded ${formatBirr(built.simpleTransaction.amountCents)}: "${built.simpleTransaction.description}" to ${built.targetAccount.name}`
       );
       setTimeout(() => setQuickCaptureToast(null), 3500);
       return;
@@ -2295,14 +2219,9 @@ export default function App() {
                         onClick={() => {
                           const text = quickCaptureInput.trim();
                           if (!text) return;
-                          let storedAccounts: Account[] = [];
-                          try {
-                            const rawAcc = localStorage.getItem('daywell_accounts');
-                            const parsedAcc = rawAcc ? JSON.parse(rawAcc) : [];
-                            if (Array.isArray(parsedAcc)) storedAccounts = parsedAcc;
-                          } catch {
-                            storedAccounts = [];
-                          }
+                          const canonical = SharedStateBridge.loadCanonicalState();
+                          const storedAccounts = (canonical.accounts || []) as Account[];
+                          const storedCategories = (canonical.categories || []) as TransactionCategory[];
                           const etbAccounts = storedAccounts.filter((a) => isActiveVerifiedEtbAccount(a));
                           const hint = quickCaptureExpenseAccount.trim().toLowerCase();
                           const matchedAccount =
@@ -2311,7 +2230,8 @@ export default function App() {
                           const parsed = parseQuickCaptureExpense(
                             text,
                             matchedAccount?.id || quickCaptureExpenseAccount,
-                            storedAccounts
+                            storedAccounts,
+                            storedCategories
                           );
                           if (parsed.rejectedCurrency) {
                             setQuickCaptureError(
@@ -2323,13 +2243,17 @@ export default function App() {
                           const prefillAccountId =
                             etbAccounts.find((a) => a.id === parsed.assetAccountId)?.id ||
                             matchedAccount?.id;
+                          const prefillCategoryId = resolveActiveExpenseCategoryIdV7(
+                            storedCategories,
+                            parsed.categoryId
+                          );
                           setFinanceComposerPrefill({
                             nonce: Date.now(),
                             kind: 'expense',
                             amountText: parsed.amountCents > 0 ? formatCentsAsInput(parsed.amountCents) : '',
                             description: parsed.description || text,
                             accountId: prefillAccountId,
-                            categoryId: parsed.categoryId || 'cat-food',
+                            categoryId: prefillCategoryId,
                           });
                           setIsQuickCaptureOpen(false);
                           setQuickCaptureInput('');

@@ -27,6 +27,7 @@ import {
   buildTransfer,
   calculateAvailableToSpendBreakdownV7,
   canCorrectJournalEntryV7,
+  categoryIdsMatchOrAlias,
   correctJournalEntryV7,
   Debt,
   ensureSystemControlAccounts,
@@ -54,6 +55,7 @@ import {
   syncVaultSavingsGoalsV7,
   TransactionCategory,
   unvoidJournalEntryGuardedV7,
+  upsertMonthlyBudgetV7,
   verifyFinanceV7Integrity,
   voidDebtWriteOffV7,
   voidJournalEntryGuardedV7,
@@ -290,11 +292,16 @@ export function DaywellFinanceModule({
   const reloadFromStorage = useCallback(() => {
     isApplyingExternalSyncRef.current = true;
     try {
-      const nextAcc = ensureSystemControlAccounts(readStoredArray<Account>('daywell_accounts'));
-      const nextCat = readStoredArray<TransactionCategory>('daywell_categories');
-      const nextTx = readStoredArray<SimpleTransaction>('daywell_finance_transactions');
-      const nextEntries = readStoredArray<JournalEntry>('daywell_journal_entries');
-      const nextPostings = readStoredArray<Posting>('daywell_postings');
+      const canonical = SharedStateBridge.loadCanonicalState();
+      const nextAcc = ensureSystemControlAccounts((canonical.accounts || []) as Account[]);
+      const rawCat = (canonical.categories || []) as TransactionCategory[];
+      const nextCat =
+        rawCat.length > 0
+          ? rawCat
+          : [...FOUNDATION_DEFAULT_EXPENSE_CATEGORIES, ...FOUNDATION_DEFAULT_INCOME_CATEGORIES];
+      const nextTx = (canonical.transactions || []) as SimpleTransaction[];
+      const nextEntries = (canonical.journalEntries || []) as JournalEntry[];
+      const nextPostings = (canonical.postings || []) as Posting[];
       const hydrated = hydrateLedgerFromSimpleTransactions({
         accounts: nextAcc,
         transactions: nextTx,
@@ -303,23 +310,23 @@ export function DaywellFinanceModule({
       });
 
       setAccounts(hydrated.accounts);
-      if (nextCat.length > 0) setCategories(nextCat);
+      setCategories(nextCat);
       setSimpleTransactions(nextTx);
-      setParties(readStoredArray<Party>('daywell_parties'));
+      setParties((canonical.parties || []) as Party[]);
       setEntries(hydrated.entries);
       setPostings(hydrated.postings);
-      setDebts(readStoredArray<Debt>('daywell_debts'));
-      setAllocations(readStoredArray<SettlementAllocation>('daywell_settlement_allocations'));
-      setCommitments(readStoredArray<SharedCommitment>('daywell_commitments'));
+      setDebts((canonical.debts || []) as Debt[]);
+      setAllocations((canonical.settlementAllocations || []) as SettlementAllocation[]);
+      setCommitments((canonical.commitments || []) as SharedCommitment[]);
       setCommitmentSettlements(
-        readStoredArray<SharedCommitmentSettlement>('daywell_commitment_settlements')
+        (canonical.commitmentSettlements || []) as SharedCommitmentSettlement[]
       );
-      setSavingsGoals(readStoredArray<SharedSavingsGoal>('daywell_savings_goals'));
-      setBudgets(readStoredArray<SharedBudget>('daywell_budgets'));
-      setRecurringRules(readStoredArray<SharedRecurringRule>('daywell_recurring_rules'));
+      setSavingsGoals((canonical.savingsGoals || []) as SharedSavingsGoal[]);
+      setBudgets((canonical.budgets || []) as SharedBudget[]);
+      setRecurringRules((canonical.recurringRules || []) as SharedRecurringRule[]);
       setPlanningPeriodEnd(localStorage.getItem('daywell_finance_planning_horizon') || null);
       setIsSetupCompleted(
-        localStorage.getItem('daywell_finance_setup_completed') === 'true' ||
+        Boolean(canonical.isFinanceSetupCompleted) ||
           hydrated.accounts.some((a) => !a.isSystem)
       );
     } finally {
@@ -792,11 +799,11 @@ export function DaywellFinanceModule({
 
   const handleDeleteCategory = (categoryId: string): { ok: boolean; error?: string } => {
     const used =
-      postings.some((p) => p.categoryId === categoryId) ||
-      simpleTransactions.some((t) => t.categoryId === categoryId) ||
-      budgets.some((b) => b.categoryId === categoryId) ||
-      commitments.some((c) => c.categoryId === categoryId) ||
-      recurringRules.some((r) => r.categoryId === categoryId) ||
+      postings.some((p) => categoryIdsMatchOrAlias(p.categoryId, categoryId)) ||
+      simpleTransactions.some((t) => categoryIdsMatchOrAlias(t.categoryId, categoryId)) ||
+      budgets.some((b) => categoryIdsMatchOrAlias(b.categoryId, categoryId)) ||
+      commitments.some((c) => categoryIdsMatchOrAlias(c.categoryId, categoryId)) ||
+      recurringRules.some((r) => categoryIdsMatchOrAlias(r.categoryId, categoryId)) ||
       categories.some((c) => (c as TransactionCategory & { parentId?: string }).parentId === categoryId);
 
     if (used) {
@@ -1704,39 +1711,33 @@ export function DaywellFinanceModule({
 
   const handleUpsertBudget = (payload: {
     categoryId: string;
+    monthIso?: string;
     limitCents: number;
     rolloverEnabled: boolean;
   }) => {
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
-    const monthIso = todayStr.slice(0, 7);
-    setBudgets((prev) => {
-      const existing = prev.find((b) => b.categoryId === payload.categoryId);
-      if (existing) {
-        return prev.map((b) =>
-          b.categoryId === payload.categoryId
-            ? {
-                ...b,
-                limitCents: payload.limitCents,
-                rolloverEnabled: payload.rolloverEnabled,
-                updatedAt: nowIso,
-              }
-            : b
-        );
-      }
-      return [
-        {
-          id: `bud-${Date.now()}`,
-          categoryId: payload.categoryId,
-          monthIso,
-          limitCents: payload.limitCents,
-          rolloverEnabled: payload.rolloverEnabled,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        },
-        ...prev,
-      ];
+    const targetMonthIso = (payload.monthIso || todayStr.slice(0, 7)).trim();
+    const validation = upsertMonthlyBudgetV7({
+      budgets,
+      categoryId: payload.categoryId,
+      monthIso: targetMonthIso,
+      limitCents: payload.limitCents,
+      rolloverEnabled: payload.rolloverEnabled,
     });
-    showToast('Saved monthly budget.');
+    if (!validation.ok) {
+      showToast(validation.error || 'Could not save monthly budget.');
+      return;
+    }
+    setBudgets((prev) => {
+      const res = upsertMonthlyBudgetV7({
+        budgets: prev,
+        categoryId: payload.categoryId,
+        monthIso: targetMonthIso,
+        limitCents: payload.limitCents,
+        rolloverEnabled: payload.rolloverEnabled,
+      });
+      return res.ok ? res.budgets : prev;
+    });
+    showToast(`Saved monthly budget for ${targetMonthIso}.`);
     setTimeout(notifyCanonicalSynced, 0);
   };
 

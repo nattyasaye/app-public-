@@ -27,6 +27,7 @@ import {
   normalizeCurrencyCode,
   Party,
   Posting,
+  resolveCategoryDisplayName,
   resolveCommitmentCurrencyStatus,
   SettlementAllocation,
   SharedBudget,
@@ -103,7 +104,12 @@ interface FinancePlanTabProps {
     dateIso: string;
   }) => { ok: boolean; error?: string };
   onReleaseAndArchiveGoal: (goalId: string) => { ok: boolean; error?: string } | void;
-  onUpsertBudget: (payload: { categoryId: string; limitCents: number; rolloverEnabled: boolean }) => void;
+  onUpsertBudget: (payload: {
+    categoryId: string;
+    monthIso?: string;
+    limitCents: number;
+    rolloverEnabled: boolean;
+  }) => void;
   onAddRecurringRule: (
     r: Omit<SharedRecurringRule, 'id' | 'createdAt' | 'isActive'>
   ) => { ok: boolean; error?: string } | void;
@@ -157,6 +163,10 @@ export function FinancePlanTab({
 }: FinancePlanTabProps) {
   const todayIso = useMemo(() => CalendarDate.today().toIsoString(), []);
   const monthIso = todayIso.slice(0, 7);
+  const activeMonthBudgets = useMemo(
+    () => budgets.filter((b) => b.monthIso === monthIso),
+    [budgets, monthIso]
+  );
   const [banner, setBanner] = useState<string | null>(null);
 
   const liquidEtbAccounts = useMemo(
@@ -454,6 +464,7 @@ export function FinancePlanTab({
     }
     onUpsertBudget({
       categoryId: budgetCatId,
+      monthIso,
       limitCents,
       rolloverEnabled: budgetRollover,
     });
@@ -1042,17 +1053,21 @@ export function FinancePlanTab({
               variant="secondary"
               size="compact"
               onClick={() => {
-                setBudgetCatId(categories.find((c) => c.type === 'expense')?.id || '');
+                setBudgetCatId(
+                  categories.find((c) => c.type === 'expense' && !c.isArchived)?.id || ''
+                );
                 setBudgetModalOpen(true);
               }}
             />
           </div>
           <div className="space-y-2.5 text-xs">
-            {budgets.length === 0 ? (
-              <p className="py-4 text-center text-[var(--dw-text-muted)]">No monthly category budgets set.</p>
+            {activeMonthBudgets.length === 0 ? (
+              <p className="py-4 text-center text-[var(--dw-text-muted)]">
+                No monthly category budgets set for {monthIso}.
+              </p>
             ) : (
-              budgets.map((b) => {
-                const catName = categories.find((c) => c.id === b.categoryId)?.name || b.categoryId;
+              activeMonthBudgets.map((b) => {
+                const catName = resolveCategoryDisplayName(categories, b.categoryId);
                 const spent = currentMonthOccurrence.categoryBreakdown[catName] || 0;
                 const pct = b.limitCents > 0 ? Math.min(100, Math.round((spent / b.limitCents) * 100)) : 0;
                 const over = spent > b.limitCents;
@@ -1259,7 +1274,9 @@ export function FinancePlanTab({
                 >
                   <option value="">Default</option>
                   {categories
-                    .filter((c) => c.type === (comDirection === 'inflow' ? 'income' : 'expense'))
+                    .filter(
+                      (c) => c.type === (comDirection === 'inflow' ? 'income' : 'expense') && !c.isArchived
+                    )
                     .map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.name}

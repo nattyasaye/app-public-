@@ -199,7 +199,7 @@ test('6. Universal Quick Capture: Text Expense Parser to Balanced Ledger', () =>
   const parsed = parseQuickCaptureExpense('350 dinner CBE', 'CBE');
 
   assert.equal(parsed.amountCents, 35000); // 350 ETB = 35,000 cents
-  assert.equal(parsed.categoryId, 'cat-dining');
+  assert.equal(parsed.categoryId, 'cat-food');
 
   // Verify balanced entry construction from the parsed draft
   const { entry, postings } = buildDirectExpense({
