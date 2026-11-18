@@ -1634,6 +1634,33 @@ class FinanceController extends ChangeNotifier {
     }
   }
 
+  // --- Finance-Only JSON Portability ---
+
+  Future<String> exportFinanceOnlyJson() async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      return await _repository.exportFinanceOnlyJson();
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<bool> importFinanceOnlyJson(String rawJson) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      await _repository.importFinanceOnlyJson(rawJson);
+      await _hydrateState();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return false;
+    }
+  }
+
   @override
   void notifyListeners() {
     if (_isDisposed) return;

@@ -16,8 +16,11 @@ import {
   isDebtEligibleEtb,
   isEtbCurrency,
   normalizeCurrencyCode,
+  resolveCanonicalCategoryId,
+  SimpleTransaction,
 } from '../domain/doubleEntryFinance';
 import {
+  SharedBudget,
   SharedCommitment,
   SharedCommitmentSettlement,
   SharedRecurringRule,
@@ -40,6 +43,8 @@ export interface ExportDataPayload {
   commitmentSettlements?: SharedCommitmentSettlement[];
   recurringRules?: SharedRecurringRule[];
   savingsGoals?: SharedSavingsGoal[];
+  budgets?: SharedBudget[];
+  transactions?: SimpleTransaction[];
   planningPeriodEndIso?: string;
 }
 
@@ -88,6 +93,8 @@ export class DataPortabilityService {
     commitmentSettlements?: SharedCommitmentSettlement[];
     recurringRules?: SharedRecurringRule[];
     savingsGoals?: SharedSavingsGoal[];
+    budgets?: SharedBudget[];
+    transactions?: SimpleTransaction[];
     planningPeriodEndIso?: string;
   }): Promise<void> {
     const normPayload: ExportDataPayload = {
@@ -103,6 +110,8 @@ export class DataPortabilityService {
       commitmentSettlements: payload.commitmentSettlements,
       recurringRules: payload.recurringRules,
       savingsGoals: payload.savingsGoals,
+      budgets: payload.budgets,
+      transactions: payload.transactions,
       planningPeriodEndIso: payload.planningPeriodEndIso,
     };
     const { blob, fileName } = await this.createExportZipBundle(normPayload);
@@ -123,6 +132,8 @@ export class DataPortabilityService {
     commitmentSettlements?: SharedCommitmentSettlement[];
     recurringRules?: SharedRecurringRule[];
     savingsGoals?: SharedSavingsGoal[];
+    budgets?: SharedBudget[];
+    transactions?: SimpleTransaction[];
     planningPeriodEndIso?: string;
   }): Promise<void> {
     const normPayload: ExportDataPayload = {
@@ -138,6 +149,8 @@ export class DataPortabilityService {
       commitmentSettlements: payload.commitmentSettlements,
       recurringRules: payload.recurringRules,
       savingsGoals: payload.savingsGoals,
+      budgets: payload.budgets,
+      transactions: payload.transactions,
       planningPeriodEndIso: payload.planningPeriodEndIso,
     };
     const excelBytes = this.generateExcelWorkbook(normPayload);
@@ -154,11 +167,12 @@ export class DataPortabilityService {
     columns: (keyof T | { key: keyof T; header: string; transform?: (val: any, row: T) => string })[]
   ): string {
     const BOM = '\uFEFF';
-    if (data.length === 0) return BOM;
-
     const headers = columns.map((col) =>
       typeof col === 'object' ? `"${col.header.replace(/"/g, '""')}"` : `"${String(col)}"`
     );
+    if (data.length === 0) {
+      return BOM + headers.join(',');
+    }
 
     const rows = data.map((row) =>
       columns
@@ -172,6 +186,393 @@ export class DataPortabilityService {
     );
 
     return BOM + [headers.join(','), ...rows].join('\r\n');
+  }
+
+  public static exportAccountsCsv(accounts: Account[]): string {
+    return this.toCsvWithBom(accounts, [
+      'id',
+      'name',
+      'type',
+      {
+        key: 'subType',
+        header: 'subType',
+        transform: (_, row) => getAccountSubType(row),
+      },
+      {
+        key: 'currencyCode',
+        header: 'currencyCode',
+        transform: (val) => normalizeCurrencyCode(val) || 'UNVERIFIED',
+      },
+      {
+        key: 'id',
+        header: 'reportingStatus',
+        transform: (_, row) => {
+          if (row.isSystem) return 'SYSTEM';
+          const tier = classifyCurrencyCode(row.currencyCode);
+          if (tier === 'verified_etb') return 'ELIGIBLE_ETB';
+          if (tier === 'verified_non_etb') {
+            return `EXCLUDED_${normalizeCurrencyCode(row.currencyCode)}`;
+          }
+          return 'CURRENCY_REVIEW';
+        },
+      },
+      {
+        key: 'openingBalanceCents',
+        header: 'openingBalanceCents',
+        transform: (val) => String(val ?? 0),
+      },
+      'isArchived',
+      'createdAt',
+    ]);
+  }
+
+  public static exportCategoriesCsv(categories: TransactionCategory[]): string {
+    return this.toCsvWithBom(categories, [
+      'id',
+      'name',
+      'type',
+      'colorHex',
+      {
+        key: 'parentId',
+        header: 'parentId',
+        transform: (val) => (val ? String(val) : ''),
+      },
+      {
+        key: 'sortOrder',
+        header: 'sortOrder',
+        transform: (val) => String(val ?? 0),
+      },
+      {
+        key: 'isDefault',
+        header: 'isDefault',
+        transform: (val) => String(Boolean(val)),
+      },
+      {
+        key: 'isArchived',
+        header: 'isArchived',
+        transform: (val) => String(Boolean(val)),
+      },
+    ]);
+  }
+
+  public static exportPartiesCsv(parties: Party[]): string {
+    return this.toCsvWithBom(parties, [
+      'id',
+      'name',
+      'phone',
+      'notes',
+      'isArchived',
+      'createdAt',
+    ]);
+  }
+
+  public static exportJournalEntriesCsv(payload: {
+    accounts: Account[];
+    entries: JournalEntry[];
+    postings: Posting[];
+    debts: Debt[];
+    allocations?: SettlementAllocation[];
+  }): string {
+    const classifications = classifyAllJournalEntries({
+      accounts: payload.accounts,
+      entries: payload.entries,
+      postings: payload.postings,
+      debts: payload.debts,
+      allocations: payload.allocations,
+    });
+    return this.toCsvWithBom(payload.entries, [
+      'id',
+      'entryType',
+      'description',
+      'occurrenceDate',
+      {
+        key: 'id',
+        header: 'currency',
+        transform: (_, row) => {
+          const cls = classifications.get(row.id);
+          if (!cls) return 'UNVERIFIED';
+          return (
+            cls.nativeCurrencyCode ||
+            (cls.touchedCurrencies.length > 0 ? cls.touchedCurrencies.join('/') : 'UNVERIFIED')
+          );
+        },
+      },
+      {
+        key: 'id',
+        header: 'reportingStatus',
+        transform: (_, row) => {
+          const cls = classifications.get(row.id);
+          if (!cls) return 'CURRENCY_REVIEW';
+          if (cls.status === 'eligible_etb') return 'ELIGIBLE_ETB';
+          if (cls.status === 'excluded_non_etb') {
+            return `EXCLUDED_${cls.nativeCurrencyCode || 'FOREIGN'}`;
+          }
+          if (cls.status === 'inactive_or_voided') return 'INACTIVE_OR_VOIDED';
+          return 'CURRENCY_REVIEW';
+        },
+      },
+      'isVoided',
+      'voidReason',
+      'correctedFromEntryId',
+      'legacySourceTxId',
+      'createdAt',
+    ]);
+  }
+
+  public static exportPostingsCsv(postings: Posting[]): string {
+    return this.toCsvWithBom(postings, [
+      'id',
+      'entryId',
+      'accountId',
+      'amountCents',
+      {
+        key: 'amountCents',
+        header: 'amount_decimal',
+        transform: (val) => (val / 100).toFixed(2),
+      },
+      'direction',
+      'accountMovementDate',
+      {
+        key: 'categoryId',
+        header: 'categoryId',
+        transform: (val) => (val ? resolveCanonicalCategoryId(String(val)) : ''),
+      },
+      'note',
+    ]);
+  }
+
+  public static exportDebtsCsv(payload: {
+    accounts: Account[];
+    entries: JournalEntry[];
+    postings: Posting[];
+    debts: Debt[];
+    allocations?: SettlementAllocation[];
+  }): string {
+    const classifications = classifyAllJournalEntries({
+      accounts: payload.accounts,
+      entries: payload.entries,
+      postings: payload.postings,
+      debts: payload.debts,
+      allocations: payload.allocations,
+    });
+    const entryMap = new Map(payload.entries.map((e) => [e.id, e]));
+    return this.toCsvWithBom(payload.debts, [
+      'id',
+      'originEntryId',
+      'partyId',
+      'debtType',
+      {
+        key: 'id',
+        header: 'currency',
+        transform: (_, row) => {
+          const originCls = classifications.get(row.originEntryId);
+          if (originCls?.nativeCurrencyCode) return originCls.nativeCurrencyCode;
+          if (
+            originCls &&
+            originCls.touchedCurrencies.length === 1 &&
+            originCls.touchedCurrencies[0] !== 'UNVERIFIED'
+          ) {
+            return originCls.touchedCurrencies[0];
+          }
+          return isDebtEligibleEtb(row, entryMap, classifications) ? 'ETB' : 'UNVERIFIED';
+        },
+      },
+      {
+        key: 'id',
+        header: 'reportingStatus',
+        transform: (_, row) => {
+          const eligible = isDebtEligibleEtb(row, entryMap, classifications);
+          if (eligible) return 'ELIGIBLE_ETB';
+          const originCls = classifications.get(row.originEntryId);
+          if (originCls?.status === 'excluded_non_etb') {
+            return `EXCLUDED_${originCls.nativeCurrencyCode || 'FOREIGN'}`;
+          }
+          return 'CURRENCY_REVIEW';
+        },
+      },
+      'principalCents',
+      {
+        key: 'principalCents',
+        header: 'principal_decimal',
+        transform: (val) => (val / 100).toFixed(2),
+      },
+      'outstandingCents',
+      {
+        key: 'outstandingCents',
+        header: 'outstanding_decimal',
+        transform: (val) => (val / 100).toFixed(2),
+      },
+      'dueDate',
+      'status',
+      'writeOffEntryId',
+      'createdAt',
+    ]);
+  }
+
+  public static exportSettlementAllocationsCsv(allocations: SettlementAllocation[]): string {
+    return this.toCsvWithBom(allocations, [
+      'id',
+      'settlementEntryId',
+      'debtId',
+      'allocatedCents',
+      {
+        key: 'allocatedCents',
+        header: 'allocated_decimal',
+        transform: (val) => (val / 100).toFixed(2),
+      },
+      'settlementDate',
+    ]);
+  }
+
+  public static exportCommitmentsCsv(commitments: SharedCommitment[]): string {
+    return this.toCsvWithBom(commitments, [
+      'id',
+      'title',
+      {
+        key: 'direction',
+        header: 'direction',
+        transform: (val) => val || 'outflow',
+      },
+      'amountCents',
+      {
+        key: 'amountCents',
+        header: 'amount_decimal',
+        transform: (val) => (Number(val || 0) / 100).toFixed(2),
+      },
+      'dueDate',
+      'isPaid',
+      'linkedAccountId',
+      'categoryId',
+      'linkedDebtId',
+      'settlementEntryId',
+      'recurringRuleId',
+      {
+        key: 'legacyPaidUnverified',
+        header: 'legacyPaidUnverified',
+        transform: (val) => String(Boolean(val)),
+      },
+    ]);
+  }
+
+  public static exportCommitmentSettlementsCsv(
+    settlements: SharedCommitmentSettlement[]
+  ): string {
+    return this.toCsvWithBom(settlements, [
+      'id',
+      'commitmentId',
+      'entryId',
+      'amountCents',
+      {
+        key: 'amountCents',
+        header: 'amount_decimal',
+        transform: (val) => (Number(val || 0) / 100).toFixed(2),
+      },
+      'settledDate',
+      'createdAt',
+    ]);
+  }
+
+  public static exportSavingsGoalsCsv(goals: SharedSavingsGoal[]): string {
+    return this.toCsvWithBom(goals, [
+      'id',
+      'title',
+      'targetCents',
+      {
+        key: 'targetCents',
+        header: 'target_decimal',
+        transform: (val) => (Number(val || 0) / 100).toFixed(2),
+      },
+      'currentAllocatedCents',
+      {
+        key: 'currentAllocatedCents',
+        header: 'allocated_decimal',
+        transform: (val) => (Number(val || 0) / 100).toFixed(2),
+      },
+      'targetDate',
+      'linkedAccountId',
+      {
+        key: 'status',
+        header: 'status',
+        transform: (val) => val || 'active',
+      },
+      {
+        key: 'status',
+        header: 'createdAt',
+        transform: (_val, row) => String((row as unknown as Record<string, unknown>).createdAt || ''),
+      },
+    ]);
+  }
+
+  public static exportBudgetsCsv(budgets: SharedBudget[]): string {
+    return this.toCsvWithBom(budgets, [
+      'id',
+      'monthIso',
+      'categoryId',
+      'limitCents',
+      {
+        key: 'limitCents',
+        header: 'limit_decimal',
+        transform: (val) => (Number(val || 0) / 100).toFixed(2),
+      },
+      {
+        key: 'rolloverEnabled',
+        header: 'rolloverEnabled',
+        transform: (val) => String(Boolean(val)),
+      },
+      'createdAt',
+      'updatedAt',
+    ]);
+  }
+
+  public static exportRecurringRulesCsv(rules: SharedRecurringRule[]): string {
+    return this.toCsvWithBom(rules, [
+      'id',
+      'title',
+      'ruleType',
+      'amountCents',
+      {
+        key: 'amountCents',
+        header: 'amount_decimal',
+        transform: (val) => (Number(val || 0) / 100).toFixed(2),
+      },
+      'frequency',
+      'interval',
+      'startDate',
+      'nextOccurrenceDate',
+      'endDate',
+      'accountId',
+      'destinationAccountId',
+      'categoryId',
+      'linkedDebtId',
+      'isActive',
+      'autoPost',
+      'createdAt',
+    ]);
+  }
+
+  public static exportTransactionsCsv(transactions: SimpleTransaction[]): string {
+    return this.toCsvWithBom(transactions, [
+      'id',
+      'type',
+      'amountCents',
+      {
+        key: 'amountCents',
+        header: 'amount_decimal',
+        transform: (val) => (Number(val || 0) / 100).toFixed(2),
+      },
+      'accountId',
+      'destinationAccountId',
+      'categoryId',
+      'description',
+      'transactionDate',
+      'journalEntryId',
+      {
+        key: 'isSuperseded',
+        header: 'isSuperseded',
+        transform: (val) => String(Boolean(val)),
+      },
+      'createdAt',
+    ]);
   }
 
   /**
@@ -397,6 +798,66 @@ export class DataPortabilityService {
     const wsDebts = XLSX.utils.aoa_to_sheet(debtsRows);
     XLSX.utils.book_append_sheet(wb, wsDebts, 'Debts_and_Receivables');
 
+    // 6. Commitments and Savings Goals Sheet
+    const goalsList = payload.savingsGoals || [];
+    const commitmentsList = payload.commitments || [];
+    const cmRows = [
+      ['Record Kind', 'ID', 'Title', 'Direction / Status', 'Amount / Target (ETB)', 'Allocated (ETB)', 'Date', 'Linked Account', 'Paid / Legacy'],
+      ...commitmentsList.map((c) => [
+        'COMMITMENT',
+        c.id,
+        c.title,
+        c.direction || 'outflow',
+        (c.amountCents / 100).toFixed(2),
+        '',
+        c.dueDate,
+        c.linkedAccountId || '',
+        c.legacyPaidUnverified ? 'LEGACY_UNVERIFIED' : c.isPaid ? 'PAID' : 'OPEN',
+      ]),
+      ...goalsList.map((g) => [
+        'SAVINGS_GOAL',
+        g.id,
+        g.title,
+        (g.status || 'active').toUpperCase(),
+        (g.targetCents / 100).toFixed(2),
+        (g.currentAllocatedCents / 100).toFixed(2),
+        g.targetDate || '',
+        g.linkedAccountId || 'VIRTUAL',
+        '',
+      ]),
+    ];
+    const wsCommitmentsGoals = XLSX.utils.aoa_to_sheet(cmRows);
+    XLSX.utils.book_append_sheet(wb, wsCommitmentsGoals, 'Commitments_and_Goals');
+
+    // 7. Budgets and Recurring Rules Sheet
+    const budgetsList = payload.budgets || [];
+    const rulesList = payload.recurringRules || [];
+    const budgetRulesRows = [
+      ['Record Kind', 'ID', 'Month / Frequency', 'Category / Type', 'Title', 'Amount (ETB)', 'Next Date', 'Active / Rollover'],
+      ...budgetsList.map((b) => [
+        'BUDGET',
+        b.id,
+        b.monthIso,
+        catMap.get(b.categoryId) || b.categoryId,
+        catMap.get(b.categoryId) || b.categoryId,
+        (b.limitCents / 100).toFixed(2),
+        '',
+        b.rolloverEnabled ? 'ROLLOVER_ON' : 'ROLLOVER_OFF',
+      ]),
+      ...rulesList.map((r) => [
+        'RECURRING_RULE',
+        r.id,
+        `${r.frequency} (x${r.interval})`,
+        r.ruleType,
+        r.title,
+        (r.amountCents / 100).toFixed(2),
+        r.nextOccurrenceDate,
+        `${r.isActive ? 'ACTIVE' : 'PAUSED'} / autoPost=${Boolean(r.autoPost)}`,
+      ]),
+    ];
+    const wsBudgetsRecurring = XLSX.utils.aoa_to_sheet(budgetRulesRows);
+    XLSX.utils.book_append_sheet(wb, wsBudgetsRecurring, 'Budgets_and_Recurring');
+
     return XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   }
 
@@ -477,7 +938,89 @@ export class DataPortabilityService {
       '    id TEXT PRIMARY KEY,',
       '    name TEXT NOT NULL,',
       '    type TEXT NOT NULL,',
-      '    color_hex TEXT NOT NULL',
+      '    color_hex TEXT NOT NULL,',
+      '    parent_id TEXT REFERENCES categories(id),',
+      '    sort_order INTEGER NOT NULL DEFAULT 0,',
+      '    is_default INTEGER NOT NULL DEFAULT 0,',
+      '    is_archived INTEGER NOT NULL DEFAULT 0',
+      ');',
+      '',
+      'CREATE TABLE IF NOT EXISTS commitments (',
+      '    id TEXT PRIMARY KEY,',
+      '    title TEXT NOT NULL,',
+      '    direction TEXT NOT NULL DEFAULT \'outflow\',',
+      '    amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),',
+      '    due_date TEXT NOT NULL,',
+      '    is_paid INTEGER NOT NULL DEFAULT 0,',
+      '    linked_account_id TEXT REFERENCES accounts(id),',
+      '    category_id TEXT REFERENCES categories(id),',
+      '    linked_debt_id TEXT REFERENCES debts(id),',
+      '    settlement_entry_id TEXT REFERENCES journal_entries(id),',
+      '    recurring_rule_id TEXT,',
+      '    legacy_paid_unverified INTEGER NOT NULL DEFAULT 0',
+      ');',
+      '',
+      'CREATE TABLE IF NOT EXISTS commitment_settlements (',
+      '    id TEXT PRIMARY KEY,',
+      '    commitment_id TEXT NOT NULL REFERENCES commitments(id),',
+      '    entry_id TEXT NOT NULL REFERENCES journal_entries(id),',
+      '    amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),',
+      '    settled_date TEXT NOT NULL,',
+      '    created_at TEXT NOT NULL',
+      ');',
+      '',
+      'CREATE TABLE IF NOT EXISTS savings_goals (',
+      '    id TEXT PRIMARY KEY,',
+      '    title TEXT NOT NULL,',
+      '    target_cents INTEGER NOT NULL CHECK(target_cents > 0),',
+      '    current_allocated_cents INTEGER NOT NULL DEFAULT 0,',
+      '    target_date TEXT,',
+      '    linked_account_id TEXT REFERENCES accounts(id),',
+      '    status TEXT NOT NULL DEFAULT \'active\',',
+      '    created_at TEXT NOT NULL',
+      ');',
+      '',
+      'CREATE TABLE IF NOT EXISTS budgets (',
+      '    id TEXT PRIMARY KEY,',
+      '    category_id TEXT NOT NULL REFERENCES categories(id),',
+      '    month_iso TEXT NOT NULL,',
+      '    limit_cents INTEGER NOT NULL CHECK(limit_cents > 0),',
+      '    rollover_enabled INTEGER NOT NULL DEFAULT 0,',
+      '    created_at TEXT NOT NULL,',
+      '    updated_at TEXT NOT NULL',
+      ');',
+      '',
+      'CREATE TABLE IF NOT EXISTS recurring_rules (',
+      '    id TEXT PRIMARY KEY,',
+      '    title TEXT NOT NULL,',
+      '    rule_type TEXT NOT NULL,',
+      '    amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),',
+      '    frequency TEXT NOT NULL,',
+      '    interval INTEGER NOT NULL DEFAULT 1,',
+      '    start_date TEXT NOT NULL,',
+      '    next_occurrence_date TEXT NOT NULL,',
+      '    end_date TEXT,',
+      '    account_id TEXT REFERENCES accounts(id),',
+      '    destination_account_id TEXT REFERENCES accounts(id),',
+      '    category_id TEXT REFERENCES categories(id),',
+      '    linked_debt_id TEXT REFERENCES debts(id),',
+      '    is_active INTEGER NOT NULL DEFAULT 1,',
+      '    auto_post INTEGER NOT NULL DEFAULT 0,',
+      '    created_at TEXT NOT NULL',
+      ');',
+      '',
+      'CREATE TABLE IF NOT EXISTS transactions (',
+      '    id TEXT PRIMARY KEY,',
+      '    type TEXT NOT NULL,',
+      '    amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),',
+      '    account_id TEXT NOT NULL,',
+      '    destination_account_id TEXT,',
+      '    category_id TEXT,',
+      '    description TEXT,',
+      '    transaction_date TEXT NOT NULL,',
+      '    journal_entry_id TEXT,',
+      '    is_superseded INTEGER NOT NULL DEFAULT 0,',
+      '    created_at TEXT NOT NULL',
       ');',
       '',
       '-- Analytical Views --',
@@ -581,6 +1124,9 @@ export class DataPortabilityService {
       'BEGIN TRANSACTION;',
     ];
 
+    const sqlStr = (val?: string | null) =>
+      val != null && val !== '' ? `'${String(val).replace(/'/g, "''")}'` : 'NULL';
+
     for (const a of payload.accounts) {
       const safeCurrency = normalizeCurrencyCode(a.currencyCode).replace(/'/g, "''");
       const safeSubType = getAccountSubType(a).replace(/'/g, "''");
@@ -591,37 +1137,89 @@ export class DataPortabilityService {
 
     for (const p of payload.parties) {
       lines.push(
-        `INSERT INTO parties (id, name, phone, notes, is_archived, created_at) VALUES ('${p.id}', '${p.name.replace(/'/g, "''")}', ${p.phone ? `'${p.phone}'` : 'NULL'}, ${p.notes ? `'${p.notes.replace(/'/g, "''")}'` : 'NULL'}, ${p.isArchived ? 1 : 0}, '${p.createdAt}');`
+        `INSERT INTO parties (id, name, phone, notes, is_archived, created_at) VALUES ('${p.id}', '${p.name.replace(/'/g, "''")}', ${sqlStr(p.phone)}, ${sqlStr(p.notes)}, ${p.isArchived ? 1 : 0}, '${p.createdAt}');`
       );
     }
 
-    for (const c of payload.categories) {
+    // Topological sort categories (parents before children) for FK compliance
+    const catById = new Map(payload.categories.map((c) => [c.id, c]));
+    const visitedCats = new Set<string>();
+    const orderedCats: TransactionCategory[] = [];
+    const visitCat = (c: TransactionCategory) => {
+      if (visitedCats.has(c.id)) return;
+      visitedCats.add(c.id);
+      if (c.parentId && catById.has(c.parentId)) {
+        visitCat(catById.get(c.parentId)!);
+      }
+      orderedCats.push(c);
+    };
+    for (const c of payload.categories) visitCat(c);
+
+    for (const c of orderedCats) {
+      const safeParent = c.parentId && catById.has(c.parentId) ? sqlStr(c.parentId) : 'NULL';
       lines.push(
-        `INSERT INTO categories (id, name, type, color_hex) VALUES ('${c.id}', '${c.name.replace(/'/g, "''")}', '${c.type}', '${c.colorHex}');`
+        `INSERT INTO categories (id, name, type, color_hex, parent_id, sort_order, is_default, is_archived) VALUES ('${c.id}', '${c.name.replace(/'/g, "''")}', '${c.type}', '${c.colorHex}', ${safeParent}, ${c.sortOrder ?? 0}, ${c.isDefault ? 1 : 0}, ${c.isArchived ? 1 : 0});`
       );
     }
 
     for (const j of payload.entries) {
       lines.push(
-        `INSERT INTO journal_entries (id, entry_type, description, occurrence_date, is_voided, void_reason, created_at) VALUES ('${j.id}', '${j.entryType}', '${j.description.replace(/'/g, "''")}', '${j.occurrenceDate}', ${j.isVoided ? 1 : 0}, ${j.voidReason ? `'${j.voidReason.replace(/'/g, "''")}'` : 'NULL'}, '${j.createdAt}');`
+        `INSERT INTO journal_entries (id, entry_type, description, occurrence_date, is_voided, void_reason, created_at) VALUES ('${j.id}', '${j.entryType}', '${j.description.replace(/'/g, "''")}', '${j.occurrenceDate}', ${j.isVoided ? 1 : 0}, ${sqlStr(j.voidReason)}, '${j.createdAt}');`
       );
     }
 
     for (const p of payload.postings) {
       lines.push(
-        `INSERT INTO postings (id, entry_id, account_id, amount_cents, direction, account_movement_date, category_id, note) VALUES ('${p.id}', '${p.entryId}', '${p.accountId}', ${p.amountCents}, '${p.direction}', '${p.accountMovementDate}', ${p.categoryId ? `'${p.categoryId}'` : 'NULL'}, ${p.note ? `'${p.note.replace(/'/g, "''")}'` : 'NULL'});`
+        `INSERT INTO postings (id, entry_id, account_id, amount_cents, direction, account_movement_date, category_id, note) VALUES ('${p.id}', '${p.entryId}', '${p.accountId}', ${p.amountCents}, '${p.direction}', '${p.accountMovementDate}', ${sqlStr(p.categoryId)}, ${sqlStr(p.note)});`
       );
     }
 
     for (const d of payload.debts) {
       lines.push(
-        `INSERT INTO debts (id, origin_entry_id, party_id, debt_type, principal_cents, outstanding_cents, due_date, status, created_at) VALUES ('${d.id}', '${d.originEntryId}', '${d.partyId}', '${d.debtType}', ${d.principalCents}, ${d.outstandingCents}, ${d.dueDate ? `'${d.dueDate}'` : 'NULL'}, '${d.status}', '${d.createdAt}');`
+        `INSERT INTO debts (id, origin_entry_id, party_id, debt_type, principal_cents, outstanding_cents, due_date, status, created_at) VALUES ('${d.id}', '${d.originEntryId}', '${d.partyId}', '${d.debtType}', ${d.principalCents}, ${d.outstandingCents}, ${sqlStr(d.dueDate)}, '${d.status}', '${d.createdAt}');`
       );
     }
 
     for (const s of payload.settlementAllocations) {
       lines.push(
         `INSERT INTO settlement_allocations (id, settlement_entry_id, debt_id, allocated_cents, settlement_date) VALUES ('${s.id}', '${s.settlementEntryId}', '${s.debtId}', ${s.allocatedCents}, '${s.settlementDate}');`
+      );
+    }
+
+    for (const cm of payload.commitments || []) {
+      lines.push(
+        `INSERT INTO commitments (id, title, direction, amount_cents, due_date, is_paid, linked_account_id, category_id, linked_debt_id, settlement_entry_id, recurring_rule_id, legacy_paid_unverified) VALUES ('${cm.id}', '${cm.title.replace(/'/g, "''")}', '${cm.direction || 'outflow'}', ${cm.amountCents}, '${cm.dueDate}', ${cm.isPaid ? 1 : 0}, ${sqlStr(cm.linkedAccountId)}, ${sqlStr(cm.categoryId)}, ${sqlStr(cm.linkedDebtId)}, ${sqlStr(cm.settlementEntryId)}, ${sqlStr(cm.recurringRuleId)}, ${cm.legacyPaidUnverified ? 1 : 0});`
+      );
+    }
+
+    for (const cs of payload.commitmentSettlements || []) {
+      lines.push(
+        `INSERT INTO commitment_settlements (id, commitment_id, entry_id, amount_cents, settled_date, created_at) VALUES ('${cs.id}', '${cs.commitmentId}', '${cs.entryId}', ${cs.amountCents}, '${cs.settledDate}', '${cs.createdAt || ''}');`
+      );
+    }
+
+    for (const g of payload.savingsGoals || []) {
+      const createdAt = String((g as unknown as Record<string, unknown>).createdAt || '');
+      lines.push(
+        `INSERT INTO savings_goals (id, title, target_cents, current_allocated_cents, target_date, linked_account_id, status, created_at) VALUES ('${g.id}', '${g.title.replace(/'/g, "''")}', ${g.targetCents}, ${g.currentAllocatedCents}, ${sqlStr(g.targetDate)}, ${sqlStr(g.linkedAccountId)}, '${g.status || 'active'}', '${createdAt}');`
+      );
+    }
+
+    for (const b of payload.budgets || []) {
+      lines.push(
+        `INSERT INTO budgets (id, category_id, month_iso, limit_cents, rollover_enabled, created_at, updated_at) VALUES ('${b.id}', '${b.categoryId}', '${b.monthIso}', ${b.limitCents}, ${b.rolloverEnabled ? 1 : 0}, '${b.createdAt}', '${b.updatedAt}');`
+      );
+    }
+
+    for (const r of payload.recurringRules || []) {
+      lines.push(
+        `INSERT INTO recurring_rules (id, title, rule_type, amount_cents, frequency, interval, start_date, next_occurrence_date, end_date, account_id, destination_account_id, category_id, linked_debt_id, is_active, auto_post, created_at) VALUES ('${r.id}', '${r.title.replace(/'/g, "''")}', '${r.ruleType}', ${r.amountCents}, '${r.frequency}', ${r.interval}, '${r.startDate}', '${r.nextOccurrenceDate}', ${sqlStr(r.endDate)}, ${sqlStr(r.accountId)}, ${sqlStr(r.destinationAccountId)}, ${sqlStr(r.categoryId)}, ${sqlStr(r.linkedDebtId)}, ${r.isActive ? 1 : 0}, ${r.autoPost ? 1 : 0}, '${r.createdAt}');`
+      );
+    }
+
+    for (const t of payload.transactions || []) {
+      lines.push(
+        `INSERT INTO transactions (id, type, amount_cents, account_id, destination_account_id, category_id, description, transaction_date, journal_entry_id, is_superseded, created_at) VALUES ('${t.id}', '${t.type}', ${t.amountCents}, '${t.accountId}', ${sqlStr(t.destinationAccountId)}, ${sqlStr(t.categoryId)}, ${sqlStr(t.description)}, '${t.transactionDate}', ${sqlStr(t.journalEntryId)}, ${t.isSuperseded ? 1 : 0}, '${t.createdAt}');`
       );
     }
 
@@ -744,6 +1342,102 @@ An expense incurred on **January 30** and paid/repaid on **February 2**:
 | \`debt_id\` | TEXT | NOT NULL | Foreign key to \`debts.id\` |
 | \`allocated_cents\` | INTEGER | NOT NULL (> 0) | Amount allocated to reduce principal |
 | \`settlement_date\` | TEXT | NOT NULL | ISO 8601 Date (\`YYYY-MM-DD\`) |
+
+### \`categories\`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| \`id\` | TEXT | PRIMARY KEY | Category identifier |
+| \`name\` | TEXT | NOT NULL | Display name |
+| \`type\` | TEXT | NOT NULL | Enum: \`income\` or \`expense\` |
+| \`color_hex\` | TEXT | NOT NULL | Hex token color |
+| \`parent_id\` | TEXT | NULLABLE | Optional parent \`categories.id\` for hierarchy rollup |
+| \`sort_order\` | INTEGER | DEFAULT 0 | Display ordering |
+| \`is_default\` | INTEGER | DEFAULT 0 | 1 if canonical starter category |
+| \`is_archived\` | INTEGER | DEFAULT 0 | 1 if archived |
+
+### \`commitments\`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| \`id\` | TEXT | PRIMARY KEY | Commitment identifier |
+| \`title\` | TEXT | NOT NULL | Bill or expected income label |
+| \`direction\` | TEXT | NOT NULL | \`outflow\` (bill) or \`inflow\` (expected income) |
+| \`amount_cents\` | INTEGER | NOT NULL (> 0) | Scheduled amount in minor units |
+| \`due_date\` | TEXT | NOT NULL | Due date (\`YYYY-MM-DD\`) |
+| \`is_paid\` | INTEGER | DEFAULT 0 | 1 if settled |
+| \`linked_account_id\` | TEXT | NULLABLE | Optional FK to \`accounts.id\` |
+| \`category_id\` | TEXT | NULLABLE | Optional FK to \`categories.id\` |
+| \`linked_debt_id\` | TEXT | NULLABLE | Optional FK to \`debts.id\` |
+| \`settlement_entry_id\` | TEXT | NULLABLE | Latest FK to \`journal_entries.id\` |
+| \`recurring_rule_id\` | TEXT | NULLABLE | Optional recurring rule ID |
+| \`legacy_paid_unverified\` | INTEGER | DEFAULT 0 | Legacy paid state without cash ledger entry |
+
+### \`commitment_settlements\`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| \`id\` | TEXT | PRIMARY KEY | Installment settlement ID |
+| \`commitment_id\` | TEXT | NOT NULL | Foreign key to \`commitments.id\` |
+| \`entry_id\` | TEXT | NOT NULL | Foreign key to \`journal_entries.id\` |
+| \`amount_cents\` | INTEGER | NOT NULL (> 0) | Settled installment amount in minor units |
+| \`settled_date\` | TEXT | NOT NULL | Settlement date (\`YYYY-MM-DD\`) |
+| \`created_at\` | TEXT | NOT NULL | ISO 8601 UTC timestamp |
+
+### \`savings_goals\`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| \`id\` | TEXT | PRIMARY KEY | Savings goal ID |
+| \`title\` | TEXT | NOT NULL | Goal title |
+| \`target_cents\` | INTEGER | NOT NULL (> 0) | Target amount in minor units |
+| \`current_allocated_cents\` | INTEGER | DEFAULT 0 | Allocated amount (synced to vault balance if linked) |
+| \`target_date\` | TEXT | NULLABLE | Optional target date (\`YYYY-MM-DD\`) |
+| \`linked_account_id\` | TEXT | NULLABLE | Optional vault \`accounts.id\` |
+| \`status\` | TEXT | NOT NULL | \`active\`, \`completed\`, or \`archived\` |
+| \`created_at\` | TEXT | NOT NULL | ISO 8601 UTC timestamp |
+
+### \`budgets\`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| \`id\` | TEXT | PRIMARY KEY | Budget record ID |
+| \`category_id\` | TEXT | NOT NULL | Foreign key to \`categories.id\` |
+| \`month_iso\` | TEXT | NOT NULL | Month key (\`YYYY-MM\`) |
+| \`limit_cents\` | INTEGER | NOT NULL (> 0) | Monthly spending limit in minor units |
+| \`rollover_enabled\` | INTEGER | DEFAULT 0 | 1 if rollover enabled |
+| \`created_at\` | TEXT | NOT NULL | ISO 8601 UTC timestamp |
+| \`updated_at\` | TEXT | NOT NULL | ISO 8601 UTC timestamp |
+
+### \`recurring_rules\`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| \`id\` | TEXT | PRIMARY KEY | Recurring schedule ID |
+| \`title\` | TEXT | NOT NULL | Rule label |
+| \`rule_type\` | TEXT | NOT NULL | \`expense\`, \`income\`, \`transfer\`, or \`commitment\` |
+| \`amount_cents\` | INTEGER | NOT NULL (> 0) | Amount in minor units |
+| \`frequency\` | TEXT | NOT NULL | \`weekly\`, \`biweekly\`, \`monthly\`, \`quarterly\`, \`yearly\` |
+| \`interval\` | INTEGER | DEFAULT 1 | Interval multiplier |
+| \`start_date\` | TEXT | NOT NULL | Start date (\`YYYY-MM-DD\`) |
+| \`next_occurrence_date\` | TEXT | NOT NULL | Next due date (\`YYYY-MM-DD\`) |
+| \`end_date\` | TEXT | NULLABLE | Optional end date (\`YYYY-MM-DD\`) |
+| \`account_id\` | TEXT | NULLABLE | Source \`accounts.id\` |
+| \`destination_account_id\` | TEXT | NULLABLE | Destination \`accounts.id\` for transfers |
+| \`category_id\` | TEXT | NULLABLE | Category \`categories.id\` |
+| \`linked_debt_id\` | TEXT | NULLABLE | Linked \`debts.id\` |
+| \`is_active\` | INTEGER | DEFAULT 1 | 1 if active |
+| \`auto_post\` | INTEGER | DEFAULT 0 | Opt-in auto-post flag |
+| \`created_at\` | TEXT | NOT NULL | ISO 8601 UTC timestamp |
+
+### \`transactions\`
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| \`id\` | TEXT | PRIMARY KEY | Legacy/simplified transaction ID |
+| \`type\` | TEXT | NOT NULL | \`income\`, \`expense\`, or \`transfer\` |
+| \`amount_cents\` | INTEGER | NOT NULL (> 0) | Amount in minor units |
+| \`account_id\` | TEXT | NOT NULL | Source account ID |
+| \`destination_account_id\` | TEXT | NULLABLE | Destination account ID |
+| \`category_id\` | TEXT | NULLABLE | Category ID |
+| \`description\` | TEXT | NULLABLE | Memo |
+| \`transaction_date\` | TEXT | NOT NULL | Date (\`YYYY-MM-DD\`) |
+| \`journal_entry_id\` | TEXT | NULLABLE | Linked \`journal_entries.id\` |
+| \`is_superseded\` | INTEGER | DEFAULT 0 | 1 if superseded |
+| \`created_at\` | TEXT | NOT NULL | ISO 8601 UTC timestamp |
 `;
   }
 
@@ -756,178 +1450,53 @@ An expense incurred on **January 30** and paid/repaid on **February 2**:
     const nowIso = nowUtc.toISOString();
     const dateStamp = CalendarDate.fromUtcInstantInEthiopia(nowUtc).toIsoString();
 
-    const classifications = classifyAllJournalEntries({
+    const commitments = payload.commitments || [];
+    const commitmentSettlements = payload.commitmentSettlements || [];
+    const savingsGoals = payload.savingsGoals || [];
+    const budgets = payload.budgets || [];
+    const recurringRules = payload.recurringRules || [];
+    const transactions = payload.transactions || [];
+
+    // 1. All 13 Normalized CSVs (with UTF-8 BOM)
+    const accountsCsv = this.exportAccountsCsv(payload.accounts);
+    const categoriesCsv = this.exportCategoriesCsv(payload.categories);
+    const partiesCsv = this.exportPartiesCsv(payload.parties);
+    const entriesCsv = this.exportJournalEntriesCsv({
       accounts: payload.accounts,
       entries: payload.entries,
       postings: payload.postings,
       debts: payload.debts,
       allocations: payload.settlementAllocations,
     });
-    const entryMap = new Map(payload.entries.map((e) => [e.id, e]));
+    const postingsCsv = this.exportPostingsCsv(payload.postings);
+    const debtsCsv = this.exportDebtsCsv({
+      accounts: payload.accounts,
+      entries: payload.entries,
+      postings: payload.postings,
+      debts: payload.debts,
+      allocations: payload.settlementAllocations,
+    });
+    const allocationsCsv = this.exportSettlementAllocationsCsv(payload.settlementAllocations);
+    const commitmentsCsv = this.exportCommitmentsCsv(commitments);
+    const commitmentSettlementsCsv = this.exportCommitmentSettlementsCsv(commitmentSettlements);
+    const savingsGoalsCsv = this.exportSavingsGoalsCsv(savingsGoals);
+    const budgetsCsv = this.exportBudgetsCsv(budgets);
+    const recurringRulesCsv = this.exportRecurringRulesCsv(recurringRules);
+    const transactionsCsv = this.exportTransactionsCsv(transactions);
 
-    // 1. Normalized CSVs (with UTF-8 BOM)
-    const accountsCsv = this.toCsvWithBom(payload.accounts, [
-      'id',
-      'name',
-      'type',
-      {
-        key: 'currencyCode',
-        header: 'currencyCode',
-        transform: (val) => normalizeCurrencyCode(val) || 'UNVERIFIED',
-      },
-      {
-        key: 'id',
-        header: 'reportingStatus',
-        transform: (_, row) => {
-          if (row.isSystem) return 'SYSTEM';
-          const tier = classifyCurrencyCode(row.currencyCode);
-          if (tier === 'verified_etb') return 'ELIGIBLE_ETB';
-          if (tier === 'verified_non_etb') {
-            return `EXCLUDED_${normalizeCurrencyCode(row.currencyCode)}`;
-          }
-          return 'CURRENCY_REVIEW';
-        },
-      },
-      'isArchived',
-      'createdAt',
-    ]);
     zip.file('csv/accounts.csv', accountsCsv);
-
-    const partiesCsv = this.toCsvWithBom(payload.parties, [
-      'id',
-      'name',
-      'phone',
-      'notes',
-      'isArchived',
-      'createdAt',
-    ]);
-    zip.file('csv/parties.csv', partiesCsv);
-
-    const categoriesCsv = this.toCsvWithBom(payload.categories, [
-      'id',
-      'name',
-      'type',
-      'colorHex',
-      'isDefault',
-    ]);
     zip.file('csv/categories.csv', categoriesCsv);
-
-    const entriesCsv = this.toCsvWithBom(payload.entries, [
-      'id',
-      'entryType',
-      'description',
-      'occurrenceDate',
-      {
-        key: 'id',
-        header: 'currency',
-        transform: (_, row) => {
-          const cls = classifications.get(row.id);
-          if (!cls) return 'UNVERIFIED';
-          return cls.nativeCurrencyCode || (cls.touchedCurrencies.length > 0 ? cls.touchedCurrencies.join('/') : 'UNVERIFIED');
-        },
-      },
-      {
-        key: 'id',
-        header: 'reportingStatus',
-        transform: (_, row) => {
-          const cls = classifications.get(row.id);
-          if (!cls) return 'CURRENCY_REVIEW';
-          if (cls.status === 'eligible_etb') return 'ELIGIBLE_ETB';
-          if (cls.status === 'excluded_non_etb') {
-            return `EXCLUDED_${cls.nativeCurrencyCode || 'FOREIGN'}`;
-          }
-          if (cls.status === 'inactive_or_voided') return 'INACTIVE_OR_VOIDED';
-          return 'CURRENCY_REVIEW';
-        },
-      },
-      'isVoided',
-      'voidReason',
-      'createdAt',
-    ]);
+    zip.file('csv/parties.csv', partiesCsv);
     zip.file('csv/journal_entries.csv', entriesCsv);
-
-    const postingsCsv = this.toCsvWithBom(payload.postings, [
-      'id',
-      'entryId',
-      'accountId',
-      'amountCents',
-      {
-        key: 'amountCents',
-        header: 'amount_decimal',
-        transform: (val) => (val / 100).toFixed(2),
-      },
-      'direction',
-      'accountMovementDate',
-      'categoryId',
-      'note',
-    ]);
     zip.file('csv/postings.csv', postingsCsv);
-
-    const debtsCsv = this.toCsvWithBom(payload.debts, [
-      'id',
-      'originEntryId',
-      'partyId',
-      'debtType',
-      {
-        key: 'id',
-        header: 'currency',
-        transform: (_, row) => {
-          const originCls = classifications.get(row.originEntryId);
-          if (originCls?.nativeCurrencyCode) return originCls.nativeCurrencyCode;
-          if (
-            originCls &&
-            originCls.touchedCurrencies.length === 1 &&
-            originCls.touchedCurrencies[0] !== 'UNVERIFIED'
-          ) {
-            return originCls.touchedCurrencies[0];
-          }
-          return isDebtEligibleEtb(row, entryMap, classifications) ? 'ETB' : 'UNVERIFIED';
-        },
-      },
-      {
-        key: 'id',
-        header: 'reportingStatus',
-        transform: (_, row) => {
-          const eligible = isDebtEligibleEtb(row, entryMap, classifications);
-          if (eligible) return 'ELIGIBLE_ETB';
-          const originCls = classifications.get(row.originEntryId);
-          if (originCls?.status === 'excluded_non_etb') {
-            return `EXCLUDED_${originCls.nativeCurrencyCode || 'FOREIGN'}`;
-          }
-          return 'CURRENCY_REVIEW';
-        },
-      },
-      'principalCents',
-      {
-        key: 'principalCents',
-        header: 'principal_decimal',
-        transform: (val) => (val / 100).toFixed(2),
-      },
-      'outstandingCents',
-      {
-        key: 'outstandingCents',
-        header: 'outstanding_decimal',
-        transform: (val) => (val / 100).toFixed(2),
-      },
-      'dueDate',
-      'status',
-      'createdAt',
-    ]);
     zip.file('csv/debts.csv', debtsCsv);
-
-    const allocationsCsv = this.toCsvWithBom(payload.settlementAllocations, [
-      'id',
-      'settlementEntryId',
-      'debtId',
-      'allocatedCents',
-      {
-        key: 'allocatedCents',
-        header: 'allocated_decimal',
-        transform: (val) => (val / 100).toFixed(2),
-      },
-      'settlementDate',
-    ]);
     zip.file('csv/settlement_allocations.csv', allocationsCsv);
+    zip.file('csv/commitments.csv', commitmentsCsv);
+    zip.file('csv/commitment_settlements.csv', commitmentSettlementsCsv);
+    zip.file('csv/savings_goals.csv', savingsGoalsCsv);
+    zip.file('csv/budgets.csv', budgetsCsv);
+    zip.file('csv/recurring_rules.csv', recurringRulesCsv);
+    zip.file('csv/transactions.csv', transactionsCsv);
 
     // 2. Multi-Sheet Excel Workbook
     const excelBytes = this.generateExcelWorkbook(payload);
@@ -944,17 +1513,24 @@ An expense incurred on **January 30** and paid/repaid on **February 2**:
     // 5. Manifest with Checksums
     const manifest = {
       schemaVersion: '2.0.0',
+      exportScope: 'finance_only',
       exportedAtUtc: nowIso,
       currency: 'ETB',
       accountingModel: 'Simplified Double-Entry Balanced Ledger',
       fileChecksums: {
         'csv/accounts.csv': { rows: payload.accounts.length, sha256: await computeSha256(accountsCsv) },
+        'csv/categories.csv': { rows: payload.categories.length, sha256: await computeSha256(categoriesCsv) },
         'csv/parties.csv': { rows: payload.parties.length, sha256: await computeSha256(partiesCsv) },
         'csv/journal_entries.csv': { rows: payload.entries.length, sha256: await computeSha256(entriesCsv) },
         'csv/postings.csv': { rows: payload.postings.length, sha256: await computeSha256(postingsCsv) },
         'csv/debts.csv': { rows: payload.debts.length, sha256: await computeSha256(debtsCsv) },
         'csv/settlement_allocations.csv': { rows: payload.settlementAllocations.length, sha256: await computeSha256(allocationsCsv) },
-        'csv/categories.csv': { rows: payload.categories.length, sha256: await computeSha256(categoriesCsv) },
+        'csv/commitments.csv': { rows: commitments.length, sha256: await computeSha256(commitmentsCsv) },
+        'csv/commitment_settlements.csv': { rows: commitmentSettlements.length, sha256: await computeSha256(commitmentSettlementsCsv) },
+        'csv/savings_goals.csv': { rows: savingsGoals.length, sha256: await computeSha256(savingsGoalsCsv) },
+        'csv/budgets.csv': { rows: budgets.length, sha256: await computeSha256(budgetsCsv) },
+        'csv/recurring_rules.csv': { rows: recurringRules.length, sha256: await computeSha256(recurringRulesCsv) },
+        'csv/transactions.csv': { rows: transactions.length, sha256: await computeSha256(transactionsCsv) },
         'sqlite/finance_export.sql': { sha256: await computeSha256(sqliteSql) },
         'data_dictionary.md': { sha256: await computeSha256(dataDict) },
       },

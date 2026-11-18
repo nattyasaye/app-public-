@@ -612,6 +612,12 @@ class _FakeFinanceRepository implements IFinanceRepository {
     required String voidReason,
   }) async =>
       throw UnimplementedError();
+
+  @override
+  Future<String> exportFinanceOnlyJson() async => '{"financeOnly":true,"exportScope":"finance_only","accounts":[],"transactions":[]}';
+
+  @override
+  Future<void> importFinanceOnlyJson(String rawJson) async {}
 }
 
 class _FakeTasksRepository implements ITasksRepository {

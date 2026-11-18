@@ -244,6 +244,8 @@ export interface TransactionCategory {
   name: string;
   type: 'income' | 'expense';
   colorHex: string;
+  parentId?: string;
+  sortOrder?: number;
   isDefault?: boolean;
   isArchived?: boolean;
   subcategories?: string[];
@@ -3155,12 +3157,16 @@ export function calculatePeriodComparison(params: {
       if (accType === 'expense') {
         const netExpense = p.direction === 'debit' ? p.amountCents : -p.amountCents;
         expenseCents += netExpense;
-        const catId = p.categoryId || CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID;
+        const catId = resolveCanonicalCategoryId(
+          p.categoryId || CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID
+        );
         categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + netExpense);
       } else if (accType === 'income') {
         const netIncome = p.direction === 'credit' ? p.amountCents : -p.amountCents;
         incomeCents += netIncome;
-        const catId = p.categoryId || CANONICAL_DEFAULT_INCOME_CATEGORY_ID;
+        const catId = resolveCanonicalCategoryId(
+          p.categoryId || CANONICAL_DEFAULT_INCOME_CATEGORY_ID
+        );
         categoryTotals.set(catId, (categoryTotals.get(catId) || 0) + netIncome);
       }
     }

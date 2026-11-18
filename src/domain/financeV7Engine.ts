@@ -25,7 +25,7 @@ import {
   SharedSavingsGoal,
   SYSTEM_CONTROL_ACCOUNT_IDS,
 } from './sharedFoundation';
-import { CalendarDate, EthiopiaClock } from './date';
+import { CalendarDate, EthiopianDate, EthiopiaClock } from './date';
 import {
   Account,
   AccountSubType,
@@ -43,10 +43,13 @@ import {
   buildThirdPartyPaidExpense,
   buildTransfer,
   calculateAccountBalance,
+  calculateNetPosition,
+  calculateSafePercentageChange,
   calculateTotalPayables,
   calculateTotalReceivables,
   CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID,
   CANONICAL_DEFAULT_INCOME_CATEGORY_ID,
+  CashFlowReportSummary,
   categoryIdsMatchOrAlias,
   classifyAllJournalEntries,
   classifyCurrencyCode,
@@ -70,6 +73,7 @@ import {
   JournalEntry,
   LEGACY_CATEGORY_ID_ALIASES,
   normalizeCurrencyCode,
+  OccurrenceReportSummary,
   parseQuickCaptureExpense,
   Party,
   Posting,
@@ -677,8 +681,9 @@ export function recordCommitmentSettlementV7(params: {
   }
 
   const direction = params.commitment.direction || 'outflow';
-  const entryId = `entry-com-${params.commitment.id}-${Date.now()}`;
-  const settlementId = `cset-${params.commitment.id}-${Date.now()}`;
+  const uniqueSuffix = `${Date.now()}-${params.existingSettlements.length + 1}-${Math.random().toString(36).slice(2, 6)}`;
+  const entryId = `entry-com-${params.commitment.id}-${uniqueSuffix}`;
+  const settlementId = `cset-${params.commitment.id}-${uniqueSuffix}`;
   const categoryId =
     params.commitment.categoryId || (direction === 'inflow' ? 'cat-other-inc' : 'cat-other-exp');
 
@@ -2788,6 +2793,769 @@ export function upsertMonthlyBudgetV7(params: {
   };
 }
 
+// ============================================================================
+// Finance Stage F4: Reporting, Period Comparisons & Canonical Spend Rollup
+// ============================================================================
+
+export type ReportPeriodMode =
+  | 'thisMonth'
+  | 'ethiopianMonth'
+  | 'last30Days'
+  | 'thisYear'
+  | 'custom';
+
+export interface ResolvedReportPeriod {
+  mode: ReportPeriodMode;
+  currentStart: string;
+  currentEnd: string;
+  previousStart: string;
+  previousEnd: string;
+  label: string;
+  baselineLabel: string;
+  daysInCurrent: number;
+  daysInPrevious: number;
+}
+
+export interface MetricDeltaV7 {
+  currentCents: number;
+  previousCents: number;
+  deltaCents: number;
+  percentageChange: number | null;
+  percentageDisplay: string;
+  isPositiveOutcome: boolean | null;
+}
+
+export interface PeriodComparisonReportV7 {
+  period: ResolvedReportPeriod;
+  currentOccurrence: OccurrenceReportSummary;
+  previousOccurrence: OccurrenceReportSummary;
+  currentCashFlow: CashFlowReportSummary;
+  previousCashFlow: CashFlowReportSummary;
+  occurrenceIncome: MetricDeltaV7;
+  occurrenceExpense: MetricDeltaV7;
+  occurrenceNet: MetricDeltaV7;
+  cashInflow: MetricDeltaV7;
+  cashOutflow: MetricDeltaV7;
+  cashNet: MetricDeltaV7;
+}
+
+export interface CategorySpendRowV7 {
+  categoryId: string;
+  categoryName: string;
+  parentId?: string;
+  directCents: number;
+  rollupCents: number;
+  sharePercent: number;
+  exactShareRatio: number;
+  isArchived: boolean;
+  isSyntheticControl?: boolean;
+  children: CategorySpendRowV7[];
+}
+
+export interface CanonicalCategorySpendReportV7 {
+  startDate: string;
+  endDate: string;
+  totalExpenseCents: number;
+  directSpendByCategoryId: Record<string, number>;
+  rollupSpendByCategoryId: Record<string, number>;
+  rows: CategorySpendRowV7[];
+}
+
+export interface AccountBalanceReportItemV7 {
+  accountId: string;
+  name: string;
+  type: Account['type'];
+  subType: SharedAccountSubType;
+  currencyCode: string;
+  balanceCents: number;
+  owedCents: number;
+  prepaidCents: number;
+  isArchived: boolean;
+  currencyTier: CurrencyValidationTier;
+}
+
+export interface AccountBalancesReportV7 {
+  liquidAccounts: AccountBalanceReportItemV7[];
+  vaultAccounts: AccountBalanceReportItemV7[];
+  creditCardAccounts: AccountBalanceReportItemV7[];
+  nonEtbReviewAccounts: AccountBalanceReportItemV7[];
+  archivedCount: number;
+  liquidTotalCents: number;
+  vaultTotalCents: number;
+  creditCardOwedTotalCents: number;
+  prepaidCardCreditTotalCents: number;
+}
+
+export interface SavingsGoalReportItemV7 {
+  goalId: string;
+  title: string;
+  targetCents: number;
+  allocatedCents: number;
+  remainingCents: number;
+  percentComplete: number;
+  targetDate?: string;
+  status: NonNullable<SharedSavingsGoal['status']>;
+  linkedAccountId?: string;
+  linkedAccountName?: string;
+  isVaultLinked: boolean;
+  isExcludedNonEtbVault: boolean;
+}
+
+export interface SavingsVaultsReportV7 {
+  vaults: AccountBalanceReportItemV7[];
+  goals: SavingsGoalReportItemV7[];
+  totalVaultBalanceCents: number;
+  totalGoalTargetCents: number;
+  totalGoalAllocatedCents: number;
+}
+
+export interface MonthlyBudgetReportItemV7 {
+  budgetId: string;
+  categoryId: string;
+  categoryName: string;
+  monthIso: string;
+  limitCents: number;
+  spentCents: number;
+  remainingCents: number;
+  percentUsed: number;
+  isOverBudget: boolean;
+  rolloverEnabled: boolean;
+}
+
+export interface MonthlyBudgetProgressReportV7 {
+  monthIso: string;
+  totalLimitCents: number;
+  totalSpentCents: number;
+  items: MonthlyBudgetReportItemV7[];
+}
+
+export interface AlignedBalanceSheetReportV7 {
+  planningPeriodEndIso: string;
+  liquidCashCents: number;
+  vaultSavingsCents: number;
+  receivablesCents: number;
+  prepaidCardCreditCents: number;
+  shortTermCreditOwedCents: number;
+  activePayablesCents: number;
+  duePayablesCents: number;
+  netFinancialPositionCents: number;
+}
+
+export function resolveReportPeriodWithComparisonV7(params: {
+  mode: ReportPeriodMode;
+  todayIso?: string;
+  ethYear?: number;
+  ethMonth?: number;
+  customStartIso?: string;
+  customEndIso?: string;
+}): ResolvedReportPeriod {
+  const today = CalendarDate.tryParse(params.todayIso) || CalendarDate.today();
+
+  if (params.mode === 'thisMonth') {
+    const currStart = today.startOfGregorianMonth;
+    const currEnd = today.endOfGregorianMonth;
+    const prevRef = today.previousGregorianMonth();
+    const prevStart = prevRef.startOfGregorianMonth;
+    const prevEnd = prevRef.endOfGregorianMonth;
+    return {
+      mode: 'thisMonth',
+      currentStart: currStart.toIsoString(),
+      currentEnd: currEnd.toIsoString(),
+      previousStart: prevStart.toIsoString(),
+      previousEnd: prevEnd.toIsoString(),
+      label: `${today.gregorianFullMonthName} ${today.year}`,
+      baselineLabel: `${prevRef.gregorianFullMonthName} ${prevRef.year}`,
+      daysInCurrent: currEnd.differenceInDays(currStart) + 1,
+      daysInPrevious: prevEnd.differenceInDays(prevStart) + 1,
+    };
+  }
+
+  if (params.mode === 'ethiopianMonth') {
+    const ethToday = today.toEthiopian();
+    const y = params.ethYear ?? ethToday.year;
+    const m = Math.min(13, Math.max(1, params.ethMonth ?? ethToday.month));
+    const ethStart = new EthiopianDate(y, m, 1);
+    const ethEnd = ethStart.endOfMonth;
+    const prevEthStart = ethStart.previousMonth().startOfMonth;
+    const prevEthEnd = prevEthStart.endOfMonth;
+    const currStartCal = ethStart.toCalendarDate();
+    const currEndCal = ethEnd.toCalendarDate();
+    const prevStartCal = prevEthStart.toCalendarDate();
+    const prevEndCal = prevEthEnd.toCalendarDate();
+    return {
+      mode: 'ethiopianMonth',
+      currentStart: currStartCal.toIsoString(),
+      currentEnd: currEndCal.toIsoString(),
+      previousStart: prevStartCal.toIsoString(),
+      previousEnd: prevEndCal.toIsoString(),
+      label: `${ethStart.englishMonthName} (${ethStart.amharicMonthName}) ${y} E.C.`,
+      baselineLabel: `${prevEthStart.englishMonthName} ${prevEthStart.year} E.C.`,
+      daysInCurrent: ethStart.daysInMonth,
+      daysInPrevious: prevEthStart.daysInMonth,
+    };
+  }
+
+  if (params.mode === 'last30Days') {
+    const currStart = today.subtractDays(29);
+    const currEnd = today;
+    const prevEnd = currStart.subtractDays(1);
+    const prevStart = prevEnd.subtractDays(29);
+    return {
+      mode: 'last30Days',
+      currentStart: currStart.toIsoString(),
+      currentEnd: currEnd.toIsoString(),
+      previousStart: prevStart.toIsoString(),
+      previousEnd: prevEnd.toIsoString(),
+      label: `Last 30 Days (${currStart.toIsoString()} - ${currEnd.toIsoString()})`,
+      baselineLabel: `Prior 30 Days (${prevStart.toIsoString()} - ${prevEnd.toIsoString()})`,
+      daysInCurrent: 30,
+      daysInPrevious: 30,
+    };
+  }
+
+  if (params.mode === 'thisYear') {
+    const currStart = new CalendarDate(today.year, 1, 1);
+    const currEnd = new CalendarDate(today.year, 12, 31);
+    const prevStart = new CalendarDate(today.year - 1, 1, 1);
+    const prevEnd = new CalendarDate(today.year - 1, 12, 31);
+    return {
+      mode: 'thisYear',
+      currentStart: currStart.toIsoString(),
+      currentEnd: currEnd.toIsoString(),
+      previousStart: prevStart.toIsoString(),
+      previousEnd: prevEnd.toIsoString(),
+      label: `Gregorian Year ${today.year}`,
+      baselineLabel: `Gregorian Year ${today.year - 1}`,
+      daysInCurrent: currEnd.differenceInDays(currStart) + 1,
+      daysInPrevious: prevEnd.differenceInDays(prevStart) + 1,
+    };
+  }
+
+  const parsedStart = CalendarDate.tryParse(params.customStartIso) || today.subtractDays(29);
+  const parsedEnd = CalendarDate.tryParse(params.customEndIso) || today;
+  const startCal = parsedStart.isAfter(parsedEnd) ? parsedEnd : parsedStart;
+  const endCal = parsedStart.isAfter(parsedEnd) ? parsedStart : parsedEnd;
+  const nDays = endCal.differenceInDays(startCal) + 1;
+  const prevEnd = startCal.subtractDays(1);
+  const prevStart = prevEnd.subtractDays(nDays - 1);
+
+  return {
+    mode: 'custom',
+    currentStart: startCal.toIsoString(),
+    currentEnd: endCal.toIsoString(),
+    previousStart: prevStart.toIsoString(),
+    previousEnd: prevEnd.toIsoString(),
+    label: `${startCal.toIsoString()} to ${endCal.toIsoString()}`,
+    baselineLabel: `Prior ${nDays}d (${prevStart.toIsoString()} - ${prevEnd.toIsoString()})`,
+    daysInCurrent: nDays,
+    daysInPrevious: nDays,
+  };
+}
+
+function buildMetricDelta(
+  previousCents: number,
+  currentCents: number,
+  higherIsBetter: boolean
+): MetricDeltaV7 {
+  const deltaCents = currentCents - previousCents;
+  const pct = calculateSafePercentageChange(previousCents, currentCents);
+  let isPositiveOutcome: boolean | null = null;
+  if (deltaCents !== 0) {
+    isPositiveOutcome = higherIsBetter ? deltaCents > 0 : deltaCents < 0;
+  }
+  return {
+    currentCents,
+    previousCents,
+    deltaCents,
+    percentageChange: pct.percentageChange,
+    percentageDisplay: pct.percentageDisplay,
+    isPositiveOutcome,
+  };
+}
+
+export function calculatePeriodComparisonReportV7(params: {
+  period: ResolvedReportPeriod;
+  accounts: Account[];
+  categories: TransactionCategory[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  debts?: Debt[];
+  allocations?: SettlementAllocation[];
+}): PeriodComparisonReportV7 {
+  const currentOccurrence = generateOccurrenceReport({
+    entries: params.entries,
+    postings: params.postings,
+    accounts: params.accounts,
+    categories: params.categories,
+    debts: params.debts,
+    allocations: params.allocations,
+    startDate: params.period.currentStart,
+    endDate: params.period.currentEnd,
+  });
+  const previousOccurrence = generateOccurrenceReport({
+    entries: params.entries,
+    postings: params.postings,
+    accounts: params.accounts,
+    categories: params.categories,
+    debts: params.debts,
+    allocations: params.allocations,
+    startDate: params.period.previousStart,
+    endDate: params.period.previousEnd,
+  });
+  const currentCashFlow = generateCashFlowReport({
+    entries: params.entries,
+    postings: params.postings,
+    accounts: params.accounts,
+    debts: params.debts,
+    allocations: params.allocations,
+    startDate: params.period.currentStart,
+    endDate: params.period.currentEnd,
+  });
+  const previousCashFlow = generateCashFlowReport({
+    entries: params.entries,
+    postings: params.postings,
+    accounts: params.accounts,
+    debts: params.debts,
+    allocations: params.allocations,
+    startDate: params.period.previousStart,
+    endDate: params.period.previousEnd,
+  });
+
+  return {
+    period: params.period,
+    currentOccurrence,
+    previousOccurrence,
+    currentCashFlow,
+    previousCashFlow,
+    occurrenceIncome: buildMetricDelta(
+      previousOccurrence.totalIncomeCents,
+      currentOccurrence.totalIncomeCents,
+      true
+    ),
+    occurrenceExpense: buildMetricDelta(
+      previousOccurrence.totalExpenseCents,
+      currentOccurrence.totalExpenseCents,
+      false
+    ),
+    occurrenceNet: buildMetricDelta(
+      previousOccurrence.netSavingsCents,
+      currentOccurrence.netSavingsCents,
+      true
+    ),
+    cashInflow: buildMetricDelta(
+      previousCashFlow.totalCashInflowCents,
+      currentCashFlow.totalCashInflowCents,
+      true
+    ),
+    cashOutflow: buildMetricDelta(
+      previousCashFlow.totalCashOutflowCents,
+      currentCashFlow.totalCashOutflowCents,
+      false
+    ),
+    cashNet: buildMetricDelta(
+      previousCashFlow.netCashFlowCents,
+      currentCashFlow.netCashFlowCents,
+      true
+    ),
+  };
+}
+
+export function calculateCanonicalCategorySpendV7(params: {
+  entries: JournalEntry[];
+  postings: Posting[];
+  accounts: Account[];
+  categories: TransactionCategory[];
+  debts?: Debt[];
+  allocations?: SettlementAllocation[];
+  startDate: string;
+  endDate: string;
+}): CanonicalCategorySpendReportV7 {
+  const accountMap = new Map(params.accounts.map((a) => [a.id, a]));
+  const entryMap = new Map(params.entries.map((e) => [e.id, e]));
+  const classifications = classifyAllJournalEntries({
+    accounts: params.accounts,
+    entries: params.entries,
+    postings: params.postings,
+    debts: params.debts,
+    allocations: params.allocations,
+  });
+
+  const directSpend: Record<string, number> = {};
+  const categoryMeta = new Map<string, TransactionCategory>();
+  const registerCategory = (c: TransactionCategory) => {
+    categoryMeta.set(c.id, c);
+  };
+  for (const c of FOUNDATIONAL_CATEGORIES_WITH_DEFAULTS(params.categories)) {
+    registerCategory(c);
+  }
+
+  for (const p of params.postings) {
+    const entry = entryMap.get(p.entryId);
+    if (!entry || entry.isVoided) continue;
+    if (!(classifications.get(entry.id)?.isEligibleEtb ?? false)) continue;
+    if (entry.occurrenceDate < params.startDate || entry.occurrenceDate > params.endDate) {
+      continue;
+    }
+    const acc = accountMap.get(p.accountId);
+    if (!acc || acc.type !== 'expense') continue;
+
+    const netExpense = p.direction === 'debit' ? p.amountCents : -p.amountCents;
+    const rawCatId = p.categoryId || CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID;
+    const matched = findCategoryByIdOrAlias(params.categories, rawCatId);
+    const bucketId = matched ? matched.id : resolveCanonicalCategoryId(rawCatId);
+    directSpend[bucketId] = (directSpend[bucketId] || 0) + netExpense;
+  }
+
+  // Non-double-counted total expense equals the sum of all direct postings across buckets.
+  const totalExpenseCents = Object.values(directSpend).reduce((sum, v) => sum + v, 0);
+
+  // Build parent -> resolved canonical parent mapping with cycle safety
+  const resolveParentCanonicalId = (catId: string): string | undefined => {
+    const cat = categoryMeta.get(catId) || findCategoryByIdOrAlias(params.categories, catId);
+    if (!cat?.parentId) return undefined;
+    const matchedParent = findCategoryByIdOrAlias(params.categories, cat.parentId);
+    return matchedParent ? matchedParent.id : resolveCanonicalCategoryId(cat.parentId);
+  };
+
+  const rollupSpend: Record<string, number> = { ...directSpend };
+  for (const [catId, directAmount] of Object.entries(directSpend)) {
+    if (directAmount === 0) continue;
+    const visited = new Set<string>([catId]);
+    let currParentId = resolveParentCanonicalId(catId);
+    while (currParentId && !visited.has(currParentId)) {
+      visited.add(currParentId);
+      rollupSpend[currParentId] = (rollupSpend[currParentId] || 0) + directAmount;
+      currParentId = resolveParentCanonicalId(currParentId);
+    }
+  }
+
+  // Build hierarchical display rows (only categories with rollup > 0 or children > 0)
+  const childrenByParent = new Map<string, string[]>();
+  const allBucketIds = new Set<string>([
+    ...Object.keys(directSpend),
+    ...Object.keys(rollupSpend),
+  ]);
+
+  for (const id of allBucketIds) {
+    if ((rollupSpend[id] || 0) <= 0 && (directSpend[id] || 0) <= 0) continue;
+    const parentId = resolveParentCanonicalId(id);
+    if (parentId && allBucketIds.has(parentId) && parentId !== id) {
+      const list = childrenByParent.get(parentId) || [];
+      list.push(id);
+      childrenByParent.set(parentId, list);
+    }
+  }
+
+  const denominator = Math.max(0, totalExpenseCents);
+  const buildRow = (id: string, depth: number, seen: Set<string>): CategorySpendRowV7 => {
+    const cat = categoryMeta.get(id) || findCategoryByIdOrAlias(params.categories, id);
+    const parentId = resolveParentCanonicalId(id);
+    const direct = directSpend[id] || 0;
+    const rollup = rollupSpend[id] || direct;
+    const ratio = denominator > 0 ? Math.max(0, rollup / denominator) : 0;
+    const childIds = !seen.has(id) && depth < 4 ? childrenByParent.get(id) || [] : [];
+    const nextSeen = new Set(seen);
+    nextSeen.add(id);
+    const children = childIds
+      .map((cid) => buildRow(cid, depth + 1, nextSeen))
+      .filter((c) => c.rollupCents > 0)
+      .sort((a, b) => b.rollupCents - a.rollupCents);
+    return {
+      categoryId: id,
+      categoryName: cat?.name || resolveCategoryDisplayName(params.categories, id),
+      ...(parentId ? { parentId } : {}),
+      directCents: direct,
+      rollupCents: rollup,
+      sharePercent: denominator > 0 ? Math.round(ratio * 100) : 0,
+      exactShareRatio: ratio,
+      isArchived: Boolean(cat?.isArchived),
+      children,
+    };
+  };
+
+  const topRows: CategorySpendRowV7[] = [];
+  for (const id of allBucketIds) {
+    const rollup = rollupSpend[id] || 0;
+    if (rollup <= 0) continue;
+    const parentId = resolveParentCanonicalId(id);
+    // Emit as top-level if no parent or parent is missing/cyclic
+    if (!parentId || parentId === id || !allBucketIds.has(parentId) || (rollupSpend[parentId] || 0) <= 0) {
+      topRows.push(buildRow(id, 0, new Set<string>()));
+    }
+  }
+  topRows.sort((a, b) => b.rollupCents - a.rollupCents);
+
+  return {
+    startDate: params.startDate,
+    endDate: params.endDate,
+    totalExpenseCents,
+    directSpendByCategoryId: directSpend,
+    rollupSpendByCategoryId: rollupSpend,
+    rows: topRows,
+  };
+}
+
+function FOUNDATIONAL_CATEGORIES_WITH_DEFAULTS(
+  categories: TransactionCategory[]
+): TransactionCategory[] {
+  const byId = new Map<string, TransactionCategory>();
+  for (const c of [
+    ...FOUNDATION_DEFAULT_EXPENSE_CATEGORIES,
+    ...FOUNDATION_DEFAULT_INCOME_CATEGORIES,
+  ]) {
+    byId.set(c.id, c);
+  }
+  for (const c of categories) {
+    byId.set(c.id, c);
+  }
+  return Array.from(byId.values());
+}
+
+export function getCanonicalBudgetSpentCentsV7(
+  spendReport: CanonicalCategorySpendReportV7,
+  budgetCategoryId: string,
+  categories: TransactionCategory[]
+): number {
+  const matched = findCategoryByIdOrAlias(categories, budgetCategoryId);
+  const resolvedId = matched ? matched.id : resolveCanonicalCategoryId(budgetCategoryId);
+  return (
+    spendReport.rollupSpendByCategoryId[resolvedId] ??
+    spendReport.directSpendByCategoryId[resolvedId] ??
+    0
+  );
+}
+
+export function buildAccountBalancesReportV7(params: {
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+}): AccountBalancesReportV7 {
+  const liquidAccounts: AccountBalanceReportItemV7[] = [];
+  const vaultAccounts: AccountBalanceReportItemV7[] = [];
+  const creditCardAccounts: AccountBalanceReportItemV7[] = [];
+  const nonEtbReviewAccounts: AccountBalanceReportItemV7[] = [];
+  let archivedCount = 0;
+
+  for (const acc of params.accounts) {
+    if (acc.isSystem) continue;
+    if (acc.isArchived) {
+      archivedCount += 1;
+      continue;
+    }
+    const subType = getAccountSubType(acc);
+    const tier = classifyCurrencyCode(acc.currencyCode);
+    const bal = calculateV7AccountBalance(acc, params.postings, params.entries);
+    const item: AccountBalanceReportItemV7 = {
+      accountId: acc.id,
+      name: acc.name,
+      type: acc.type,
+      subType,
+      currencyCode: normalizeCurrencyCode(acc.currencyCode) || 'UNVERIFIED',
+      balanceCents: bal,
+      owedCents: acc.type === 'liability' && bal > 0 ? bal : 0,
+      prepaidCents: acc.type === 'liability' && bal < 0 ? -bal : 0,
+      isArchived: Boolean(acc.isArchived),
+      currencyTier: tier,
+    };
+
+    if (tier !== 'verified_etb') {
+      nonEtbReviewAccounts.push(item);
+      continue;
+    }
+
+    if (acc.type === 'asset') {
+      if (subType === 'savings_vault') {
+        vaultAccounts.push(item);
+      } else if (subType !== 'receivable' && !acc.name.toLowerCase().includes('receivable')) {
+        liquidAccounts.push(item);
+      }
+    } else if (acc.type === 'liability' && subType === 'credit_card') {
+      creditCardAccounts.push(item);
+    }
+  }
+
+  return {
+    liquidAccounts,
+    vaultAccounts,
+    creditCardAccounts,
+    nonEtbReviewAccounts,
+    archivedCount,
+    liquidTotalCents: liquidAccounts.reduce((s, a) => s + a.balanceCents, 0),
+    vaultTotalCents: vaultAccounts.reduce((s, a) => s + a.balanceCents, 0),
+    creditCardOwedTotalCents: creditCardAccounts.reduce((s, a) => s + a.owedCents, 0),
+    prepaidCardCreditTotalCents: creditCardAccounts.reduce((s, a) => s + a.prepaidCents, 0),
+  };
+}
+
+export function buildSavingsVaultsAndGoalsReportV7(params: {
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  savingsGoals: SharedSavingsGoal[];
+}): SavingsVaultsReportV7 {
+  const accountById = new Map(params.accounts.map((a) => [a.id, a]));
+  const balances = buildAccountBalancesReportV7({
+    accounts: params.accounts,
+    entries: params.entries,
+    postings: params.postings,
+  });
+
+  const goals: SavingsGoalReportItemV7[] = params.savingsGoals.map((g) => {
+    const linkedAcc = g.linkedAccountId ? accountById.get(g.linkedAccountId) : undefined;
+    const isVaultLinked = Boolean(g.linkedAccountId);
+    const isExcludedNonEtbVault =
+      isVaultLinked &&
+      (!linkedAcc ||
+        !isActiveVerifiedEtbAccount(linkedAcc) ||
+        linkedAcc.subType !== 'savings_vault');
+    const allocatedCents = getSavingsGoalEffectiveBalanceV7({
+      goal: g,
+      accounts: params.accounts,
+      entries: params.entries,
+      postings: params.postings,
+    });
+    const remainingCents = Math.max(0, g.targetCents - allocatedCents);
+    const percentComplete =
+      g.targetCents > 0 ? Math.min(100, Math.round((allocatedCents / g.targetCents) * 100)) : 0;
+    return {
+      goalId: g.id,
+      title: g.title,
+      targetCents: g.targetCents,
+      allocatedCents,
+      remainingCents,
+      percentComplete,
+      ...(g.targetDate ? { targetDate: g.targetDate } : {}),
+      status: g.status || 'active',
+      ...(g.linkedAccountId ? { linkedAccountId: g.linkedAccountId } : {}),
+      ...(linkedAcc ? { linkedAccountName: linkedAcc.name } : {}),
+      isVaultLinked,
+      isExcludedNonEtbVault,
+    };
+  });
+
+  const activeNonExcluded = goals.filter(
+    (g) => g.status !== 'archived' && !g.isExcludedNonEtbVault
+  );
+
+  return {
+    vaults: balances.vaultAccounts,
+    goals,
+    totalVaultBalanceCents: balances.vaultTotalCents,
+    totalGoalTargetCents: activeNonExcluded.reduce((s, g) => s + g.targetCents, 0),
+    totalGoalAllocatedCents: activeNonExcluded.reduce((s, g) => s + g.allocatedCents, 0),
+  };
+}
+
+export function resolveActiveReportMonthIsoV7(params: {
+  mode: ReportPeriodMode;
+  startDateIso: string;
+  endDateIso: string;
+  todayIso?: string;
+}): string {
+  const todayIso = params.todayIso || CalendarDate.today().toIsoString();
+  if (
+    params.mode === 'thisMonth' ||
+    (params.startDateIso.length >= 7 &&
+      params.endDateIso.length >= 7 &&
+      params.startDateIso.slice(0, 7) === params.endDateIso.slice(0, 7))
+  ) {
+    return params.startDateIso.slice(0, 7);
+  }
+  return todayIso.slice(0, 7);
+}
+
+export function buildMonthlyBudgetProgressReportV7(params: {
+  budgets: SharedBudget[];
+  categories: TransactionCategory[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  accounts: Account[];
+  debts?: Debt[];
+  allocations?: SettlementAllocation[];
+  monthIso: string;
+}): MonthlyBudgetProgressReportV7 {
+  const monthMatch = /^(\d{4})-(\d{2})$/.exec(params.monthIso.trim());
+  const y = monthMatch ? parseInt(monthMatch[1], 10) : CalendarDate.today().year;
+  const m = monthMatch ? parseInt(monthMatch[2], 10) : CalendarDate.today().month;
+  const bounds = CalendarDate.monthBounds('gregorian', y, Math.min(12, Math.max(1, m)));
+
+  const spendReport = calculateCanonicalCategorySpendV7({
+    entries: params.entries,
+    postings: params.postings,
+    accounts: params.accounts,
+    categories: params.categories,
+    debts: params.debts,
+    allocations: params.allocations,
+    startDate: bounds.start.toIsoString(),
+    endDate: bounds.end.toIsoString(),
+  });
+
+  const matchingBudgets = params.budgets.filter((b) => b.monthIso === params.monthIso);
+  const items: MonthlyBudgetReportItemV7[] = matchingBudgets.map((b) => {
+    const spentCents = getCanonicalBudgetSpentCentsV7(
+      spendReport,
+      b.categoryId,
+      params.categories
+    );
+    const remainingCents = b.limitCents - spentCents;
+    const percentUsed =
+      b.limitCents > 0 ? Math.min(100, Math.round((spentCents / b.limitCents) * 100)) : 0;
+    return {
+      budgetId: b.id,
+      categoryId: b.categoryId,
+      categoryName: resolveCategoryDisplayName(params.categories, b.categoryId),
+      monthIso: b.monthIso,
+      limitCents: b.limitCents,
+      spentCents,
+      remainingCents,
+      percentUsed,
+      isOverBudget: spentCents > b.limitCents,
+      rolloverEnabled: Boolean(b.rolloverEnabled),
+    };
+  });
+
+  return {
+    monthIso: params.monthIso,
+    totalLimitCents: items.reduce((s, i) => s + i.limitCents, 0),
+    totalSpentCents: items.reduce((s, i) => s + i.spentCents, 0),
+    items,
+  };
+}
+
+export function buildAlignedBalanceSheetReportV7(params: {
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+  debts: Debt[];
+  allocations?: SettlementAllocation[];
+  breakdown: AvailableToSpendBreakdownV7;
+}): AlignedBalanceSheetReportV7 {
+  const activePayablesCents = calculateTotalPayables(params.debts, {
+    accounts: params.accounts,
+    entries: params.entries,
+    postings: params.postings,
+    allocations: params.allocations,
+  });
+  const netFinancialPositionCents = calculateNetPosition(
+    params.accounts,
+    params.postings,
+    params.debts,
+    params.entries,
+    params.allocations
+  );
+  return {
+    planningPeriodEndIso: params.breakdown.planningPeriodEndIso,
+    liquidCashCents: params.breakdown.liquidCashCents,
+    vaultSavingsCents: params.breakdown.vaultSavingsCents,
+    receivablesCents: params.breakdown.receivablesCents,
+    prepaidCardCreditCents: params.breakdown.prepaidCardCreditCents,
+    shortTermCreditOwedCents: params.breakdown.shortTermCreditOwedCents,
+    activePayablesCents,
+    duePayablesCents: params.breakdown.duePayablesCents,
+    netFinancialPositionCents,
+  };
+}
+
 export {
   assertEtbDebtEligible,
   assertEtbPostingAccounts,
@@ -2803,6 +3571,10 @@ export {
   buildThirdPartyPaidExpense,
   buildTransfer,
   calculateAccountBalance,
+  calculateNetPosition,
+  calculateSafePercentageChange,
+  calculateTotalPayables,
+  calculateTotalReceivables,
   CANONICAL_DEFAULT_EXPENSE_CATEGORY_ID,
   CANONICAL_DEFAULT_INCOME_CATEGORY_ID,
   categoryIdsMatchOrAlias,
@@ -2829,12 +3601,14 @@ export {
 export type {
   Account,
   AccountSubType,
+  CashFlowReportSummary,
   CurrencyIsolationAudit,
   CurrencyValidationTier,
   Debt,
   EntryCurrencyClassification,
   EntryCurrencyStatus,
   JournalEntry,
+  OccurrenceReportSummary,
   Party,
   Posting,
   QuickCaptureParsedExpense,

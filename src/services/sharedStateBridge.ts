@@ -96,6 +96,32 @@ export interface SharedDatabaseStateV7 extends SharedDatabaseState {
   ledgerMigrationReportV7?: string | null;
 }
 
+export interface FinanceOnlySnapshotV7 {
+  financeOnly: true;
+  exportScope: 'finance_only';
+  schemaVersion: number;
+  snapshotFormatVersion: number;
+  financeSchemaVersion: number;
+  appVersion: string;
+  exportedAt: string;
+  isFinanceSetupCompleted: boolean;
+  openingBalanceCents: number;
+  ledgerMigrationReportV7?: string | null;
+  accounts: SharedAccount[];
+  categories: SharedCategory[];
+  parties: Party[];
+  transactions: SharedTransaction[];
+  journalEntries: JournalEntry[];
+  postings: Posting[];
+  debts: Debt[];
+  settlementAllocations: SettlementAllocation[];
+  commitments: SharedCommitment[];
+  commitmentSettlements: SharedCommitmentSettlement[];
+  savingsGoals: SharedSavingsGoal[];
+  budgets: SharedBudget[];
+  recurringRules: SharedRecurringRule[];
+}
+
 export class SharedStateBridge {
   public static readonly STORAGE_KEY = 'daywell_canonical_database_v3';
   public static readonly SYNC_EVENT_NAME = 'daywell:canonical-synced';
@@ -1516,12 +1542,152 @@ export class SharedStateBridge {
     }
   }
 
+  private static saveFinanceOnlyToStorage(params: {
+    schemaVersion: number;
+    snapshotFormatVersion: number;
+    databaseSchemaVersion?: number;
+    financeSchemaVersion: number;
+    appVersion: string;
+    isFinanceSetupCompleted: boolean;
+    openingBalanceCents: number;
+    ledgerMigrationReportV7?: string | null;
+    accounts: SharedAccount[];
+    categories: SharedCategory[];
+    transactions: SharedTransaction[];
+    commitments: SharedCommitment[];
+    commitmentSettlements: SharedCommitmentSettlement[];
+    savingsGoals: SharedSavingsGoal[];
+    budgets: SharedBudget[];
+    recurringRules: SharedRecurringRule[];
+    parties: Party[];
+    journalEntries: JournalEntry[];
+    postings: Posting[];
+    debts: Debt[];
+    settlementAllocations: SettlementAllocation[];
+  }): SharedDatabaseStateV7 {
+    const existing = this.assembleLiveDatabaseState();
+    const updatedState: SharedDatabaseStateV7 = {
+      ...existing,
+      schemaVersion: params.schemaVersion,
+      snapshotFormatVersion: params.snapshotFormatVersion,
+      ...(params.databaseSchemaVersion !== undefined
+        ? { databaseSchemaVersion: params.databaseSchemaVersion }
+        : {}),
+      financeSchemaVersion: params.financeSchemaVersion,
+      appVersion: params.appVersion,
+      exportedAt: LocalDateTime.now().toEthiopiaIsoString(),
+      isFinanceSetupCompleted: params.isFinanceSetupCompleted,
+      openingBalanceCents: params.openingBalanceCents,
+      ...(params.ledgerMigrationReportV7 !== undefined
+        ? { ledgerMigrationReportV7: params.ledgerMigrationReportV7 }
+        : {}),
+      accounts: params.accounts,
+      categories: params.categories,
+      transactions: params.transactions,
+      commitments: params.commitments,
+      commitmentSettlements: params.commitmentSettlements,
+      savingsGoals: params.savingsGoals,
+      budgets: params.budgets,
+      recurringRules: params.recurringRules,
+      parties: params.parties,
+      journalEntries: params.journalEntries,
+      postings: params.postings,
+      debts: params.debts,
+      settlementAllocations: params.settlementAllocations,
+    };
+
+    try {
+      localStorage.setItem(this.STORAGE_KEY, JSON.stringify(updatedState));
+      localStorage.setItem('daywell_accounts', JSON.stringify(updatedState.accounts));
+      localStorage.setItem('daywell_categories', JSON.stringify(updatedState.categories));
+      localStorage.setItem(
+        'daywell_finance_transactions',
+        JSON.stringify(updatedState.transactions)
+      );
+      localStorage.setItem('daywell_transactions', JSON.stringify(updatedState.transactions));
+      localStorage.setItem(
+        'daywell_commitments',
+        JSON.stringify(updatedState.commitments || [])
+      );
+      localStorage.setItem(
+        'daywell_commitment_settlements',
+        JSON.stringify(updatedState.commitmentSettlements || [])
+      );
+      localStorage.setItem(
+        'daywell_savings_goals',
+        JSON.stringify(updatedState.savingsGoals || [])
+      );
+      localStorage.setItem('daywell_budgets', JSON.stringify(updatedState.budgets || []));
+      localStorage.setItem(
+        'daywell_recurring_rules',
+        JSON.stringify(updatedState.recurringRules || [])
+      );
+      localStorage.setItem('daywell_parties', JSON.stringify(updatedState.parties || []));
+      localStorage.setItem(
+        'daywell_journal_entries',
+        JSON.stringify(updatedState.journalEntries || [])
+      );
+      localStorage.setItem('daywell_postings', JSON.stringify(updatedState.postings || []));
+      localStorage.setItem('daywell_debts', JSON.stringify(updatedState.debts || []));
+      localStorage.setItem(
+        'daywell_settlement_allocations',
+        JSON.stringify(updatedState.settlementAllocations || [])
+      );
+      localStorage.setItem(
+        'daywell_finance_setup_completed',
+        updatedState.isFinanceSetupCompleted ? 'true' : 'false'
+      );
+
+      window.dispatchEvent(new CustomEvent(this.SYNC_EVENT_NAME, { detail: updatedState }));
+    } catch (e) {
+      console.error('[SharedStateBridge] Failed to persist finance-only state:', e);
+    }
+
+    return updatedState;
+  }
+
   /**
    * Exports canonical state formatted for direct import into Android application.
    */
   public static exportToAndroidJson(state?: SharedDatabaseStateV7): string {
     const active = state || this.assembleLiveDatabaseState();
     return JSON.stringify(active, null, 2);
+  }
+
+  /**
+   * Exports a strict Finance-only JSON snapshot excluding Tasks, Notes, Projects,
+   * Goals, Calendar Events, Reminders, Inbox Items, and non-Finance settings.
+   */
+  public static exportFinanceOnlyJson(state?: SharedDatabaseStateV7): string {
+    const active = state || this.assembleLiveDatabaseState();
+    const payload: FinanceOnlySnapshotV7 = {
+      financeOnly: true,
+      exportScope: 'finance_only',
+      schemaVersion: this.SUPPORTED_EXCHANGE_SCHEMA_VERSION,
+      snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
+      financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
+      appVersion: active.appVersion || '1.0.2+3',
+      exportedAt: LocalDateTime.now().toEthiopiaIsoString(),
+      isFinanceSetupCompleted: Boolean(active.isFinanceSetupCompleted),
+      openingBalanceCents: active.openingBalanceCents ?? 0,
+      ...(active.ledgerMigrationReportV7 !== undefined
+        ? { ledgerMigrationReportV7: active.ledgerMigrationReportV7 }
+        : {}),
+      accounts: active.accounts || [],
+      categories: active.categories || [],
+      parties: active.parties || [],
+      transactions: active.transactions || [],
+      journalEntries: active.journalEntries || [],
+      postings: active.postings || [],
+      debts: active.debts || [],
+      settlementAllocations: active.settlementAllocations || [],
+      commitments: active.commitments || [],
+      commitmentSettlements: active.commitmentSettlements || [],
+      savingsGoals: active.savingsGoals || [],
+      budgets: active.budgets || [],
+      recurringRules: active.recurringRules || [],
+    };
+    return JSON.stringify(payload, null, 2);
   }
 
   private static requireUniqueId(
@@ -1760,6 +1926,34 @@ export class SharedStateBridge {
     'projects',
     'projectTrackingBlocks',
     'projectTrackingRecords',
+    'goals',
+    'inboxItems',
+    'calendarEvents',
+    'reminders',
+    'appSettings',
+  ] as const;
+
+  private static readonly FINANCE_OPTIONAL_ARRAY_COLLECTIONS = [
+    'categories',
+    'parties',
+    'journalEntries',
+    'postings',
+    'debts',
+    'settlementAllocations',
+    'commitments',
+    'commitmentSettlements',
+    'savingsGoals',
+    'budgets',
+    'recurringRules',
+  ] as const;
+
+  private static readonly NON_FINANCE_MODULE_KEYS = [
+    'tasks',
+    'notes',
+    'projects',
+    'projectTrackingBlocks',
+    'projectTrackingRecords',
+    'milestones',
     'goals',
     'inboxItems',
     'calendarEvents',
@@ -3648,6 +3842,844 @@ export class SharedStateBridge {
       return {
         success: false,
         error: e?.message || 'Failed to import payload.',
+        errorKind: 'invalid_payload',
+      };
+    }
+  }
+
+  /**
+   * Validates and atomically imports a Finance-only JSON export, strictly rejecting
+   * full cross-module backups or payloads containing non-Finance module keys.
+   * Existing Tasks, Notes, Projects, Goals, Calendar events, Reminders, Inbox items,
+   * and non-Finance settings are completely preserved.
+   */
+  public static importFinanceOnlyJson(
+    jsonString: string
+  ): {
+    success: boolean;
+    state?: SharedDatabaseStateV7;
+    error?: string;
+    errorKind?: BackupFailureKind;
+  } {
+    try {
+      let rawParsed: unknown;
+      try {
+        rawParsed = JSON.parse(jsonString);
+      } catch {
+        return {
+          success: false,
+          error: 'Invalid JSON payload.',
+          errorKind: 'invalid_payload',
+        };
+      }
+
+      if (!rawParsed || typeof rawParsed !== 'object' || Array.isArray(rawParsed)) {
+        throw new BackupValidationError(
+          'invalid_payload',
+          'Finance-only snapshot payload must be a JSON object.'
+        );
+      }
+
+      const record = rawParsed as Record<string, any>;
+      if (record.financeOnly !== true) {
+        throw new BackupValidationError(
+          'invalid_payload',
+          'Full cross-module backups cannot be restored here. Select a Finance-only JSON export (financeOnly: true), or use Settings > Backup & Restore for full device backups.'
+        );
+      }
+      if (
+        record.exportScope !== undefined &&
+        record.exportScope !== 'finance_only'
+      ) {
+        throw new BackupValidationError(
+          'invalid_payload',
+          `Invalid exportScope "${String(record.exportScope)}": expected "finance_only".`
+        );
+      }
+
+      for (const forbiddenKey of this.NON_FINANCE_MODULE_KEYS) {
+        if (
+          Object.prototype.hasOwnProperty.call(record, forbiddenKey) &&
+          record[forbiddenKey] !== undefined
+        ) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Finance-only restore rejected: payload contains non-Finance collection "${forbiddenKey}". Use Settings > Backup & Restore for full backups.`
+          );
+        }
+      }
+
+      const versionInfo = interpretSnapshotVersions(record);
+      if (!Array.isArray(record.accounts) || !Array.isArray(record.transactions)) {
+        throw new BackupValidationError(
+          'invalid_payload',
+          'Finance-only payload is missing required accounts or transactions array.'
+        );
+      }
+
+      for (const key of this.FINANCE_OPTIONAL_ARRAY_COLLECTIONS) {
+        if (
+          Object.prototype.hasOwnProperty.call(record, key) &&
+          record[key] !== undefined &&
+          !Array.isArray(record[key])
+        ) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid Finance snapshot field "${key}": expected an array.`
+          );
+        }
+      }
+
+      for (const key of ['accounts', 'transactions', ...this.FINANCE_OPTIONAL_ARRAY_COLLECTIONS]) {
+        const value = record[key];
+        if (!Array.isArray(value)) continue;
+        for (let i = 0; i < value.length; i++) {
+          const entry = value[i];
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid record in "${key}" at index ${i}: expected a JSON object.`
+            );
+          }
+        }
+      }
+
+      const nowIso = EthiopiaClock.nowUtc().toISOString();
+      const normalizeOptionalDate = (val: unknown, fieldName: string): string | undefined => {
+        if (val == null) return undefined;
+        if (typeof val !== 'string') {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid date value "${val}" for ${fieldName}.`
+          );
+        }
+        if (val.trim() === '') return undefined;
+        const parsedDate = SharedDateFormatter.tryParseFlexibleToCalendarDate(val);
+        if (!parsedDate) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid date value "${val}" for ${fieldName}.`
+          );
+        }
+        return parsedDate.toIsoString();
+      };
+      const normalizeRequiredDate = (val: unknown, fieldName: string): string => {
+        const parsedDate = normalizeOptionalDate(val, fieldName);
+        if (!parsedDate) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Missing required date value for ${fieldName}.`
+          );
+        }
+        return parsedDate;
+      };
+      const normalizeRequiredInstant = (val: unknown, fieldName: string): string => {
+        if (typeof val !== 'string' || !val.trim()) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Missing or invalid ISO timestamp for ${fieldName}.`
+          );
+        }
+        const ms = Date.parse(val.trim());
+        if (Number.isNaN(ms)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid ISO timestamp "${val}" for ${fieldName}.`
+          );
+        }
+        return new Date(ms).toISOString();
+      };
+      const normalizeOptionalInstant = (val: unknown, fieldName: string): string | undefined => {
+        if (val === undefined || val === null) return undefined;
+        return normalizeRequiredInstant(val, fieldName);
+      };
+
+      // 1. Categories
+      const categorySeenIds = new Set<string>();
+      const stagedCategories = ((record.categories || []) as Record<string, any>[]).map((c, idx) => {
+        const ctx = `categories[${idx}]`;
+        const id = this.requireUniqueId(c, 'categories', idx, categorySeenIds);
+        const name = this.requireBoundedString(c, 'name', ctx, 100);
+        const type = this.optionalEnum(c, 'type', this.VALID_CATEGORY_TYPES, ctx);
+        if (!type) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Missing required field "${ctx}.type" (expected income or expense).`
+          );
+        }
+        const colorHex = this.optionalString(c, 'colorHex', ctx) ?? '#1B4D3E';
+        const parentId = this.optionalString(c, 'parentId', ctx);
+        const sortOrder = this.optionalIntMin(c, 'sortOrder', ctx, -1000000) ?? 0;
+        const isDefault = this.optionalBool(c, 'isDefault', ctx) ?? false;
+        const isArchived = this.optionalBool(c, 'isArchived', ctx) ?? false;
+        return {
+          ...c,
+          id,
+          name,
+          type,
+          colorHex,
+          ...(parentId !== undefined ? { parentId } : {}),
+          sortOrder,
+          isDefault,
+          isArchived,
+        } as SharedCategory;
+      });
+      const validatedCategories = this.breakChainCycles(stagedCategories, 'parentId') as SharedCategory[];
+      const validCategoryIds = new Set<string>([
+        ...categorySeenIds,
+        ...this.CANONICAL_STARTER_CATEGORY_ID_SET,
+      ]);
+
+      // 2. Accounts
+      const accountSeenIds = new Set<string>();
+      const validatedAccounts = (record.accounts as Record<string, any>[]).map((a, idx) => {
+        const ctx = `accounts[${idx}]`;
+        const id = this.requireUniqueId(a, 'accounts', idx, accountSeenIds);
+        const name = this.requireBoundedString(a, 'name', ctx, 150);
+        const type = this.optionalEnum(a, 'type', this.VALID_ACCOUNT_TYPES, ctx) ?? 'asset';
+        const subType = this.optionalString(a, 'subType', ctx);
+        const isSystem = this.optionalBool(a, 'isSystem', ctx);
+        const isSystemAccount = Boolean(isSystem) || this.SYSTEM_CONTROL_ACCOUNT_ID_SET.has(id);
+        const hasCurrencyField =
+          Object.prototype.hasOwnProperty.call(a, 'currencyCode') &&
+          a.currencyCode !== undefined &&
+          a.currencyCode !== null;
+        const rawCurrency = this.optionalString(a, 'currencyCode', ctx, { allowEmpty: true });
+
+        let currencyCode: string;
+        if (isSystemAccount) {
+          if (hasCurrencyField) {
+            const trimmedSys = (rawCurrency ?? '').trim();
+            if (trimmedSys !== '' && !isEtbCurrency(trimmedSys)) {
+              throw new BackupValidationError(
+                'invalid_payload',
+                `Invalid ${ctx}.currencyCode: system control account "${name}" must use ETB.`
+              );
+            }
+          }
+          currencyCode = 'ETB';
+        } else if (hasCurrencyField) {
+          const trimmed = (rawCurrency ?? '').trim();
+          if (trimmed === '') currencyCode = '';
+          else if (isEtbCurrency(trimmed)) currencyCode = 'ETB';
+          else if (isValidCurrencyCode(trimmed)) currencyCode = normalizeCurrencyCode(trimmed);
+          else {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid ${ctx}.currencyCode on snapshot ${ctx} ("${name}"): unrecognized currency code "${normalizeCurrencyCode(trimmed)}".`
+            );
+          }
+        } else {
+          currencyCode = '';
+        }
+
+        const openingBalanceCents =
+          a.openingBalanceCents !== undefined && a.openingBalanceCents !== null
+            ? this.requireIntMin(a, 'openingBalanceCents', ctx, Number.MIN_SAFE_INTEGER)
+            : 0;
+        const openingBalanceDate = normalizeOptionalDate(
+          a.openingBalanceDate,
+          `${ctx}.openingBalanceDate`
+        );
+        const isArchivedFlag = this.optionalBool(a, 'isArchived', ctx) ?? false;
+        const legacyIsActiveFlag = this.optionalBool(a, 'isActive', ctx);
+        const createdAt = normalizeOptionalInstant(a.createdAt, `${ctx}.createdAt`);
+        const { isActive: _retiredIsActive, ...rest } = a;
+        return {
+          ...rest,
+          id,
+          name,
+          type,
+          ...(subType !== undefined ? { subType } : {}),
+          ...(isSystem !== undefined ? { isSystem } : {}),
+          currencyCode,
+          openingBalanceCents,
+          isArchived: isArchivedFlag || legacyIsActiveFlag === false,
+          ...(openingBalanceDate !== undefined ? { openingBalanceDate } : {}),
+          ...(createdAt !== undefined ? { createdAt } : {}),
+        } as SharedAccount;
+      });
+      const targetAccountIdsWithSystem = new Set<string>([
+        ...accountSeenIds,
+        ...this.SYSTEM_CONTROL_ACCOUNT_ID_SET,
+      ]);
+
+      // 3. Parties
+      const partySeenIds = new Set<string>();
+      const validatedParties = ((record.parties || []) as Record<string, any>[]).map((p, idx) => {
+        const ctx = `parties[${idx}]`;
+        const id = this.requireUniqueId(p, 'parties', idx, partySeenIds);
+        const name = this.requireBoundedString(p, 'name', ctx, 150);
+        const phone = this.optionalString(p, 'phone', ctx, { allowEmpty: true });
+        const notes = this.optionalString(p, 'notes', ctx, { allowEmpty: true });
+        const isArchived = this.optionalBool(p, 'isArchived', ctx) ?? false;
+        const createdAt = normalizeOptionalInstant(p.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        return {
+          ...p,
+          id,
+          name,
+          ...(phone !== undefined ? { phone } : {}),
+          ...(notes !== undefined ? { notes } : {}),
+          isArchived,
+          createdAt,
+        } as Party;
+      });
+
+      // 4. Transactions
+      const txSeenIds = new Set<string>();
+      const stagedTransactions = (record.transactions as Record<string, any>[]).map((tx, idx) => {
+        const ctx = `transactions[${idx}]`;
+        const id = this.requireUniqueId(tx, 'transactions', idx, txSeenIds);
+        const type = this.optionalEnum(tx, 'type', this.VALID_TRANSACTION_TYPES, ctx);
+        if (!type) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Missing or invalid field "${ctx}.type".`
+          );
+        }
+        const amountCents = this.requireIntMin(tx, 'amountCents', ctx, 1);
+        const transactionDate = normalizeRequiredDate(
+          tx.transactionDate,
+          `${ctx}.transactionDate`
+        );
+        let categoryId: string;
+        if (tx.categoryId !== undefined && tx.categoryId !== null) {
+          if (typeof tx.categoryId !== 'string' || !tx.categoryId.trim()) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid field "${ctx}.categoryId": expected a non-empty string.`
+            );
+          }
+          categoryId = tx.categoryId.trim();
+          if (!validCategoryIds.has(categoryId)) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid foreign key "${ctx}.categoryId": category "${categoryId}" does not exist.`
+            );
+          }
+        } else {
+          if (versionInfo.usesModernFinanceV7Rules) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Missing required foreign key "${ctx}.categoryId" on ${type} transaction "${id}".`
+            );
+          }
+          categoryId = type === 'income' ? 'cat-other-inc' : 'cat-other-exp';
+        }
+        const isSuperseded = this.optionalBool(tx, 'isSuperseded', ctx);
+        const correctedFromId = this.optionalString(tx, 'correctedFromId', ctx);
+        const createdAt = normalizeOptionalInstant(tx.createdAt, `${ctx}.createdAt`);
+        return {
+          ...tx,
+          id,
+          type,
+          categoryId,
+          amountCents,
+          transactionDate,
+          ...(isSuperseded !== undefined ? { isSuperseded } : {}),
+          ...(correctedFromId !== undefined ? { correctedFromId } : {}),
+          ...(createdAt !== undefined ? { createdAt } : {}),
+        };
+      });
+      const validatedTransactions = this.breakChainCycles(
+        stagedTransactions,
+        'correctedFromId'
+      ) as SharedTransaction[];
+
+      // 5. Journal Entries
+      const entrySeenIds = new Set<string>();
+      const legacySourceSeen = new Map<string, string>();
+      const stagedEntries = ((record.journalEntries || []) as Record<string, any>[]).map(
+        (e, idx) => {
+          const ctx = `journalEntries[${idx}]`;
+          const id = this.requireUniqueId(e, 'journalEntries', idx, entrySeenIds);
+          const rawEntryType = this.optionalString(e, 'entryType', ctx, { allowEmpty: true });
+          let entryType: EntryType;
+          try {
+            entryType = normalizeEntryType(rawEntryType, { defaultIfOmitted: 'standard' });
+          } catch (err) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid field "${ctx}.entryType": ${err instanceof Error ? err.message : String(rawEntryType)}`
+            );
+          }
+          const occurrenceDate = normalizeRequiredDate(
+            e.occurrenceDate,
+            `${ctx}.occurrenceDate`
+          );
+          const legacySourceTxId = this.optionalString(e, 'legacySourceTxId', ctx);
+          if (legacySourceTxId !== undefined) {
+            const owner = legacySourceSeen.get(legacySourceTxId);
+            if (owner && owner !== id) {
+              throw new BackupValidationError(
+                'invalid_payload',
+                `Duplicate legacySourceTxId "${legacySourceTxId}" in "${ctx}".`
+              );
+            }
+            legacySourceSeen.set(legacySourceTxId, id);
+          }
+          const isVoided = this.optionalBool(e, 'isVoided', ctx) ?? false;
+          const correctedFromEntryId = this.optionalString(e, 'correctedFromEntryId', ctx);
+          const createdAt = normalizeOptionalInstant(e.createdAt, `${ctx}.createdAt`) ?? nowIso;
+          return {
+            ...e,
+            id,
+            entryType,
+            description: this.optionalString(e, 'description', ctx, { allowEmpty: true }) ?? '',
+            occurrenceDate,
+            isVoided,
+            ...(legacySourceTxId !== undefined ? { legacySourceTxId } : {}),
+            ...(correctedFromEntryId !== undefined ? { correctedFromEntryId } : {}),
+            createdAt,
+          };
+        }
+      );
+      const validatedJournalEntries = this.breakChainCycles(
+        stagedEntries,
+        'correctedFromEntryId'
+      ) as JournalEntry[];
+
+      // 6. Postings (balanced double-entry + FKs)
+      const postingSeenIds = new Set<string>();
+      const entryLedgerTotals = new Map<string, { debits: number; credits: number }>();
+      const validatedPostings = ((record.postings || []) as Record<string, any>[]).map((p, idx) => {
+        const ctx = `postings[${idx}]`;
+        const id = this.requireUniqueId(p, 'postings', idx, postingSeenIds);
+        const amountCents = this.requireIntMin(p, 'amountCents', ctx, 1);
+        const accountMovementDate = normalizeRequiredDate(
+          p.accountMovementDate,
+          `${ctx}.accountMovementDate`
+        );
+        const entryId = this.requireBoundedString(p, 'entryId', ctx, 200);
+        if (!entrySeenIds.has(entryId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.entryId": journal entry "${entryId}" does not exist.`
+          );
+        }
+        const accountId = this.requireBoundedString(p, 'accountId', ctx, 200);
+        if (!targetAccountIdsWithSystem.has(accountId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.accountId": account "${accountId}" does not exist.`
+          );
+        }
+        const direction =
+          this.optionalEnum(p, 'direction', this.VALID_POSTING_DIRECTIONS, ctx) ?? 'debit';
+        const rawCategoryId = this.optionalString(p, 'categoryId', ctx);
+        const safeCategoryId =
+          rawCategoryId && validCategoryIds.has(rawCategoryId) ? rawCategoryId : undefined;
+
+        const running = entryLedgerTotals.get(entryId) ?? { debits: 0, credits: 0 };
+        if (direction === 'debit') running.debits += amountCents;
+        else running.credits += amountCents;
+        entryLedgerTotals.set(entryId, running);
+
+        const { categoryId: _droppedCat, ...rest } = p;
+        return {
+          ...rest,
+          id,
+          entryId,
+          accountId,
+          amountCents,
+          direction,
+          accountMovementDate,
+          ...(safeCategoryId !== undefined ? { categoryId: safeCategoryId } : {}),
+        } as Posting;
+      });
+
+      for (const [entryId, totals] of entryLedgerTotals.entries()) {
+        if (totals.debits !== totals.credits) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Unbalanced double-entry postings for journal entry "${entryId}": debits=${totals.debits}, credits=${totals.credits}.`
+          );
+        }
+      }
+
+      // 7. Debts
+      const debtSeenIds = new Set<string>();
+      const validatedDebts = ((record.debts || []) as Record<string, any>[]).map((d, idx) => {
+        const ctx = `debts[${idx}]`;
+        const id = this.requireUniqueId(d, 'debts', idx, debtSeenIds);
+        const principalCents = this.requireIntMin(d, 'principalCents', ctx, 1);
+        const outstandingCents = this.optionalIntMin(d, 'outstandingCents', ctx, 0);
+        const originEntryId = this.requireBoundedString(d, 'originEntryId', ctx, 200);
+        if (!entrySeenIds.has(originEntryId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.originEntryId": journal entry "${originEntryId}" does not exist.`
+          );
+        }
+        const partyId = this.requireBoundedString(d, 'partyId', ctx, 200);
+        if (!partySeenIds.has(partyId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.partyId": party "${partyId}" does not exist.`
+          );
+        }
+        const debtType =
+          this.optionalEnum(d, 'debtType', this.VALID_DEBT_TYPES, ctx) ?? 'payable';
+        const rawStatus = this.optionalString(d, 'status', ctx, { allowEmpty: true });
+        let normalizedStatus: DebtStatus;
+        try {
+          normalizedStatus = normalizeDebtStatus(rawStatus, { defaultIfOmitted: 'active' });
+        } catch (err) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid field "${ctx}.status": ${err instanceof Error ? err.message : String(rawStatus)}`
+          );
+        }
+        const rawWriteOff = this.optionalString(d, 'writeOffEntryId', ctx);
+        const safeWriteOff =
+          rawWriteOff && entrySeenIds.has(rawWriteOff) ? rawWriteOff : undefined;
+        const dueDate = normalizeOptionalDate(d.dueDate, `${ctx}.dueDate`);
+        const createdAt = normalizeOptionalInstant(d.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        const { writeOffEntryId: _droppedWo, ...rest } = d;
+        return {
+          ...rest,
+          id,
+          originEntryId,
+          partyId,
+          debtType,
+          principalCents,
+          ...(outstandingCents !== undefined ? { outstandingCents } : {}),
+          ...(dueDate !== undefined ? { dueDate } : {}),
+          status: normalizedStatus,
+          ...(safeWriteOff !== undefined ? { writeOffEntryId: safeWriteOff } : {}),
+          createdAt,
+        } as Debt;
+      });
+
+      // 8. SettlementAllocations
+      const allocationSeenIds = new Set<string>();
+      const validatedSettlementAllocations = (
+        (record.settlementAllocations || []) as Record<string, any>[]
+      ).map((a, idx) => {
+        const ctx = `settlementAllocations[${idx}]`;
+        const id = this.requireUniqueId(a, 'settlementAllocations', idx, allocationSeenIds);
+        const allocatedCents = this.requireIntMin(a, 'allocatedCents', ctx, 1);
+        const settlementDate = normalizeRequiredDate(
+          a.settlementDate,
+          `${ctx}.settlementDate`
+        );
+        const settlementEntryId = this.requireBoundedString(a, 'settlementEntryId', ctx, 200);
+        if (!entrySeenIds.has(settlementEntryId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.settlementEntryId": journal entry "${settlementEntryId}" does not exist.`
+          );
+        }
+        const debtId = this.requireBoundedString(a, 'debtId', ctx, 200);
+        if (!debtSeenIds.has(debtId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.debtId": debt "${debtId}" does not exist.`
+          );
+        }
+        return {
+          ...a,
+          id,
+          settlementEntryId,
+          debtId,
+          allocatedCents,
+          settlementDate,
+        } as SettlementAllocation;
+      });
+
+      // 9. SavingsGoals
+      const savingsSeenIds = new Set<string>();
+      const validatedSavingsGoals: SharedSavingsGoal[] = (
+        (record.savingsGoals || []) as Record<string, any>[]
+      ).map((g, idx) => {
+        const ctx = `savingsGoals[${idx}]`;
+        const id = this.requireUniqueId(g, 'savingsGoals', idx, savingsSeenIds);
+        const title = this.requireBoundedString(g, 'title', ctx, 200);
+        const targetCents = this.requireIntMin(g, 'targetCents', ctx, 1);
+        const currentAllocatedCents =
+          this.optionalIntMin(g, 'currentAllocatedCents', ctx, 0) ?? 0;
+        const targetDate = normalizeOptionalDate(g.targetDate, `${ctx}.targetDate`);
+        const rawLinkedAcc = this.optionalString(g, 'linkedAccountId', ctx);
+        const safeLinkedAcc =
+          rawLinkedAcc && targetAccountIdsWithSystem.has(rawLinkedAcc)
+            ? rawLinkedAcc
+            : undefined;
+        const status =
+          this.optionalEnum(g, 'status', this.VALID_SAVINGS_STATUSES, ctx) ?? 'active';
+        const createdAt = normalizeOptionalInstant(g.createdAt, `${ctx}.createdAt`);
+        const { linkedAccountId: _droppedAcc, ...rest } = g;
+        return {
+          ...rest,
+          id,
+          title,
+          targetCents,
+          currentAllocatedCents,
+          ...(targetDate !== undefined ? { targetDate } : {}),
+          ...(safeLinkedAcc !== undefined ? { linkedAccountId: safeLinkedAcc } : {}),
+          status,
+          ...(createdAt !== undefined ? { createdAt } : {}),
+        };
+      });
+
+      // 10. Budgets
+      const budgetSeenIds = new Set<string>();
+      const budgetCompositeSeen = new Map<string, string>();
+      const validatedBudgets: SharedBudget[] = (
+        (record.budgets || []) as Record<string, any>[]
+      ).map((b, idx) => {
+        const ctx = `budgets[${idx}]`;
+        const id = this.requireUniqueId(b, 'budgets', idx, budgetSeenIds);
+        const limitCents = this.requireIntMin(b, 'limitCents', ctx, 1);
+        const categoryId = this.requireBoundedString(b, 'categoryId', ctx, 200);
+        if (!validCategoryIds.has(categoryId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.categoryId": category "${categoryId}" does not exist.`
+          );
+        }
+        const monthIso = this.requireMonthIso(b, 'monthIso', ctx);
+        const compositeKey = `${monthIso}\u0000${categoryId}`;
+        const existingOwner = budgetCompositeSeen.get(compositeKey);
+        if (existingOwner && existingOwner !== id) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Duplicate budget for monthIso="${monthIso}" and categoryId="${categoryId}" at "${ctx}".`
+          );
+        }
+        budgetCompositeSeen.set(compositeKey, id);
+        const rolloverEnabled = this.optionalBool(b, 'rolloverEnabled', ctx) ?? false;
+        const createdAt = normalizeOptionalInstant(b.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        const updatedAt = normalizeOptionalInstant(b.updatedAt, `${ctx}.updatedAt`) ?? createdAt;
+        return {
+          id,
+          categoryId,
+          monthIso,
+          limitCents,
+          rolloverEnabled,
+          createdAt,
+          updatedAt,
+        };
+      });
+
+      // 11. Recurring Rules
+      const ruleSeenIds = new Set<string>();
+      const validatedRecurringRules: SharedRecurringRule[] = (
+        (record.recurringRules || []) as Record<string, any>[]
+      ).map((r, idx) => {
+        const ctx = `recurringRules[${idx}]`;
+        const id = this.requireUniqueId(r, 'recurringRules', idx, ruleSeenIds);
+        const title = this.requireBoundedString(r, 'title', ctx, 200);
+        const amountCents = this.requireIntMin(r, 'amountCents', ctx, 1);
+        const startDate = normalizeRequiredDate(r.startDate, `${ctx}.startDate`);
+        const nextOccurrenceDate = normalizeRequiredDate(
+          r.nextOccurrenceDate,
+          `${ctx}.nextOccurrenceDate`
+        );
+        const endDate = normalizeOptionalDate(r.endDate, `${ctx}.endDate`);
+        const ruleType =
+          this.optionalEnum(r, 'ruleType', this.VALID_RULE_TYPES, ctx) ?? 'commitment';
+        const frequency =
+          this.optionalEnum(r, 'frequency', this.VALID_RULE_FREQUENCIES, ctx) ?? 'monthly';
+        const interval = this.optionalIntMin(r, 'interval', ctx, 1) ?? 1;
+        const rawAcc = this.optionalString(r, 'accountId', ctx);
+        const safeAcc =
+          rawAcc && targetAccountIdsWithSystem.has(rawAcc) ? rawAcc : undefined;
+        const rawDestAcc = this.optionalString(r, 'destinationAccountId', ctx);
+        const safeDestAcc =
+          rawDestAcc && targetAccountIdsWithSystem.has(rawDestAcc) ? rawDestAcc : undefined;
+        const rawCat = this.optionalString(r, 'categoryId', ctx);
+        const safeCat = rawCat && validCategoryIds.has(rawCat) ? rawCat : undefined;
+        const rawDebt = this.optionalString(r, 'linkedDebtId', ctx);
+        const safeDebt = rawDebt && debtSeenIds.has(rawDebt) ? rawDebt : undefined;
+        const isActive = this.optionalBool(r, 'isActive', ctx) ?? true;
+        const autoPost = this.optionalBool(r, 'autoPost', ctx) ?? false;
+        const createdAt = normalizeOptionalInstant(r.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        return {
+          id,
+          title,
+          ruleType,
+          amountCents,
+          frequency,
+          interval,
+          startDate,
+          nextOccurrenceDate,
+          ...(endDate !== undefined ? { endDate } : {}),
+          ...(safeAcc !== undefined ? { accountId: safeAcc } : {}),
+          ...(safeDestAcc !== undefined ? { destinationAccountId: safeDestAcc } : {}),
+          ...(safeCat !== undefined ? { categoryId: safeCat } : {}),
+          ...(safeDebt !== undefined ? { linkedDebtId: safeDebt } : {}),
+          isActive,
+          autoPost,
+          createdAt,
+        };
+      });
+
+      // 12. Commitments
+      const commitmentSeenIds = new Set<string>();
+      const validatedCommitments: SharedCommitment[] = (
+        (record.commitments || []) as Record<string, any>[]
+      ).map((c, idx) => {
+        const ctx = `commitments[${idx}]`;
+        const id = this.requireUniqueId(c, 'commitments', idx, commitmentSeenIds);
+        const title = this.requireBoundedString(c, 'title', ctx, 200);
+        const amountCents = this.requireIntMin(c, 'amountCents', ctx, 1);
+        const dueDate = normalizeRequiredDate(c.dueDate, `${ctx}.dueDate`);
+        const isPaid = this.optionalBool(c, 'isPaid', ctx) ?? false;
+        const direction =
+          this.optionalEnum(c, 'direction', this.VALID_COMMITMENT_DIRECTIONS, ctx) ?? 'outflow';
+        const legacyPaidUnverified =
+          this.optionalBool(c, 'legacyPaidUnverified', ctx) ?? false;
+        const recurringRule = this.optionalString(c, 'recurringRule', ctx);
+        const rawAcc = this.optionalString(c, 'linkedAccountId', ctx);
+        const safeAcc =
+          rawAcc && targetAccountIdsWithSystem.has(rawAcc) ? rawAcc : undefined;
+        const rawCat = this.optionalString(c, 'categoryId', ctx);
+        const safeCat = rawCat && validCategoryIds.has(rawCat) ? rawCat : undefined;
+        const rawDebt = this.optionalString(c, 'linkedDebtId', ctx);
+        const safeDebt = rawDebt && debtSeenIds.has(rawDebt) ? rawDebt : undefined;
+        const rawEntry = this.optionalString(c, 'settlementEntryId', ctx);
+        const safeEntry = rawEntry && entrySeenIds.has(rawEntry) ? rawEntry : undefined;
+        const rawRule = this.optionalString(c, 'recurringRuleId', ctx);
+        const safeRule = rawRule && ruleSeenIds.has(rawRule) ? rawRule : undefined;
+        const createdAt = normalizeOptionalInstant(c.createdAt, `${ctx}.createdAt`);
+        const {
+          linkedAccountId: _droppedAcc,
+          categoryId: _droppedCat,
+          linkedDebtId: _droppedDebt,
+          settlementEntryId: _droppedEntry,
+          recurringRuleId: _droppedRule,
+          ...rest
+        } = c;
+        return {
+          ...rest,
+          id,
+          title,
+          amountCents,
+          dueDate,
+          isPaid,
+          direction,
+          legacyPaidUnverified,
+          ...(recurringRule !== undefined ? { recurringRule } : {}),
+          ...(safeAcc !== undefined ? { linkedAccountId: safeAcc } : {}),
+          ...(safeCat !== undefined ? { categoryId: safeCat } : {}),
+          ...(safeDebt !== undefined ? { linkedDebtId: safeDebt } : {}),
+          ...(safeEntry !== undefined ? { settlementEntryId: safeEntry } : {}),
+          ...(safeRule !== undefined ? { recurringRuleId: safeRule } : {}),
+          ...(createdAt !== undefined ? { createdAt } : {}),
+        };
+      });
+
+      // 13. Commitment Settlements
+      const settlementSeenIds = new Set<string>();
+      const validatedCommitmentSettlements: SharedCommitmentSettlement[] = (
+        (record.commitmentSettlements || []) as Record<string, any>[]
+      ).map((s, idx) => {
+        const ctx = `commitmentSettlements[${idx}]`;
+        const id = this.requireUniqueId(s, 'commitmentSettlements', idx, settlementSeenIds);
+        const amountCents = this.requireIntMin(s, 'amountCents', ctx, 1);
+        const settledDate = normalizeRequiredDate(s.settledDate, `${ctx}.settledDate`);
+        const commitmentId = this.requireBoundedString(s, 'commitmentId', ctx, 200);
+        if (!commitmentSeenIds.has(commitmentId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.commitmentId": commitment "${commitmentId}" does not exist.`
+          );
+        }
+        const entryId = this.requireBoundedString(s, 'entryId', ctx, 200);
+        if (!entrySeenIds.has(entryId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.entryId": journal entry "${entryId}" does not exist.`
+          );
+        }
+        const createdAt = normalizeOptionalInstant(s.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        return {
+          id,
+          commitmentId,
+          entryId,
+          amountCents,
+          settledDate,
+          createdAt,
+        };
+      });
+
+      const appVersion = this.optionalString(record, 'appVersion', 'snapshot') ?? '1.0.2+3';
+      const isFinanceSetupCompleted =
+        this.optionalBool(record, 'isFinanceSetupCompleted', 'snapshot') ?? true;
+      const openingBalanceCents =
+        this.optionalIntMin(record, 'openingBalanceCents', 'snapshot', Number.MIN_SAFE_INTEGER) ??
+        0;
+      const ledgerMigrationReportV7 =
+        record.ledgerMigrationReportV7 === undefined
+          ? undefined
+          : record.ledgerMigrationReportV7 === null
+            ? null
+            : this.optionalString(record, 'ledgerMigrationReportV7', 'snapshot', {
+                allowEmpty: true,
+              });
+
+      const accountsForSync = validatedAccounts as unknown as Account[];
+      const entryById = new Map(validatedJournalEntries.map((e) => [e.id, e]));
+      const reconciledDebts = validatedDebts.map((debt) => {
+        const originEntry = entryById.get(debt.originEntryId);
+        const writeOffEntry = debt.writeOffEntryId
+          ? entryById.get(debt.writeOffEntryId)
+          : undefined;
+        const hasLedgerAllocs = validatedSettlementAllocations.some(
+          (a) => a.debtId === debt.id
+        );
+        const hasWriteOffLedgerLink = writeOffEntry?.entryType === 'write_off';
+        if (originEntry?.isVoided || hasWriteOffLedgerLink || hasLedgerAllocs) {
+          return reconcileDebtsV7({
+            debts: [debt],
+            entries: validatedJournalEntries,
+            allocations: validatedSettlementAllocations,
+          })[0];
+        }
+        return debt;
+      });
+      const syncedSavingsGoals = syncVaultSavingsGoalsV7({
+        accounts: accountsForSync,
+        entries: validatedJournalEntries,
+        postings: validatedPostings,
+        savingsGoals: validatedSavingsGoals,
+      });
+
+      const updatedState = this.saveFinanceOnlyToStorage({
+        schemaVersion: versionInfo.schemaVersion,
+        snapshotFormatVersion: versionInfo.snapshotFormatVersion,
+        ...(versionInfo.databaseSchemaVersion !== undefined
+          ? { databaseSchemaVersion: versionInfo.databaseSchemaVersion }
+          : {}),
+        financeSchemaVersion:
+          versionInfo.financeSchemaVersion ?? this.SUPPORTED_FINANCE_SCHEMA_VERSION,
+        appVersion,
+        isFinanceSetupCompleted,
+        openingBalanceCents,
+        ...(ledgerMigrationReportV7 !== undefined ? { ledgerMigrationReportV7 } : {}),
+        accounts: validatedAccounts,
+        categories: validatedCategories,
+        transactions: validatedTransactions,
+        commitments: validatedCommitments,
+        commitmentSettlements: validatedCommitmentSettlements,
+        savingsGoals: syncedSavingsGoals,
+        budgets: validatedBudgets,
+        recurringRules: validatedRecurringRules,
+        parties: validatedParties,
+        journalEntries: validatedJournalEntries,
+        postings: validatedPostings,
+        debts: reconciledDebts,
+        settlementAllocations: validatedSettlementAllocations,
+      });
+
+      return { success: true, state: updatedState };
+    } catch (e: any) {
+      if (e instanceof BackupValidationError) {
+        return { success: false, error: e.message, errorKind: e.kind };
+      }
+      return {
+        success: false,
+        error: e?.message || 'Failed to import Finance-only payload.',
         errorKind: 'invalid_payload',
       };
     }

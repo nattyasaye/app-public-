@@ -505,6 +505,244 @@ class DatabasePersistenceCoordinator {
     };
   }
 
+  static const List<String> _nonFinanceSnapshotKeys = <String>[
+    'tasks',
+    'notes',
+    'projects',
+    'projectTrackingBlocks',
+    'projectTrackingRecords',
+    'milestones',
+    'goals',
+    'inboxItems',
+    'calendarEvents',
+    'reminders',
+    'appSettings',
+  ];
+
+  /// Exports strictly the 13 Finance tables and Finance setup metadata with zero
+  /// non-Finance collections (Tasks, Notes, Projects, Goals, Calendar, Inbox, etc.).
+  Future<Map<String, dynamic>> exportFinanceOnlySnapshot() async {
+    final settings = await _db.select(_db.appSettings).get();
+    final settingsMap = {for (final s in settings) s.key: s.value};
+
+    final accounts = await _db.select(_db.accountsTable).get();
+    final categories = await _db.select(_db.financialCategories).get();
+    final categoryNames = {for (final c in categories) c.id: c.name};
+    final accountNames = {for (final a in accounts) a.id: a.name};
+
+    final transactions = await _db.select(_db.financialTransactions).get();
+    final commitments = await _db.select(_db.financialCommitments).get();
+    final commitmentSettlements =
+        await _db.select(_db.commitmentSettlementsTable).get();
+    final savingsGoals = await _db.select(_db.savingsGoals).get();
+    final parties = await _db.select(_db.partiesTable).get();
+    final journalEntries = await _db.select(_db.journalEntriesTable).get();
+    final postings = await _db.select(_db.postingsTable).get();
+    final debts = await _db.select(_db.debtsTable).get();
+    final allocations = await _db.select(_db.settlementAllocationsTable).get();
+    final budgets = await _db.select(_db.budgetsTable).get();
+    final recurringRules = await _db.select(_db.recurringRulesTable).get();
+
+    final openingBalanceCents =
+        int.tryParse(settingsMap[AppDatabase.openingBalanceKey] ?? '') ?? 0;
+    final hasUserAccounts = accounts.any((a) => !a.isSystem);
+    final isSetupCompleted =
+        settingsMap[AppDatabase.financeSetupKey] == 'true' || hasUserAccounts;
+
+    return {
+      'financeOnly': true,
+      'exportScope': 'finance_only',
+      'schemaVersion': canonicalExchangeSchemaVersion,
+      'snapshotFormatVersion': supportedSnapshotFormatVersion,
+      'databaseSchemaVersion': _db.schemaVersion,
+      'financeSchemaVersion': 7,
+      'appVersion': CanonicalSeedDatabase.appVersion,
+      'exportedAt': LocalDateTime.now().toEthiopiaIsoString(),
+      'isFinanceSetupCompleted': isSetupCompleted,
+      'openingBalanceCents': openingBalanceCents,
+      'ledgerMigrationReportV7': settingsMap[V7LedgerHardener.v7ReportKey],
+      'accounts': accounts
+          .map((a) => {
+                'id': a.id,
+                'name': a.name,
+                'type': a.type,
+                'subType': a.subType,
+                'isSystem': a.isSystem,
+                'currencyCode': a.currencyCode,
+                'isArchived': a.isArchived,
+                'openingBalanceCents': a.openingBalanceCents,
+                'openingBalanceDate': a.openingBalanceDate,
+                'createdAt': EthiopiaClock.toUtcIsoString(a.createdAt),
+              })
+          .toList(),
+      'categories': categories
+          .map((c) => {
+                'id': c.id,
+                'name': c.name,
+                'type': c.type,
+                'colorHex': c.colorHex,
+                'parentId': c.parentId,
+                'sortOrder': c.sortOrder,
+                'isDefault': c.isDefault,
+                'isArchived': c.isArchived,
+              })
+          .toList(),
+      'transactions': transactions
+          .map((t) => {
+                'id': t.id,
+                'categoryId': t.categoryId,
+                'categoryName': categoryNames[t.categoryId] ?? 'General',
+                'amountCents': t.amountCents,
+                'type': t.type,
+                'transactionDate': t.transactionDate,
+                'note': t.note,
+                'payee': t.payee,
+                'isSuperseded': t.isSuperseded,
+                'correctedFromId': t.correctedFromId,
+                'correctionReason': t.correctionReason,
+                'accountId': t.accountId,
+                'accountName':
+                    t.accountId != null ? accountNames[t.accountId!] : null,
+                'destinationAccountId': t.destinationAccountId,
+                'destinationAccountName': t.destinationAccountId != null
+                    ? accountNames[t.destinationAccountId!]
+                    : null,
+                'createdAt': EthiopiaClock.toUtcIsoString(t.createdAt),
+              })
+          .toList(),
+      'commitments': commitments
+          .map((c) => {
+                'id': c.id,
+                'title': c.title,
+                'amountCents': c.amountCents,
+                'dueDate': c.dueDate,
+                'isPaid': c.isPaid,
+                'direction': c.direction,
+                'legacyPaidUnverified': c.legacyPaidUnverified,
+                'recurringRule': c.recurringRule,
+                'linkedAccountId': c.linkedAccountId,
+                'categoryId': c.categoryId,
+                'linkedDebtId': c.linkedDebtId,
+                'settlementEntryId': c.settlementEntryId,
+                'recurringRuleId': c.recurringRuleId,
+                'createdAt': EthiopiaClock.toUtcIsoString(c.createdAt),
+              })
+          .toList(),
+      'commitmentSettlements': commitmentSettlements
+          .map((s) => {
+                'id': s.id,
+                'commitmentId': s.commitmentId,
+                'entryId': s.entryId,
+                'amountCents': s.amountCents,
+                'settledDate': s.settledDate,
+                'createdAt': EthiopiaClock.toUtcIsoString(s.createdAt),
+              })
+          .toList(),
+      'savingsGoals': savingsGoals
+          .map((s) => {
+                'id': s.id,
+                'title': s.title,
+                'targetCents': s.targetCents,
+                'currentAllocatedCents': s.currentAllocatedCents,
+                'targetDate': s.targetDate,
+                'linkedAccountId': s.linkedAccountId,
+                'status': s.status,
+                'createdAt': EthiopiaClock.toUtcIsoString(s.createdAt),
+              })
+          .toList(),
+      'budgets': budgets
+          .map((b) => {
+                'id': b.id,
+                'categoryId': b.categoryId,
+                'monthIso': b.monthIso,
+                'limitCents': b.limitCents,
+                'rolloverEnabled': b.rolloverEnabled,
+                'createdAt': EthiopiaClock.toUtcIsoString(b.createdAt),
+                'updatedAt': EthiopiaClock.toUtcIsoString(b.updatedAt),
+              })
+          .toList(),
+      'recurringRules': recurringRules
+          .map((r) => {
+                'id': r.id,
+                'title': r.title,
+                'ruleType': r.ruleType,
+                'amountCents': r.amountCents,
+                'frequency': r.frequency,
+                'interval': r.interval,
+                'startDate': r.startDate,
+                'nextOccurrenceDate': r.nextOccurrenceDate,
+                'endDate': r.endDate,
+                'accountId': r.accountId,
+                'destinationAccountId': r.destinationAccountId,
+                'categoryId': r.categoryId,
+                'linkedDebtId': r.linkedDebtId,
+                'isActive': r.isActive,
+                'autoPost': r.autoPost,
+                'createdAt': EthiopiaClock.toUtcIsoString(r.createdAt),
+              })
+          .toList(),
+      'parties': parties
+          .map((p) => {
+                'id': p.id,
+                'name': p.name,
+                'phone': p.phone,
+                'notes': p.notes,
+                'isArchived': p.isArchived,
+                'createdAt': EthiopiaClock.toUtcIsoString(p.createdAt),
+              })
+          .toList(),
+      'journalEntries': journalEntries
+          .map((e) => {
+                'id': e.id,
+                'entryType': EntryType.tryParse(e.entryType)?.dbValue ??
+                    e.entryType,
+                'description': e.description,
+                'occurrenceDate': e.occurrenceDate,
+                'isVoided': e.isVoided,
+                'voidReason': e.voidReason,
+                'legacySourceTxId': e.legacySourceTxId,
+                'correctedFromEntryId': e.correctedFromEntryId,
+                'createdAt': EthiopiaClock.toUtcIsoString(e.createdAt),
+              })
+          .toList(),
+      'postings': postings
+          .map((p) => {
+                'id': p.id,
+                'entryId': p.entryId,
+                'accountId': p.accountId,
+                'amountCents': p.amountCents,
+                'direction': p.direction,
+                'accountMovementDate': p.accountMovementDate,
+                'categoryId': p.categoryId,
+                'note': p.note,
+              })
+          .toList(),
+      'debts': debts
+          .map((d) => {
+                'id': d.id,
+                'originEntryId': d.originEntryId,
+                'partyId': d.partyId,
+                'debtType': d.debtType,
+                'principalCents': d.principalCents,
+                'outstandingCents': d.outstandingCents,
+                'dueDate': d.dueDate,
+                'status': DebtStatus.tryParse(d.status)?.dbValue ?? d.status,
+                'writeOffEntryId': d.writeOffEntryId,
+                'createdAt': EthiopiaClock.toUtcIsoString(d.createdAt),
+              })
+          .toList(),
+      'settlementAllocations': allocations
+          .map((a) => {
+                'id': a.id,
+                'settlementEntryId': a.settlementEntryId,
+                'debtId': a.debtId,
+                'allocatedCents': a.allocatedCents,
+                'settlementDate': a.settlementDate,
+              })
+          .toList(),
+    };
+  }
+
   static const int canonicalExchangeSchemaVersion = 5;
   static const int supportedSnapshotFormatVersion = 2;
   static const int legacyOmittedSnapshotFormatVersion = 1;
@@ -3376,6 +3614,285 @@ class DatabasePersistenceCoordinator {
   Future<void> importSnapshot(Map<String, dynamic> stateMap,
       {bool clearExisting = true}) async {
     await importSnapshotDetailed(stateMap, clearExisting: clearExisting);
+  }
+
+  /// Validates and atomically replaces ONLY the 13 Finance tables from a
+  /// Finance-only JSON snapshot (`financeOnly: true`), preserving Tasks, Notes,
+  /// Projects, Milestones, Goals, Inbox, CalendarEvents, Reminders, and
+  /// non-Finance AppSettings completely untouched.
+  Future<SnapshotImportReport> importFinanceOnlySnapshot(
+    Map<String, dynamic> stateMap,
+  ) async {
+    if (stateMap['financeOnly'] != true) {
+      throw const BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Full cross-module backups cannot be restored here. Select a Finance-only JSON export (financeOnly: true), or use Settings > Backup & Restore for full device backups.',
+      );
+    }
+    if (stateMap.containsKey('exportScope') &&
+        stateMap['exportScope'] != null &&
+        stateMap['exportScope'] != 'finance_only') {
+      throw BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Invalid exportScope "${stateMap['exportScope']}": expected "finance_only".',
+      );
+    }
+    for (final forbiddenKey in _nonFinanceSnapshotKeys) {
+      if (stateMap.containsKey(forbiddenKey) &&
+          stateMap[forbiddenKey] != null) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Finance-only restore rejected: payload contains non-Finance collection "$forbiddenKey". Use Settings > Backup & Restore for full backups.',
+        );
+      }
+    }
+    if (stateMap['accounts'] is! List || stateMap['transactions'] is! List) {
+      throw const BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Finance-only payload is missing required "accounts" or "transactions" array.',
+      );
+    }
+
+    final now = EthiopiaClock.nowUtc();
+    final plan = validateAndPrepareSnapshot(
+      stateMap,
+      fallbackTimestampUtc: now,
+    );
+
+    // Pre-transaction double-entry balance invariant verification.
+    final postingsByEntryId = <String, List<Map<String, dynamic>>>{};
+    final rawPostings =
+        (stateMap['postings'] as List<dynamic>? ?? const <dynamic>[]);
+    for (final item in rawPostings) {
+      if (item is Map<String, dynamic>) {
+        final entryId = item['entryId']?.toString().trim() ?? '';
+        if (entryId.isNotEmpty) {
+          postingsByEntryId.putIfAbsent(entryId, () => []).add(item);
+        }
+      }
+    }
+    final rawEntries =
+        (stateMap['journalEntries'] as List<dynamic>? ?? const <dynamic>[]);
+    for (final item in rawEntries) {
+      if (item is! Map<String, dynamic>) continue;
+      final isVoided = item['isVoided'] == true;
+      if (isVoided) continue;
+      final entryId = item['id']?.toString().trim() ?? '';
+      final entryPostings =
+          postingsByEntryId[entryId] ?? const <Map<String, dynamic>>[];
+      if (entryPostings.length < 2) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Incomplete journal entry "$entryId": requires at least 2 postings (found ${entryPostings.length}).',
+        );
+      }
+      var debits = 0;
+      var credits = 0;
+      for (final p in entryPostings) {
+        final amount = (p['amountCents'] as int?) ?? 0;
+        final direction = p['direction']?.toString().trim() ?? '';
+        if (direction == 'debit') {
+          debits += amount;
+        } else if (direction == 'credit') {
+          credits += amount;
+        }
+      }
+      if (debits != credits) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Unbalanced journal entry "$entryId": debits ($debits) != credits ($credits).',
+        );
+      }
+    }
+
+    final diagnostics = List<SnapshotImportDiagnostic>.from(
+      plan.preImportDiagnostics,
+    );
+    final warningStrings = diagnostics
+        .where((d) => d.severity == SnapshotDiagnosticSeverity.warning)
+        .map((d) => d.toWarningString())
+        .toList();
+
+    await _db.transaction(() async {
+      // Break Finance-only self-referential / cross-cycle FKs before leaf-to-parent delete.
+      await _db.customStatement(
+        'UPDATE financial_categories SET parent_id = NULL;',
+      );
+      await _db.customStatement(
+        'UPDATE journal_entries_table SET corrected_from_entry_id = NULL;',
+      );
+      await _db.customStatement(
+        'UPDATE debts_table SET write_off_entry_id = NULL;',
+      );
+
+      // Delete ONLY the 13 Finance tables (Tasks, Notes, Projects, Goals, Inbox,
+      // CalendarEvents, Reminders, and non-Finance AppSettings remain untouched).
+      await _db.delete(_db.commitmentSettlementsTable).go();
+      await _db.delete(_db.recurringRulesTable).go();
+      await _db.delete(_db.budgetsTable).go();
+      await _db.delete(_db.financialCommitments).go();
+      await _db.delete(_db.savingsGoals).go();
+      await _db.delete(_db.settlementAllocationsTable).go();
+      await _db.delete(_db.debtsTable).go();
+      await _db.delete(_db.postingsTable).go();
+      await _db.delete(_db.journalEntriesTable).go();
+      await _db.delete(_db.financialTransactions).go();
+      await _db.delete(_db.partiesTable).go();
+      await _db.delete(_db.accountsTable).go();
+      await _db.delete(_db.financialCategories).go();
+
+      await (_db.delete(_db.appSettings)
+            ..where((t) =>
+                t.key.equals(V6LedgerMigrator.v6MigratedSentinelKey) |
+                t.key.equals(V7LedgerHardener.v7ReportKey)))
+          .go();
+
+      for (final row in plan.categories) {
+        await _db.into(_db.financialCategories).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.accounts) {
+        await _db.into(_db.accountsTable).insertOnConflictUpdate(row);
+      }
+      await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+
+      for (final row in plan.parties) {
+        await _db.into(_db.partiesTable).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.transactions) {
+        await _db.into(_db.financialTransactions).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.journalEntries) {
+        await _db.into(_db.journalEntriesTable).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.postings) {
+        await _db.into(_db.postingsTable).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.debts) {
+        await _db.into(_db.debtsTable).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.settlementAllocations) {
+        await _db
+            .into(_db.settlementAllocationsTable)
+            .insertOnConflictUpdate(row);
+      }
+      for (final row in plan.savingsGoals) {
+        await _db.into(_db.savingsGoals).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.budgets) {
+        await _db.into(_db.budgetsTable).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.recurringRules) {
+        await _db.into(_db.recurringRulesTable).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.commitments) {
+        await _db.into(_db.financialCommitments).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.commitmentSettlements) {
+        await _db
+            .into(_db.commitmentSettlementsTable)
+            .insertOnConflictUpdate(row);
+      }
+
+      if (plan.versionInterpretation.requiresLegacyPreV6Migration) {
+        await V6LedgerMigrator.migrateDataInTransaction(_db);
+        final report = await V7LedgerHardener.hardenAndAuditInTransaction(
+          _db,
+          fromVersion: plan.snapshotVersion,
+          preRebuildWarnings: warningStrings,
+        );
+        for (final w in report.warnings) {
+          if (!warningStrings.contains(w)) {
+            warningStrings.add(w);
+          }
+        }
+      } else if (plan.versionInterpretation.requiresLegacyV6Hardening) {
+        final report = await V7LedgerHardener.hardenAndAuditInTransaction(
+          _db,
+          fromVersion: 6,
+          preRebuildWarnings: warningStrings,
+        );
+        for (final w in report.warnings) {
+          if (!warningStrings.contains(w)) {
+            warningStrings.add(w);
+          }
+        }
+      } else {
+        await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+        await V7LedgerHardener.reconcileAllDebtsV7(_db);
+        await V7LedgerHardener.syncVaultSavingsGoalsV7(_db);
+        await V7LedgerHardener.verifyInvariantsOnly(_db);
+        final savedReport = plan.ledgerMigrationReportV7;
+        if (savedReport != null && savedReport.trim().isNotEmpty) {
+          await _db.into(_db.appSettings).insertOnConflictUpdate(
+                AppSettingsCompanion.insert(
+                  key: V7LedgerHardener.v7ReportKey,
+                  value: savedReport,
+                  updatedAt: now,
+                ),
+              );
+        }
+      }
+
+      final isSetupDone = plan.explicitIsFinanceSetupCompleted ??
+          plan.hasUserAccountsInSnapshot;
+
+      await _db.into(_db.appSettings).insertOnConflictUpdate(
+            AppSettingsCompanion.insert(
+              key: AppDatabase.openingBalanceKey,
+              value: '${plan.openingBalanceCents}',
+              updatedAt: now,
+            ),
+          );
+      await _db.into(_db.appSettings).insertOnConflictUpdate(
+            AppSettingsCompanion.insert(
+              key: AppDatabase.financeSetupKey,
+              value: isSetupDone ? 'true' : 'false',
+              updatedAt: now,
+            ),
+          );
+      await _db.into(_db.appSettings).insertOnConflictUpdate(
+            AppSettingsCompanion.insert(
+              key: AppDatabase.seedSentinelKey,
+              value: 'true',
+              updatedAt: now,
+            ),
+          );
+
+      final fkViolations =
+          await _db.customSelect('PRAGMA foreign_key_check').get();
+      if (fkViolations.isNotEmpty) {
+        throw BackupValidationException(
+          BackupFailureKind.databaseImportFailure,
+          'Foreign key constraint violation detected before commit '
+          '(${fkViolations.length} row(s)).',
+        );
+      }
+    });
+
+    final financeOnlyCounts = <String, int>{
+      for (final key in const <String>[
+        'accounts',
+        'categories',
+        'parties',
+        'transactions',
+        'journalEntries',
+        'postings',
+        'debts',
+        'settlementAllocations',
+        'commitments',
+        'commitmentSettlements',
+        'savingsGoals',
+        'budgets',
+        'recurringRules',
+      ])
+        key: plan.restoredRecordCounts[key] ?? 0,
+    };
+
+    return SnapshotImportReport(
+      warnings: List<String>.unmodifiable(warningStrings),
+      diagnostics: List<SnapshotImportDiagnostic>.unmodifiable(diagnostics),
+      restoredRecordCounts: Map<String, int>.unmodifiable(financeOnlyCounts),
+    );
   }
 
   /// Safely purges demonstration records matching [KnownSeedIds] directly in SQLite

@@ -187,7 +187,29 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
     final monthIso = _budgetMonthIso;
     final monthBudgets =
         state.budgets.where((b) => b.monthIso == monthIso).toList();
-    final spendByCat = state.categorySpendForMonth(monthIso);
+    final monthParts = monthIso.split('-');
+    final todayCal = CalendarDate.today();
+    final budgetYear = monthParts.length == 2
+        ? (int.tryParse(monthParts[0]) ?? todayCal.year)
+        : todayCal.year;
+    final budgetMonth = monthParts.length == 2
+        ? (int.tryParse(monthParts[1]) ?? todayCal.month).clamp(1, 12)
+        : todayCal.month;
+    final monthBounds = CalendarDate.monthBounds(
+      CalendarSystem.gregorian,
+      budgetYear,
+      budgetMonth,
+    );
+    final spendReport = DoubleEntryEngine.calculateCanonicalCategorySpend(
+      entries: state.journalEntries,
+      postings: state.postings,
+      accounts: state.accounts,
+      categories: state.categories,
+      debts: state.debts,
+      allocations: state.settlementAllocations,
+      startDateIso: monthBounds.start.toIsoString(),
+      endDateIso: monthBounds.end.toIsoString(),
+    );
     final categoryById = {for (final c in state.categories) c.id: c};
 
     return Column(
@@ -235,7 +257,11 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
           for (final budget in monthBudgets) ...[
             Builder(
               builder: (ctx) {
-                final spent = spendByCat[budget.categoryId] ?? 0;
+                final spent = DoubleEntryEngine.getCanonicalBudgetSpentCents(
+                  spendReport,
+                  budget.categoryId,
+                  state.categories,
+                );
                 final limit = budget.limitCents <= 0 ? 1 : budget.limitCents;
                 final ratio = spent / limit;
                 final tone = ratio > 1.0

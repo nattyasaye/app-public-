@@ -5,9 +5,11 @@ import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/date/shared_date.dart';
+import '../../core/interfaces/platform_service_interfaces.dart';
 import '../../domain/finance/finance_contracts.dart';
 import '../../domain/finance/recurring_engine.dart';
 import '../database/app_database.dart';
+import '../database/database_persistence_coordinator.dart';
 import '../database/v6_ledger_migrator.dart';
 import '../database/v7_ledger_hardener.dart';
 
@@ -111,6 +113,35 @@ class DriftFinanceRepository implements IFinanceRepository {
             updatedAt: EthiopiaClock.nowUtc(),
           ),
         );
+  }
+
+  @override
+  Future<String> exportFinanceOnlyJson() async {
+    final map =
+        await DatabasePersistenceCoordinator(_db).exportFinanceOnlySnapshot();
+    return jsonEncode(map);
+  }
+
+  @override
+  Future<void> importFinanceOnlyJson(String rawJson) async {
+    dynamic decoded;
+    try {
+      decoded = jsonDecode(rawJson);
+    } catch (_) {
+      throw const BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Invalid Finance JSON payload.',
+      );
+    }
+    if (decoded is! Map) {
+      throw const BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Finance-only snapshot payload must be a JSON object.',
+      );
+    }
+    final stateMap = decoded.map((k, v) => MapEntry(k.toString(), v));
+    await DatabasePersistenceCoordinator(_db)
+        .importFinanceOnlySnapshot(stateMap);
   }
 
   // ==========================================================================

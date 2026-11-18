@@ -13,12 +13,13 @@ import {
 } from 'lucide-react';
 import {
   Account,
+  calculateCanonicalCategorySpendV7,
   calculateCommitmentSettledCents,
   classifyAllJournalEntries,
   classifyCurrencyCode,
   Debt,
   formatCurrencyCents,
-  generateOccurrenceReport,
+  getCanonicalBudgetSpentCentsV7,
   getCommitmentRemainingCents,
   isActiveVerifiedEtbAccount,
   isDebtEligibleEtb,
@@ -225,10 +226,10 @@ export function FinancePlanTab({
     [entries]
   );
 
-  // Month occurrence spend for budgets
-  const currentMonthOccurrence = useMemo(() => {
+  // Month canonical spend for budgets (resolves legacy aliases and parent-category rollups)
+  const currentMonthSpendReport = useMemo(() => {
     const today = CalendarDate.today();
-    return generateOccurrenceReport({
+    return calculateCanonicalCategorySpendV7({
       entries,
       postings,
       accounts,
@@ -1068,7 +1069,11 @@ export function FinancePlanTab({
             ) : (
               activeMonthBudgets.map((b) => {
                 const catName = resolveCategoryDisplayName(categories, b.categoryId);
-                const spent = currentMonthOccurrence.categoryBreakdown[catName] || 0;
+                const spent = getCanonicalBudgetSpentCentsV7(
+                  currentMonthSpendReport,
+                  b.categoryId,
+                  categories
+                );
                 const pct = b.limitCents > 0 ? Math.min(100, Math.round((spent / b.limitCents) * 100)) : 0;
                 const over = spent > b.limitCents;
                 return (

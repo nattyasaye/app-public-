@@ -2237,11 +2237,18 @@ export function DaywellFinanceModule({
         <FinanceReportsTab
           accounts={accounts}
           categories={categories}
+          parties={parties}
           entries={entries}
           postings={postings}
           debts={debts}
           allocations={allocations}
           commitments={commitments}
+          commitmentSettlements={commitmentSettlements}
+          savingsGoals={savingsGoals}
+          budgets={budgets}
+          recurringRules={recurringRules}
+          simpleTransactions={simpleTransactions}
+          planningPeriodEndIso={planningPeriodEnd || undefined}
           breakdown={breakdown}
           integrityReport={integrityReport}
           onRefreshState={() => {

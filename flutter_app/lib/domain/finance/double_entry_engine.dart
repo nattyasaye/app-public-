@@ -885,6 +885,300 @@ class _FinancialCurrencyScan {
   });
 }
 
+enum ReportPeriodMode {
+  thisMonth,
+  ethiopianMonth,
+  last30Days,
+  thisYear,
+  custom,
+}
+
+class ResolvedReportPeriod {
+  final ReportPeriodMode mode;
+  final String currentStart;
+  final String currentEnd;
+  final String previousStart;
+  final String previousEnd;
+  final String label;
+  final String baselineLabel;
+  final int daysInCurrent;
+  final int daysInPrevious;
+
+  const ResolvedReportPeriod({
+    required this.mode,
+    required this.currentStart,
+    required this.currentEnd,
+    required this.previousStart,
+    required this.previousEnd,
+    required this.label,
+    required this.baselineLabel,
+    required this.daysInCurrent,
+    required this.daysInPrevious,
+  });
+}
+
+class SafePercentageChangeResult {
+  final double? percentageChange;
+  final String percentageDisplay;
+
+  const SafePercentageChangeResult({
+    required this.percentageChange,
+    required this.percentageDisplay,
+  });
+}
+
+class MetricComparisonDelta {
+  final int currentCents;
+  final int previousCents;
+  final int deltaCents;
+  final double? percentageChange;
+  final String percentageDisplay;
+  final bool? isPositiveOutcome;
+
+  const MetricComparisonDelta({
+    required this.currentCents,
+    required this.previousCents,
+    required this.deltaCents,
+    required this.percentageChange,
+    required this.percentageDisplay,
+    required this.isPositiveOutcome,
+  });
+}
+
+class PeriodComparisonReport {
+  final ResolvedReportPeriod period;
+  final ({int incomeCents, int expenseCents, int netCashflowCents})
+      currentOccurrence;
+  final ({int incomeCents, int expenseCents, int netCashflowCents})
+      previousOccurrence;
+  final ({int inflowCents, int outflowCents, int netCashflowCents})
+      currentLiquidCash;
+  final ({int inflowCents, int outflowCents, int netCashflowCents})
+      previousLiquidCash;
+  final MetricComparisonDelta occurrenceIncome;
+  final MetricComparisonDelta occurrenceExpense;
+  final MetricComparisonDelta occurrenceNet;
+  final MetricComparisonDelta cashInflow;
+  final MetricComparisonDelta cashOutflow;
+  final MetricComparisonDelta cashNet;
+
+  const PeriodComparisonReport({
+    required this.period,
+    required this.currentOccurrence,
+    required this.previousOccurrence,
+    required this.currentLiquidCash,
+    required this.previousLiquidCash,
+    required this.occurrenceIncome,
+    required this.occurrenceExpense,
+    required this.occurrenceNet,
+    required this.cashInflow,
+    required this.cashOutflow,
+    required this.cashNet,
+  });
+}
+
+class CategorySpendRow {
+  final String categoryId;
+  final String categoryName;
+  final String? parentId;
+  final int directCents;
+  final int rollupCents;
+  final int sharePercent;
+  final double exactShareRatio;
+  final bool isArchived;
+  final List<CategorySpendRow> children;
+
+  const CategorySpendRow({
+    required this.categoryId,
+    required this.categoryName,
+    this.parentId,
+    required this.directCents,
+    required this.rollupCents,
+    required this.sharePercent,
+    required this.exactShareRatio,
+    required this.isArchived,
+    this.children = const [],
+  });
+}
+
+class CanonicalCategorySpendReport {
+  final String startDate;
+  final String endDate;
+  final int totalExpenseCents;
+  final Map<String, int> directSpendByCategoryId;
+  final Map<String, int> rollupSpendByCategoryId;
+  final List<CategorySpendRow> rows;
+
+  const CanonicalCategorySpendReport({
+    required this.startDate,
+    required this.endDate,
+    required this.totalExpenseCents,
+    required this.directSpendByCategoryId,
+    required this.rollupSpendByCategoryId,
+    required this.rows,
+  });
+}
+
+class AccountBalanceReportItem {
+  final String accountId;
+  final String name;
+  final AccountType type;
+  final AccountSubType subType;
+  final String currencyCode;
+  final int balanceCents;
+  final int owedCents;
+  final int prepaidCents;
+  final bool isArchived;
+  final CurrencyValidationTier currencyTier;
+
+  const AccountBalanceReportItem({
+    required this.accountId,
+    required this.name,
+    required this.type,
+    required this.subType,
+    required this.currencyCode,
+    required this.balanceCents,
+    required this.owedCents,
+    required this.prepaidCents,
+    required this.isArchived,
+    required this.currencyTier,
+  });
+}
+
+class AccountBalancesReport {
+  final List<AccountBalanceReportItem> liquidAccounts;
+  final List<AccountBalanceReportItem> vaultAccounts;
+  final List<AccountBalanceReportItem> creditCardAccounts;
+  final List<AccountBalanceReportItem> nonEtbReviewAccounts;
+  final int archivedCount;
+  final int liquidTotalCents;
+  final int vaultTotalCents;
+  final int creditCardOwedTotalCents;
+  final int prepaidCardCreditTotalCents;
+
+  const AccountBalancesReport({
+    required this.liquidAccounts,
+    required this.vaultAccounts,
+    required this.creditCardAccounts,
+    required this.nonEtbReviewAccounts,
+    required this.archivedCount,
+    required this.liquidTotalCents,
+    required this.vaultTotalCents,
+    required this.creditCardOwedTotalCents,
+    required this.prepaidCardCreditTotalCents,
+  });
+}
+
+class SavingsGoalReportItem {
+  final String goalId;
+  final String title;
+  final int targetCents;
+  final int allocatedCents;
+  final int remainingCents;
+  final int percentComplete;
+  final String? targetDate;
+  final SavingsGoalStatus status;
+  final String? linkedAccountId;
+  final String? linkedAccountName;
+  final bool isVaultLinked;
+  final bool isExcludedNonEtbVault;
+
+  const SavingsGoalReportItem({
+    required this.goalId,
+    required this.title,
+    required this.targetCents,
+    required this.allocatedCents,
+    required this.remainingCents,
+    required this.percentComplete,
+    this.targetDate,
+    required this.status,
+    this.linkedAccountId,
+    this.linkedAccountName,
+    required this.isVaultLinked,
+    required this.isExcludedNonEtbVault,
+  });
+}
+
+class SavingsVaultsReport {
+  final List<AccountBalanceReportItem> vaults;
+  final List<SavingsGoalReportItem> goals;
+  final int totalVaultBalanceCents;
+  final int totalGoalTargetCents;
+  final int totalGoalAllocatedCents;
+
+  const SavingsVaultsReport({
+    required this.vaults,
+    required this.goals,
+    required this.totalVaultBalanceCents,
+    required this.totalGoalTargetCents,
+    required this.totalGoalAllocatedCents,
+  });
+}
+
+class MonthlyBudgetReportItem {
+  final String budgetId;
+  final String categoryId;
+  final String categoryName;
+  final String monthIso;
+  final int limitCents;
+  final int spentCents;
+  final int remainingCents;
+  final int percentUsed;
+  final bool isOverBudget;
+  final bool rolloverEnabled;
+
+  const MonthlyBudgetReportItem({
+    required this.budgetId,
+    required this.categoryId,
+    required this.categoryName,
+    required this.monthIso,
+    required this.limitCents,
+    required this.spentCents,
+    required this.remainingCents,
+    required this.percentUsed,
+    required this.isOverBudget,
+    required this.rolloverEnabled,
+  });
+}
+
+class MonthlyBudgetProgressReport {
+  final String monthIso;
+  final int totalLimitCents;
+  final int totalSpentCents;
+  final List<MonthlyBudgetReportItem> items;
+
+  const MonthlyBudgetProgressReport({
+    required this.monthIso,
+    required this.totalLimitCents,
+    required this.totalSpentCents,
+    required this.items,
+  });
+}
+
+class AlignedBalanceSheetReport {
+  final String planningPeriodEndIso;
+  final int liquidCashCents;
+  final int vaultSavingsCents;
+  final int receivablesCents;
+  final int prepaidCardCreditCents;
+  final int shortTermCreditOwedCents;
+  final int activePayablesCents;
+  final int duePayablesCents;
+  final int netFinancialPositionCents;
+
+  const AlignedBalanceSheetReport({
+    required this.planningPeriodEndIso,
+    required this.liquidCashCents,
+    required this.vaultSavingsCents,
+    required this.receivablesCents,
+    required this.prepaidCardCreditCents,
+    required this.shortTermCreditOwedCents,
+    required this.activePayablesCents,
+    required this.duePayablesCents,
+    required this.netFinancialPositionCents,
+  });
+}
+
 class DoubleEntryEngine {
   static const Set<String> _iso4217RecognizedCodes = {
     'AED',
@@ -2850,15 +3144,21 @@ class DoubleEntryEngine {
           !(classifications[p.entryId]?.isEligibleEtb ?? false)) {
         continue;
       }
-      final catId = p.categoryId;
-      if (catId == null) continue;
+      final rawCatId = p.categoryId;
+      if (rawCatId == null || rawCatId.trim().isEmpty) continue;
       if (entry.occurrenceDate.compareTo(startDateIso) < 0 ||
           entry.occurrenceDate.compareTo(endDateIso) > 0) {
         continue;
       }
 
-      if (categoryTypes != null) {
-        final type = categoryTypes[catId];
+      final matchedCat = categories == null
+          ? null
+          : findCategoryByIdOrAlias(categories, rawCatId);
+      final bucketId = matchedCat?.id ?? resolveCanonicalCategoryId(rawCatId);
+
+      if (matchedCat != null && matchedCat.type != 'expense') continue;
+      if (matchedCat == null && categoryTypes != null) {
+        final type = categoryTypes[bucketId] ?? categoryTypes[rawCatId];
         if (type != null && type != 'expense') continue;
       }
       if (accountTypes != null) {
@@ -2874,16 +3174,27 @@ class DoubleEntryEngine {
       final delta = p.direction == PostingDirection.debit
           ? p.amountCents
           : -p.amountCents;
-      totals[catId] = (totals[catId] ?? 0) + delta;
+      totals[bucketId] = (totals[bucketId] ?? 0) + delta;
     }
 
     if (rollupToParents && categories != null) {
-      final parentById = {for (final c in categories) c.id: c.parentId};
+      String? resolveParentBucketId(String catId) {
+        final cat = findCategoryByIdOrAlias(categories, catId);
+        final rawParent = cat?.parentId;
+        if (rawParent == null || rawParent.trim().isEmpty) return null;
+        final matchedParent = findCategoryByIdOrAlias(categories, rawParent);
+        return matchedParent?.id ?? resolveCanonicalCategoryId(rawParent);
+      }
+
       final rolledUp = Map<String, int>.from(totals);
       for (final entry in totals.entries) {
-        final parentId = parentById[entry.key];
-        if (parentId != null && parentId.isNotEmpty) {
+        if (entry.value == 0) continue;
+        final visited = <String>{entry.key};
+        var parentId = resolveParentBucketId(entry.key);
+        while (parentId != null && !visited.contains(parentId)) {
+          visited.add(parentId);
           rolledUp[parentId] = (rolledUp[parentId] ?? 0) + entry.value;
+          parentId = resolveParentBucketId(parentId);
         }
       }
       return rolledUp;
@@ -4152,5 +4463,704 @@ class DoubleEntryEngine {
       'postings': refundPostings,
       'summary': summary,
     };
+  }
+
+  // --------------------------------------------------------------------------
+  // Stage F4: Reporting, Period Comparison, Hierarchical Category Spend &
+  // Consolidated Position Builders
+  // --------------------------------------------------------------------------
+
+  static int getSavingsGoalEffectiveBalance({
+    required SavingsGoalModel goal,
+    required List<AccountModel> accounts,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+  }) {
+    if (!goal.isVaultLinked) {
+      return max(0, goal.currentAllocatedCents);
+    }
+    final vaultMatches = accounts.where((a) => a.id == goal.linkedAccountId);
+    if (vaultMatches.isEmpty) {
+      return max(0, goal.currentAllocatedCents);
+    }
+    return max(
+      0,
+      calculateAccountBalance(
+        account: vaultMatches.first,
+        postings: postings,
+        entries: entries,
+      ),
+    );
+  }
+
+  static SafePercentageChangeResult calculateSafePercentageChange(
+    int previousCents,
+    int currentCents,
+  ) {
+    if (previousCents == 0 && currentCents == 0) {
+      return const SafePercentageChangeResult(
+        percentageChange: 0,
+        percentageDisplay: '0.0%',
+      );
+    }
+    if (previousCents == 0) {
+      if (currentCents > 0) {
+        return const SafePercentageChangeResult(
+          percentageChange: 100,
+          percentageDisplay: '+100% (New)',
+        );
+      }
+      return const SafePercentageChangeResult(
+        percentageChange: -100,
+        percentageDisplay: '-100%',
+      );
+    }
+    final change = ((currentCents - previousCents) / previousCents.abs()) * 100;
+    final sign = change > 0 ? '+' : '';
+    final rounded = (change * 10).roundToDouble() / 10;
+    return SafePercentageChangeResult(
+      percentageChange: rounded,
+      percentageDisplay: '$sign${change.toStringAsFixed(1)}%',
+    );
+  }
+
+  static ResolvedReportPeriod resolveReportPeriodWithComparison({
+    required ReportPeriodMode mode,
+    int? ethYear,
+    int? ethMonth,
+    String? customStartIso,
+    String? customEndIso,
+    String? todayIso,
+  }) {
+    final today =
+        CalendarDate.tryParse(todayIso) ?? CalendarDate.today();
+
+    if (mode == ReportPeriodMode.thisMonth) {
+      final currStart = today.startOfGregorianMonth;
+      final currEnd = today.endOfGregorianMonth;
+      final prevRef = today.previousGregorianMonth();
+      final prevStart = prevRef.startOfGregorianMonth;
+      final prevEnd = prevRef.endOfGregorianMonth;
+      return ResolvedReportPeriod(
+        mode: ReportPeriodMode.thisMonth,
+        currentStart: currStart.toIsoString(),
+        currentEnd: currEnd.toIsoString(),
+        previousStart: prevStart.toIsoString(),
+        previousEnd: prevEnd.toIsoString(),
+        label: '${today.gregorianFullMonthName} ${today.year}',
+        baselineLabel: '${prevRef.gregorianFullMonthName} ${prevRef.year}',
+        daysInCurrent: currEnd.differenceInDays(currStart) + 1,
+        daysInPrevious: prevEnd.differenceInDays(prevStart) + 1,
+      );
+    }
+
+    if (mode == ReportPeriodMode.ethiopianMonth) {
+      final ethToday = today.toEthiopian();
+      final y = ethYear ?? ethToday.year;
+      final rawM = ethMonth ?? ethToday.month;
+      final m = rawM < 1 ? 1 : (rawM > 13 ? 13 : rawM);
+      final ethStart = EthiopianDate(year: y, month: m, day: 1);
+      final ethEnd = ethStart.endOfMonth;
+      final prevEthStart = ethStart.previousMonth().startOfMonth;
+      final prevEthEnd = prevEthStart.endOfMonth;
+      final currStartCal = ethStart.toCalendarDate();
+      final currEndCal = ethEnd.toCalendarDate();
+      final prevStartCal = prevEthStart.toCalendarDate();
+      final prevEndCal = prevEthEnd.toCalendarDate();
+      return ResolvedReportPeriod(
+        mode: ReportPeriodMode.ethiopianMonth,
+        currentStart: currStartCal.toIsoString(),
+        currentEnd: currEndCal.toIsoString(),
+        previousStart: prevStartCal.toIsoString(),
+        previousEnd: prevEndCal.toIsoString(),
+        label:
+            '${ethStart.englishMonthName} (${ethStart.amharicMonthName}) $y E.C.',
+        baselineLabel:
+            '${prevEthStart.englishMonthName} ${prevEthStart.year} E.C.',
+        daysInCurrent: ethStart.daysInMonth,
+        daysInPrevious: prevEthStart.daysInMonth,
+      );
+    }
+
+    if (mode == ReportPeriodMode.last30Days) {
+      final currStart = today.subtractDays(29);
+      final currEnd = today;
+      final prevEnd = currStart.subtractDays(1);
+      final prevStart = prevEnd.subtractDays(29);
+      return ResolvedReportPeriod(
+        mode: ReportPeriodMode.last30Days,
+        currentStart: currStart.toIsoString(),
+        currentEnd: currEnd.toIsoString(),
+        previousStart: prevStart.toIsoString(),
+        previousEnd: prevEnd.toIsoString(),
+        label:
+            'Last 30 Days (${currStart.toIsoString()} - ${currEnd.toIsoString()})',
+        baselineLabel:
+            'Prior 30 Days (${prevStart.toIsoString()} - ${prevEnd.toIsoString()})',
+        daysInCurrent: 30,
+        daysInPrevious: 30,
+      );
+    }
+
+    if (mode == ReportPeriodMode.thisYear) {
+      final currStart = CalendarDate(year: today.year, month: 1, day: 1);
+      final currEnd = CalendarDate(year: today.year, month: 12, day: 31);
+      final prevStart = CalendarDate(year: today.year - 1, month: 1, day: 1);
+      final prevEnd = CalendarDate(year: today.year - 1, month: 12, day: 31);
+      return ResolvedReportPeriod(
+        mode: ReportPeriodMode.thisYear,
+        currentStart: currStart.toIsoString(),
+        currentEnd: currEnd.toIsoString(),
+        previousStart: prevStart.toIsoString(),
+        previousEnd: prevEnd.toIsoString(),
+        label: 'Gregorian Year ${today.year}',
+        baselineLabel: 'Gregorian Year ${today.year - 1}',
+        daysInCurrent: currEnd.differenceInDays(currStart) + 1,
+        daysInPrevious: prevEnd.differenceInDays(prevStart) + 1,
+      );
+    }
+
+    final parsedStart =
+        CalendarDate.tryParse(customStartIso) ?? today.subtractDays(29);
+    final parsedEnd = CalendarDate.tryParse(customEndIso) ?? today;
+    final startCal = parsedStart.isAfter(parsedEnd) ? parsedEnd : parsedStart;
+    final endCal = parsedStart.isAfter(parsedEnd) ? parsedStart : parsedEnd;
+    final nDays = endCal.differenceInDays(startCal) + 1;
+    final prevEnd = startCal.subtractDays(1);
+    final prevStart = prevEnd.subtractDays(nDays - 1);
+
+    return ResolvedReportPeriod(
+      mode: ReportPeriodMode.custom,
+      currentStart: startCal.toIsoString(),
+      currentEnd: endCal.toIsoString(),
+      previousStart: prevStart.toIsoString(),
+      previousEnd: prevEnd.toIsoString(),
+      label: '${startCal.toIsoString()} to ${endCal.toIsoString()}',
+      baselineLabel:
+          'Prior ${nDays}d (${prevStart.toIsoString()} - ${prevEnd.toIsoString()})',
+      daysInCurrent: nDays,
+      daysInPrevious: nDays,
+    );
+  }
+
+  static MetricComparisonDelta _buildMetricDelta(
+    int previousCents,
+    int currentCents, {
+    required bool higherIsBetter,
+  }) {
+    final deltaCents = currentCents - previousCents;
+    final pct = calculateSafePercentageChange(previousCents, currentCents);
+    bool? isPositiveOutcome;
+    if (deltaCents != 0) {
+      isPositiveOutcome = higherIsBetter ? deltaCents > 0 : deltaCents < 0;
+    }
+    return MetricComparisonDelta(
+      currentCents: currentCents,
+      previousCents: previousCents,
+      deltaCents: deltaCents,
+      percentageChange: pct.percentageChange,
+      percentageDisplay: pct.percentageDisplay,
+      isPositiveOutcome: isPositiveOutcome,
+    );
+  }
+
+  static PeriodComparisonReport calculatePeriodComparisonReport({
+    required ResolvedReportPeriod period,
+    required List<AccountModel> accounts,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    List<DebtModel>? debts,
+    List<SettlementAllocationModel>? allocations,
+  }) {
+    final currentOccurrence = calculateOccurrencePnlTotals(
+      accounts: accounts,
+      postings: postings,
+      entries: entries,
+      startDateIso: period.currentStart,
+      endDateIso: period.currentEnd,
+      debts: debts,
+      allocations: allocations,
+    );
+    final previousOccurrence = calculateOccurrencePnlTotals(
+      accounts: accounts,
+      postings: postings,
+      entries: entries,
+      startDateIso: period.previousStart,
+      endDateIso: period.previousEnd,
+      debts: debts,
+      allocations: allocations,
+    );
+    final currentLiquidCash = calculateLiquidCashflowTotals(
+      accounts: accounts,
+      postings: postings,
+      entries: entries,
+      startDateIso: period.currentStart,
+      endDateIso: period.currentEnd,
+      debts: debts,
+      allocations: allocations,
+    );
+    final previousLiquidCash = calculateLiquidCashflowTotals(
+      accounts: accounts,
+      postings: postings,
+      entries: entries,
+      startDateIso: period.previousStart,
+      endDateIso: period.previousEnd,
+      debts: debts,
+      allocations: allocations,
+    );
+
+    return PeriodComparisonReport(
+      period: period,
+      currentOccurrence: currentOccurrence,
+      previousOccurrence: previousOccurrence,
+      currentLiquidCash: currentLiquidCash,
+      previousLiquidCash: previousLiquidCash,
+      occurrenceIncome: _buildMetricDelta(
+        previousOccurrence.incomeCents,
+        currentOccurrence.incomeCents,
+        higherIsBetter: true,
+      ),
+      occurrenceExpense: _buildMetricDelta(
+        previousOccurrence.expenseCents,
+        currentOccurrence.expenseCents,
+        higherIsBetter: false,
+      ),
+      occurrenceNet: _buildMetricDelta(
+        previousOccurrence.netCashflowCents,
+        currentOccurrence.netCashflowCents,
+        higherIsBetter: true,
+      ),
+      cashInflow: _buildMetricDelta(
+        previousLiquidCash.inflowCents,
+        currentLiquidCash.inflowCents,
+        higherIsBetter: true,
+      ),
+      cashOutflow: _buildMetricDelta(
+        previousLiquidCash.outflowCents,
+        currentLiquidCash.outflowCents,
+        higherIsBetter: false,
+      ),
+      cashNet: _buildMetricDelta(
+        previousLiquidCash.netCashflowCents,
+        currentLiquidCash.netCashflowCents,
+        higherIsBetter: true,
+      ),
+    );
+  }
+
+  static CanonicalCategorySpendReport calculateCanonicalCategorySpend({
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    required List<AccountModel> accounts,
+    required List<TransactionCategoryModel> categories,
+    List<DebtModel>? debts,
+    List<SettlementAllocationModel>? allocations,
+    required String startDateIso,
+    required String endDateIso,
+  }) {
+    final accountById = {for (final a in accounts) a.id: a};
+    final entryById = {for (final e in entries) e.id: e};
+    final classifications = classifyAllEntries(
+      accounts: accounts,
+      entries: entries,
+      postings: postings,
+      debts: debts,
+      allocations: allocations,
+    );
+
+    final categoryMeta = <String, TransactionCategoryModel>{};
+    for (final entry in kCanonicalCategoryFallbacks.entries) {
+      categoryMeta[entry.key] = TransactionCategoryModel(
+        id: entry.key,
+        name: entry.value.name,
+        type: entry.value.type,
+        isDefault: true,
+      );
+    }
+    for (final c in categories) {
+      categoryMeta[c.id] = c;
+    }
+
+    final directSpend = <String, int>{};
+    for (final p in postings) {
+      final entry = entryById[p.entryId];
+      if (entry == null || entry.isVoided) continue;
+      if (!(classifications[entry.id]?.isEligibleEtb ?? false)) continue;
+      if (entry.occurrenceDate.compareTo(startDateIso) < 0 ||
+          entry.occurrenceDate.compareTo(endDateIso) > 0) {
+        continue;
+      }
+      final acc = accountById[p.accountId];
+      final isExpenseAcc = acc != null
+          ? acc.type == AccountType.expense
+          : p.accountId == SystemControlAccounts.expense;
+      if (!isExpenseAcc) continue;
+
+      final netExpense = p.direction == PostingDirection.debit
+          ? p.amountCents
+          : -p.amountCents;
+      final rawCatId = (p.categoryId != null && p.categoryId!.trim().isNotEmpty)
+          ? p.categoryId!.trim()
+          : SystemControlAccounts.canonicalDefaultExpenseCategoryId;
+      final matched = findCategoryByIdOrAlias(categories, rawCatId);
+      final bucketId = matched?.id ?? resolveCanonicalCategoryId(rawCatId);
+      directSpend[bucketId] = (directSpend[bucketId] ?? 0) + netExpense;
+    }
+
+    final totalExpenseCents =
+        directSpend.values.fold<int>(0, (sum, val) => sum + val);
+
+    String? resolveParentCanonicalId(String catId) {
+      final cat =
+          categoryMeta[catId] ?? findCategoryByIdOrAlias(categories, catId);
+      final rawParent = cat?.parentId;
+      if (rawParent == null || rawParent.trim().isEmpty) return null;
+      final matchedParent = findCategoryByIdOrAlias(categories, rawParent);
+      return matchedParent?.id ?? resolveCanonicalCategoryId(rawParent);
+    }
+
+    final rollupSpend = Map<String, int>.from(directSpend);
+    for (final entry in directSpend.entries) {
+      if (entry.value == 0) continue;
+      final visited = <String>{entry.key};
+      var currParentId = resolveParentCanonicalId(entry.key);
+      while (currParentId != null && !visited.contains(currParentId)) {
+        visited.add(currParentId);
+        rollupSpend[currParentId] =
+            (rollupSpend[currParentId] ?? 0) + entry.value;
+        currParentId = resolveParentCanonicalId(currParentId);
+      }
+    }
+
+    final allBucketIds = <String>{
+      ...directSpend.keys,
+      ...rollupSpend.keys,
+    };
+    final childrenByParent = <String, List<String>>{};
+    for (final id in allBucketIds) {
+      if ((rollupSpend[id] ?? 0) <= 0 && (directSpend[id] ?? 0) <= 0) {
+        continue;
+      }
+      final parentId = resolveParentCanonicalId(id);
+      if (parentId != null &&
+          allBucketIds.contains(parentId) &&
+          parentId != id) {
+        childrenByParent.putIfAbsent(parentId, () => []).add(id);
+      }
+    }
+
+    final denominator = max(0, totalExpenseCents);
+    CategorySpendRow buildRow(String id, int depth, Set<String> seen) {
+      final cat = categoryMeta[id] ?? findCategoryByIdOrAlias(categories, id);
+      final parentId = resolveParentCanonicalId(id);
+      final direct = directSpend[id] ?? 0;
+      final rollup = rollupSpend[id] ?? direct;
+      final ratio = denominator > 0 ? max(0.0, rollup / denominator) : 0.0;
+      final childIds = (!seen.contains(id) && depth < 4)
+          ? (childrenByParent[id] ?? const <String>[])
+          : const <String>[];
+      final nextSeen = {...seen, id};
+      final children = childIds
+          .map((cid) => buildRow(cid, depth + 1, nextSeen))
+          .where((c) => c.rollupCents > 0)
+          .toList()
+        ..sort((a, b) => b.rollupCents.compareTo(a.rollupCents));
+
+      return CategorySpendRow(
+        categoryId: id,
+        categoryName:
+            cat?.name ?? resolveCategoryDisplayName(categories, id),
+        parentId: parentId,
+        directCents: direct,
+        rollupCents: rollup,
+        sharePercent: denominator > 0 ? (ratio * 100).round() : 0,
+        exactShareRatio: ratio,
+        isArchived: cat?.isArchived ?? false,
+        children: List<CategorySpendRow>.unmodifiable(children),
+      );
+    }
+
+    final topRows = <CategorySpendRow>[];
+    for (final id in allBucketIds) {
+      final rollup = rollupSpend[id] ?? 0;
+      if (rollup <= 0) continue;
+      final parentId = resolveParentCanonicalId(id);
+      if (parentId == null ||
+          parentId == id ||
+          !allBucketIds.contains(parentId) ||
+          (rollupSpend[parentId] ?? 0) <= 0) {
+        topRows.add(buildRow(id, 0, const <String>{}));
+      }
+    }
+    topRows.sort((a, b) => b.rollupCents.compareTo(a.rollupCents));
+
+    return CanonicalCategorySpendReport(
+      startDate: startDateIso,
+      endDate: endDateIso,
+      totalExpenseCents: totalExpenseCents,
+      directSpendByCategoryId: Map<String, int>.unmodifiable(directSpend),
+      rollupSpendByCategoryId: Map<String, int>.unmodifiable(rollupSpend),
+      rows: List<CategorySpendRow>.unmodifiable(topRows),
+    );
+  }
+
+  static int getCanonicalBudgetSpentCents(
+    CanonicalCategorySpendReport spendReport,
+    String budgetCategoryId,
+    List<TransactionCategoryModel> categories,
+  ) {
+    final matched = findCategoryByIdOrAlias(categories, budgetCategoryId);
+    final resolvedId =
+        matched?.id ?? resolveCanonicalCategoryId(budgetCategoryId);
+    return spendReport.rollupSpendByCategoryId[resolvedId] ??
+        spendReport.directSpendByCategoryId[resolvedId] ??
+        0;
+  }
+
+  static AccountBalancesReport buildAccountBalancesReport({
+    required List<AccountModel> accounts,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+  }) {
+    final liquidAccounts = <AccountBalanceReportItem>[];
+    final vaultAccounts = <AccountBalanceReportItem>[];
+    final creditCardAccounts = <AccountBalanceReportItem>[];
+    final nonEtbReviewAccounts = <AccountBalanceReportItem>[];
+    var archivedCount = 0;
+
+    for (final acc in accounts) {
+      if (acc.isSystem) continue;
+      if (acc.isArchived) {
+        archivedCount += 1;
+        continue;
+      }
+      final tier = classifyCurrencyCode(acc.currencyCode);
+      final normCurrency = normalizeCurrencyCode(acc.currencyCode);
+      final bal = calculateAccountBalance(
+        account: acc,
+        postings: postings,
+        entries: entries,
+      );
+      final item = AccountBalanceReportItem(
+        accountId: acc.id,
+        name: acc.name,
+        type: acc.type,
+        subType: acc.subType,
+        currencyCode: normCurrency.isEmpty ? 'UNVERIFIED' : normCurrency,
+        balanceCents: bal,
+        owedCents: acc.type == AccountType.liability && bal > 0 ? bal : 0,
+        prepaidCents: acc.type == AccountType.liability && bal < 0 ? -bal : 0,
+        isArchived: acc.isArchived,
+        currencyTier: tier,
+      );
+
+      if (tier != CurrencyValidationTier.verifiedEtb) {
+        nonEtbReviewAccounts.add(item);
+        continue;
+      }
+
+      if (acc.type == AccountType.asset) {
+        if (acc.subType.isSavingsVault) {
+          vaultAccounts.add(item);
+        } else if (acc.subType != AccountSubType.receivable &&
+            !acc.name.toLowerCase().contains('receivable')) {
+          liquidAccounts.add(item);
+        }
+      } else if (acc.type == AccountType.liability && acc.subType.isCreditCard) {
+        creditCardAccounts.add(item);
+      }
+    }
+
+    return AccountBalancesReport(
+      liquidAccounts: List<AccountBalanceReportItem>.unmodifiable(liquidAccounts),
+      vaultAccounts: List<AccountBalanceReportItem>.unmodifiable(vaultAccounts),
+      creditCardAccounts:
+          List<AccountBalanceReportItem>.unmodifiable(creditCardAccounts),
+      nonEtbReviewAccounts:
+          List<AccountBalanceReportItem>.unmodifiable(nonEtbReviewAccounts),
+      archivedCount: archivedCount,
+      liquidTotalCents:
+          liquidAccounts.fold<int>(0, (s, a) => s + a.balanceCents),
+      vaultTotalCents:
+          vaultAccounts.fold<int>(0, (s, a) => s + a.balanceCents),
+      creditCardOwedTotalCents:
+          creditCardAccounts.fold<int>(0, (s, a) => s + a.owedCents),
+      prepaidCardCreditTotalCents:
+          creditCardAccounts.fold<int>(0, (s, a) => s + a.prepaidCents),
+    );
+  }
+
+  static SavingsVaultsReport buildSavingsVaultsAndGoalsReport({
+    required List<AccountModel> accounts,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    required List<SavingsGoalModel> savingsGoals,
+  }) {
+    final accountById = {for (final a in accounts) a.id: a};
+    final balances = buildAccountBalancesReport(
+      accounts: accounts,
+      entries: entries,
+      postings: postings,
+    );
+
+    final goals = savingsGoals.map((g) {
+      final linkedAcc =
+          g.linkedAccountId != null ? accountById[g.linkedAccountId] : null;
+      final isVaultLinked = g.isVaultLinked;
+      final isExcludedNonEtbVault = isVaultLinked &&
+          (linkedAcc == null ||
+              !isActiveVerifiedEtbAccount(linkedAcc) ||
+              !linkedAcc.subType.isSavingsVault);
+      final allocatedCents = getSavingsGoalEffectiveBalance(
+        goal: g,
+        accounts: accounts,
+        entries: entries,
+        postings: postings,
+      );
+      final remainingCents = max(0, g.targetCents - allocatedCents);
+      final percentComplete = g.targetCents > 0
+          ? min(100, ((allocatedCents / g.targetCents) * 100).round())
+          : 0;
+      return SavingsGoalReportItem(
+        goalId: g.id,
+        title: g.title,
+        targetCents: g.targetCents,
+        allocatedCents: allocatedCents,
+        remainingCents: remainingCents,
+        percentComplete: percentComplete,
+        targetDate: g.targetDate?.toIsoString(),
+        status: g.status,
+        linkedAccountId: g.linkedAccountId,
+        linkedAccountName: linkedAcc?.name,
+        isVaultLinked: isVaultLinked,
+        isExcludedNonEtbVault: isExcludedNonEtbVault,
+      );
+    }).toList(growable: false);
+
+    final activeNonExcluded = goals.where(
+      (g) => g.status != SavingsGoalStatus.archived && !g.isExcludedNonEtbVault,
+    );
+
+    return SavingsVaultsReport(
+      vaults: balances.vaultAccounts,
+      goals: List<SavingsGoalReportItem>.unmodifiable(goals),
+      totalVaultBalanceCents: balances.vaultTotalCents,
+      totalGoalTargetCents:
+          activeNonExcluded.fold<int>(0, (s, g) => s + g.targetCents),
+      totalGoalAllocatedCents:
+          activeNonExcluded.fold<int>(0, (s, g) => s + g.allocatedCents),
+    );
+  }
+
+  static String resolveActiveReportMonthIso({
+    required ReportPeriodMode mode,
+    required String startDateIso,
+    required String endDateIso,
+    String? todayIso,
+  }) {
+    final effectiveTodayIso = todayIso ?? CalendarDate.today().toIsoString();
+    if (mode == ReportPeriodMode.thisMonth ||
+        (startDateIso.length >= 7 &&
+            endDateIso.length >= 7 &&
+            startDateIso.substring(0, 7) == endDateIso.substring(0, 7))) {
+      return startDateIso.substring(0, 7);
+    }
+    return effectiveTodayIso.substring(0, 7);
+  }
+
+  static MonthlyBudgetProgressReport buildMonthlyBudgetProgressReport({
+    required List<BudgetModel> budgets,
+    required List<TransactionCategoryModel> categories,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    required List<AccountModel> accounts,
+    List<DebtModel>? debts,
+    List<SettlementAllocationModel>? allocations,
+    required String monthIso,
+  }) {
+    final match = RegExp(r'^(\d{4})-(\d{2})$').firstMatch(monthIso.trim());
+    final today = CalendarDate.today();
+    final y = match != null ? int.parse(match.group(1)!) : today.year;
+    final rawM = match != null ? int.parse(match.group(2)!) : today.month;
+    final m = rawM < 1 ? 1 : (rawM > 12 ? 12 : rawM);
+    final bounds = CalendarDate.monthBounds(CalendarSystem.gregorian, y, m);
+
+    final spendReport = calculateCanonicalCategorySpend(
+      entries: entries,
+      postings: postings,
+      accounts: accounts,
+      categories: categories,
+      debts: debts,
+      allocations: allocations,
+      startDateIso: bounds.start.toIsoString(),
+      endDateIso: bounds.end.toIsoString(),
+    );
+
+    final matching = budgets.where((b) => b.monthIso == monthIso);
+    final items = matching.map((b) {
+      final spentCents = getCanonicalBudgetSpentCents(
+        spendReport,
+        b.categoryId,
+        categories,
+      );
+      final remainingCents = b.limitCents - spentCents;
+      final percentUsed = b.limitCents > 0
+          ? min(100, ((spentCents / b.limitCents) * 100).round())
+          : 0;
+      return MonthlyBudgetReportItem(
+        budgetId: b.id,
+        categoryId: b.categoryId,
+        categoryName: resolveCategoryDisplayName(categories, b.categoryId),
+        monthIso: b.monthIso,
+        limitCents: b.limitCents,
+        spentCents: spentCents,
+        remainingCents: remainingCents,
+        percentUsed: percentUsed,
+        isOverBudget: spentCents > b.limitCents,
+        rolloverEnabled: b.rolloverEnabled,
+      );
+    }).toList(growable: false);
+
+    return MonthlyBudgetProgressReport(
+      monthIso: monthIso,
+      totalLimitCents: items.fold<int>(0, (s, i) => s + i.limitCents),
+      totalSpentCents: items.fold<int>(0, (s, i) => s + i.spentCents),
+      items: List<MonthlyBudgetReportItem>.unmodifiable(items),
+    );
+  }
+
+  static AlignedBalanceSheetReport buildAlignedBalanceSheetReport({
+    required List<AccountModel> accounts,
+    required List<JournalEntryModel> entries,
+    required List<PostingModel> postings,
+    required List<DebtModel> debts,
+    List<SettlementAllocationModel>? allocations,
+    required AvailableToSpendBreakdown breakdown,
+  }) {
+    final activePayablesCents = calculateTotalPayables(
+      debts,
+      accounts: accounts,
+      entries: entries,
+      postings: postings,
+      allocations: allocations,
+    );
+    final netFinancialPositionCents = calculateNetPosition(
+      accounts: accounts,
+      postings: postings,
+      entries: entries,
+      debts: debts,
+      allocations: allocations ?? const [],
+    );
+    return AlignedBalanceSheetReport(
+      planningPeriodEndIso: breakdown.periodEndIso,
+      liquidCashCents: breakdown.liquidCashCents,
+      vaultSavingsCents: breakdown.vaultSavingsCents,
+      receivablesCents: breakdown.receivablesCents,
+      prepaidCardCreditCents: breakdown.prepaidCardCreditCents,
+      shortTermCreditOwedCents: breakdown.shortTermCreditOwedCents,
+      activePayablesCents: activePayablesCents,
+      duePayablesCents: breakdown.duePayablesCents,
+      netFinancialPositionCents: netFinancialPositionCents,
+    );
   }
 }

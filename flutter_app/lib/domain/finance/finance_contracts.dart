@@ -344,4 +344,10 @@ abstract class IFinanceRepository
     required CalendarDate periodEnd,
     required List<int> expectedFutureIncomeCents,
   });
+
+  /// Exports strictly Finance-module records as a Finance-only JSON string (`financeOnly: true`).
+  Future<String> exportFinanceOnlyJson();
+
+  /// Validates and atomically restores strictly Finance-module records from a Finance-only JSON string.
+  Future<void> importFinanceOnlyJson(String rawJson);
 }

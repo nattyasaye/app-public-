@@ -293,6 +293,81 @@ class FinanceExportService {
     return buffer.toString();
   }
 
+  static String exportCommitmentSettlementsCsv(
+    List<CommitmentSettlementModel> settlements,
+  ) {
+    final buffer = StringBuffer('\uFEFF');
+    buffer.writeln(
+      '"Settlement ID","Commitment ID","Entry ID","Amount Cents","Amount Decimal","Settled Date","Created At"',
+    );
+    for (final s in settlements) {
+      buffer.writeln(
+        '${_csvCell(s.id)},${_csvCell(s.commitmentId)},${_csvCell(s.entryId)},${s.amountCents},"${(s.amountCents / 100).toStringAsFixed(2)}",${_csvCell(s.settledDate.toIsoString())},${_csvCell(EthiopiaClock.toUtcIsoString(s.createdAt))}',
+      );
+    }
+    return buffer.toString();
+  }
+
+  static String exportSavingsGoalsCsv(List<SavingsGoalModel> goals) {
+    final buffer = StringBuffer('\uFEFF');
+    buffer.writeln(
+      '"Goal ID","Title","Target Cents","Target Decimal","Current Allocated Cents","Allocated Decimal","Target Date","Linked Account ID","Status"',
+    );
+    for (final g in goals) {
+      buffer.writeln(
+        '${_csvCell(g.id)},${_csvCell(g.title)},${g.targetCents},"${(g.targetCents / 100).toStringAsFixed(2)}",${g.currentAllocatedCents},"${(g.currentAllocatedCents / 100).toStringAsFixed(2)}",${_csvCell(g.targetDate?.toIsoString())},${_csvCell(g.linkedAccountId)},${_csvCell(g.status.name)}',
+      );
+    }
+    return buffer.toString();
+  }
+
+  static String exportTransactionsCsv(
+    List<TransactionModel> transactions, {
+    List<JournalEntryModel> entries = const [],
+  }) {
+    final entryByLegacyTxId = <String, String>{
+      for (final e in entries)
+        if (e.legacySourceTxId != null && e.legacySourceTxId!.isNotEmpty)
+          e.legacySourceTxId!: e.id,
+    };
+    final buffer = StringBuffer('\uFEFF');
+    buffer.writeln(
+      '"Transaction ID","Type","Amount Cents","Amount Decimal","Account ID","Destination Account ID","Category ID","Description","Transaction Date","Journal Entry ID","Is Superseded"',
+    );
+    for (final t in transactions) {
+      final desc = t.note ?? t.payee ?? t.categoryName;
+      buffer.writeln(
+        '${_csvCell(t.id)},${_csvCell(t.type)},${t.amountCents},"${(t.amountCents / 100).toStringAsFixed(2)}",${_csvCell(t.accountId)},${_csvCell(t.destinationAccountId)},${_csvCell(t.categoryId)},${_csvCell(desc)},${_csvCell(t.transactionDate.toIsoString())},${_csvCell(entryByLegacyTxId[t.id])},${t.isSuperseded ? 'TRUE' : 'FALSE'}',
+      );
+    }
+    return buffer.toString();
+  }
+
+  static List<TransactionCategoryModel> _topologicalCategories(
+    List<TransactionCategoryModel> categories,
+  ) {
+    final byId = {for (final c in categories) c.id: c};
+    final visited = <String>{};
+    final visiting = <String>{};
+    final ordered = <TransactionCategoryModel>[];
+
+    void visit(TransactionCategoryModel cat) {
+      if (visited.contains(cat.id) || visiting.contains(cat.id)) return;
+      visiting.add(cat.id);
+      if (cat.parentId != null && byId.containsKey(cat.parentId)) {
+        visit(byId[cat.parentId]!);
+      }
+      visiting.remove(cat.id);
+      visited.add(cat.id);
+      ordered.add(cat);
+    }
+
+    for (final c in categories) {
+      visit(c);
+    }
+    return ordered;
+  }
+
   static String exportSqliteAnalyticalScript({
     required List<AccountModel> accounts,
     required List<PartyModel> parties,
@@ -303,6 +378,10 @@ class FinanceExportService {
     List<TransactionCategoryModel> categories = const [],
     List<BudgetModel> budgets = const [],
     List<RecurringRuleModel> recurringRules = const [],
+    List<CommitmentModel> commitments = const [],
+    List<CommitmentSettlementModel> commitmentSettlements = const [],
+    List<SavingsGoalModel> savingsGoals = const [],
+    List<TransactionModel> transactions = const [],
   }) {
     final buffer = StringBuffer();
     buffer.writeln(
@@ -314,10 +393,10 @@ class FinanceExportService {
     buffer.writeln('PRAGMA foreign_keys = ON;\n');
 
     buffer.writeln(
-      'CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, sub_type TEXT NOT NULL, is_system INTEGER NOT NULL, currency_code TEXT NOT NULL, is_archived INTEGER NOT NULL, opening_balance_cents INTEGER NOT NULL, opening_balance_date TEXT NOT NULL, created_at TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS accounts (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, sub_type TEXT NOT NULL, is_system INTEGER NOT NULL, currency_code TEXT NOT NULL, is_archived INTEGER NOT NULL, opening_balance_cents INTEGER NOT NULL, opening_balance_date TEXT, created_at TEXT NOT NULL);',
     );
     buffer.writeln(
-      'CREATE TABLE IF NOT EXISTS categories (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, parent_id TEXT, color_hex TEXT NOT NULL, sort_order INTEGER NOT NULL, is_default INTEGER NOT NULL, is_archived INTEGER NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS categories (id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, parent_id TEXT REFERENCES categories(id), color_hex TEXT NOT NULL, sort_order INTEGER NOT NULL, is_default INTEGER NOT NULL, is_archived INTEGER NOT NULL);',
     );
     buffer.writeln(
       'CREATE TABLE IF NOT EXISTS parties (id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT, notes TEXT, is_archived INTEGER NOT NULL, created_at TEXT NOT NULL);',
@@ -326,19 +405,31 @@ class FinanceExportService {
       'CREATE TABLE IF NOT EXISTS journal_entries (id TEXT PRIMARY KEY, entry_type TEXT NOT NULL, description TEXT NOT NULL, occurrence_date TEXT NOT NULL, is_voided INTEGER NOT NULL, void_reason TEXT, corrected_from_entry_id TEXT, legacy_source_tx_id TEXT, created_at TEXT NOT NULL);',
     );
     buffer.writeln(
-      'CREATE TABLE IF NOT EXISTS postings (id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, account_id TEXT NOT NULL, amount_cents INTEGER NOT NULL, direction TEXT NOT NULL, account_movement_date TEXT NOT NULL, category_id TEXT, note TEXT);',
+      'CREATE TABLE IF NOT EXISTS postings (id TEXT PRIMARY KEY, entry_id TEXT NOT NULL REFERENCES journal_entries(id), account_id TEXT NOT NULL REFERENCES accounts(id), amount_cents INTEGER NOT NULL, direction TEXT NOT NULL, account_movement_date TEXT NOT NULL, category_id TEXT, note TEXT);',
     );
     buffer.writeln(
-      'CREATE TABLE IF NOT EXISTS debts (id TEXT PRIMARY KEY, origin_entry_id TEXT NOT NULL, party_id TEXT NOT NULL, debt_type TEXT NOT NULL, principal_cents INTEGER NOT NULL, outstanding_cents INTEGER NOT NULL, due_date TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS debts (id TEXT PRIMARY KEY, origin_entry_id TEXT NOT NULL REFERENCES journal_entries(id), party_id TEXT NOT NULL REFERENCES parties(id), debt_type TEXT NOT NULL, principal_cents INTEGER NOT NULL, outstanding_cents INTEGER NOT NULL, due_date TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL);',
     );
     buffer.writeln(
-      'CREATE TABLE IF NOT EXISTS settlement_allocations (id TEXT PRIMARY KEY, settlement_entry_id TEXT NOT NULL, debt_id TEXT NOT NULL, allocated_cents INTEGER NOT NULL, settlement_date TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS settlement_allocations (id TEXT PRIMARY KEY, settlement_entry_id TEXT NOT NULL REFERENCES journal_entries(id), debt_id TEXT NOT NULL REFERENCES debts(id), allocated_cents INTEGER NOT NULL, settlement_date TEXT NOT NULL);',
     );
     buffer.writeln(
-      'CREATE TABLE IF NOT EXISTS budgets (id TEXT PRIMARY KEY, category_id TEXT NOT NULL, month_iso TEXT NOT NULL, limit_cents INTEGER NOT NULL, rollover_enabled INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);',
+      'CREATE TABLE IF NOT EXISTS commitments (id TEXT PRIMARY KEY, title TEXT NOT NULL, direction TEXT NOT NULL, amount_cents INTEGER NOT NULL, due_date TEXT NOT NULL, is_paid INTEGER NOT NULL, linked_account_id TEXT, category_id TEXT, linked_debt_id TEXT, settlement_entry_id TEXT, recurring_rule_id TEXT, legacy_paid_unverified INTEGER NOT NULL);',
     );
     buffer.writeln(
-      'CREATE TABLE IF NOT EXISTS recurring_rules (id TEXT PRIMARY KEY, title TEXT NOT NULL, rule_type TEXT NOT NULL, amount_cents INTEGER NOT NULL, frequency TEXT NOT NULL, interval INTEGER NOT NULL, start_date TEXT NOT NULL, next_occurrence_date TEXT NOT NULL, end_date TEXT, account_id TEXT, destination_account_id TEXT, category_id TEXT, linked_debt_id TEXT, is_active INTEGER NOT NULL, auto_post INTEGER NOT NULL, created_at TEXT NOT NULL);\n',
+      'CREATE TABLE IF NOT EXISTS commitment_settlements (id TEXT PRIMARY KEY, commitment_id TEXT NOT NULL REFERENCES commitments(id), entry_id TEXT NOT NULL REFERENCES journal_entries(id), amount_cents INTEGER NOT NULL, settled_date TEXT NOT NULL, created_at TEXT NOT NULL);',
+    );
+    buffer.writeln(
+      'CREATE TABLE IF NOT EXISTS savings_goals (id TEXT PRIMARY KEY, title TEXT NOT NULL, target_cents INTEGER NOT NULL, current_allocated_cents INTEGER NOT NULL, target_date TEXT, linked_account_id TEXT, status TEXT NOT NULL, created_at TEXT NOT NULL);',
+    );
+    buffer.writeln(
+      'CREATE TABLE IF NOT EXISTS budgets (id TEXT PRIMARY KEY, category_id TEXT NOT NULL REFERENCES categories(id), month_iso TEXT NOT NULL, limit_cents INTEGER NOT NULL, rollover_enabled INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);',
+    );
+    buffer.writeln(
+      'CREATE TABLE IF NOT EXISTS recurring_rules (id TEXT PRIMARY KEY, title TEXT NOT NULL, rule_type TEXT NOT NULL, amount_cents INTEGER NOT NULL, frequency TEXT NOT NULL, interval INTEGER NOT NULL, start_date TEXT NOT NULL, next_occurrence_date TEXT NOT NULL, end_date TEXT, account_id TEXT, destination_account_id TEXT, category_id TEXT, linked_debt_id TEXT, is_active INTEGER NOT NULL, auto_post INTEGER NOT NULL, created_at TEXT NOT NULL);',
+    );
+    buffer.writeln(
+      'CREATE TABLE IF NOT EXISTS transactions (id TEXT PRIMARY KEY, type TEXT NOT NULL, amount_cents INTEGER NOT NULL, account_id TEXT, destination_account_id TEXT, category_id TEXT, description TEXT, transaction_date TEXT NOT NULL, journal_entry_id TEXT, is_superseded INTEGER NOT NULL);\n',
     );
 
     buffer.writeln(
@@ -348,9 +439,17 @@ class FinanceExportService {
       'CREATE VIEW IF NOT EXISTS view_occurrence_pnl AS SELECT j.occurrence_date, c.name AS category_name, a.type AS account_type, j.description, p.amount_cents, ROUND(p.amount_cents / 100.0, 2) AS amount_decimal FROM postings p JOIN accounts a ON p.account_id = a.id JOIN journal_entries j ON p.entry_id = j.id LEFT JOIN categories c ON p.category_id = c.id WHERE a.type IN (\'income\', \'expense\') AND j.is_voided = 0 AND (SELECT COUNT(*) FROM postings pc WHERE pc.entry_id = j.id) >= 2 AND NOT EXISTS (SELECT 1 FROM postings px LEFT JOIN accounts ax ON px.account_id = ax.id WHERE px.entry_id = j.id AND (px.account_id = \'acc-sys-legacy-offset\' OR ax.id IS NULL OR (ax.type IN (\'asset\', \'liability\') AND LOWER(COALESCE(ax.name, \'\')) NOT LIKE \'%receivable%\' AND LOWER(COALESCE(ax.name, \'\')) NOT LIKE \'%payable%\' AND UPPER(TRIM(COALESCE(ax.currency_code, \'\'))) != \'ETB\'))) AND (EXISTS (SELECT 1 FROM postings pr JOIN accounts ar ON pr.account_id = ar.id WHERE pr.entry_id = j.id AND ar.type IN (\'asset\', \'liability\') AND LOWER(COALESCE(ar.name, \'\')) NOT LIKE \'%receivable%\' AND LOWER(COALESCE(ar.name, \'\')) NOT LIKE \'%payable%\' AND UPPER(TRIM(COALESCE(ar.currency_code, \'\'))) = \'ETB\') OR EXISTS (SELECT 1 FROM debts d JOIN settlement_allocations sa ON sa.debt_id = d.id JOIN journal_entries sj ON sa.settlement_entry_id = sj.id JOIN postings sp ON sp.entry_id = sj.id JOIN accounts sax ON sp.account_id = sax.id WHERE d.origin_entry_id = j.id AND sj.is_voided = 0 AND sax.type IN (\'asset\', \'liability\') AND LOWER(COALESCE(sax.name, \'\')) NOT LIKE \'%receivable%\' AND LOWER(COALESCE(sax.name, \'\')) NOT LIKE \'%payable%\' AND UPPER(TRIM(COALESCE(sax.currency_code, \'\'))) = \'ETB\')) AND NOT EXISTS (SELECT 1 FROM debts d JOIN settlement_allocations sa ON sa.debt_id = d.id JOIN journal_entries sj ON sa.settlement_entry_id = sj.id JOIN postings sp ON sp.entry_id = sj.id JOIN accounts sax ON sp.account_id = sax.id WHERE d.origin_entry_id = j.id AND sj.is_voided = 0 AND sax.type IN (\'asset\', \'liability\') AND LOWER(COALESCE(sax.name, \'\')) NOT LIKE \'%receivable%\' AND LOWER(COALESCE(sax.name, \'\')) NOT LIKE \'%payable%\' AND UPPER(TRIM(COALESCE(sax.currency_code, \'\'))) != \'ETB\');',
     );
     buffer.writeln(
-      'CREATE VIEW IF NOT EXISTS view_cash_flow AS SELECT p.account_movement_date, a.name AS account_name, p.direction, CASE WHEN p.direction = \'debit\' THEN p.amount_cents ELSE 0 END AS inflow_cents, CASE WHEN p.direction = \'credit\' THEN p.amount_cents ELSE 0 END AS outflow_cents, ROUND(CASE WHEN p.direction = \'debit\' THEN p.amount_cents ELSE 0 END / 100.0, 2) AS inflow_decimal, ROUND(CASE WHEN p.direction = \'credit\' THEN p.amount_cents ELSE 0 END / 100.0, 2) AS outflow_decimal, j.description FROM postings p JOIN accounts a ON p.account_id = a.id JOIN journal_entries j ON p.entry_id = j.id WHERE a.type = \'asset\' AND a.sub_type NOT IN (\'receivable\', \'savings_vault\') AND LOWER(a.name) NOT LIKE \'%receivable%\' AND j.is_voided = 0 AND UPPER(TRIM(COALESCE(a.currency_code, \'\'))) = \'ETB\' AND (SELECT COUNT(*) FROM postings pc WHERE pc.entry_id = j.id) >= 2 AND NOT EXISTS (SELECT 1 FROM postings px LEFT JOIN accounts ax ON px.account_id = ax.id WHERE px.entry_id = j.id AND (px.account_id = \'acc-sys-legacy-offset\' OR ax.id IS NULL OR (ax.type IN (\'asset\', \'liability\') AND LOWER(COALESCE(ax.name, \'\')) NOT LIKE \'%receivable%\' AND LOWER(COALESCE(ax.name, \'\')) NOT LIKE \'%payable%\' AND UPPER(TRIM(COALESCE(ax.currency_code, \'\'))) != \'ETB\')));',
+      'CREATE VIEW IF NOT EXISTS view_cash_flow AS SELECT p.account_movement_date, a.name AS account_name, p.direction, CASE WHEN p.direction = \'debit\' THEN p.amount_cents ELSE 0 END AS inflow_cents, CASE WHEN p.direction = \'credit\' THEN p.amount_cents ELSE 0 END AS outflow_cents, ROUND(CASE WHEN p.direction = \'debit\' THEN p.amount_cents ELSE 0 END / 100.0, 2) AS inflow_decimal, ROUND(CASE WHEN p.direction = \'credit\' THEN p.amount_cents ELSE 0 END / 100.0, 2) AS outflow_decimal, j.description FROM postings p JOIN accounts a ON p.account_id = a.id JOIN journal_entries j ON p.entry_id = j.id WHERE a.type = \'asset\' AND a.is_system = 0 AND a.sub_type NOT IN (\'receivable\', \'savings_vault\') AND LOWER(a.name) NOT LIKE \'%receivable%\' AND j.is_voided = 0 AND UPPER(TRIM(COALESCE(a.currency_code, \'\'))) = \'ETB\' AND (SELECT COUNT(*) FROM postings pc WHERE pc.entry_id = j.id) >= 2 AND NOT EXISTS (SELECT 1 FROM postings px LEFT JOIN accounts ax ON px.account_id = ax.id WHERE px.entry_id = j.id AND (px.account_id = \'acc-sys-legacy-offset\' OR ax.id IS NULL OR (ax.type IN (\'asset\', \'liability\') AND LOWER(COALESCE(ax.name, \'\')) NOT LIKE \'%receivable%\' AND LOWER(COALESCE(ax.name, \'\')) NOT LIKE \'%payable%\' AND UPPER(TRIM(COALESCE(ax.currency_code, \'\'))) != \'ETB\')));',
     );
     buffer.writeln('');
+
+    final orderedCats = _topologicalCategories(categories);
+    final catIds = {for (final c in orderedCats) c.id};
+    final entryByLegacyTxId = <String, String>{
+      for (final e in entries)
+        if (e.legacySourceTxId != null && e.legacySourceTxId!.isNotEmpty)
+          e.legacySourceTxId!: e.id,
+    };
 
     buffer.writeln('BEGIN TRANSACTION;');
     for (final a in accounts) {
@@ -358,9 +457,11 @@ class FinanceExportService {
         'INSERT INTO accounts VALUES (${_sqlText(a.id)}, ${_sqlText(a.name)}, ${_sqlText(a.type.name)}, ${_sqlText(a.subType.dbValue)}, ${a.isSystem ? 1 : 0}, ${_sqlText(a.currencyCode)}, ${a.isArchived ? 1 : 0}, ${a.openingBalanceCents}, ${_sqlText(a.openingBalanceDate)}, ${_sqlText(EthiopiaClock.toUtcIsoString(a.createdAt))});',
       );
     }
-    for (final c in categories) {
+    for (final c in orderedCats) {
+      final safeParent =
+          (c.parentId != null && catIds.contains(c.parentId)) ? c.parentId : null;
       buffer.writeln(
-        'INSERT INTO categories VALUES (${_sqlText(c.id)}, ${_sqlText(c.name)}, ${_sqlText(c.type)}, ${_sqlText(c.parentId)}, ${_sqlText(c.colorHex)}, ${c.sortOrder}, ${c.isDefault ? 1 : 0}, ${c.isArchived ? 1 : 0});',
+        'INSERT INTO categories VALUES (${_sqlText(c.id)}, ${_sqlText(c.name)}, ${_sqlText(c.type)}, ${_sqlText(safeParent)}, ${_sqlText(c.colorHex)}, ${c.sortOrder}, ${c.isDefault ? 1 : 0}, ${c.isArchived ? 1 : 0});',
       );
     }
     for (final p in parties) {
@@ -388,6 +489,21 @@ class FinanceExportService {
         'INSERT INTO settlement_allocations VALUES (${_sqlText(s.id)}, ${_sqlText(s.settlementEntryId)}, ${_sqlText(s.debtId)}, ${s.allocatedCents}, ${_sqlText(s.settlementDate)});',
       );
     }
+    for (final cm in commitments) {
+      buffer.writeln(
+        'INSERT INTO commitments VALUES (${_sqlText(cm.id)}, ${_sqlText(cm.title)}, ${_sqlText(cm.direction.name)}, ${cm.amountCents}, ${_sqlText(cm.dueDate.toIsoString())}, ${cm.isPaid ? 1 : 0}, ${_sqlText(cm.linkedAccountId)}, ${_sqlText(cm.categoryId)}, ${_sqlText(cm.linkedDebtId)}, ${_sqlText(cm.settlementEntryId)}, ${_sqlText(cm.recurringRuleId)}, ${cm.legacyPaidUnverified ? 1 : 0});',
+      );
+    }
+    for (final cs in commitmentSettlements) {
+      buffer.writeln(
+        'INSERT INTO commitment_settlements VALUES (${_sqlText(cs.id)}, ${_sqlText(cs.commitmentId)}, ${_sqlText(cs.entryId)}, ${cs.amountCents}, ${_sqlText(cs.settledDate.toIsoString())}, ${_sqlText(EthiopiaClock.toUtcIsoString(cs.createdAt))});',
+      );
+    }
+    for (final g in savingsGoals) {
+      buffer.writeln(
+        'INSERT INTO savings_goals VALUES (${_sqlText(g.id)}, ${_sqlText(g.title)}, ${g.targetCents}, ${g.currentAllocatedCents}, ${_sqlText(g.targetDate?.toIsoString())}, ${_sqlText(g.linkedAccountId)}, ${_sqlText(g.status.name)}, ${_sqlText(EthiopiaClock.toUtcIsoString(EthiopiaClock.nowUtc()))});',
+      );
+    }
     for (final b in budgets) {
       buffer.writeln(
         'INSERT INTO budgets VALUES (${_sqlText(b.id)}, ${_sqlText(b.categoryId)}, ${_sqlText(b.monthIso)}, ${b.limitCents}, ${b.rolloverEnabled ? 1 : 0}, ${_sqlText(EthiopiaClock.toUtcIsoString(b.createdAt))}, ${_sqlText(EthiopiaClock.toUtcIsoString(b.updatedAt))});',
@@ -396,6 +512,12 @@ class FinanceExportService {
     for (final r in recurringRules) {
       buffer.writeln(
         'INSERT INTO recurring_rules VALUES (${_sqlText(r.id)}, ${_sqlText(r.title)}, ${_sqlText(r.ruleType.name)}, ${r.amountCents}, ${_sqlText(r.frequency.name)}, ${r.interval}, ${_sqlText(r.startDate.toIsoString())}, ${_sqlText(r.nextOccurrenceDate.toIsoString())}, ${_sqlText(r.endDate?.toIsoString())}, ${_sqlText(r.accountId)}, ${_sqlText(r.destinationAccountId)}, ${_sqlText(r.categoryId)}, ${_sqlText(r.linkedDebtId)}, ${r.isActive ? 1 : 0}, ${r.autoPost ? 1 : 0}, ${_sqlText(EthiopiaClock.toUtcIsoString(r.createdAt))});',
+      );
+    }
+    for (final t in transactions) {
+      final desc = t.note ?? t.payee ?? t.categoryName;
+      buffer.writeln(
+        'INSERT INTO transactions VALUES (${_sqlText(t.id)}, ${_sqlText(t.type)}, ${t.amountCents}, ${_sqlText(t.accountId)}, ${_sqlText(t.destinationAccountId)}, ${_sqlText(t.categoryId)}, ${_sqlText(desc)}, ${_sqlText(t.transactionDate.toIsoString())}, ${_sqlText(entryByLegacyTxId[t.id])}, ${t.isSuperseded ? 1 : 0});',
       );
     }
     buffer.writeln('COMMIT;');
