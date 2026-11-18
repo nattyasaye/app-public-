@@ -317,6 +317,28 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                 initialMode: FinanceComposerMode.split,
               ),
             ),
+            DaywellButton(
+              label: 'Lend',
+              leadingIcon: Icons.arrow_upward,
+              variant: DaywellButtonVariant.outlined,
+              size: DaywellButtonSize.compact,
+              onPressed: () => FinanceComposerSheet.show(
+                context,
+                controller: widget.controller,
+                initialMode: FinanceComposerMode.lend,
+              ),
+            ),
+            DaywellButton(
+              label: 'Borrow',
+              leadingIcon: Icons.arrow_downward,
+              variant: DaywellButtonVariant.outlined,
+              size: DaywellButtonSize.compact,
+              onPressed: () => FinanceComposerSheet.show(
+                context,
+                controller: widget.controller,
+                initialMode: FinanceComposerMode.borrow,
+              ),
+            ),
           ],
         ),
         const SizedBox(height: SharedDesignTokens.spacingLg),

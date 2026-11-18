@@ -84,6 +84,9 @@ class SystemControlAccounts {
   static const String interestExpenseCategoryId = 'cat-interest-exp';
   static const String interestIncomeCategoryId = 'cat-interest-inc';
 
+  static const String canonicalDefaultExpenseCategoryId = 'cat-other-exp';
+  static const String canonicalDefaultIncomeCategoryId = 'cat-other-inc';
+
   static const Set<String> allIds = {
     equity,
     income,
@@ -95,6 +98,30 @@ class SystemControlAccounts {
 
   static bool isSystemControlId(String id) => allIds.contains(id);
 }
+
+const Map<String, String> kLegacyCategoryIdAliases = {
+  'cat-other': SystemControlAccounts.canonicalDefaultExpenseCategoryId,
+  'cat-misc': SystemControlAccounts.canonicalDefaultExpenseCategoryId,
+  'cat-exp-other': SystemControlAccounts.canonicalDefaultExpenseCategoryId,
+  'cat-inc-other': SystemControlAccounts.canonicalDefaultIncomeCategoryId,
+  'cat-from-asaye': 'cat-asaye',
+  'cat-communication': 'cat-comm',
+};
+
+const Map<String, ({String name, String type})> kCanonicalCategoryFallbacks = {
+  'cat-food': (name: 'Food', type: 'expense'),
+  'cat-transport': (name: 'Transport', type: 'expense'),
+  'cat-housing': (name: 'Housing', type: 'expense'),
+  'cat-utilities': (name: 'Utilities', type: 'expense'),
+  'cat-comm': (name: 'Communication', type: 'expense'),
+  'cat-other-exp': (name: 'Other', type: 'expense'),
+  'cat-fees': (name: 'Financial Fees', type: 'expense'),
+  'cat-salary': (name: 'Salary', type: 'income'),
+  'cat-freelance': (name: 'Freelance & Business', type: 'income'),
+  'cat-asaye': (name: 'From Asaye', type: 'income'),
+  'cat-invest': (name: 'Investments & Returns', type: 'income'),
+  'cat-other-inc': (name: 'Other Income', type: 'income'),
+};
 
 enum EntryType {
   standard('standard'),
@@ -2926,6 +2953,70 @@ class DoubleEntryEngine {
     return {'entry': entry, 'postings': postings, 'debt': debt};
   }
 
+  /// Resolves a legacy category ID alias to its canonical category ID without mutating stored data.
+  static String resolveCanonicalCategoryId(String categoryId) {
+    final trimmed = categoryId.trim();
+    return kLegacyCategoryIdAliases[trimmed] ?? trimmed;
+  }
+
+  /// Checks whether two category IDs match directly or via canonical alias equivalence.
+  static bool categoryIdsMatchOrAlias(String? a, String? b) {
+    if (a == null || b == null) return false;
+    final cleanA = a.trim();
+    final cleanB = b.trim();
+    if (cleanA.isEmpty || cleanB.isEmpty) return false;
+    if (cleanA == cleanB) return true;
+    return resolveCanonicalCategoryId(cleanA) ==
+        resolveCanonicalCategoryId(cleanB);
+  }
+
+  /// Finds a matching category by exact ID or canonical alias equivalence.
+  static TransactionCategoryModel? findCategoryByIdOrAlias(
+    List<TransactionCategoryModel> categories,
+    String? categoryId, {
+    String? expectedType,
+  }) {
+    if (categoryId == null || categoryId.trim().isEmpty) return null;
+    final cleanId = categoryId.trim();
+    bool matchesType(TransactionCategoryModel c) =>
+        expectedType == null || c.type == expectedType;
+
+    for (final c in categories) {
+      if (c.id == cleanId && matchesType(c)) return c;
+    }
+    final canonicalId = resolveCanonicalCategoryId(cleanId);
+    for (final c in categories) {
+      if (c.id == canonicalId && matchesType(c)) return c;
+    }
+    for (final c in categories) {
+      if (resolveCanonicalCategoryId(c.id) == canonicalId && matchesType(c)) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  /// Resolves a human-readable category display name across active/archived categories and canonical aliases.
+  static String resolveCategoryDisplayName(
+    List<TransactionCategoryModel> categories,
+    String? categoryId,
+  ) {
+    if (categoryId == null || categoryId.trim().isEmpty) return 'Uncategorized';
+    final cleanId = categoryId.trim();
+    final found = findCategoryByIdOrAlias(categories, cleanId);
+    if (found != null) return found.name;
+    final canonicalId = resolveCanonicalCategoryId(cleanId);
+    return kCanonicalCategoryFallbacks[canonicalId]?.name ?? cleanId;
+  }
+
+  static String canonicalCategoryNameForSeed(
+    String categoryId, {
+    String fallback = 'General',
+  }) {
+    final canonicalId = resolveCanonicalCategoryId(categoryId);
+    return kCanonicalCategoryFallbacks[canonicalId]?.name ?? fallback;
+  }
+
   /// Example B: I lend money
   /// Debit Asset (Receivable), Credit Asset (Cash). Zero expense!
   static Map<String, dynamic> buildLendMoney({
@@ -2936,9 +3027,14 @@ class DoubleEntryEngine {
     required String sourceAssetAccountId,
     required int amountCents,
     required String date,
+    String? movementDate,
     String? dueDate,
     required String description,
+    String? note,
   }) {
+    final effectiveMovementDate = movementDate ?? date;
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
     final entry = JournalEntryModel(
       id: entryId,
       entryType: EntryType.debtIssuance,
@@ -2953,7 +3049,8 @@ class DoubleEntryEngine {
         accountId: receivableAccountId,
         amountCents: amountCents,
         direction: PostingDirection.debit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
+        note: cleanNote,
       ),
       PostingModel(
         id: '$entryId-cr-cash',
@@ -2961,7 +3058,8 @@ class DoubleEntryEngine {
         accountId: sourceAssetAccountId,
         amountCents: amountCents,
         direction: PostingDirection.credit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
+        note: cleanNote,
       ),
     ];
 
@@ -2991,9 +3089,14 @@ class DoubleEntryEngine {
     required String payableAccountId,
     required int amountCents,
     required String date,
+    String? movementDate,
     String? dueDate,
     required String description,
+    String? note,
   }) {
+    final effectiveMovementDate = movementDate ?? date;
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
     final entry = JournalEntryModel(
       id: entryId,
       entryType: EntryType.debtIssuance,
@@ -3008,7 +3111,8 @@ class DoubleEntryEngine {
         accountId: destAssetAccountId,
         amountCents: amountCents,
         direction: PostingDirection.debit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
+        note: cleanNote,
       ),
       PostingModel(
         id: '$entryId-cr-payable',
@@ -3016,7 +3120,8 @@ class DoubleEntryEngine {
         accountId: payableAccountId,
         amountCents: amountCents,
         direction: PostingDirection.credit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
+        note: cleanNote,
       ),
     ];
 
@@ -3048,11 +3153,16 @@ class DoubleEntryEngine {
     required int myShareCents,
     required int theirShareCents,
     required String occurrenceDate,
+    String? movementDate,
     String? dueDate,
     required String description,
     String? categoryId,
+    String? note,
   }) {
     final total = myShareCents + theirShareCents;
+    final effectiveMovementDate = movementDate ?? occurrenceDate;
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
     final entry = JournalEntryModel(
       id: entryId,
       entryType: EntryType.splitExpense,
@@ -3069,6 +3179,7 @@ class DoubleEntryEngine {
         direction: PostingDirection.debit,
         accountMovementDate: occurrenceDate,
         categoryId: categoryId,
+        note: cleanNote,
       ),
       PostingModel(
         id: '$entryId-dr-rec',
@@ -3076,7 +3187,8 @@ class DoubleEntryEngine {
         accountId: receivableAccountId,
         amountCents: theirShareCents,
         direction: PostingDirection.debit,
-        accountMovementDate: occurrenceDate,
+        accountMovementDate: effectiveMovementDate,
+        note: cleanNote,
       ),
       PostingModel(
         id: '$entryId-cr-cash',
@@ -3084,7 +3196,8 @@ class DoubleEntryEngine {
         accountId: paidAssetAccountId,
         amountCents: total,
         direction: PostingDirection.credit,
-        accountMovementDate: occurrenceDate,
+        accountMovementDate: effectiveMovementDate,
+        note: cleanNote,
       ),
     ];
 

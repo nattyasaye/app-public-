@@ -189,14 +189,141 @@ class FinanceUiFormatters {
     String? categoryId,
     Map<String, TransactionCategoryModel> categoryById,
   ) {
-    if (categoryId == null) return 'Uncategorized';
-    final category = categoryById[categoryId];
-    if (category == null) return categoryId;
+    if (categoryId == null || categoryId.trim().isEmpty) {
+      return 'Uncategorized';
+    }
+    final cleanId = categoryId.trim();
+    final categoriesList = categoryById.values.toList(growable: false);
+    final category = categoryById[cleanId] ??
+        DoubleEntryEngine.findCategoryByIdOrAlias(categoriesList, cleanId);
+    if (category == null) {
+      return DoubleEntryEngine.resolveCategoryDisplayName(
+        categoriesList,
+        cleanId,
+      );
+    }
     final parentId = category.parentId;
-    if (parentId != null && categoryById.containsKey(parentId)) {
-      return '${categoryById[parentId]!.name} > ${category.name}';
+    if (parentId != null) {
+      final parent = categoryById[parentId] ??
+          DoubleEntryEngine.findCategoryByIdOrAlias(categoriesList, parentId);
+      if (parent != null) {
+        return '${parent.name} > ${category.name}';
+      }
     }
     return category.name;
+  }
+
+  /// Resolves an initial or legacy category ID against available categories
+  /// without mutating stored historical records.
+  static String? resolveCategorySelectionValue(
+    String? currentCategoryId,
+    List<TransactionCategoryModel> categories, {
+    required String type,
+    bool preserveUnmatchedHistorical = false,
+  }) {
+    if (currentCategoryId == null || currentCategoryId.trim().isEmpty) {
+      return null;
+    }
+    final cleanId = currentCategoryId.trim();
+    final activeOfType = categories
+        .where((c) => !c.isArchived && c.type == type)
+        .toList(growable: false);
+    for (final c in activeOfType) {
+      if (c.id == cleanId) return c.id;
+    }
+    final aliasInActive = DoubleEntryEngine.findCategoryByIdOrAlias(
+      activeOfType,
+      cleanId,
+      expectedType: type,
+    );
+    if (aliasInActive != null) {
+      return aliasInActive.id;
+    }
+    if (preserveUnmatchedHistorical) {
+      for (final c in categories) {
+        if (c.id == cleanId && c.type == type) return c.id;
+      }
+      final canonical = DoubleEntryEngine.resolveCanonicalCategoryId(cleanId);
+      if (kCanonicalCategoryFallbacks.containsKey(cleanId) ||
+          kCanonicalCategoryFallbacks.containsKey(canonical)) {
+        return cleanId;
+      }
+    }
+    return null;
+  }
+
+  static List<DropdownMenuItem<String>> buildCategoryDropdownItemsWithPreserved(
+    List<TransactionCategoryModel> allCategories, {
+    required String type,
+    String? preserveCategoryId,
+  }) {
+    final items = buildCategoryDropdownItems(
+      allCategories,
+      type: type,
+      includeArchived: false,
+    );
+    final cleanPreserve = preserveCategoryId?.trim();
+    if (cleanPreserve != null &&
+        cleanPreserve.isNotEmpty &&
+        !items.any((item) => item.value == cleanPreserve)) {
+      final exact = allCategories.where((c) => c.id == cleanPreserve);
+      final label = exact.isNotEmpty
+          ? (exact.first.isArchived
+              ? '${exact.first.name} (Archived)'
+              : exact.first.name)
+          : DoubleEntryEngine.resolveCategoryDisplayName(
+              allCategories,
+              cleanPreserve,
+            );
+      items.add(
+        DropdownMenuItem<String>(
+          value: cleanPreserve,
+          child: Text(label, overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+    return items;
+  }
+
+  static List<DropdownMenuItem<String>> buildFeeCategoryDropdownItems(
+    List<TransactionCategoryModel> allCategories, {
+    String? preserveCategoryId,
+  }) {
+    final items = buildCategoryDropdownItems(
+      allCategories,
+      type: 'expense',
+      includeArchived: false,
+    );
+    if (!items.any((i) => i.value == SystemControlAccounts.feeCategoryId)) {
+      items.insert(
+        0,
+        const DropdownMenuItem<String>(
+          value: SystemControlAccounts.feeCategoryId,
+          child: Text('Financial Fees', overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+    final cleanPreserve = preserveCategoryId?.trim();
+    if (cleanPreserve != null &&
+        cleanPreserve.isNotEmpty &&
+        !items.any((i) => i.value == cleanPreserve)) {
+      final exact = allCategories.where((c) => c.id == cleanPreserve);
+      final label = exact.isNotEmpty
+          ? (exact.first.isArchived
+              ? '${exact.first.name} (Archived)'
+              : exact.first.name)
+          : DoubleEntryEngine.resolveCategoryDisplayName(
+              allCategories,
+              cleanPreserve,
+            );
+      items.add(
+        DropdownMenuItem<String>(
+          value: cleanPreserve,
+          child: Text(label, overflow: TextOverflow.ellipsis),
+        ),
+      );
+    }
+    return items;
   }
 
   static List<DropdownMenuItem<String>> buildCategoryDropdownItems(

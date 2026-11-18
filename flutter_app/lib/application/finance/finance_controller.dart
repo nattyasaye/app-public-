@@ -179,6 +179,61 @@ class FinanceController extends ChangeNotifier {
     }
   }
 
+  void _preflightAssertSpendableEtbAccountIfLoaded(
+    String accountId, {
+    String roleLabel = 'Account',
+  }) {
+    _preflightAssertEtbAccountIfLoaded(accountId, roleLabel: roleLabel);
+    if (SystemControlAccounts.isSystemControlId(accountId)) return;
+    if (_state.accounts.isEmpty) return;
+    final match = _state.accounts.where((a) => a.id == accountId);
+    if (match.isEmpty) return;
+    final acc = match.first;
+    if (acc.isArchived) {
+      throw DoubleEntryValidationError(
+        '$roleLabel "${acc.name}" is archived and cannot receive new postings.',
+      );
+    }
+    final isSpendable = !acc.subType.isSavingsVault &&
+        acc.subType != AccountSubType.receivable &&
+        acc.subType != AccountSubType.payable &&
+        (acc.type == AccountType.asset ||
+            (acc.type == AccountType.liability &&
+                acc.subType == AccountSubType.creditCard));
+    if (!isSpendable) {
+      throw DoubleEntryValidationError(
+        '$roleLabel "${acc.name}" cannot be used here; select an active Verified ETB liquid asset or credit card account (Savings Vaults are allowed in Transfers only).',
+      );
+    }
+  }
+
+  void _preflightAssertTransferEtbAccountIfLoaded(
+    String accountId, {
+    String roleLabel = 'Account',
+  }) {
+    _preflightAssertEtbAccountIfLoaded(accountId, roleLabel: roleLabel);
+    if (SystemControlAccounts.isSystemControlId(accountId)) return;
+    if (_state.accounts.isEmpty) return;
+    final match = _state.accounts.where((a) => a.id == accountId);
+    if (match.isEmpty) return;
+    final acc = match.first;
+    if (acc.isArchived) {
+      throw DoubleEntryValidationError(
+        '$roleLabel "${acc.name}" is archived and cannot participate in transfers.',
+      );
+    }
+    final isTransferable = acc.subType != AccountSubType.receivable &&
+        acc.subType != AccountSubType.payable &&
+        (acc.type == AccountType.asset ||
+            (acc.type == AccountType.liability &&
+                acc.subType == AccountSubType.creditCard));
+    if (!isTransferable) {
+      throw DoubleEntryValidationError(
+        '$roleLabel "${acc.name}" cannot participate in an ETB transfer.',
+      );
+    }
+  }
+
   Future<void> addAccount({
     required String name,
     required AccountType type,
@@ -430,17 +485,23 @@ class FinanceController extends ChangeNotifier {
     required String categoryId,
     required int amountCents,
     required CalendarDate date,
+    CalendarDate? movementDate,
     required String description,
     String? payee,
     String? note,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(accountId, roleLabel: 'Paid account');
+      _preflightAssertSpendableEtbAccountIfLoaded(
+        accountId,
+        roleLabel: 'Paid account',
+      );
       final entry = await _repository.recordDirectExpense(
         accountId: accountId,
         categoryId: categoryId,
         amountCents: amountCents,
         date: date,
+        movementDate: movementDate,
         description: description,
         payee: payee,
         note: note,
@@ -459,18 +520,23 @@ class FinanceController extends ChangeNotifier {
     required String categoryId,
     required int amountCents,
     required CalendarDate date,
+    CalendarDate? movementDate,
     required String description,
     String? payee,
     String? note,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(accountId,
-          roleLabel: 'Deposit account');
+      _preflightAssertSpendableEtbAccountIfLoaded(
+        accountId,
+        roleLabel: 'Deposit account',
+      );
       final entry = await _repository.recordDirectIncome(
         accountId: accountId,
         categoryId: categoryId,
         amountCents: amountCents,
         date: date,
+        movementDate: movementDate,
         description: description,
         payee: payee,
         note: note,
@@ -491,13 +557,17 @@ class FinanceController extends ChangeNotifier {
     required int theirShareCents,
     required String partyId,
     required CalendarDate date,
+    CalendarDate? movementDate,
     CalendarDate? dueDate,
     required String description,
     String? note,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(paidAccountId,
-          roleLabel: 'Paid account');
+      _preflightAssertSpendableEtbAccountIfLoaded(
+        paidAccountId,
+        roleLabel: 'Paid account',
+      );
       final entry = await _repository.recordSplitExpense(
         paidAccountId: paidAccountId,
         myCategoryId: myCategoryId,
@@ -505,6 +575,7 @@ class FinanceController extends ChangeNotifier {
         theirShareCents: theirShareCents,
         partyId: partyId,
         date: date,
+        movementDate: movementDate,
         dueDate: dueDate,
         description: description,
         note: note,
@@ -562,7 +633,11 @@ class FinanceController extends ChangeNotifier {
         }
       }
       for (final p in replacementPostings) {
-        _preflightAssertEtbAccountIfLoaded(p.accountId);
+        if (replacementEntry.entryType == EntryType.transfer) {
+          _preflightAssertTransferEtbAccountIfLoaded(p.accountId);
+        } else {
+          _preflightAssertSpendableEtbAccountIfLoaded(p.accountId);
+        }
       }
       final entry = await _repository.correctJournalEntry(
         originalEntryId: originalEntryId,
@@ -588,7 +663,7 @@ class FinanceController extends ChangeNotifier {
   }) async {
     _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(
+      _preflightAssertSpendableEtbAccountIfLoaded(
         refundAccountId,
         roleLabel: 'Refund destination account',
       );
@@ -613,17 +688,19 @@ class FinanceController extends ChangeNotifier {
     required String toAssetAccountId,
     required int amountCents,
     required String date,
+    String? movementDate,
     required String description,
     int transferFeeCents = 0,
     String? feeCategoryId,
     String? note,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(
+      _preflightAssertTransferEtbAccountIfLoaded(
         fromAssetAccountId,
         roleLabel: 'Source account',
       );
-      _preflightAssertEtbAccountIfLoaded(
+      _preflightAssertTransferEtbAccountIfLoaded(
         toAssetAccountId,
         roleLabel: 'Destination account',
       );
@@ -634,6 +711,9 @@ class FinanceController extends ChangeNotifier {
         transferFeeCents: transferFeeCents,
         feeCategoryId: feeCategoryId,
         date: SharedDateFormatter.parseFlexibleToCalendarDate(date),
+        movementDate: movementDate != null
+            ? SharedDateFormatter.parseFlexibleToCalendarDate(movementDate)
+            : null,
         description: description,
         note: note,
       );
@@ -664,6 +744,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<void> voidJournalEntry(String entryId, String reason) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.voidJournalEntry(
         entryId: entryId,
@@ -677,6 +758,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<void> unvoidJournalEntry(String entryId) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.unvoidJournalEntry(entryId);
       await _refreshAccountsAndLedger();
@@ -935,6 +1017,7 @@ class FinanceController extends ChangeNotifier {
     required String settlementId,
     required String reason,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.voidCommitmentSettlement(
         settlementId: settlementId,
@@ -948,6 +1031,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<void> markLegacyCommitmentUnpaid(String commitmentId) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.markLegacyCommitmentUnpaid(commitmentId);
       await _refreshAccountsAndLedger();
@@ -964,7 +1048,12 @@ class FinanceController extends ChangeNotifier {
     CalendarDate? paidDate,
     String? note,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
+      _preflightAssertSpendableEtbAccountIfLoaded(
+        accountId,
+        roleLabel: 'Payment account',
+      );
       await _repository.markCommitmentPaidWithPosting(
         commitmentId: commitmentId,
         accountId: accountId,
@@ -1088,6 +1177,7 @@ class FinanceController extends ChangeNotifier {
     int deltaCents, {
     String? sourceAccountId,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.fundSavingsGoal(
         goalId: id,
@@ -1159,6 +1249,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<void> archiveParty(String id) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.archiveParty(id);
       await _refreshAccountsAndLedger();
@@ -1173,12 +1264,17 @@ class FinanceController extends ChangeNotifier {
     required String sourceAccountId,
     required int amountCents,
     required CalendarDate date,
+    CalendarDate? movementDate,
     CalendarDate? dueDate,
     required String description,
+    String? note,
   }) async {
     _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(
+      if (amountCents <= 0) {
+        throw ArgumentError('Loan amount must be strictly greater than 0.');
+      }
+      _preflightAssertSpendableEtbAccountIfLoaded(
         sourceAccountId,
         roleLabel: 'Source account',
       );
@@ -1192,8 +1288,10 @@ class FinanceController extends ChangeNotifier {
         sourceAssetAccountId: sourceAccountId,
         amountCents: amountCents,
         date: date.toIsoString(),
+        movementDate: movementDate?.toIsoString(),
         dueDate: dueDate?.toIsoString(),
         description: description.trim(),
+        note: note,
       );
       final saved = await _repository.recordDebtWithEntry(
         entry: payload['entry'] as JournalEntryModel,
@@ -1214,12 +1312,17 @@ class FinanceController extends ChangeNotifier {
     required String destinationAccountId,
     required int amountCents,
     required CalendarDate date,
+    CalendarDate? movementDate,
     CalendarDate? dueDate,
     required String description,
+    String? note,
   }) async {
     _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(
+      if (amountCents <= 0) {
+        throw ArgumentError('Loan amount must be strictly greater than 0.');
+      }
+      _preflightAssertSpendableEtbAccountIfLoaded(
         destinationAccountId,
         roleLabel: 'Destination account',
       );
@@ -1233,8 +1336,10 @@ class FinanceController extends ChangeNotifier {
         payableAccountId: SystemControlAccounts.payable,
         amountCents: amountCents,
         date: date.toIsoString(),
+        movementDate: movementDate?.toIsoString(),
         dueDate: dueDate?.toIsoString(),
         description: description.trim(),
+        note: note,
       );
       final saved = await _repository.recordDebtWithEntry(
         entry: payload['entry'] as JournalEntryModel,
@@ -1261,7 +1366,7 @@ class FinanceController extends ChangeNotifier {
   }) async {
     _state = _state.copyWith(clearError: true);
     try {
-      _preflightAssertEtbAccountIfLoaded(
+      _preflightAssertSpendableEtbAccountIfLoaded(
         settlementAssetAccountId,
         roleLabel: 'Settlement account',
       );
@@ -1341,6 +1446,7 @@ class FinanceController extends ChangeNotifier {
     required String debtId,
     required String reason,
   }) async {
+    _state = _state.copyWith(clearError: true);
     try {
       final updated = await _repository.voidDebtOrigin(
         debtId: debtId,
@@ -1369,6 +1475,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<void> deleteBudget(String budgetId) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.deleteBudget(budgetId);
       await _refreshAccountsAndLedger();
@@ -1416,6 +1523,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<RecurringRuleModel?> pauseRecurringRule(String ruleId) async {
+    _state = _state.copyWith(clearError: true);
     try {
       final updated = await _repository.pauseRecurringRule(ruleId);
       await _refreshAccountsAndLedger();
@@ -1445,6 +1553,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<RecurringRuleModel?> skipNextOccurrence(String ruleId) async {
+    _state = _state.copyWith(clearError: true);
     try {
       final updated = await _repository.skipNextOccurrence(ruleId);
       await _refreshAccountsAndLedger();
@@ -1457,6 +1566,7 @@ class FinanceController extends ChangeNotifier {
   }
 
   Future<void> deleteRecurringRule(String ruleId) async {
+    _state = _state.copyWith(clearError: true);
     try {
       await _repository.deleteRecurringRule(ruleId);
       await _refreshAccountsAndLedger();

@@ -671,6 +671,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     required String categoryId,
     required int amountCents,
     required CalendarDate date,
+    CalendarDate? movementDate,
     required String description,
     String? payee,
     String? note,
@@ -680,22 +681,52 @@ class DriftFinanceRepository implements IFinanceRepository {
     }
     final cleanDesc = _formatDescription(description, payee: payee);
     final entryId = 'entry-${_uuid.v4()}';
+    final txId = 'tx-$entryId';
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
+    final cleanPayee =
+        (payee != null && payee.trim().isNotEmpty) ? payee.trim() : null;
     final built = DoubleEntryEngine.buildDirectExpense(
       entryId: entryId,
       paidAccountId: accountId,
       categoryId: categoryId,
       amountCents: amountCents,
       date: date.toIsoString(),
+      movementDate: movementDate?.toIsoString(),
       description: cleanDesc,
-      note: note?.trim(),
+      note: cleanNote,
     );
-    final entry = built['entry'] as JournalEntryModel;
+    final entry =
+        (built['entry'] as JournalEntryModel).copyWith(legacySourceTxId: txId);
     final postings = built['postings'] as List<PostingModel>;
     DoubleEntryEngine.validateBalancedEntry(postings);
 
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+      await _assertSpendableEtbAccountsInTx(
+        [accountId],
+        roleLabel: 'Paid account',
+      );
+      await _ensureCategoryExists(
+        categoryId,
+        DoubleEntryEngine.canonicalCategoryNameForSeed(categoryId),
+        'expense',
+      );
       await _insertEntryAndPostingsInTx(entry, postings);
+      await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+            FinancialTransactionsCompanion.insert(
+              id: txId,
+              categoryId: categoryId,
+              amountCents: amountCents,
+              type: 'expense',
+              transactionDate: date.toIsoString(),
+              note: Value(cleanNote),
+              payee: Value(cleanPayee),
+              accountId: Value(accountId),
+              isSuperseded: const Value(false),
+              createdAt: entry.createdAt,
+            ),
+          );
       await _syncVaultGoalsInTx();
     });
     return entry;
@@ -707,6 +738,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     required String categoryId,
     required int amountCents,
     required CalendarDate date,
+    CalendarDate? movementDate,
     required String description,
     String? payee,
     String? note,
@@ -716,22 +748,52 @@ class DriftFinanceRepository implements IFinanceRepository {
     }
     final cleanDesc = _formatDescription(description, payee: payee);
     final entryId = 'entry-${_uuid.v4()}';
+    final txId = 'tx-$entryId';
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
+    final cleanPayee =
+        (payee != null && payee.trim().isNotEmpty) ? payee.trim() : null;
     final built = DoubleEntryEngine.buildDirectIncome(
       entryId: entryId,
       destAccountId: accountId,
       categoryId: categoryId,
       amountCents: amountCents,
       date: date.toIsoString(),
+      movementDate: movementDate?.toIsoString(),
       description: cleanDesc,
-      note: note?.trim(),
+      note: cleanNote,
     );
-    final entry = built['entry'] as JournalEntryModel;
+    final entry =
+        (built['entry'] as JournalEntryModel).copyWith(legacySourceTxId: txId);
     final postings = built['postings'] as List<PostingModel>;
     DoubleEntryEngine.validateBalancedEntry(postings);
 
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+      await _assertSpendableEtbAccountsInTx(
+        [accountId],
+        roleLabel: 'Deposit account',
+      );
+      await _ensureCategoryExists(
+        categoryId,
+        DoubleEntryEngine.canonicalCategoryNameForSeed(categoryId),
+        'income',
+      );
       await _insertEntryAndPostingsInTx(entry, postings);
+      await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+            FinancialTransactionsCompanion.insert(
+              id: txId,
+              categoryId: categoryId,
+              amountCents: amountCents,
+              type: 'income',
+              transactionDate: date.toIsoString(),
+              note: Value(cleanNote),
+              payee: Value(cleanPayee),
+              accountId: Value(accountId),
+              isSuperseded: const Value(false),
+              createdAt: entry.createdAt,
+            ),
+          );
       await _syncVaultGoalsInTx();
     });
     return entry;
@@ -745,6 +807,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     int transferFeeCents = 0,
     String? feeCategoryId,
     required CalendarDate date,
+    CalendarDate? movementDate,
     required String description,
     String? note,
   }) async {
@@ -759,10 +822,15 @@ class DriftFinanceRepository implements IFinanceRepository {
     }
 
     final entryId = 'entry-xfer-${_uuid.v4()}';
+    final txId = 'tx-$entryId';
     final dateIso = date.toIsoString();
     final effectiveFeeCatId = transferFeeCents > 0
-        ? (feeCategoryId ?? SystemControlAccounts.feeCategoryId)
+        ? ((feeCategoryId != null && feeCategoryId.trim().isNotEmpty)
+            ? feeCategoryId.trim()
+            : SystemControlAccounts.feeCategoryId)
         : null;
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
 
     final built = DoubleEntryEngine.buildTransfer(
       entryId: entryId,
@@ -770,45 +838,43 @@ class DriftFinanceRepository implements IFinanceRepository {
       toAssetAccountId: toAccountId,
       amountCents: amountCents,
       date: dateIso,
+      movementDate: movementDate?.toIsoString(),
       description:
           description.trim().isEmpty ? 'Account Transfer' : description.trim(),
       transferFeeCents: transferFeeCents,
       feeExpenseAccountId:
           transferFeeCents > 0 ? SystemControlAccounts.expense : null,
-      note: note?.trim(),
+      feeCategoryId: effectiveFeeCatId,
+      note: cleanNote,
     );
 
-    final entry = built['entry'] as JournalEntryModel;
-    final rawPostings = built['postings'] as List<PostingModel>;
-    final postings = rawPostings.map((p) {
-      if (effectiveFeeCatId != null && p.id.endsWith('-dr-fee')) {
-        return PostingModel(
-          id: p.id,
-          entryId: p.entryId,
-          accountId: p.accountId,
-          amountCents: p.amountCents,
-          direction: p.direction,
-          accountMovementDate: p.accountMovementDate,
-          categoryId: effectiveFeeCatId,
-          note: p.note,
-        );
-      }
-      return p;
-    }).toList();
+    final entry =
+        (built['entry'] as JournalEntryModel).copyWith(legacySourceTxId: txId);
+    final postings = built['postings'] as List<PostingModel>;
 
     DoubleEntryEngine.validateBalancedEntry(postings);
 
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
-      if (effectiveFeeCatId == SystemControlAccounts.feeCategoryId) {
-        await V6LedgerMigrator.ensureSystemCategory(
-          _db,
-          categoryId: SystemControlAccounts.feeCategoryId,
-          name: 'Transfer & Bank Fees',
-          type: 'expense',
-        );
-      }
+      await _assertTransferEtbAccountsInTx([fromAccountId, toAccountId]);
+      final mirrorCategoryId = await _resolveTransferMirrorCategoryIdInTx(
+        feeCategoryId: effectiveFeeCatId,
+      );
       await _insertEntryAndPostingsInTx(entry, postings);
+      await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+            FinancialTransactionsCompanion.insert(
+              id: txId,
+              categoryId: mirrorCategoryId,
+              amountCents: amountCents,
+              type: 'transfer',
+              transactionDate: dateIso,
+              note: Value(cleanNote),
+              accountId: Value(fromAccountId),
+              destinationAccountId: Value(toAccountId),
+              isSuperseded: const Value(false),
+              createdAt: entry.createdAt,
+            ),
+          );
       await _syncVaultGoalsInTx();
     });
     return entry;
@@ -822,6 +888,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     required int theirShareCents,
     required String partyId,
     required CalendarDate date,
+    CalendarDate? movementDate,
     CalendarDate? dueDate,
     required String description,
     String? note,
@@ -835,6 +902,8 @@ class DriftFinanceRepository implements IFinanceRepository {
     final entryId = 'entry-split-${_uuid.v4()}';
     final debtId = 'debt-split-${_uuid.v4()}';
     final dateIso = date.toIsoString();
+    final cleanNote =
+        (note != null && note.trim().isNotEmpty) ? note.trim() : null;
     final built = DoubleEntryEngine.buildSplitExpense(
       entryId: entryId,
       debtId: debtId,
@@ -845,35 +914,30 @@ class DriftFinanceRepository implements IFinanceRepository {
       myShareCents: myShareCents,
       theirShareCents: theirShareCents,
       occurrenceDate: dateIso,
+      movementDate: movementDate?.toIsoString(),
       dueDate: dueDate?.toIsoString(),
       description: description.trim(),
       categoryId: myCategoryId,
+      note: cleanNote,
     );
 
     final entry = built['entry'] as JournalEntryModel;
-    final cleanNote = note?.trim();
-    final postings = (built['postings'] as List<PostingModel>)
-        .map(
-          (p) => cleanNote != null && cleanNote.isNotEmpty
-              ? PostingModel(
-                  id: p.id,
-                  entryId: p.entryId,
-                  accountId: p.accountId,
-                  amountCents: p.amountCents,
-                  direction: p.direction,
-                  accountMovementDate: p.accountMovementDate,
-                  categoryId: p.categoryId,
-                  note: cleanNote,
-                )
-              : p,
-        )
-        .toList();
+    final postings = built['postings'] as List<PostingModel>;
     final debt = built['debt'] as DebtModel;
 
     DoubleEntryEngine.validateBalancedEntry(postings);
 
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+      await _assertSpendableEtbAccountsInTx(
+        [paidAccountId],
+        roleLabel: 'Paid account',
+      );
+      await _ensureCategoryExists(
+        myCategoryId,
+        DoubleEntryEngine.canonicalCategoryNameForSeed(myCategoryId),
+        'expense',
+      );
       await _insertEntryAndPostingsInTx(entry, postings);
       await _db.into(_db.debtsTable).insert(
             DebtsTableCompanion.insert(
@@ -990,6 +1054,15 @@ class DriftFinanceRepository implements IFinanceRepository {
         );
       }
 
+      final nonSystemReplacementIds = replacementPostings
+          .map((p) => p.accountId)
+          .where((id) => !SystemControlAccounts.isSystemControlId(id));
+      if (linkedEntry.entryType == EntryType.transfer) {
+        await _assertTransferEtbAccountsInTx(nonSystemReplacementIds);
+      } else {
+        await _assertSpendableEtbAccountsInTx(nonSystemReplacementIds);
+      }
+
       final origCandidateIds = <String>{
         original.id,
         if (original.id.startsWith('entry-tx-'))
@@ -1023,6 +1096,20 @@ class DriftFinanceRepository implements IFinanceRepository {
       );
       await _syncCommitmentsForEntryInTx(originalEntryId);
 
+      // Ensure any referenced fee/expense/income category exists safely.
+      for (final p in replacementPostings) {
+        final catId = p.categoryId?.trim();
+        if (catId != null && catId.isNotEmpty) {
+          final isIncomeControl = p.accountId == SystemControlAccounts.income &&
+              p.direction == PostingDirection.credit;
+          await _ensureCategoryExists(
+            catId,
+            DoubleEntryEngine.canonicalCategoryNameForSeed(catId),
+            isIncomeControl ? 'income' : 'expense',
+          );
+        }
+      }
+
       var entryToInsert = linkedEntry;
       if (origTxRow != null) {
         final newTxId = (linkedEntry.legacySourceTxId != null &&
@@ -1049,8 +1136,12 @@ class DriftFinanceRepository implements IFinanceRepository {
           txType = 'transfer';
           PostingModel? src;
           PostingModel? dst;
+          PostingModel? fee;
           for (final p in replacementPostings) {
-            if (p.accountId == SystemControlAccounts.expense) continue;
+            if (p.accountId == SystemControlAccounts.expense) {
+              fee ??= p;
+              continue;
+            }
             if (p.direction == PostingDirection.credit &&
                 !SystemControlAccounts.isSystemControlId(p.accountId)) {
               src ??= p;
@@ -1061,7 +1152,10 @@ class DriftFinanceRepository implements IFinanceRepository {
           }
           txAmountCents =
               dst?.amountCents ?? src?.amountCents ?? origTxRow.amountCents;
-          txCategoryId = origTxRow.categoryId;
+          txCategoryId = await _resolveTransferMirrorCategoryIdInTx(
+            feeCategoryId: fee?.categoryId,
+            preferredFallbackId: origTxRow.categoryId,
+          );
           txAccountId = src?.accountId ?? origTxRow.accountId;
           txDestAccountId = dst?.accountId ?? origTxRow.destinationAccountId;
           txNote = dst?.note ?? src?.note;
@@ -1086,7 +1180,7 @@ class DriftFinanceRepository implements IFinanceRepository {
           final sepIdx = linkedEntry.description.indexOf(' — ');
           txPayee = sepIdx > 0
               ? linkedEntry.description.substring(0, sepIdx).trim()
-              : origTxRow.payee;
+              : null;
         } else {
           txType = 'expense';
           PostingModel? expDr;
@@ -1108,11 +1202,15 @@ class DriftFinanceRepository implements IFinanceRepository {
           final sepIdx = linkedEntry.description.indexOf(' — ');
           txPayee = sepIdx > 0
               ? linkedEntry.description.substring(0, sepIdx).trim()
-              : origTxRow.payee;
+              : null;
         }
 
         if (txType != 'transfer') {
-          await _ensureCategoryExists(txCategoryId, 'General', txType);
+          await _ensureCategoryExists(
+            txCategoryId,
+            DoubleEntryEngine.canonicalCategoryNameForSeed(txCategoryId),
+            txType,
+          );
         }
 
         await _db.into(_db.financialTransactions).insertOnConflictUpdate(
@@ -1225,16 +1323,71 @@ class DriftFinanceRepository implements IFinanceRepository {
         .getSingleOrNull();
     if (existing != null) return;
 
+    if (categoryId == SystemControlAccounts.feeCategoryId) {
+      await V6LedgerMigrator.ensureSystemCategory(
+        _db,
+        categoryId: SystemControlAccounts.feeCategoryId,
+        name: categoryName.trim().isEmpty || categoryName.trim() == 'General'
+            ? 'Financial Fees'
+            : categoryName.trim(),
+        type: 'expense',
+      );
+      return;
+    }
+
+    final resolvedName =
+        (categoryName.trim().isEmpty || categoryName.trim() == 'General')
+            ? DoubleEntryEngine.canonicalCategoryNameForSeed(
+                categoryId,
+                fallback: 'General',
+              )
+            : categoryName.trim();
+
     await _db.into(_db.financialCategories).insertOnConflictUpdate(
           FinancialCategoriesCompanion.insert(
             id: categoryId,
-            name: categoryName.trim().isEmpty ? 'General' : categoryName.trim(),
+            name: resolvedName,
             type: type == 'income' ? 'income' : 'expense',
             colorHex: const Value('#64748B'),
             isDefault: const Value(false),
             isArchived: const Value(false),
           ),
         );
+  }
+
+  Future<String> _resolveTransferMirrorCategoryIdInTx({
+    String? feeCategoryId,
+    String? preferredFallbackId,
+  }) async {
+    final cleanFee = feeCategoryId?.trim();
+    if (cleanFee != null && cleanFee.isNotEmpty) {
+      await _ensureCategoryExists(
+        cleanFee,
+        DoubleEntryEngine.canonicalCategoryNameForSeed(cleanFee),
+        'expense',
+      );
+      return cleanFee;
+    }
+    final cleanPreferred = preferredFallbackId?.trim();
+    if (cleanPreferred != null && cleanPreferred.isNotEmpty) {
+      final preferredRow = await (_db.select(_db.financialCategories)
+            ..where((tbl) => tbl.id.equals(cleanPreferred)))
+          .getSingleOrNull();
+      if (preferredRow != null) return preferredRow.id;
+    }
+    final allCats = await _db.select(_db.financialCategories).get();
+    for (final id in [
+      SystemControlAccounts.canonicalDefaultExpenseCategoryId,
+      SystemControlAccounts.feeCategoryId,
+    ]) {
+      if (allCats.any((c) => c.id == id)) return id;
+    }
+    final firstExpense =
+        allCats.where((c) => c.type == 'expense').toList(growable: false);
+    if (firstExpense.isNotEmpty) return firstExpense.first.id;
+    const fallbackId = SystemControlAccounts.canonicalDefaultExpenseCategoryId;
+    await _ensureCategoryExists(fallbackId, 'Other', 'expense');
+    return fallbackId;
   }
 
   @override
@@ -1803,6 +1956,10 @@ class DriftFinanceRepository implements IFinanceRepository {
 
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+      await _assertSpendableEtbAccountsInTx(
+        postings.map((p) => p.accountId),
+        roleLabel: 'Debt account',
+      );
       await _insertEntryAndPostingsInTx(entry, postings);
       await _db.into(_db.debtsTable).insert(
             DebtsTableCompanion.insert(
@@ -1834,6 +1991,10 @@ class DriftFinanceRepository implements IFinanceRepository {
     await _db.transaction(() async {
       await V6LedgerMigrator.ensureSystemControlAccounts(_db);
       await _assertEtbDebtInTx(allocation.debtId);
+      await _assertSpendableEtbAccountsInTx(
+        settlementPostings.map((p) => p.accountId),
+        roleLabel: 'Settlement account',
+      );
       await _insertEntryAndPostingsInTx(settlementEntry, settlementPostings);
 
       await _db.into(_db.settlementAllocationsTable).insert(
@@ -3605,6 +3766,62 @@ class DriftFinanceRepository implements IFinanceRepository {
     }
   }
 
+  Future<void> _assertSpendableEtbAccountsInTx(
+    Iterable<String> accountIds, {
+    String roleLabel = 'Account',
+  }) async {
+    await _assertEtbAccountsInTx(accountIds);
+    final uniqueIds = accountIds
+        .where((id) => !SystemControlAccounts.isSystemControlId(id))
+        .toSet();
+    if (uniqueIds.isEmpty) return;
+
+    final rows = await (_db.select(_db.accountsTable)
+          ..where((tbl) => tbl.id.isIn(uniqueIds.toList())))
+        .get();
+    for (final r in rows) {
+      if (r.isSystem) continue;
+      final isSpendable = r.subType != AccountSubType.savingsVault.dbValue &&
+          r.subType != AccountSubType.receivable.dbValue &&
+          r.subType != AccountSubType.payable.dbValue &&
+          (r.type == AccountType.asset.name ||
+              (r.type == AccountType.liability.name &&
+                  r.subType == AccountSubType.creditCard.dbValue));
+      if (!isSpendable) {
+        throw DoubleEntryValidationError(
+          '$roleLabel "${r.name}" cannot be used for this transaction; select an active Verified ETB liquid or credit card account (Savings Vaults are allowed in Transfers only).',
+        );
+      }
+    }
+  }
+
+  Future<void> _assertTransferEtbAccountsInTx(
+    Iterable<String> accountIds,
+  ) async {
+    await _assertEtbAccountsInTx(accountIds);
+    final uniqueIds = accountIds
+        .where((id) => !SystemControlAccounts.isSystemControlId(id))
+        .toSet();
+    if (uniqueIds.isEmpty) return;
+
+    final rows = await (_db.select(_db.accountsTable)
+          ..where((tbl) => tbl.id.isIn(uniqueIds.toList())))
+        .get();
+    for (final r in rows) {
+      if (r.isSystem) continue;
+      final isTransferable = r.subType != AccountSubType.receivable.dbValue &&
+          r.subType != AccountSubType.payable.dbValue &&
+          (r.type == AccountType.asset.name ||
+              (r.type == AccountType.liability.name &&
+                  r.subType == AccountSubType.creditCard.dbValue));
+      if (!isTransferable) {
+        throw DoubleEntryValidationError(
+          'Account "${r.name}" cannot participate in an ETB transfer.',
+        );
+      }
+    }
+  }
+
   Future<void> _assertEtbVaultAccountInTx(String accountId) async {
     await _assertEtbAccountsInTx([accountId]);
     final row = await (_db.select(_db.accountsTable)
@@ -4096,8 +4313,12 @@ class DriftFinanceRepository implements IFinanceRepository {
           txType = 'transfer';
           PostingModel? src;
           PostingModel? dst;
+          PostingModel? fee;
           for (final p in entryPostings) {
-            if (p.accountId == SystemControlAccounts.expense) continue;
+            if (p.accountId == SystemControlAccounts.expense) {
+              fee ??= p;
+              continue;
+            }
             if (p.direction == PostingDirection.credit &&
                 !SystemControlAccounts.isSystemControlId(p.accountId)) {
               src ??= p;
@@ -4107,7 +4328,9 @@ class DriftFinanceRepository implements IFinanceRepository {
             }
           }
           txAmount = dst?.amountCents ?? src?.amountCents ?? 0;
-          txCategoryId = 'cat-transfer';
+          txCategoryId = await _resolveTransferMirrorCategoryIdInTx(
+            feeCategoryId: fee?.categoryId,
+          );
           txAccountId = src?.accountId;
           txDestAccountId = dst?.accountId;
           txNote = dst?.note ?? src?.note;
@@ -4125,7 +4348,8 @@ class DriftFinanceRepository implements IFinanceRepository {
             }
           }
           txAmount = drAcc?.amountCents ?? crInc?.amountCents ?? 0;
-          txCategoryId = crInc?.categoryId ?? 'cat-inc-other';
+          txCategoryId = crInc?.categoryId ??
+              SystemControlAccounts.canonicalDefaultIncomeCategoryId;
           txAccountId = drAcc?.accountId;
           txNote = drAcc?.note ?? crInc?.note;
           final sepIdx = mappedTarget.description.indexOf(' — ');
@@ -4146,7 +4370,8 @@ class DriftFinanceRepository implements IFinanceRepository {
             }
           }
           txAmount = drExp?.amountCents ?? crAcc?.amountCents ?? 0;
-          txCategoryId = drExp?.categoryId ?? 'cat-exp-other';
+          txCategoryId = drExp?.categoryId ??
+              SystemControlAccounts.canonicalDefaultExpenseCategoryId;
           txAccountId = crAcc?.accountId;
           txNote = drExp?.note ?? crAcc?.note;
           final sepIdx = mappedTarget.description.indexOf(' — ');
@@ -4157,7 +4382,11 @@ class DriftFinanceRepository implements IFinanceRepository {
 
         if (txAmount > 0 && txAccountId != null) {
           if (txType != 'transfer') {
-            await _ensureCategoryExists(txCategoryId, 'General', txType);
+            await _ensureCategoryExists(
+              txCategoryId,
+              DoubleEntryEngine.canonicalCategoryNameForSeed(txCategoryId),
+              txType,
+            );
           }
           await _db.into(_db.financialTransactions).insertOnConflictUpdate(
                 FinancialTransactionsCompanion.insert(

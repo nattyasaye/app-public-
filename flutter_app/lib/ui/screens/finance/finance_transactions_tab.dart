@@ -713,6 +713,20 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                       tone: DaywellStatusTone.warning,
                     ),
                   ),
+                if (!entry.isVoided &&
+                    classification.isEligibleEtb &&
+                    !canEdit &&
+                    correctCheck.error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(
+                      top: SharedDesignTokens.spacingSm,
+                    ),
+                    child: DaywellStatusBanner(
+                      title: 'Direct Correction Unavailable',
+                      message: correctCheck.error!,
+                      tone: DaywellStatusTone.info,
+                    ),
+                  ),
                 const SizedBox(height: SharedDesignTokens.spacingMd),
                 Text(
                   'Balanced Ledger Postings',

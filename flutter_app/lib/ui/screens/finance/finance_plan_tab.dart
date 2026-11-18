@@ -1326,14 +1326,20 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
           : '',
     );
     var dueDate = existing?.dueDate ?? CalendarDate.today();
-    final catItems = FinanceUiFormatters.buildCategoryDropdownItems(
-      state.activeCategories,
+    final catItems = FinanceUiFormatters.buildCategoryDropdownItemsWithPreserved(
+      state.categories,
       type: 'expense',
+      preserveCategoryId: existing?.categoryId,
     );
-    String? catId = existing?.categoryId ??
+    String? catId = FinanceUiFormatters.resolveCategorySelectionValue(
+          existing?.categoryId,
+          state.categories,
+          type: 'expense',
+          preserveUnmatchedHistorical: existing != null,
+        ) ??
         (catItems.isNotEmpty ? catItems.first.value : null);
     String? linkedDebtId = existing?.linkedDebtId;
-    final etbAccounts = state.activeEtbUserAccounts;
+    final etbAccounts = state.activeEtbSpendableAccounts;
     String? linkedAccountId = existing?.linkedAccountId ??
         (linkedDebtId == null && etbAccounts.isNotEmpty
             ? etbAccounts.first.id
@@ -1623,14 +1629,24 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
             accounts.any((a) => a.id == item.linkedAccountId)
         ? item.linkedAccountId
         : (accounts.isNotEmpty ? accounts.first.id : null);
-    final catItems = FinanceUiFormatters.buildCategoryDropdownItems(
-      state.activeCategories,
-      type: item.direction == CommitmentDirection.inflow ? 'income' : 'expense',
+    final catType =
+        item.direction == CommitmentDirection.inflow ? 'income' : 'expense';
+    final catItems =
+        FinanceUiFormatters.buildCategoryDropdownItemsWithPreserved(
+      state.categories,
+      type: catType,
+      preserveCategoryId: item.categoryId,
     );
-    String? catId =
-        item.categoryId ?? (catItems.isNotEmpty ? catItems.first.value : null);
+    String? catId = FinanceUiFormatters.resolveCategorySelectionValue(
+          item.categoryId,
+          state.categories,
+          type: catType,
+          preserveUnmatchedHistorical: true,
+        ) ??
+        (catItems.isNotEmpty ? catItems.first.value : null);
     var paidDate = CalendarDate.today();
     final noteCtrl = TextEditingController();
+    var isSaving = false;
     String? error;
 
     await showModalBottomSheet<void>(
@@ -1734,29 +1750,39 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                         ? 'Record Receipt & Settle'
                         : 'Post Payment & Mark Paid',
                     fullWidth: true,
-                    onPressed: () async {
-                      final settled =
-                          await widget.controller.recordCommitmentSettlement(
-                        commitmentId: item.id,
-                        accountId: accountId ?? accounts.first.id,
-                        amountCents: item.remainingCents > 0
-                            ? item.remainingCents
-                            : item.amountCents,
-                        categoryId: catId,
-                        settledDate: paidDate,
-                        note: noteCtrl.text.trim().isEmpty
-                            ? null
-                            : noteCtrl.text.trim(),
-                      );
-                      final err = widget.controller.state.errorMessage;
-                      if (settled == null || err != null) {
-                        setModalState(
-                          () => error = err ?? 'Unable to record settlement.',
-                        );
-                        return;
-                      }
-                      if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                    },
+                    isLoading: isSaving,
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            setModalState(() {
+                              isSaving = true;
+                              error = null;
+                            });
+                            final settled = await widget.controller
+                                .recordCommitmentSettlement(
+                              commitmentId: item.id,
+                              accountId: accountId ?? accounts.first.id,
+                              amountCents: item.remainingCents > 0
+                                  ? item.remainingCents
+                                  : item.amountCents,
+                              categoryId: catId,
+                              settledDate: paidDate,
+                              note: noteCtrl.text.trim().isEmpty
+                                  ? null
+                                  : noteCtrl.text.trim(),
+                            );
+                            final err = widget.controller.state.errorMessage;
+                            if (settled == null || err != null) {
+                              if (ctx.mounted) {
+                                setModalState(() {
+                                  isSaving = false;
+                                  error = err ?? 'Unable to record settlement.';
+                                });
+                              }
+                              return;
+                            }
+                            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                          },
                   ),
                 ],
               ],
@@ -1773,7 +1799,6 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
     RecurringRuleModel? existing,
   }) async {
     final state = widget.controller.state;
-    final accounts = state.activeEtbSpendableAccounts;
     final titleCtrl = TextEditingController(text: existing?.title ?? '');
     final amountCtrl = TextEditingController(
       text: existing != null
@@ -1787,14 +1812,24 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
     var frequency = existing?.frequency ?? RecurrenceFrequency.monthly;
     var startDate = existing?.startDate ?? CalendarDate.today();
     var autoPost = existing?.autoPost ?? false;
+
+    List<AccountModel> eligibleFor(RecurringRuleType type) =>
+        type == RecurringRuleType.transfer
+            ? [
+                ...state.activeEtbSpendableAccounts,
+                ...state.activeEtbVaultAccounts,
+              ]
+            : state.activeEtbSpendableAccounts;
+
+    final initialAccounts = eligibleFor(ruleType);
     String? accountId = existing?.accountId != null &&
-            accounts.any((a) => a.id == existing!.accountId)
+            initialAccounts.any((a) => a.id == existing!.accountId)
         ? existing!.accountId
-        : (accounts.isNotEmpty ? accounts.first.id : null);
+        : (initialAccounts.isNotEmpty ? initialAccounts.first.id : null);
     String? destAccountId = existing?.destinationAccountId != null &&
-            accounts.any((a) => a.id == existing!.destinationAccountId)
+            initialAccounts.any((a) => a.id == existing!.destinationAccountId)
         ? existing!.destinationAccountId
-        : (accounts.length > 1 ? accounts[1].id : null);
+        : (initialAccounts.length > 1 ? initialAccounts[1].id : null);
     String? categoryId = existing?.categoryId;
     String? error;
 
@@ -1804,16 +1839,38 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
       useSafeArea: true,
       builder: (sheetCtx) => StatefulBuilder(
         builder: (ctx, setModalState) {
+          final accounts = eligibleFor(ruleType);
+          if (accountId == null || !accounts.any((a) => a.id == accountId)) {
+            accountId = accounts.isNotEmpty ? accounts.first.id : null;
+          }
+          if (ruleType == RecurringRuleType.transfer &&
+              (destAccountId == null ||
+                  destAccountId == accountId ||
+                  !accounts.any((a) => a.id == destAccountId))) {
+            destAccountId = accounts.length > 1
+                ? accounts
+                    .firstWhere(
+                      (a) => a.id != accountId,
+                      orElse: () => accounts.first,
+                    )
+                    .id
+                : null;
+          }
           final catType =
               ruleType == RecurringRuleType.income ? 'income' : 'expense';
-          final catItems = FinanceUiFormatters.buildCategoryDropdownItems(
-            state.activeCategories,
+          final catItems =
+              FinanceUiFormatters.buildCategoryDropdownItemsWithPreserved(
+            state.categories,
             type: catType,
+            preserveCategoryId: existing?.categoryId,
           );
-          if (categoryId == null ||
-              !catItems.any((c) => c.value == categoryId)) {
-            categoryId = catItems.isNotEmpty ? catItems.first.value : null;
-          }
+          categoryId = FinanceUiFormatters.resolveCategorySelectionValue(
+                categoryId,
+                state.categories,
+                type: catType,
+                preserveUnmatchedHistorical: existing != null,
+              ) ??
+              (catItems.isNotEmpty ? catItems.first.value : null);
 
           return Padding(
             padding: EdgeInsets.only(
@@ -2479,6 +2536,7 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
     var showNewParty = activeParties.isEmpty;
     var date = CalendarDate.today();
     CalendarDate? dueDate;
+    var isSaving = false;
     String? error;
 
     await showModalBottomSheet<void>(
@@ -2517,7 +2575,7 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                 const SizedBox(height: SharedDesignTokens.spacingCompact),
                 if (accounts.isEmpty)
                   const DaywellStatusBanner(
-                    message: 'Add an account first.',
+                    message: 'Add an active spendable ETB account first.',
                     tone: DaywellStatusTone.warning,
                   )
                 else ...[
@@ -2627,62 +2685,85 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                           }
                         },
                       ),
+                      if (dueDate != null)
+                        DaywellButton(
+                          label: 'Clear',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: () => setModalState(() => dueDate = null),
+                        ),
                     ],
                   ),
                   const SizedBox(height: SharedDesignTokens.spacingMd),
                   DaywellButton(
                     label: isReceivable ? 'Post Loan Out' : 'Post Loan In',
                     fullWidth: true,
-                    onPressed: () async {
-                      final cents = FinanceUiFormatters.parseEtbToCents(
-                        amountCtrl.text,
-                      );
-                      if (cents == null || cents <= 0) {
-                        setModalState(() => error = 'Enter amount > 0.');
-                        return;
-                      }
-                      String? resolvedPartyId = partyId;
-                      if (showNewParty || resolvedPartyId == null) {
-                        final pName = newPartyCtrl.text.trim();
-                        if (pName.isEmpty) {
-                          setModalState(() => error = 'Enter party name.');
-                          return;
-                        }
-                        resolvedPartyId =
-                            await widget.controller.ensurePartyId(pName);
-                      }
-                      final desc = descCtrl.text.trim().isEmpty
-                          ? (isReceivable ? 'Money Lent' : 'Money Borrowed')
-                          : descCtrl.text.trim();
-                      if (isReceivable) {
-                        await widget.controller.lendMoney(
-                          partyId: resolvedPartyId,
-                          sourceAccountId: accountId!,
-                          amountCents: cents,
-                          date: date,
-                          dueDate: dueDate,
-                          description: desc,
-                        );
-                      } else {
-                        await widget.controller.borrowMoney(
-                          partyId: resolvedPartyId,
-                          destinationAccountId: accountId!,
-                          amountCents: cents,
-                          date: date,
-                          dueDate: dueDate,
-                          description: desc,
-                        );
-                      }
-                      final err = widget.controller.state.errorMessage;
-                      if (err != null) {
-                        setModalState(() => error = err);
-                        return;
-                      }
-                      if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                    },
+                    isLoading: isSaving,
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            final cents = FinanceUiFormatters.parseEtbToCents(
+                              amountCtrl.text,
+                            );
+                            if (cents == null || cents <= 0) {
+                              setModalState(() => error = 'Enter amount > 0.');
+                              return;
+                            }
+                            String? resolvedPartyId = partyId;
+                            if (showNewParty || resolvedPartyId == null) {
+                              final pName = newPartyCtrl.text.trim();
+                              if (pName.isEmpty) {
+                                setModalState(
+                                    () => error = 'Enter party name.');
+                                return;
+                              }
+                              resolvedPartyId =
+                                  await widget.controller.ensurePartyId(pName);
+                            }
+                            setModalState(() {
+                              isSaving = true;
+                              error = null;
+                            });
+                            final desc = descCtrl.text.trim().isEmpty
+                                ? (isReceivable
+                                    ? 'Money Lent'
+                                    : 'Money Borrowed')
+                                : descCtrl.text.trim();
+                            final DebtModel? saved;
+                            if (isReceivable) {
+                              saved = await widget.controller.lendMoney(
+                                partyId: resolvedPartyId,
+                                sourceAccountId: accountId!,
+                                amountCents: cents,
+                                date: date,
+                                dueDate: dueDate,
+                                description: desc,
+                              );
+                            } else {
+                              saved = await widget.controller.borrowMoney(
+                                partyId: resolvedPartyId,
+                                destinationAccountId: accountId!,
+                                amountCents: cents,
+                                date: date,
+                                dueDate: dueDate,
+                                description: desc,
+                              );
+                            }
+                            final err = widget.controller.state.errorMessage;
+                            if (saved == null || err != null) {
+                              if (ctx.mounted) {
+                                setModalState(() {
+                                  isSaving = false;
+                                  error = err ?? 'Unable to record debt entry.';
+                                });
+                              }
+                              return;
+                            }
+                            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                          },
                   ),
                 ],
-              ],
+              ),
             ),
           ),
         ),
@@ -2705,6 +2786,7 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
     );
     final interestCtrl = TextEditingController();
     var date = CalendarDate.today();
+    var isSaving = false;
     String? error;
 
     await showModalBottomSheet<void>(
@@ -2744,7 +2826,7 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                 const SizedBox(height: SharedDesignTokens.spacingCompact),
                 if (accounts.isEmpty)
                   const DaywellStatusBanner(
-                    message: 'Add an account to settle debt.',
+                    message: 'Add an active spendable ETB account to settle debt.',
                     tone: DaywellStatusTone.warning,
                   )
                 else ...[
@@ -2777,48 +2859,87 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                       decimal: true,
                     ),
                   ),
+                  const SizedBox(height: SharedDesignTokens.spacingSm),
+                  Wrap(
+                    spacing: SharedDesignTokens.spacingSm,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text('Settlement Date: ${date.toIsoString()}'),
+                      DaywellButton(
+                        label: 'Pick Date',
+                        variant: DaywellButtonVariant.text,
+                        size: DaywellButtonSize.compact,
+                        onPressed: () async {
+                          final picked =
+                              await FinanceUiFormatters.pickCalendarDate(
+                            ctx,
+                            initialDate: date,
+                          );
+                          if (picked != null) {
+                            setModalState(() => date = picked);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
                   const SizedBox(height: SharedDesignTokens.spacingMd),
                   DaywellButton(
                     label: 'Post Settlement',
                     fullWidth: true,
-                    onPressed: () async {
-                      final principal = FinanceUiFormatters.parseEtbToCents(
-                        principalCtrl.text,
-                      );
-                      final interestRaw = interestCtrl.text.trim();
-                      final interest = interestRaw.isEmpty
-                          ? 0
-                          : FinanceUiFormatters.parseEtbToCents(interestRaw);
-                      if (principal == null ||
-                          principal <= 0 ||
-                          principal > debt.outstandingCents) {
-                        setModalState(
-                          () => error =
-                              'Enter principal between 0.01 and outstanding balance.',
-                        );
-                        return;
-                      }
-                      if (interest == null || interest < 0) {
-                        setModalState(
-                          () => error = 'Enter valid non-negative interest.',
-                        );
-                        return;
-                      }
-                      await widget.controller.recordDoubleEntrySettlement(
-                        debt: debt,
-                        settlementAssetAccountId: accountId!,
-                        allocatedCents: principal,
-                        interestCents: interest,
-                        settlementDate: date.toIsoString(),
-                        description: 'Settlement: $partyName',
-                      );
-                      final err = widget.controller.state.errorMessage;
-                      if (err != null) {
-                        setModalState(() => error = err);
-                        return;
-                      }
-                      if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                    },
+                    isLoading: isSaving,
+                    onPressed: isSaving
+                        ? null
+                        : () async {
+                            final principal =
+                                FinanceUiFormatters.parseEtbToCents(
+                              principalCtrl.text,
+                            );
+                            final interestRaw = interestCtrl.text.trim();
+                            final interest = interestRaw.isEmpty
+                                ? 0
+                                : FinanceUiFormatters.parseEtbToCents(
+                                    interestRaw,
+                                  );
+                            if (principal == null ||
+                                principal <= 0 ||
+                                principal > debt.outstandingCents) {
+                              setModalState(
+                                () => error =
+                                    'Enter principal between 0.01 and outstanding balance.',
+                              );
+                              return;
+                            }
+                            if (interest == null || interest < 0) {
+                              setModalState(
+                                () => error =
+                                    'Enter valid non-negative interest.',
+                              );
+                              return;
+                            }
+                            setModalState(() {
+                              isSaving = true;
+                              error = null;
+                            });
+                            await widget.controller.recordDoubleEntrySettlement(
+                              debt: debt,
+                              settlementAssetAccountId: accountId!,
+                              allocatedCents: principal,
+                              interestCents: interest,
+                              settlementDate: date.toIsoString(),
+                              description: 'Settlement: $partyName',
+                            );
+                            final err = widget.controller.state.errorMessage;
+                            if (err != null) {
+                              if (ctx.mounted) {
+                                setModalState(() {
+                                  isSaving = false;
+                                  error = err;
+                                });
+                              }
+                              return;
+                            }
+                            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                          },
                   ),
                 ],
               ],
