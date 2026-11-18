@@ -72,8 +72,9 @@ class V7LedgerHardener {
       warnings: warnings,
     );
 
-    // 4. Normalize SavingsGoals statuses.
+    // 4. Normalize SavingsGoals statuses & synchronize vault-linked allocations.
     await _normalizeSavingsGoalStatuses(db);
+    await syncVaultSavingsGoalsV7(db);
 
     // 5. Audit Legacy Clearing Offset usage.
     final clearingPostings = await db.customSelect('''
@@ -697,6 +698,104 @@ class V7LedgerHardener {
       "UPDATE savings_goals SET status = 'active' "
       "WHERE status IS NULL OR status NOT IN ('active', 'completed', 'archived');",
     );
+  }
+
+  /// Synchronizes active/completed vault-linked SavingsGoals (`currentAllocatedCents`
+  /// and `status`) against live ledger balances of their linked Savings Vaults.
+  static Future<void> syncVaultSavingsGoalsV7(AppDatabase db) async {
+    final goals = await db.select(db.savingsGoals).get();
+    final vaultGoals = goals
+        .where(
+          (g) =>
+              g.status != 'archived' &&
+              g.linkedAccountId != null &&
+              g.linkedAccountId!.trim().isNotEmpty,
+        )
+        .toList();
+    if (vaultGoals.isEmpty) return;
+
+    final accounts = await db.select(db.accountsTable).get();
+    final accountById = <String, AccountModel>{};
+    for (final a in accounts) {
+      final accountType = AccountType.values.firstWhere(
+        (t) => t.name == a.type,
+        orElse: () => AccountType.asset,
+      );
+      accountById[a.id] = AccountModel(
+        id: a.id,
+        name: a.name,
+        type: accountType,
+        subType: AccountSubType.fromDbValue(a.subType, fallbackType: accountType),
+        isSystem: a.isSystem,
+        currencyCode: a.currencyCode,
+        isArchived: a.isArchived,
+        openingBalanceCents: a.openingBalanceCents,
+        openingBalanceDate: a.openingBalanceDate,
+        createdAt: a.createdAt,
+      );
+    }
+
+    final entryRows = await db.select(db.journalEntriesTable).get();
+    final mappedEntries = entryRows
+        .map(
+          (e) => JournalEntryModel(
+            id: e.id,
+            entryType: EntryType.fromDbValue(e.entryType),
+            description: e.description,
+            occurrenceDate: e.occurrenceDate,
+            isVoided: e.isVoided,
+            voidReason: e.voidReason,
+            legacySourceTxId: e.legacySourceTxId,
+            correctedFromEntryId: e.correctedFromEntryId,
+            createdAt: e.createdAt,
+          ),
+        )
+        .toList();
+
+    final postingRows = await db.select(db.postingsTable).get();
+    final mappedPostings = postingRows
+        .map(
+          (p) => PostingModel(
+            id: p.id,
+            entryId: p.entryId,
+            accountId: p.accountId,
+            amountCents: p.amountCents,
+            direction: p.direction == 'debit'
+                ? PostingDirection.debit
+                : PostingDirection.credit,
+            accountMovementDate: p.accountMovementDate,
+            categoryId: p.categoryId,
+            note: p.note,
+          ),
+        )
+        .toList();
+
+    for (final goal in vaultGoals) {
+      final acc = accountById[goal.linkedAccountId!.trim()];
+      if (acc == null) continue;
+      final balance = max(
+        0,
+        DoubleEntryEngine.calculateAccountBalance(
+          account: acc,
+          postings: mappedPostings,
+          entries: mappedEntries,
+        ),
+      );
+      final nextStatus =
+          (goal.targetCents > 0 && balance >= goal.targetCents)
+              ? 'completed'
+              : 'active';
+      if (goal.currentAllocatedCents != balance || goal.status != nextStatus) {
+        await (db.update(db.savingsGoals)
+              ..where((tbl) => tbl.id.equals(goal.id)))
+            .write(
+          SavingsGoalsCompanion(
+            currentAllocatedCents: Value(balance),
+            status: Value(nextStatus),
+          ),
+        );
+      }
+    }
   }
 
   static Future<int> _auditAndSynthesizeOpeningBalances(

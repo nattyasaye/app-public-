@@ -75,7 +75,10 @@ interface FinancePlanTabProps {
     amountCents: number;
     settledDateIso: string;
   }) => { ok: boolean; error?: string };
-  onVoidCommitmentSettlement: (settlementId: string, commitmentId: string) => void;
+  onVoidCommitmentSettlement: (
+    settlementId: string,
+    commitmentId: string
+  ) => { ok: boolean; error?: string } | void;
   onMarkLegacyUnpaid: (commitmentId: string) => void;
   onOpenComposer: (kind: ComposerKind) => void;
   onSettleDebt: (payload: {
@@ -87,7 +90,7 @@ interface FinancePlanTabProps {
     dateIso: string;
   }) => { ok: boolean; error?: string };
   onWriteOffDebt: (debtId: string, reason: string) => void;
-  onVoidDebtWriteOff: (debtId: string) => void;
+  onVoidDebtWriteOff: (debtId: string) => { ok: boolean; error?: string } | void;
   onVoidDebtOrigin: (debtId: string) => { ok: boolean; error?: string };
   onAddSavingsGoal: (
     g: Omit<SharedSavingsGoal, 'id' | 'currentAllocatedCents' | 'status'>
@@ -703,7 +706,12 @@ export function FinancePlanTab({
                                 `Void this settlement of ${formatCurrencyCents(s.amountCents, isEtbCommitment ? 'ETB' : cmCurrency)}?`,
                                 'Void',
                                 'danger',
-                                () => onVoidCommitmentSettlement(s.id, c.id)
+                                () => {
+                                  const res = onVoidCommitmentSettlement(s.id, c.id);
+                                  if (res && !res.ok && res.error) {
+                                    setBanner(res.error);
+                                  }
+                                }
                               )
                             }
                             className="text-[var(--dw-error)] hover:underline cursor-pointer"
@@ -847,7 +855,12 @@ export function FinancePlanTab({
                             variant="outlined"
                             size="compact"
                             leadingIcon={<RotateCcw className="w-3 h-3" />}
-                            onClick={() => onVoidDebtWriteOff(d.id)}
+                            onClick={() => {
+                              const res = onVoidDebtWriteOff(d.id);
+                              if (res && !res.ok && res.error) {
+                                setBanner(res.error);
+                              }
+                            }}
                           />
                         )}
                       </>
@@ -967,11 +980,21 @@ export function FinancePlanTab({
                             variant="outlined"
                             size="compact"
                             leadingIcon={<Archive className="w-3 h-3" />}
-                            onClick={() =>
+                            onClick={() => {
+                              if (g.linkedAccountId && g.currentAllocatedCents > 0) {
+                                const res = onReleaseAndArchiveGoal(g.id);
+                                if (!res || !res.ok) {
+                                  setBanner(
+                                    res?.error ||
+                                      'Withdraw vault funds back to a liquid account before archiving this vault-linked goal.'
+                                  );
+                                }
+                                return;
+                              }
                               onRequestConfirm(
                                 g.linkedAccountId ? 'Archive Vault Goal?' : 'Release & Archive Goal?',
                                 g.linkedAccountId
-                                  ? `Archive goal "${g.title}"? Cash stays safely in the linked Savings Vault account until withdrawn.`
+                                  ? `Archive vault-linked goal "${g.title}"? Its vault balance is zero.`
                                   : `Release ${formatCurrencyCents(g.currentAllocatedCents, goalCurrency)} reserved for "${g.title}" and archive it?`,
                                 g.linkedAccountId ? 'Archive Goal' : 'Release & Archive',
                                 'primary',
@@ -981,8 +1004,8 @@ export function FinancePlanTab({
                                     setBanner(res.error);
                                   }
                                 }
-                              )
-                            }
+                              );
+                            }}
                           />
                         </>
                       )}

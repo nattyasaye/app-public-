@@ -951,10 +951,14 @@ export function reconcileDebtsV7(params: {
     const remaining = Math.max(0, debt.principalCents - clampedSettled);
 
     const writeOffId = debt.writeOffEntryId;
-    const hasActiveWriteOff =
-      Boolean(writeOffId) &&
-      !voidedIds.has(writeOffId!) &&
-      entryById.has(writeOffId!);
+    const writeOffEntry = writeOffId ? entryById.get(writeOffId) : undefined;
+    const hasActiveLinkedWriteOff =
+      Boolean(writeOffEntry) &&
+      writeOffEntry!.entryType === 'write_off' &&
+      !voidedIds.has(writeOffEntry!.id);
+    const isLegacyWrittenOffWithoutLink =
+      !writeOffId && debt.status === 'written_off';
+    const hasActiveWriteOff = hasActiveLinkedWriteOff || isLegacyWrittenOffWithoutLink;
 
     if (hasActiveWriteOff) {
       if (debt.status === 'written_off' && debt.outstandingCents === 0) {
@@ -1000,6 +1004,29 @@ export function assertCanArchiveAccountV7(params: {
         `Cannot archive savings vault "${params.account.name}" while its balance is nonzero (${formatCurrencyCents(bal, params.account.currencyCode)}). Withdraw or transfer all funds to zero first.`
       );
     }
+  }
+}
+
+/**
+ * Prevents archiving a vault-linked SavingsGoal while its ledger/allocated balance is nonzero.
+ */
+export function assertCanArchiveSavingsGoalV7(params: {
+  goal: SharedSavingsGoal;
+  accounts: Account[];
+  entries: JournalEntry[];
+  postings: Posting[];
+}): void {
+  if (params.goal.status === 'archived' || !params.goal.linkedAccountId) return;
+  const bal = getSavingsGoalEffectiveBalanceV7({
+    goal: params.goal,
+    accounts: params.accounts,
+    entries: params.entries,
+    postings: params.postings,
+  });
+  if (bal > 0) {
+    throw new DoubleEntryValidationError(
+      `Cannot archive vault-linked savings goal "${params.goal.title}" while its balance is nonzero (${formatCurrencyCents(bal, 'ETB')}). Withdraw all funds back to a liquid account first.`
+    );
   }
 }
 
@@ -1788,6 +1815,26 @@ export function unvoidJournalEntryGuardedV7(params: {
       throw new DoubleEntryValidationError(
         'Cannot restore refund because total refunded amount would exceed the original expense.'
       );
+    }
+  }
+
+  // Guard 7: If commitment settlement entry, prevent over-settling the linked commitment.
+  const linkedCmSettlementGuard = params.commitmentSettlements.find((s) => s.entryId === target.id);
+  if (linkedCmSettlementGuard) {
+    const linkedCommitment = params.commitments.find(
+      (c) => c.id === linkedCmSettlementGuard.commitmentId
+    );
+    if (linkedCommitment) {
+      const currentSettled = calculateCommitmentSettledCents(
+        linkedCommitment.id,
+        params.commitmentSettlements,
+        params.entries
+      );
+      if (currentSettled + linkedCmSettlementGuard.amountCents > linkedCommitment.amountCents) {
+        throw new DoubleEntryValidationError(
+          'Cannot restore commitment installment because total settled amount would exceed the commitment amount.'
+        );
+      }
     }
   }
 

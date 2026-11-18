@@ -957,6 +957,7 @@ class DriftFinanceRepository implements IFinanceRepository {
       correctedFromEntryId: originalEntryId,
       isVoided: false,
     );
+    var returnedEntry = linkedEntry;
 
     await _db.transaction(() async {
       final accounts =
@@ -989,6 +990,24 @@ class DriftFinanceRepository implements IFinanceRepository {
         );
       }
 
+      final origCandidateIds = <String>{
+        original.id,
+        if (original.id.startsWith('entry-tx-'))
+          original.id.substring('entry-tx-'.length),
+        if (original.id.startsWith('entry-'))
+          original.id.substring('entry-'.length),
+        if (original.legacySourceTxId != null &&
+            original.legacySourceTxId!.trim().isNotEmpty)
+          original.legacySourceTxId!.trim(),
+      }.toList();
+      final origTxRows = origCandidateIds.isEmpty
+          ? const []
+          : await (_db.select(_db.financialTransactions)
+                ..where((tbl) => tbl.id.isIn(origCandidateIds))
+                ..limit(1))
+              .get();
+      final origTxRow = origTxRows.isEmpty ? null : origTxRows.first;
+
       await (_db.update(_db.journalEntriesTable)
             ..where((tbl) => tbl.id.equals(originalEntryId)))
           .write(
@@ -1003,11 +1022,125 @@ class DriftFinanceRepository implements IFinanceRepository {
         isSuperseded: true,
       );
       await _syncCommitmentsForEntryInTx(originalEntryId);
-      await _insertEntryAndPostingsInTx(linkedEntry, replacementPostings);
+
+      var entryToInsert = linkedEntry;
+      if (origTxRow != null) {
+        final newTxId = (linkedEntry.legacySourceTxId != null &&
+                linkedEntry.legacySourceTxId!.trim().isNotEmpty)
+            ? linkedEntry.legacySourceTxId!.trim()
+            : 'tx-${linkedEntry.id}';
+        final isTransfer = linkedEntry.entryType == EntryType.transfer;
+        final isIncome = !isTransfer &&
+            replacementPostings.any(
+              (p) =>
+                  p.accountId == SystemControlAccounts.income &&
+                  p.direction == PostingDirection.credit,
+            );
+
+        late String txType;
+        late int txAmountCents;
+        late String txCategoryId;
+        String? txAccountId;
+        String? txDestAccountId;
+        String? txNote;
+        String? txPayee;
+
+        if (isTransfer) {
+          txType = 'transfer';
+          PostingModel? src;
+          PostingModel? dst;
+          for (final p in replacementPostings) {
+            if (p.accountId == SystemControlAccounts.expense) continue;
+            if (p.direction == PostingDirection.credit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              src ??= p;
+            } else if (p.direction == PostingDirection.debit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              dst ??= p;
+            }
+          }
+          txAmountCents =
+              dst?.amountCents ?? src?.amountCents ?? origTxRow.amountCents;
+          txCategoryId = origTxRow.categoryId;
+          txAccountId = src?.accountId ?? origTxRow.accountId;
+          txDestAccountId = dst?.accountId ?? origTxRow.destinationAccountId;
+          txNote = dst?.note ?? src?.note;
+        } else if (isIncome) {
+          txType = 'income';
+          PostingModel? accDr;
+          PostingModel? incCr;
+          for (final p in replacementPostings) {
+            if (p.accountId == SystemControlAccounts.income &&
+                p.direction == PostingDirection.credit) {
+              incCr ??= p;
+            } else if (p.direction == PostingDirection.debit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              accDr ??= p;
+            }
+          }
+          txAmountCents =
+              accDr?.amountCents ?? incCr?.amountCents ?? origTxRow.amountCents;
+          txCategoryId = incCr?.categoryId ?? origTxRow.categoryId;
+          txAccountId = accDr?.accountId ?? origTxRow.accountId;
+          txNote = accDr?.note ?? incCr?.note;
+          final sepIdx = linkedEntry.description.indexOf(' — ');
+          txPayee = sepIdx > 0
+              ? linkedEntry.description.substring(0, sepIdx).trim()
+              : origTxRow.payee;
+        } else {
+          txType = 'expense';
+          PostingModel? expDr;
+          PostingModel? accCr;
+          for (final p in replacementPostings) {
+            if (p.accountId == SystemControlAccounts.expense &&
+                p.direction == PostingDirection.debit) {
+              expDr ??= p;
+            } else if (p.direction == PostingDirection.credit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              accCr ??= p;
+            }
+          }
+          txAmountCents =
+              expDr?.amountCents ?? accCr?.amountCents ?? origTxRow.amountCents;
+          txCategoryId = expDr?.categoryId ?? origTxRow.categoryId;
+          txAccountId = accCr?.accountId ?? origTxRow.accountId;
+          txNote = expDr?.note ?? accCr?.note;
+          final sepIdx = linkedEntry.description.indexOf(' — ');
+          txPayee = sepIdx > 0
+              ? linkedEntry.description.substring(0, sepIdx).trim()
+              : origTxRow.payee;
+        }
+
+        if (txType != 'transfer') {
+          await _ensureCategoryExists(txCategoryId, 'General', txType);
+        }
+
+        await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+              FinancialTransactionsCompanion.insert(
+                id: newTxId,
+                categoryId: txCategoryId,
+                amountCents: txAmountCents.abs(),
+                type: txType,
+                transactionDate: linkedEntry.occurrenceDate,
+                note: Value(txNote?.trim()),
+                payee: Value(txPayee),
+                accountId: Value(txAccountId),
+                destinationAccountId: Value(txDestAccountId),
+                isSuperseded: const Value(false),
+                correctedFromId: Value(origTxRow.id),
+                correctionReason: Value(correctionReason.trim()),
+                createdAt: linkedEntry.createdAt,
+              ),
+            );
+        entryToInsert = linkedEntry.copyWith(legacySourceTxId: newTxId);
+      }
+
+      await _insertEntryAndPostingsInTx(entryToInsert, replacementPostings);
       await V7LedgerHardener.reconcileAllDebtsV7(_db);
       await _syncVaultGoalsInTx();
+      returnedEntry = entryToInsert;
     });
-    return linkedEntry;
+    return returnedEntry;
   }
 
   @override
@@ -1284,6 +1417,7 @@ class DriftFinanceRepository implements IFinanceRepository {
                 tbl.id.equals('entry-tx-$originalId'))
             ..limit(1))
           .getSingleOrNull();
+      var origEntryPostings = const <PostingModel>[];
       if (originalLedgerPreCheck != null) {
         final accounts =
             await getAccounts(includeArchived: true, includeSystem: true);
@@ -1306,6 +1440,9 @@ class DriftFinanceRepository implements IFinanceRepository {
             check.error ?? 'Only active ETB transactions can be corrected.',
           );
         }
+        origEntryPostings = postings
+            .where((p) => p.entryId == originalLedgerPreCheck.id)
+            .toList();
       }
 
       final now = EthiopiaClock.nowUtc();
@@ -1372,14 +1509,43 @@ class DriftFinanceRepository implements IFinanceRepository {
           correctionNote.trim(),
           payee: newPayee ?? original.payee,
         );
+        final sameOccurrenceDate = originalLedger != null &&
+            original.transactionDate == originalLedger.occurrenceDate;
         late Map<String, dynamic> built;
         if (original.type == 'transfer') {
+          PostingModel? feePosting;
+          PostingModel? dstPosting;
+          PostingModel? srcPosting;
+          for (final p in origEntryPostings) {
+            if (p.accountId == SystemControlAccounts.expense) {
+              feePosting ??= p;
+            } else if (p.direction == PostingDirection.debit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              dstPosting ??= p;
+            } else if (p.direction == PostingDirection.credit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              srcPosting ??= p;
+            }
+          }
+          final preservedFeeCents = feePosting?.amountCents ?? 0;
+          final preservedFeeCategoryId =
+              preservedFeeCents > 0 ? feePosting?.categoryId : null;
+          final preservedMovementDate = sameOccurrenceDate
+              ? (dstPosting?.accountMovementDate ??
+                  srcPosting?.accountMovementDate ??
+                  original.transactionDate)
+              : original.transactionDate;
           built = DoubleEntryEngine.buildTransfer(
             entryId: replacementId,
             fromAssetAccountId: effectiveAccountId,
             toAssetAccountId: original.destinationAccountId!,
             amountCents: newAmountCents.abs(),
+            transferFeeCents: preservedFeeCents,
+            feeExpenseAccountId:
+                preservedFeeCents > 0 ? SystemControlAccounts.expense : null,
+            feeCategoryId: preservedFeeCategoryId,
             date: original.transactionDate,
+            movementDate: preservedMovementDate,
             description: desc,
             note: correctionNote.trim(),
           );
@@ -1388,23 +1554,45 @@ class DriftFinanceRepository implements IFinanceRepository {
             correctedFromEntryId: originalLedger?.id,
           );
         } else if (original.type == 'income') {
+          PostingModel? drAcc;
+          for (final p in origEntryPostings) {
+            if (p.direction == PostingDirection.debit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              drAcc ??= p;
+            }
+          }
+          final preservedMovementDate = sameOccurrenceDate
+              ? (drAcc?.accountMovementDate ?? original.transactionDate)
+              : original.transactionDate;
           built = DoubleEntryEngine.buildDirectIncome(
             entryId: replacementId,
             destAccountId: effectiveAccountId,
             categoryId: newCategoryId,
             amountCents: newAmountCents.abs(),
             date: original.transactionDate,
+            movementDate: preservedMovementDate,
             description: desc,
             note: correctionNote.trim(),
             correctedFromEntryId: originalLedger?.id,
           );
         } else {
+          PostingModel? crAcc;
+          for (final p in origEntryPostings) {
+            if (p.direction == PostingDirection.credit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              crAcc ??= p;
+            }
+          }
+          final preservedMovementDate = sameOccurrenceDate
+              ? (crAcc?.accountMovementDate ?? original.transactionDate)
+              : original.transactionDate;
           built = DoubleEntryEngine.buildDirectExpense(
             entryId: replacementId,
             paidAccountId: effectiveAccountId,
             categoryId: newCategoryId,
             amountCents: newAmountCents.abs(),
             date: original.transactionDate,
+            movementDate: preservedMovementDate,
             description: desc,
             note: correctionNote.trim(),
             correctedFromEntryId: originalLedger?.id,
@@ -2454,6 +2642,34 @@ class DriftFinanceRepository implements IFinanceRepository {
       }
       if (effectiveVaultId != null) {
         await _assertEtbVaultAccountInTx(effectiveVaultId);
+      }
+      if (goal.status == SavingsGoalStatus.archived &&
+          existing?.status != 'archived' &&
+          effectiveVaultId != null) {
+        await _syncVaultGoalsInTx();
+        final accounts =
+            await getAccounts(includeArchived: true, includeSystem: true);
+        AccountModel? vaultAcc;
+        for (final a in accounts) {
+          if (a.id == effectiveVaultId) {
+            vaultAcc = a;
+            break;
+          }
+        }
+        if (vaultAcc != null) {
+          final vaultPostings = await getPostings(accountId: effectiveVaultId);
+          final allEntries = await getJournalEntries(includeVoided: true);
+          final liveBalance = DoubleEntryEngine.calculateAccountBalance(
+            account: vaultAcc,
+            postings: vaultPostings,
+            entries: allEntries,
+          );
+          if (liveBalance > 0) {
+            throw DoubleEntryValidationError(
+              'Withdraw vault funds back to a liquid account before archiving.',
+            );
+          }
+        }
       }
       final targetCents = goal.targetCents.abs();
       final allocated = goal.currentAllocatedCents.abs();
@@ -3798,6 +4014,25 @@ class DriftFinanceRepository implements IFinanceRepository {
       }
     }
 
+    // Guard 7: Commitment settlement cannot be restored if doing so would over-settle its commitment.
+    final targetCmSettlements = await (_db.select(_db.commitmentSettlementsTable)
+          ..where((tbl) => tbl.entryId.equals(entryId)))
+        .get();
+    for (final cs in targetCmSettlements) {
+      final commitment = await (_db.select(_db.financialCommitments)
+            ..where((tbl) => tbl.id.equals(cs.commitmentId)))
+          .getSingleOrNull();
+      if (commitment == null) continue;
+      final currentSettled =
+          await _verifiedCommitmentSettledCentsInTx(cs.commitmentId);
+      if (currentSettled + cs.amountCents > commitment.amountCents) {
+        throw DoubleEntryValidationError(
+          'Cannot restore commitment settlement because total settled amount '
+          'would exceed the commitment amount.',
+        );
+      }
+    }
+
     await (_db.update(_db.journalEntriesTable)
           ..where((tbl) => tbl.id.equals(entryId)))
         .write(
@@ -3821,6 +4056,130 @@ class DriftFinanceRepository implements IFinanceRepository {
       legacySourceTxId: entryRow.legacySourceTxId,
       isSuperseded: false,
     );
+
+    // If a dual-written legacySourceTxId row was hard-deleted via deleteTransaction
+    // and is now restored via unvoidJournalEntry, recreate the FinancialTransactions
+    // mirror row so both stores remain consistent.
+    final legacyId = entryRow.legacySourceTxId?.trim();
+    if (legacyId != null &&
+        legacyId.isNotEmpty &&
+        !legacyId.startsWith('open:') &&
+        (mappedTarget.entryType == EntryType.standard ||
+            mappedTarget.entryType == EntryType.transfer) &&
+        !DoubleEntryEngine.isRefundEntry(mappedTarget)) {
+      final existingDualTx = await (_db.select(_db.financialTransactions)
+            ..where((tbl) => tbl.id.equals(legacyId)))
+          .getSingleOrNull();
+      final linkedOriginDebt = await (_db.select(_db.debtsTable)
+            ..where((tbl) => tbl.originEntryId.equals(entryId))
+            ..limit(1))
+          .getSingleOrNull();
+      if (existingDualTx == null &&
+          targetAllocs.isEmpty &&
+          linkedOriginDebt == null) {
+        final isTransfer = mappedTarget.entryType == EntryType.transfer;
+        final isIncome = !isTransfer &&
+            entryPostings.any(
+              (p) =>
+                  p.accountId == SystemControlAccounts.income &&
+                  p.direction == PostingDirection.credit,
+            );
+        late String txType;
+        late int txAmount;
+        late String txCategoryId;
+        String? txAccountId;
+        String? txDestAccountId;
+        String? txNote;
+        String? txPayee;
+
+        if (isTransfer) {
+          txType = 'transfer';
+          PostingModel? src;
+          PostingModel? dst;
+          for (final p in entryPostings) {
+            if (p.accountId == SystemControlAccounts.expense) continue;
+            if (p.direction == PostingDirection.credit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              src ??= p;
+            } else if (p.direction == PostingDirection.debit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              dst ??= p;
+            }
+          }
+          txAmount = dst?.amountCents ?? src?.amountCents ?? 0;
+          txCategoryId = 'cat-transfer';
+          txAccountId = src?.accountId;
+          txDestAccountId = dst?.accountId;
+          txNote = dst?.note ?? src?.note;
+        } else if (isIncome) {
+          txType = 'income';
+          PostingModel? drAcc;
+          PostingModel? crInc;
+          for (final p in entryPostings) {
+            if (p.accountId == SystemControlAccounts.income &&
+                p.direction == PostingDirection.credit) {
+              crInc ??= p;
+            } else if (p.direction == PostingDirection.debit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              drAcc ??= p;
+            }
+          }
+          txAmount = drAcc?.amountCents ?? crInc?.amountCents ?? 0;
+          txCategoryId = crInc?.categoryId ?? 'cat-inc-other';
+          txAccountId = drAcc?.accountId;
+          txNote = drAcc?.note ?? crInc?.note;
+          final sepIdx = mappedTarget.description.indexOf(' — ');
+          if (sepIdx > 0) {
+            txPayee = mappedTarget.description.substring(0, sepIdx).trim();
+          }
+        } else {
+          txType = 'expense';
+          PostingModel? drExp;
+          PostingModel? crAcc;
+          for (final p in entryPostings) {
+            if (p.accountId == SystemControlAccounts.expense &&
+                p.direction == PostingDirection.debit) {
+              drExp ??= p;
+            } else if (p.direction == PostingDirection.credit &&
+                !SystemControlAccounts.isSystemControlId(p.accountId)) {
+              crAcc ??= p;
+            }
+          }
+          txAmount = drExp?.amountCents ?? crAcc?.amountCents ?? 0;
+          txCategoryId = drExp?.categoryId ?? 'cat-exp-other';
+          txAccountId = crAcc?.accountId;
+          txNote = drExp?.note ?? crAcc?.note;
+          final sepIdx = mappedTarget.description.indexOf(' — ');
+          if (sepIdx > 0) {
+            txPayee = mappedTarget.description.substring(0, sepIdx).trim();
+          }
+        }
+
+        if (txAmount > 0 && txAccountId != null) {
+          if (txType != 'transfer') {
+            await _ensureCategoryExists(txCategoryId, 'General', txType);
+          }
+          await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+                FinancialTransactionsCompanion.insert(
+                  id: legacyId,
+                  categoryId: txCategoryId,
+                  amountCents: txAmount.abs(),
+                  type: txType,
+                  transactionDate: mappedTarget.occurrenceDate,
+                  note: Value(txNote?.trim()),
+                  payee: Value(txPayee),
+                  accountId: Value(txAccountId),
+                  destinationAccountId: Value(txDestAccountId),
+                  isSuperseded: const Value(false),
+                  correctedFromId: const Value(null),
+                  correctionReason: const Value(null),
+                  createdAt: mappedTarget.createdAt,
+                ),
+              );
+        }
+      }
+    }
+
     await _syncCommitmentsForEntryInTx(entryId);
     await V7LedgerHardener.reconcileAllDebtsV7(_db);
     await _syncVaultGoalsInTx();

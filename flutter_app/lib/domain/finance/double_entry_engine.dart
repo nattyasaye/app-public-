@@ -3387,10 +3387,12 @@ class DoubleEntryEngine {
     required String categoryId,
     required int amountCents,
     required String date,
+    String? movementDate,
     required String description,
     String? note,
     String? correctedFromEntryId,
   }) {
+    final effectiveMovementDate = movementDate ?? date;
     final entry = JournalEntryModel(
       id: entryId,
       entryType: EntryType.standard,
@@ -3415,7 +3417,7 @@ class DoubleEntryEngine {
         accountId: paidAccountId,
         amountCents: amountCents,
         direction: PostingDirection.credit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
         note: note,
       ),
     ];
@@ -3431,10 +3433,12 @@ class DoubleEntryEngine {
     required String categoryId,
     required int amountCents,
     required String date,
+    String? movementDate,
     required String description,
     String? note,
     String? correctedFromEntryId,
   }) {
+    final effectiveMovementDate = movementDate ?? date;
     final entry = JournalEntryModel(
       id: entryId,
       entryType: EntryType.standard,
@@ -3449,7 +3453,7 @@ class DoubleEntryEngine {
         accountId: destAccountId,
         amountCents: amountCents,
         direction: PostingDirection.debit,
-        accountMovementDate: date,
+        accountMovementDate: effectiveMovementDate,
         note: note,
       ),
       PostingModel(

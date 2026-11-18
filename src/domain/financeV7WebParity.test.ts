@@ -2,27 +2,36 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   Account,
+  assertCanArchiveAccountV7,
+  assertCanArchiveSavingsGoalV7,
   buildBorrowMoney,
   buildDebtSettlement,
   buildDebtWriteOff,
   buildDirectExpense,
+  buildDirectIncome,
   buildLendMoney,
   buildSplitExpense,
   buildThirdPartyPaidExpense,
+  buildTransfer,
   calculateAvailableToSpendBreakdownV7,
   calculateCommitmentSettledCents,
   calculateV7AccountBalance,
+  canCorrectJournalEntryV7,
+  correctJournalEntryV7,
   Debt,
   ensureSystemControlAccounts,
   fundSavingsGoalV7,
   getCommitmentRemainingCents,
+  getExpenseRefundSummaryV7,
   getOpeningBalanceRevisionHistory,
   hydrateLedgerFromSimpleTransactions,
   JournalEntry,
   Party,
   Posting,
   processDueRecurringRulesV7,
+  reconcileDebtsV7,
   recordCommitmentSettlementV7,
+  recordExpenseRefundV7,
   reviseAccountOpeningBalanceV7,
   SettlementAllocation,
   SharedCommitment,
@@ -30,11 +39,15 @@ import {
   SharedRecurringRule,
   SharedSavingsGoal,
   skipNextRecurringOccurrenceV7,
+  syncVaultSavingsGoalsV7,
+  unvoidJournalEntryGuardedV7,
   verifyFinanceV7Integrity,
   voidCommitmentSettlementV7,
   voidDebtOriginV7,
   voidDebtWriteOffV7,
+  voidJournalEntryGuardedV7,
 } from './financeV7Engine';
+import { DoubleEntryValidationError } from './doubleEntryFinance';
 import { SYSTEM_CONTROL_ACCOUNT_IDS } from './sharedFoundation';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 
@@ -520,6 +533,832 @@ describe('Finance v7 Web Engine & Cross-Platform Parity', () => {
       assert.equal(imported.success, true);
       assert.equal(JSON.parse(store.get('daywell_commitments')!)[0].direction, 'inflow');
       assert.equal(JSON.parse(store.get('daywell_parties')!)[0].name, 'Abebe');
+    } finally {
+      (globalThis as any).window = prevWindow;
+      (globalThis as any).localStorage = prevLocalStorage;
+    }
+  });
+
+  it('Stage B (F1): enforces debt-origin/settlement void guards, unvoid checks, and debt reconciliation', () => {
+    const accounts = ensureSystemControlAccounts([
+      makeAssetAccount('acc-cbe', 'CBE', 500_000),
+    ]);
+    const lend = buildLendMoney({
+      entryId: 'entry-lend-1',
+      debtId: 'debt-rec-1',
+      partyId: 'party-1',
+      sourceAssetAccountId: 'acc-cbe',
+      receivableAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.receivable,
+      amountCents: 100_000,
+      date: '2026-11-05',
+      description: 'Loan to friend',
+    });
+    const partialSettle = buildDebtSettlement({
+      settlementEntryId: 'entry-settle-1',
+      debt: lend.debt,
+      settlementAccountId: 'acc-cbe',
+      debtAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.receivable,
+      allocatedPrincipalCents: 40_000,
+      settlementDate: '2026-11-06',
+      description: 'Partial repayment',
+    });
+    let entries: JournalEntry[] = [lend.entry, partialSettle.entry];
+    let postings: Posting[] = [...lend.postings, ...partialSettle.postings];
+    let debts: Debt[] = [partialSettle.updatedDebt];
+    let allocations: SettlementAllocation[] = [partialSettle.allocation];
+
+    // 1) Cannot void debt origin while active settlement exists
+    assert.throws(
+      () =>
+        voidJournalEntryGuardedV7({
+          entryId: 'entry-lend-1',
+          reason: 'Mistake',
+          accounts,
+          entries,
+          postings,
+          debts,
+          allocations,
+          commitments: [],
+          commitmentSettlements: [],
+          savingsGoals: [],
+          simpleTransactions: [],
+        }),
+      DoubleEntryValidationError
+    );
+
+    // 2) Void settlement first -> debt reconciles back to 100,000 active
+    const afterSettleVoid = voidJournalEntryGuardedV7({
+      entryId: 'entry-settle-1',
+      reason: 'Bounced transfer',
+      accounts,
+      entries,
+      postings,
+      debts,
+      allocations,
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [],
+      simpleTransactions: [],
+    });
+    entries = afterSettleVoid.updatedEntries;
+    debts = afterSettleVoid.updatedDebts;
+    assert.equal(debts[0].outstandingCents, 100_000);
+    assert.equal(debts[0].status, 'active');
+
+    // 3) Now debt origin can be voided -> debt becomes voided (0 outstanding)
+    const afterOriginVoid = voidJournalEntryGuardedV7({
+      entryId: 'entry-lend-1',
+      reason: 'Cancelled loan',
+      accounts,
+      entries,
+      postings,
+      debts,
+      allocations,
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [],
+      simpleTransactions: [],
+    });
+    entries = afterOriginVoid.updatedEntries;
+    debts = afterOriginVoid.updatedDebts;
+    assert.equal(debts[0].status, 'voided');
+    assert.equal(debts[0].outstandingCents, 0);
+
+    // 4) Cannot unvoid settlement while debt origin is voided
+    assert.throws(
+      () =>
+        unvoidJournalEntryGuardedV7({
+          entryId: 'entry-settle-1',
+          accounts,
+          entries,
+          postings,
+          debts,
+          allocations,
+          commitments: [],
+          commitmentSettlements: [],
+          savingsGoals: [],
+          simpleTransactions: [],
+        }),
+      DoubleEntryValidationError
+    );
+
+    // 5) Unvoid origin then write off -> settlement cannot be voided/unvoided while write-off active
+    const afterOriginUnvoid = unvoidJournalEntryGuardedV7({
+      entryId: 'entry-lend-1',
+      accounts,
+      entries,
+      postings,
+      debts,
+      allocations,
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [],
+      simpleTransactions: [],
+    });
+    entries = afterOriginUnvoid.updatedEntries;
+    debts = afterOriginUnvoid.updatedDebts;
+    assert.equal(debts[0].status, 'active');
+    assert.equal(debts[0].outstandingCents, 100_000);
+
+    const wo = buildDebtWriteOff({
+      writeOffEntryId: 'entry-wo-1',
+      debt: debts[0],
+      debtAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.receivable,
+      writeOffAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      writeOffCents: debts[0].outstandingCents,
+      date: '2026-11-10',
+      reason: 'Uncollectible',
+    });
+    entries = [...entries, wo.entry];
+    postings = [...postings, ...wo.postings];
+    debts = [wo.updatedDebt];
+    assert.equal(debts[0].status, 'written_off');
+
+    assert.throws(
+      () =>
+        unvoidJournalEntryGuardedV7({
+          entryId: 'entry-settle-1',
+          accounts,
+          entries,
+          postings,
+          debts,
+          allocations,
+          commitments: [],
+          commitmentSettlements: [],
+          savingsGoals: [],
+          simpleTransactions: [],
+        }),
+      DoubleEntryValidationError
+    );
+    assert.throws(
+      () =>
+        voidJournalEntryGuardedV7({
+          entryId: 'entry-lend-1',
+          reason: 'Try void under writeoff',
+          accounts,
+          entries,
+          postings,
+          debts,
+          allocations,
+          commitments: [],
+          commitmentSettlements: [],
+          savingsGoals: [],
+          simpleTransactions: [],
+        }),
+      DoubleEntryValidationError
+    );
+
+    // Void write-off via voidDebtWriteOffV7 + reconcileDebtsV7 restores active debt
+    const voidedWo = voidDebtWriteOffV7({
+      debt: debts[0],
+      entries,
+      allocations,
+      reason: 'Recovery resumed',
+    });
+    const reconciledAfterWoVoid = reconcileDebtsV7({
+      debts: [voidedWo.updatedDebt],
+      entries: voidedWo.updatedEntries,
+      allocations,
+    });
+    assert.equal(reconciledAfterWoVoid[0].status, 'active');
+    assert.equal(reconciledAfterWoVoid[0].outstandingCents, 100_000);
+    assert.equal(reconciledAfterWoVoid[0].writeOffEntryId, undefined);
+  });
+
+  it('Stage B (F1): blocks unsafe edits/corrections and preserves payee, movementDate, feeCategoryId, and dual-write consistency', () => {
+    const accounts = ensureSystemControlAccounts([
+      makeAssetAccount('acc-cbe', 'CBE', 500_000),
+      makeAssetAccount('acc-cash', 'Wallet', 50_000, { subType: 'cash' }),
+    ]);
+    const split = buildSplitExpense({
+      entryId: 'entry-split-1',
+      debtId: 'debt-split-1',
+      partyId: 'party-1',
+      myExpenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      receivableAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.receivable,
+      paidAssetAccountId: 'acc-cbe',
+      myShareCents: 15_000,
+      theirShareCents: 15_000,
+      occurrenceDate: '2026-11-05',
+      description: 'Team lunch',
+      categoryId: 'cat-food',
+    });
+    const xfer = buildTransfer({
+      id: 'entry-xfer-1',
+      fromAssetAccountId: 'acc-cbe',
+      toAssetAccountId: 'acc-cash',
+      amountCents: 20_000,
+      transferFeeCents: 500,
+      feeExpenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      feeCategoryId: 'cat-sys-fees',
+      date: '2026-11-05',
+      movementDate: '2026-11-06',
+      description: 'ATM cash pull',
+    });
+    const stdExp = buildDirectExpense({
+      id: 'entry-exp-1',
+      assetAccountId: 'acc-cbe',
+      expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      categoryId: 'cat-food',
+      amountCents: 12_000,
+      occurrenceDate: '2026-11-04',
+      movementDate: '2026-11-05',
+      description: 'Tomoca — Coffee',
+      note: 'Morning brew',
+    });
+    const openRev = reviseAccountOpeningBalanceV7({
+      account: accounts.find((a) => a.id === 'acc-cbe')!,
+      newOpeningBalanceCents: 520_000,
+      newOpeningDateIso: '2026-11-01',
+      entries: [],
+      postings: [],
+    });
+
+    const cmSettlement = recordCommitmentSettlementV7({
+      commitment: {
+        id: 'com-1',
+        title: 'Internet',
+        amountCents: 10_000,
+        dueDate: '2026-11-10',
+        isPaid: false,
+        direction: 'outflow',
+      },
+      accountId: 'acc-cbe',
+      amountCents: 6_000,
+      settledDateIso: '2026-11-08',
+      existingSettlements: [],
+      entries: [],
+    });
+
+    const allEntries: JournalEntry[] = [
+      split.entry,
+      xfer.entry,
+      stdExp.entry,
+      openRev.revisionEntry!,
+      cmSettlement.entry,
+    ];
+    const allPostings: Posting[] = [
+      ...split.postings,
+      ...xfer.postings,
+      ...stdExp.postings,
+      ...openRev.updatedPostings,
+      ...cmSettlement.postings,
+    ];
+    const debts: Debt[] = [split.debt];
+
+    // Blocked entry types
+    assert.equal(
+      canCorrectJournalEntryV7({
+        entry: split.entry,
+        entries: allEntries,
+        postings: allPostings,
+        accounts,
+        debts,
+        allocations: [],
+      }).ok,
+      false
+    );
+    assert.equal(
+      canCorrectJournalEntryV7({
+        entry: openRev.revisionEntry!,
+        entries: allEntries,
+        postings: allPostings,
+        accounts,
+        debts,
+        allocations: [],
+      }).ok,
+      false
+    );
+    assert.equal(
+      canCorrectJournalEntryV7({
+        entry: cmSettlement.entry,
+        entries: allEntries,
+        postings: allPostings,
+        accounts,
+        debts,
+        allocations: [],
+        commitmentSettlements: [cmSettlement.settlement],
+      }).ok,
+      false
+    );
+
+    // Commitment over-settlement unvoid guard (Guard 7)
+    const voidedCm = voidCommitmentSettlementV7({
+      settlementId: cmSettlement.settlement.id,
+      reason: 'Retry payment',
+      commitment: cmSettlement.updatedCommitment,
+      settlements: [cmSettlement.settlement],
+      entries: allEntries,
+    });
+    const fullCm = recordCommitmentSettlementV7({
+      commitment: voidedCm.updatedCommitment,
+      accountId: 'acc-cbe',
+      amountCents: 10_000,
+      settledDateIso: '2026-11-09',
+      existingSettlements: [cmSettlement.settlement],
+      entries: voidedCm.updatedEntries,
+    });
+    assert.throws(
+      () =>
+        unvoidJournalEntryGuardedV7({
+          entryId: cmSettlement.entry.id,
+          accounts,
+          entries: [...voidedCm.updatedEntries, fullCm.entry],
+          postings: [...allPostings, ...fullCm.postings],
+          debts,
+          allocations: [],
+          commitments: [fullCm.updatedCommitment],
+          commitmentSettlements: [cmSettlement.settlement, fullCm.settlement],
+          savingsGoals: [],
+          simpleTransactions: [],
+        }),
+      DoubleEntryValidationError
+    );
+
+    // Supported transfer correction preserves feeCategoryId & movementDate
+    assert.equal(
+      canCorrectJournalEntryV7({
+        entry: xfer.entry,
+        entries: allEntries,
+        postings: allPostings,
+        accounts,
+        debts,
+        allocations: [],
+      }).ok,
+      true
+    );
+    const xferRepl = buildTransfer({
+      id: 'entry-xfer-2',
+      fromAssetAccountId: 'acc-cbe',
+      toAssetAccountId: 'acc-cash',
+      amountCents: 25_000,
+      transferFeeCents: 500,
+      feeExpenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      feeCategoryId: 'cat-sys-fees',
+      date: '2026-11-05',
+      movementDate: '2026-11-06',
+      description: 'ATM cash pull',
+    });
+    const corrRes = correctJournalEntryV7({
+      originalEntryId: xfer.entry.id,
+      replacementEntry: xferRepl.entry,
+      replacementPostings: xferRepl.postings,
+      correctionReason: 'Updated amount',
+      accounts,
+      entries: allEntries,
+      postings: allPostings,
+      debts,
+      allocations: [],
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [],
+      simpleTransactions: [
+        {
+          id: 'tx-xfer-1',
+          type: 'transfer',
+          amountCents: 20_000,
+          accountId: 'acc-cbe',
+          destinationAccountId: 'acc-cash',
+          description: 'ATM cash pull',
+          transactionDate: '2026-11-05',
+          createdAt: '2026-11-05T08:00:00Z',
+          updatedAt: '2026-11-05T08:00:00Z',
+          journalEntryId: xfer.entry.id,
+        },
+      ],
+      replacementSimpleTx: {
+        id: 'tx-xfer-2',
+        type: 'transfer',
+        amountCents: 25_000,
+        accountId: 'acc-cbe',
+        destinationAccountId: 'acc-cash',
+        description: 'ATM cash pull',
+        transactionDate: '2026-11-05',
+        createdAt: '2026-11-05T08:05:00Z',
+        updatedAt: '2026-11-05T08:05:00Z',
+        journalEntryId: 'entry-xfer-2',
+      },
+    });
+    const feePost = corrRes.updatedPostings.find(
+      (p) => p.entryId === 'entry-xfer-2' && p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense
+    );
+    const dstPost = corrRes.updatedPostings.find(
+      (p) => p.entryId === 'entry-xfer-2' && p.accountId === 'acc-cash'
+    );
+    assert.equal(feePost?.categoryId, 'cat-sys-fees');
+    assert.equal(dstPost?.accountMovementDate, '2026-11-06');
+    assert.equal(
+      corrRes.updatedSimpleTransactions.find((t) => t.id === 'tx-xfer-1')?.isSuperseded,
+      true
+    );
+    assert.equal(
+      corrRes.updatedSimpleTransactions.find((t) => t.id === 'tx-xfer-2')?.isSuperseded,
+      undefined
+    );
+
+    // Dual-write void & unvoid synchronization on direct expense
+    const voidExp = voidJournalEntryGuardedV7({
+      entryId: stdExp.entry.id,
+      reason: 'Duplicate',
+      accounts,
+      entries: corrRes.updatedEntries,
+      postings: corrRes.updatedPostings,
+      debts,
+      allocations: [],
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [],
+      simpleTransactions: [
+        {
+          id: 'tx-exp-1',
+          type: 'expense',
+          amountCents: 12_000,
+          accountId: 'acc-cbe',
+          categoryId: 'cat-food',
+          payee: 'Tomoca',
+          description: 'Coffee',
+          transactionDate: '2026-11-04',
+          createdAt: '2026-11-04T08:00:00Z',
+          updatedAt: '2026-11-04T08:00:00Z',
+          journalEntryId: stdExp.entry.id,
+        },
+      ],
+    });
+    assert.equal(voidExp.updatedSimpleTransactions[0].isSuperseded, true);
+    const unvoidExp = unvoidJournalEntryGuardedV7({
+      entryId: stdExp.entry.id,
+      accounts,
+      entries: voidExp.updatedEntries,
+      postings: corrRes.updatedPostings,
+      debts,
+      allocations: [],
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [],
+      simpleTransactions: voidExp.updatedSimpleTransactions,
+    });
+    assert.equal(unvoidExp.updatedSimpleTransactions[0].isSuperseded, false);
+  });
+
+  it('Stage B (F1): synchronizes vault SavingsGoals, blocks nonzero archival, and validates expense refunds', () => {
+    const accounts = ensureSystemControlAccounts([
+      makeAssetAccount('acc-cbe', 'CBE', 300_000),
+      makeAssetAccount('acc-vault', 'Emergency Vault', 25_000, { subType: 'savings_vault' }),
+      {
+        id: 'acc-card',
+        name: 'Abyssinia Card',
+        type: 'liability',
+        subType: 'credit_card',
+        currencyCode: 'ETB',
+        openingBalanceCents: 40_000,
+        isArchived: false,
+        createdAt: '2026-11-01T00:00:00Z',
+      },
+    ]);
+    let vaultGoal: SharedSavingsGoal = {
+      id: 'goal-vault',
+      title: 'Emergency Vault',
+      targetCents: 100_000,
+      currentAllocatedCents: 0,
+      linkedAccountId: 'acc-vault',
+      status: 'active',
+    };
+
+    // 1) Opening-balance sync + fund deposit + void/unvoid + withdrawal + archive block
+    let syncedGoals = syncVaultSavingsGoalsV7({
+      accounts,
+      entries: [],
+      postings: [],
+      savingsGoals: [vaultGoal],
+    });
+    vaultGoal = syncedGoals[0];
+    assert.equal(vaultGoal.currentAllocatedCents, 25_000);
+
+    const fundRes = fundSavingsGoalV7({
+      goal: vaultGoal,
+      amountCents: 75_000,
+      direction: 'deposit',
+      sourceAccountId: 'acc-cbe',
+      dateIso: '2026-11-05',
+      accounts,
+      entries: [],
+      postings: [],
+    });
+    let entries: JournalEntry[] = [fundRes.entry!];
+    let postings: Posting[] = [...fundRes.postings!];
+    assert.equal(fundRes.updatedGoal.currentAllocatedCents, 100_000);
+    assert.equal(fundRes.updatedGoal.status, 'completed');
+
+    // Void deposit -> goal returns to active 25,000
+    const voidFund = voidJournalEntryGuardedV7({
+      entryId: fundRes.entry!.id,
+      reason: 'Undo transfer',
+      accounts,
+      entries,
+      postings,
+      debts: [],
+      allocations: [],
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [fundRes.updatedGoal],
+      simpleTransactions: [],
+    });
+    assert.equal(voidFund.updatedSavingsGoals[0].currentAllocatedCents, 25_000);
+    assert.equal(voidFund.updatedSavingsGoals[0].status, 'active');
+
+    // Unvoid deposit -> back to completed 100,000
+    const unvoidFund = unvoidJournalEntryGuardedV7({
+      entryId: fundRes.entry!.id,
+      accounts,
+      entries: voidFund.updatedEntries,
+      postings,
+      debts: [],
+      allocations: [],
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: voidFund.updatedSavingsGoals,
+      simpleTransactions: [],
+    });
+    entries = unvoidFund.updatedEntries;
+    vaultGoal = unvoidFund.updatedSavingsGoals[0];
+    assert.equal(vaultGoal.currentAllocatedCents, 100_000);
+    assert.equal(vaultGoal.status, 'completed');
+
+    // Block archiving nonzero vault goal & vault account
+    assert.throws(
+      () =>
+        assertCanArchiveSavingsGoalV7({
+          goal: vaultGoal,
+          accounts,
+          entries,
+          postings,
+        }),
+      DoubleEntryValidationError
+    );
+    assert.throws(
+      () =>
+        assertCanArchiveAccountV7({
+          account: accounts.find((a) => a.id === 'acc-vault')!,
+          entries,
+          postings,
+        }),
+      DoubleEntryValidationError
+    );
+
+    // Withdraw full 100,000 back to liquid -> now archive succeeds
+    const withdrawRes = fundSavingsGoalV7({
+      goal: vaultGoal,
+      amountCents: 100_000,
+      direction: 'withdraw',
+      sourceAccountId: 'acc-cbe',
+      dateIso: '2026-11-06',
+      accounts,
+      entries,
+      postings,
+    });
+    entries = [withdrawRes.entry!, ...entries];
+    postings = [...withdrawRes.postings!, ...postings];
+    vaultGoal = withdrawRes.updatedGoal;
+    assert.equal(vaultGoal.currentAllocatedCents, 0);
+    assert.equal(vaultGoal.status, 'active');
+    assertCanArchiveSavingsGoalV7({ goal: vaultGoal, accounts, entries, postings });
+    assertCanArchiveAccountV7({
+      account: accounts.find((a) => a.id === 'acc-vault')!,
+      entries,
+      postings,
+    });
+
+    // 2) Expense Refund lifecycle (card destination allowed, vault disallowed, partial+full cap, void block)
+    const exp = buildDirectExpense({
+      id: 'entry-exp-ref-orig',
+      assetAccountId: 'acc-cbe',
+      expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      categoryId: 'cat-shopping',
+      amountCents: 50_000,
+      occurrenceDate: '2026-11-05',
+      movementDate: '2026-11-05',
+      description: 'Electronics',
+    });
+    entries = [exp.entry, ...entries];
+    postings = [...exp.postings, ...postings];
+
+    // Disallow vault as refund destination
+    assert.throws(
+      () =>
+        recordExpenseRefundV7({
+          originalEntryId: exp.entry.id,
+          refundAccountId: 'acc-vault',
+          refundCents: 10_000,
+          refundDateIso: '2026-11-06',
+          entries,
+          postings,
+          accounts,
+        }),
+      DoubleEntryValidationError
+    );
+
+    // Allow partial refund to active credit card liability
+    const r1 = recordExpenseRefundV7({
+      refundEntryId: 'entry-ref-1',
+      originalEntryId: exp.entry.id,
+      refundAccountId: 'acc-card',
+      refundCents: 20_000,
+      refundDateIso: '2026-11-06',
+      entries,
+      postings,
+      accounts,
+    });
+    entries = [r1.entry, ...entries];
+    postings = [...r1.postings, ...postings];
+    assert.equal(r1.updatedSummary.remainingRefundableCents, 30_000);
+
+    // Card owed decreases from 40,000 to 20,000
+    assert.equal(
+      calculateV7AccountBalance(
+        accounts.find((a) => a.id === 'acc-card')!,
+        postings,
+        entries
+      ),
+      20_000
+    );
+
+    // Block voiding original expense while active refund exists
+    assert.throws(
+      () =>
+        voidJournalEntryGuardedV7({
+          entryId: exp.entry.id,
+          reason: 'Try void refunded',
+          accounts,
+          entries,
+          postings,
+          debts: [],
+          allocations: [],
+          commitments: [],
+          commitmentSettlements: [],
+          savingsGoals: [],
+          simpleTransactions: [],
+        }),
+      DoubleEntryValidationError
+    );
+
+    // Block correcting refunded original expense or refund entry itself
+    assert.equal(
+      canCorrectJournalEntryV7({
+        entry: exp.entry,
+        entries,
+        postings,
+        accounts,
+        debts: [],
+        allocations: [],
+      }).ok,
+      false
+    );
+    assert.equal(
+      canCorrectJournalEntryV7({
+        entry: r1.entry,
+        entries,
+        postings,
+        accounts,
+        debts: [],
+        allocations: [],
+      }).ok,
+      false
+    );
+
+    // Second refund reaches full cap; over-refund fails
+    const r2 = recordExpenseRefundV7({
+      refundEntryId: 'entry-ref-2',
+      originalEntryId: exp.entry.id,
+      refundAccountId: 'acc-cbe',
+      refundCents: 30_000,
+      refundDateIso: '2026-11-07',
+      entries,
+      postings,
+      accounts,
+    });
+    entries = [r2.entry, ...entries];
+    postings = [...r2.postings, ...postings];
+    assert.equal(
+      getExpenseRefundSummaryV7({
+        originalEntryId: exp.entry.id,
+        entries,
+        postings,
+        accounts,
+      }).remainingRefundableCents,
+      0
+    );
+
+    // Void r1, restore r2 not applicable since r2 is active -> cannot unvoid r1 if r2+r1 > 50k; voiding r2 makes r1 restorable
+    const voidR1 = voidJournalEntryGuardedV7({
+      entryId: 'entry-ref-1',
+      reason: 'Cancel',
+      accounts,
+      entries,
+      postings,
+      debts: [],
+      allocations: [],
+      commitments: [],
+      commitmentSettlements: [],
+      savingsGoals: [],
+      simpleTransactions: [],
+    });
+    // Now r2 is 30k, so remaining refundable is 20k -> r1 (20k) CAN unvoid cleanly, and another 25k refund fails
+    assert.throws(
+      () =>
+        recordExpenseRefundV7({
+          originalEntryId: exp.entry.id,
+          refundAccountId: 'acc-cbe',
+          refundCents: 25_000,
+          refundDateIso: '2026-11-08',
+          entries: voidR1.updatedEntries,
+          postings,
+          accounts,
+        }),
+      DoubleEntryValidationError
+    );
+  });
+
+  it('Stage B (F1): SharedStateBridge.importFromAndroidJson reconciles stale debt and vault-goal state', () => {
+    const store = new Map<string, string>();
+    const prevWindow = (globalThis as any).window;
+    const prevLocalStorage = (globalThis as any).localStorage;
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => void store.set(k, String(v)),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    (globalThis as any).window = {
+      dispatchEvent: () => true,
+      CustomEvent: class CustomEvent {
+        type: string;
+        constructor(type: string) {
+          this.type = type;
+        }
+      },
+    };
+
+    try {
+      const payload = {
+        schemaVersion: 5,
+        financeSchemaVersion: 7,
+        accounts: [
+          makeAssetAccount('acc-cbe', 'CBE', 100_000),
+          makeAssetAccount('acc-vault', 'Emergency Vault', 80_000, { subType: 'savings_vault' }),
+        ],
+        categories: [],
+        transactions: [],
+        parties: [
+          {
+            id: 'party-1',
+            name: 'Friend',
+            isArchived: false,
+            createdAt: '2026-11-01T00:00:00Z',
+          },
+        ],
+        journalEntries: [
+          {
+            id: 'entry-lend-stale',
+            entryType: 'debt_issuance',
+            description: 'Voided lend',
+            occurrenceDate: '2026-11-02',
+            isVoided: true,
+            voidReason: 'Voided',
+            createdAt: '2026-11-02T00:00:00Z',
+          },
+        ],
+        postings: [],
+        debts: [
+          {
+            id: 'debt-stale',
+            originEntryId: 'entry-lend-stale',
+            partyId: 'party-1',
+            debtType: 'receivable',
+            principalCents: 50_000,
+            outstandingCents: 50_000,
+            status: 'active',
+            createdAt: '2026-11-02T00:00:00Z',
+          },
+        ],
+        savingsGoals: [
+          {
+            id: 'goal-vault-stale',
+            title: 'Emergency Vault',
+            targetCents: 80_000,
+            currentAllocatedCents: 10_000,
+            linkedAccountId: 'acc-vault',
+            status: 'active',
+          },
+        ],
+      };
+
+      const res = SharedStateBridge.importFromAndroidJson(JSON.stringify(payload));
+      assert.equal(res.success, true, res.error);
+      const importedDebts = JSON.parse(store.get('daywell_debts')!);
+      const importedGoals = JSON.parse(store.get('daywell_savings_goals')!);
+      assert.equal(importedDebts[0].status, 'voided');
+      assert.equal(importedDebts[0].outstandingCents, 0);
+      assert.equal(importedGoals[0].currentAllocatedCents, 80_000);
+      assert.equal(importedGoals[0].status, 'completed');
     } finally {
       (globalThis as any).window = prevWindow;
       (globalThis as any).localStorage = prevLocalStorage;

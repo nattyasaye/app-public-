@@ -32,6 +32,7 @@ import {
   validateRecord,
 } from '../domain/projectsEngine';
 import {
+  Account,
   CANONICAL_DEBT_STATUSES,
   CANONICAL_ENTRY_TYPES,
   DEBT_STATUS_LEGACY_ALIASES,
@@ -51,6 +52,10 @@ import {
   tryNormalizeDebtStatus,
   tryNormalizeEntryType,
 } from '../domain/doubleEntryFinance';
+import {
+  reconcileDebtsV7,
+  syncVaultSavingsGoalsV7,
+} from '../domain/financeV7Engine';
 import { EthiopiaClock, LocalDateTime, SharedDateFormatter } from '../domain/date';
 import { BackupFailureKind, BackupValidationError } from '../domain/backupTypes';
 import { interpretSnapshotVersions } from '../domain/snapshotVersionPolicy';
@@ -3571,6 +3576,33 @@ export class SharedStateBridge {
                 allowEmpty: true,
               });
 
+      const accountsForSync = validatedAccounts as unknown as Account[];
+      const entryById = new Map(validatedJournalEntries.map((e) => [e.id, e]));
+      const reconciledDebts = validatedDebts.map((debt) => {
+        const originEntry = entryById.get(debt.originEntryId);
+        const writeOffEntry = debt.writeOffEntryId
+          ? entryById.get(debt.writeOffEntryId)
+          : undefined;
+        const hasLedgerAllocs = validatedSettlementAllocations.some(
+          (a) => a.debtId === debt.id
+        );
+        const hasWriteOffLedgerLink = writeOffEntry?.entryType === 'write_off';
+        if (originEntry?.isVoided || hasWriteOffLedgerLink || hasLedgerAllocs) {
+          return reconcileDebtsV7({
+            debts: [debt],
+            entries: validatedJournalEntries,
+            allocations: validatedSettlementAllocations,
+          })[0];
+        }
+        return debt;
+      });
+      const syncedSavingsGoals = syncVaultSavingsGoalsV7({
+        accounts: accountsForSync,
+        entries: validatedJournalEntries,
+        postings: validatedPostings,
+        savingsGoals: validatedSavingsGoals,
+      });
+
       const importedState: SharedDatabaseStateV7 = {
         schemaVersion,
         snapshotFormatVersion,
@@ -3586,13 +3618,13 @@ export class SharedStateBridge {
         transactions: validatedTransactions,
         commitments: validatedCommitments,
         commitmentSettlements: validatedCommitmentSettlements,
-        savingsGoals: validatedSavingsGoals,
+        savingsGoals: syncedSavingsGoals,
         budgets: validatedBudgets,
         recurringRules: validatedRecurringRules,
         parties: validatedParties,
         journalEntries: validatedJournalEntries,
         postings: validatedPostings,
-        debts: validatedDebts,
+        debts: reconciledDebts,
         settlementAllocations: validatedSettlementAllocations,
         milestones: validatedMilestones,
         tasks: validatedTasks,

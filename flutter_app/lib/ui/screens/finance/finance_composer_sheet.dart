@@ -201,6 +201,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       );
       _accountId = drAcc.accountId;
       _categoryId = crInc.categoryId;
+      _originalMovementDate = drAcc.accountMovementDate;
       _amountCtrl.text =
           FinanceUiFormatters.formatCentsAsInput(drAcc.amountCents);
       _noteCtrl.text = drAcc.note ?? crInc.note ?? '';
@@ -218,6 +219,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       );
       _accountId = crAcc.accountId;
       _categoryId = drExp.categoryId;
+      _originalMovementDate = crAcc.accountMovementDate;
       _amountCtrl.text =
           FinanceUiFormatters.formatCentsAsInput(drExp.amountCents);
       _noteCtrl.text = drExp.note ?? crAcc.note ?? '';
@@ -463,12 +465,16 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       if (_categoryId == null) {
         throw ArgumentError('Select an income category.');
       }
+      final preservedMovementDate = dateIso == original.occurrenceDate
+          ? (_originalMovementDate ?? dateIso)
+          : dateIso;
       built = DoubleEntryEngine.buildDirectIncome(
         entryId: replacementId,
         destAccountId: _accountId!,
         categoryId: _categoryId!,
         amountCents: amountCents,
         date: dateIso,
+        movementDate: preservedMovementDate,
         description: effectiveDescription,
         note: note,
         correctedFromEntryId: original.id,
@@ -477,12 +483,16 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       if (_categoryId == null) {
         throw ArgumentError('Select an expense category.');
       }
+      final preservedMovementDate = dateIso == original.occurrenceDate
+          ? (_originalMovementDate ?? dateIso)
+          : dateIso;
       built = DoubleEntryEngine.buildDirectExpense(
         entryId: replacementId,
         paidAccountId: _accountId!,
         categoryId: _categoryId!,
         amountCents: amountCents,
         date: dateIso,
+        movementDate: preservedMovementDate,
         description: effectiveDescription,
         note: note,
         correctedFromEntryId: original.id,

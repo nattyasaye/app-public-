@@ -358,16 +358,28 @@ export function FinanceTransactionsTab({
     const nominalPosting = info.postings.find((p) => accountById.get(p.accountId)?.isSystem);
     const catPosting = info.postings.find((p) => p.categoryId);
     const kind: ComposerKind = info.polarity === 'income' ? 'income' : 'expense';
+    const payeeSep = ' — ';
+    let prefillPayee = matchedTx?.payee?.trim() || undefined;
+    let prefillDesc = entry.description;
+    if (prefillPayee && prefillDesc.startsWith(`${prefillPayee}${payeeSep}`)) {
+      prefillDesc = prefillDesc.slice(prefillPayee.length + payeeSep.length).trim();
+    } else if (!prefillPayee && prefillDesc.includes(payeeSep)) {
+      const sepIdx = prefillDesc.indexOf(payeeSep);
+      if (sepIdx > 0) {
+        prefillPayee = prefillDesc.slice(0, sepIdx).trim();
+        prefillDesc = prefillDesc.slice(sepIdx + payeeSep.length).trim();
+      }
+    }
 
     onOpenComposer(kind, entry.id, {
       amountText: centsToInputText(info.amountCents),
-      description: entry.description,
+      description: prefillDesc,
       accountId: primaryUserPosting?.accountId,
       categoryId: nominalPosting?.categoryId || catPosting?.categoryId,
       occurrenceDate: entry.occurrenceDate,
       movementDate: primaryUserPosting?.accountMovementDate || entry.occurrenceDate,
       note: primaryUserPosting?.note || nominalPosting?.note,
-      payee: matchedTx?.payee,
+      payee: prefillPayee,
     });
     setInspectEntry(null);
   };

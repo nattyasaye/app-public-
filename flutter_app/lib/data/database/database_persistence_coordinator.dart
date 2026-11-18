@@ -3313,6 +3313,7 @@ class DatabasePersistenceCoordinator {
       } else {
         await V6LedgerMigrator.ensureSystemControlAccounts(_db);
         await V7LedgerHardener.reconcileAllDebtsV7(_db);
+        await V7LedgerHardener.syncVaultSavingsGoalsV7(_db);
         await V7LedgerHardener.verifyInvariantsOnly(_db);
         final savedReport = plan.ledgerMigrationReportV7;
         if (savedReport != null && savedReport.trim().isNotEmpty) {
