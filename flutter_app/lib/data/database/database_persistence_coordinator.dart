@@ -302,8 +302,8 @@ class DatabasePersistenceCoordinator {
       'journalEntries': journalEntries
           .map((e) => {
                 'id': e.id,
-                'entryType': EntryType.tryParse(e.entryType)?.dbValue ??
-                    e.entryType,
+                'entryType':
+                    EntryType.tryParse(e.entryType)?.dbValue ?? e.entryType,
                 'description': e.description,
                 'occurrenceDate': e.occurrenceDate,
                 'isVoided': e.isVoided,
@@ -694,8 +694,8 @@ class DatabasePersistenceCoordinator {
       'journalEntries': journalEntries
           .map((e) => {
                 'id': e.id,
-                'entryType': EntryType.tryParse(e.entryType)?.dbValue ??
-                    e.entryType,
+                'entryType':
+                    EntryType.tryParse(e.entryType)?.dbValue ?? e.entryType,
                 'description': e.description,
                 'occurrenceDate': e.occurrenceDate,
                 'isVoided': e.isVoided,
@@ -1135,8 +1135,7 @@ class DatabasePersistenceCoordinator {
         diagnostics.add(
           SnapshotImportDiagnostic(
             code: 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
-            message:
-                'Snapshot omitted currencyCode on account "$name" ($id); '
+            message: 'Snapshot omitted currencyCode on account "$name" ($id); '
                 'preserved as Unverified for Currency Review.',
             table: 'accounts',
             recordId: id,

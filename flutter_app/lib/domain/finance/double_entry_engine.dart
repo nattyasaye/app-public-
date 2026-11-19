@@ -947,14 +947,26 @@ class MetricComparisonDelta {
 
 class PeriodComparisonReport {
   final ResolvedReportPeriod period;
-  final ({int incomeCents, int expenseCents, int netCashflowCents})
-      currentOccurrence;
-  final ({int incomeCents, int expenseCents, int netCashflowCents})
-      previousOccurrence;
-  final ({int inflowCents, int outflowCents, int netCashflowCents})
-      currentLiquidCash;
-  final ({int inflowCents, int outflowCents, int netCashflowCents})
-      previousLiquidCash;
+  final ({
+    int incomeCents,
+    int expenseCents,
+    int netCashflowCents
+  }) currentOccurrence;
+  final ({
+    int incomeCents,
+    int expenseCents,
+    int netCashflowCents
+  }) previousOccurrence;
+  final ({
+    int inflowCents,
+    int outflowCents,
+    int netCashflowCents
+  }) currentLiquidCash;
+  final ({
+    int inflowCents,
+    int outflowCents,
+    int netCashflowCents
+  }) previousLiquidCash;
   final MetricComparisonDelta occurrenceIncome;
   final MetricComparisonDelta occurrenceExpense;
   final MetricComparisonDelta occurrenceNet;
@@ -4868,8 +4880,7 @@ class DoubleEntryEngine {
 
       return CategorySpendRow(
         categoryId: id,
-        categoryName:
-            cat?.name ?? resolveCategoryDisplayName(categories, id),
+        categoryName: cat?.name ?? resolveCategoryDisplayName(categories, id),
         parentId: parentId,
         directCents: direct,
         rollupCents: rollup,
@@ -4983,8 +4994,7 @@ class DoubleEntryEngine {
       archivedCount: archivedCount,
       liquidTotalCents:
           liquidAccounts.fold<int>(0, (s, a) => s + a.balanceCents),
-      vaultTotalCents:
-          vaultAccounts.fold<int>(0, (s, a) => s + a.balanceCents),
+      vaultTotalCents: vaultAccounts.fold<int>(0, (s, a) => s + a.balanceCents),
       creditCardOwedTotalCents:
           creditCardAccounts.fold<int>(0, (s, a) => s + a.owedCents),
       prepaidCardCreditTotalCents:

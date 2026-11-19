@@ -453,8 +453,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
 
     if (_modeUsesParty) {
       final activeParties = state.parties.where((p) => !p.isArchived).toList();
-      final hasExistingParty =
-          !_showNewPartyField &&
+      final hasExistingParty = !_showNewPartyField &&
           _partyId != null &&
           activeParties.any((p) => p.id == _partyId);
       if (!hasExistingParty && _newPartyCtrl.text.trim().isEmpty) {
@@ -1110,8 +1109,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                         final picked =
                             await FinanceUiFormatters.pickCalendarDate(
                           context,
-                          initialDate:
-                              _dueDate ?? _selectedDate.addDays(7),
+                          initialDate: _dueDate ?? _selectedDate.addDays(7),
                         );
                         if (picked != null && mounted) {
                           setState(() => _dueDate = picked);

@@ -222,10 +222,10 @@ void main() {
         await (db.update(db.financialCategories)
               ..where((t) => t.id.equals('cat-cycle-a')))
             .write(
-              const FinancialCategoriesCompanion(
-                parentId: Value('cat-cycle-b'),
-              ),
-            );
+          const FinancialCategoriesCompanion(
+            parentId: Value('cat-cycle-b'),
+          ),
+        );
 
         await controller.recordDirectExpense(
           accountId: 'acc-bank',

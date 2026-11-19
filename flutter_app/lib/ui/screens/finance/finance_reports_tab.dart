@@ -120,8 +120,7 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
       startDateIso: period.currentStart,
       endDateIso: period.currentEnd,
     );
-    final accountBalancesReport =
-        DoubleEntryEngine.buildAccountBalancesReport(
+    final accountBalancesReport = DoubleEntryEngine.buildAccountBalancesReport(
       accounts: state.accounts,
       entries: state.journalEntries,
       postings: state.postings,

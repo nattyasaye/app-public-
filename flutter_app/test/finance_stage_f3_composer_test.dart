@@ -181,10 +181,10 @@ void main() {
         expect(feePosting.amountCents, 2500);
         expect(feePosting.categoryId, 'cat-comm');
 
-        final bank = controller.state.accounts
-            .firstWhere((a) => a.id == 'acc-bank');
-        final vault = controller.state.accounts
-            .firstWhere((a) => a.id == 'acc-vault');
+        final bank =
+            controller.state.accounts.firstWhere((a) => a.id == 'acc-bank');
+        final vault =
+            controller.state.accounts.firstWhere((a) => a.id == 'acc-vault');
         expect(controller.state.getAccountBalanceCents(bank), 797500);
         expect(controller.state.getAccountBalanceCents(vault), 700000);
 
@@ -244,8 +244,8 @@ void main() {
           description: 'Partial repayment',
         );
         expect(controller.state.errorMessage, isNull);
-        final updatedRec = controller.state.debts
-            .firstWhere((d) => d.id == receivable.id);
+        final updatedRec =
+            controller.state.debts.firstWhere((d) => d.id == receivable.id);
         expect(updatedRec.outstandingCents, 60000);
 
         // Split Expense
@@ -329,8 +329,8 @@ void main() {
         expect(replacement, isNotNull);
         expect(replacement!.correctedFromEntryId, orig.id);
 
-        final oldOrig = controller.state.journalEntries
-            .firstWhere((e) => e.id == orig.id);
+        final oldOrig =
+            controller.state.journalEntries.firstWhere((e) => e.id == orig.id);
         expect(oldOrig.isVoided, isTrue);
 
         final repPostings = controller.state.postings

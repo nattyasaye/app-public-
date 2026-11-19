@@ -3972,10 +3972,9 @@ class DriftFinanceRepository implements IFinanceRepository {
           entries: entries,
         ),
       );
-      final nextStatus =
-          (goal.targetCents > 0 && balance >= goal.targetCents)
-              ? 'completed'
-              : 'active';
+      final nextStatus = (goal.targetCents > 0 && balance >= goal.targetCents)
+          ? 'completed'
+          : 'active';
       if (goal.currentAllocatedCents != balance || goal.status != nextStatus) {
         await (_db.update(_db.savingsGoals)
               ..where((tbl) => tbl.id.equals(goal.id)))

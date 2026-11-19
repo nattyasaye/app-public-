@@ -784,10 +784,9 @@ class V7LedgerHardener {
           entries: mappedEntries,
         ),
       );
-      final nextStatus =
-          (goal.targetCents > 0 && balance >= goal.targetCents)
-              ? 'completed'
-              : 'active';
+      final nextStatus = (goal.targetCents > 0 && balance >= goal.targetCents)
+          ? 'completed'
+          : 'active';
       if (goal.currentAllocatedCents != balance || goal.status != nextStatus) {
         await (db.update(db.savingsGoals)
               ..where((tbl) => tbl.id.equals(goal.id)))

@@ -1135,8 +1135,8 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                                 isSaving = true;
                                 validationError = null;
                               });
-                              final created = await widget.controller
-                                  .recordExpenseRefund(
+                              final created =
+                                  await widget.controller.recordExpenseRefund(
                                 originalEntryId: entry.id,
                                 refundAccountId: selectedAccountId,
                                 refundCents: refundCents,
