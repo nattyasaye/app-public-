@@ -29,6 +29,7 @@ Map<String, dynamic> _stageASnapshot({
   List<Map<String, dynamic>>? journalEntries,
   List<Map<String, dynamic>>? postings,
   List<Map<String, dynamic>>? debts,
+  List<Map<String, dynamic>>? settlementAllocations,
 }) {
   return <String, dynamic>{
     'schemaVersion': schemaVersion,
@@ -70,7 +71,8 @@ Map<String, dynamic> _stageASnapshot({
     'journalEntries': journalEntries ?? const <Map<String, dynamic>>[],
     'postings': postings ?? const <Map<String, dynamic>>[],
     'debts': debts ?? const <Map<String, dynamic>>[],
-    'settlementAllocations': const <Map<String, dynamic>>[],
+    'settlementAllocations':
+        settlementAllocations ?? const <Map<String, dynamic>>[],
     'commitments': const <Map<String, dynamic>>[],
     'commitmentSettlements': const <Map<String, dynamic>>[],
     'savingsGoals': const <Map<String, dynamic>>[],
@@ -125,6 +127,28 @@ void main() {
                   'isVoided': false,
                   'createdAt': '2026-11-15T08:00:00.000Z',
                 },
+              )
+              .toList(),
+          postings: EntryType.values
+              .expand(
+                (t) => <Map<String, dynamic>>[
+                  <String, dynamic>{
+                    'id': 'post-${t.dbValue}-dr',
+                    'entryId': 'je-${t.dbValue}',
+                    'accountId': 'acc-etb',
+                    'amountCents': 1000,
+                    'direction': 'debit',
+                    'accountMovementDate': '2026-11-15',
+                  },
+                  <String, dynamic>{
+                    'id': 'post-${t.dbValue}-cr',
+                    'entryId': 'je-${t.dbValue}',
+                    'accountId': SystemControlAccounts.equity,
+                    'amountCents': 1000,
+                    'direction': 'credit',
+                    'accountMovementDate': '2026-11-15',
+                  },
+                ],
               )
               .toList(),
         );
@@ -187,22 +211,151 @@ void main() {
             <String, dynamic>{
               'id': 'je-origin',
               'entryType': 'debt_issuance',
+              'description': 'Receivable origin',
               'occurrenceDate': '2026-11-15',
+              'isVoided': false,
+            },
+            <String, dynamic>{
+              'id': 'je-origin-voided',
+              'entryType': 'debt_issuance',
+              'description': 'Voided receivable origin',
+              'occurrenceDate': '2026-11-15',
+              'isVoided': true,
+              'voidReason': 'Entered in error',
+            },
+            <String, dynamic>{
+              'id': 'je-settle-partial',
+              'entryType': 'settlement',
+              'description': 'Partial debt settlement',
+              'occurrenceDate': '2026-11-15',
+              'isVoided': false,
+            },
+            <String, dynamic>{
+              'id': 'je-settle-full',
+              'entryType': 'settlement',
+              'description': 'Full debt settlement',
+              'occurrenceDate': '2026-11-15',
+              'isVoided': false,
+            },
+            <String, dynamic>{
+              'id': 'je-writeoff',
+              'entryType': 'write_off',
+              'description': 'Debt write-off',
+              'occurrenceDate': '2026-11-15',
+              'isVoided': false,
             },
           ],
-          debts: DebtStatus.values
-              .map(
-                (s) => <String, dynamic>{
-                  'id': 'debt-${s.dbValue}',
-                  'originEntryId': 'je-origin',
-                  'partyId': 'party-1',
-                  'debtType': 'receivable',
-                  'principalCents': 10000,
-                  'outstandingCents': s == DebtStatus.active ? 5000 : 0,
-                  'status': s.dbValue,
-                },
-              )
-              .toList(),
+          postings: const <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'post-origin-dr',
+              'entryId': 'je-origin',
+              'accountId': SystemControlAccounts.receivable,
+              'amountCents': 10000,
+              'direction': 'debit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-origin-cr',
+              'entryId': 'je-origin',
+              'accountId': 'acc-etb',
+              'amountCents': 10000,
+              'direction': 'credit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-origin-voided-dr',
+              'entryId': 'je-origin-voided',
+              'accountId': SystemControlAccounts.receivable,
+              'amountCents': 10000,
+              'direction': 'debit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-origin-voided-cr',
+              'entryId': 'je-origin-voided',
+              'accountId': 'acc-etb',
+              'amountCents': 10000,
+              'direction': 'credit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-settle-partial-dr',
+              'entryId': 'je-settle-partial',
+              'accountId': 'acc-etb',
+              'amountCents': 5000,
+              'direction': 'debit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-settle-partial-cr',
+              'entryId': 'je-settle-partial',
+              'accountId': SystemControlAccounts.receivable,
+              'amountCents': 5000,
+              'direction': 'credit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-settle-full-dr',
+              'entryId': 'je-settle-full',
+              'accountId': 'acc-etb',
+              'amountCents': 10000,
+              'direction': 'debit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-settle-full-cr',
+              'entryId': 'je-settle-full',
+              'accountId': SystemControlAccounts.receivable,
+              'amountCents': 10000,
+              'direction': 'credit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-writeoff-dr',
+              'entryId': 'je-writeoff',
+              'accountId': SystemControlAccounts.expense,
+              'amountCents': 10000,
+              'direction': 'debit',
+              'accountMovementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'post-writeoff-cr',
+              'entryId': 'je-writeoff',
+              'accountId': SystemControlAccounts.receivable,
+              'amountCents': 10000,
+              'direction': 'credit',
+              'accountMovementDate': '2026-11-15',
+            },
+          ],
+          debts: DebtStatus.values.map((s) {
+            final isVoided = s == DebtStatus.voided;
+            return <String, dynamic>{
+              'id': 'debt-${s.dbValue}',
+              'originEntryId': isVoided ? 'je-origin-voided' : 'je-origin',
+              'partyId': 'party-1',
+              'debtType': 'receivable',
+              'principalCents': 10000,
+              'outstandingCents': s == DebtStatus.active ? 5000 : 0,
+              'status': s.dbValue,
+              if (s == DebtStatus.writtenOff) 'writeOffEntryId': 'je-writeoff',
+            };
+          }).toList(),
+          settlementAllocations: const <Map<String, dynamic>>[
+            <String, dynamic>{
+              'id': 'alloc-active',
+              'settlementEntryId': 'je-settle-partial',
+              'debtId': 'debt-active',
+              'allocatedCents': 5000,
+              'settlementDate': '2026-11-15',
+            },
+            <String, dynamic>{
+              'id': 'alloc-settled',
+              'settlementEntryId': 'je-settle-full',
+              'debtId': 'debt-settled',
+              'allocatedCents': 10000,
+              'settlementDate': '2026-11-15',
+            },
+          ],
         );
 
         await coordinator.importSnapshotDetailed(snapshot);

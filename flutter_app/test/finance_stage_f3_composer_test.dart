@@ -111,10 +111,13 @@ void main() {
             .where((p) => p.entryId == expEntry.id)
             .toList();
         expect(expPostings.length, 2);
-        expect(
-          expPostings.every((p) => p.accountMovementDate == '2026-11-12'),
-          isTrue,
+        final bankPosting =
+            expPostings.firstWhere((p) => p.accountId == 'acc-bank');
+        final expControlPosting = expPostings.firstWhere(
+          (p) => p.accountId == SystemControlAccounts.expense,
         );
+        expect(bankPosting.accountMovementDate, '2026-11-12');
+        expect(expControlPosting.accountMovementDate, '2026-11-10');
 
         final occIncome = CalendarDate(year: 2026, month: 11, day: 14);
         final movIncome = CalendarDate(year: 2026, month: 11, day: 15);
@@ -260,16 +263,42 @@ void main() {
           note: '60/40 split',
         );
         expect(splitEntry, isNotNull);
+        final split = splitEntry!;
+        expect(split.entryType, EntryType.splitExpense);
         expect(
           controller.state.debts.any(
-            (d) =>
-                d.originEntryId == splitEntry!.id && d.principalCents == 20000,
+            (d) => d.originEntryId == split.id && d.principalCents == 20000,
           ),
           isTrue,
         );
-        final splitMirror = controller.state.transactions
-            .firstWhere((t) => t.id == 'tx-${splitEntry!.id}');
-        expect(splitMirror.amountCents, 30000);
+        final splitPostings = controller.state.postings
+            .where((p) => p.entryId == split.id)
+            .toList();
+        expect(splitPostings.length, 3);
+        expect(
+          splitPostings
+              .firstWhere((p) => p.accountId == SystemControlAccounts.expense)
+              .amountCents,
+          30000,
+        );
+        expect(
+          splitPostings
+              .firstWhere(
+                (p) => p.accountId == SystemControlAccounts.receivable,
+              )
+              .amountCents,
+          20000,
+        );
+        expect(
+          splitPostings
+              .firstWhere((p) => p.accountId == 'acc-bank')
+              .amountCents,
+          50000,
+        );
+        expect(
+          controller.state.transactions.any((t) => t.id == 'tx-${split.id}'),
+          isFalse,
+        );
 
         // Expense Refund
         final exp = await controller.recordDirectExpense(
@@ -335,8 +364,16 @@ void main() {
             .where((p) => p.entryId == replacement.id)
             .toList();
         expect(
-          repPostings.every((p) => p.accountMovementDate == '2026-11-10'),
-          isTrue,
+          repPostings
+              .firstWhere((p) => p.accountId == 'acc-cash')
+              .accountMovementDate,
+          '2026-11-10',
+        );
+        expect(
+          repPostings
+              .firstWhere((p) => p.accountId == SystemControlAccounts.expense)
+              .accountMovementDate,
+          '2026-11-08',
         );
 
         final oldMirror = controller.state.transactions
@@ -550,19 +587,40 @@ void main() {
         expect(find.text('Source Account'), findsOneWidget);
         expect(find.text('Fee Category'), findsNothing);
 
-        await tester.enterText(fieldByLabel('Amount (ETB) *'), '250.00');
+        final amountField = fieldByLabel('Amount (ETB) *');
+        await tester.ensureVisible(amountField);
+        await tester.pumpAndSettle();
+        await tester.enterText(amountField, '250.00');
+        await tester.pumpAndSettle();
+
         final partyField = fieldByLabel('New Person / Party Name *');
         await tester.ensureVisible(partyField);
+        await tester.pumpAndSettle();
         await tester.enterText(partyField, 'Dawit');
+        await tester.pumpAndSettle();
+
         final descField = fieldByLabel('Description');
         await tester.ensureVisible(descField);
+        await tester.pumpAndSettle();
         await tester.enterText(descField, 'Taxi loan');
+        await tester.pumpAndSettle();
 
-        await tester.ensureVisible(find.text('Post Loan Out'));
-        await tester.runAsync(() async {
-          await tester.tap(find.text('Post Loan Out'));
-          await Future<void>.delayed(const Duration(milliseconds: 100));
-        });
+        final postLoanButton =
+            find.widgetWithText(DaywellButton, 'Post Loan Out');
+        await tester.ensureVisible(postLoanButton);
+        await tester.pumpAndSettle();
+        await tester.tap(postLoanButton);
+        await tester.pump();
+        final stopwatch = Stopwatch()..start();
+        while (find.byType(FinanceComposerSheet).evaluate().isNotEmpty) {
+          if (stopwatch.elapsed > const Duration(seconds: 5)) {
+            break;
+          }
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+          );
+        }
         await tester.pumpAndSettle();
 
         expect(find.byType(FinanceComposerSheet), findsNothing);

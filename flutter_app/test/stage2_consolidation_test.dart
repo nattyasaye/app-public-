@@ -443,11 +443,16 @@ void main() {
         expect(state2.financeController.state.categories.length, 12);
         expect(state2.financeController.state.isSetupCompleted, isTrue);
         expect(state2.financeController.state.accounts.length, 2);
-        expect(state2.financeController.state.transactions.length, 1);
-        expect(
-          state2.financeController.state.transactions.single.amountCents,
-          18500,
-        );
+        expect(state2.financeController.state.transactions.length, 2);
+        final expenseTx = state2.financeController.state.transactions
+            .firstWhere((t) => t.id == 'tx-restart-1');
+        expect(expenseTx.amountCents, 18500);
+        expect(expenseTx.type, 'expense');
+        final transferTx = state2.financeController.state.transactions
+            .firstWhere((t) => t.type == 'transfer');
+        expect(transferTx.amountCents, 10000);
+        expect(transferTx.accountId, 'acc-cbe-user');
+        expect(transferTx.destinationAccountId, 'acc-telebirr-user');
         // 2 opening balance entries + 1 recorded expense + 1 transfer = 4 entries, 8 postings
         expect(state2.financeController.state.journalEntries.length, 4);
         expect(state2.financeController.state.postings.length, 8);
