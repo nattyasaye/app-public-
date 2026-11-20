@@ -15,6 +15,96 @@ import 'package:personal_management_app/ui/screens/finance/finance_reports_tab.d
 
 import 'support/sqlite_test_helper.dart';
 
+class _StageF4Fixture {
+  final AppDatabase db;
+  final DriftFinanceRepository repo;
+  final FinanceController controller;
+  final DatabasePersistenceCoordinator coordinator;
+
+  const _StageF4Fixture({
+    required this.db,
+    required this.repo,
+    required this.controller,
+    required this.coordinator,
+  });
+}
+
+Future<_StageF4Fixture> _createSeededStageF4Fixture() async {
+  final db = AppDatabase(NativeDatabase.memory());
+  await db.ensureInitialized();
+  final repo = DriftFinanceRepository(db);
+  final controller = FinanceController(repository: repo);
+  final coordinator = DatabasePersistenceCoordinator(db);
+  await controller.completeSetup([
+    AccountModel(
+      id: 'acc-bank',
+      name: 'CBE Checking',
+      type: AccountType.asset,
+      subType: AccountSubType.bank,
+      currencyCode: 'ETB',
+      openingBalanceCents: 1000000,
+      openingBalanceDate: '2026-01-01',
+    ),
+    AccountModel(
+      id: 'acc-vault',
+      name: 'Emergency Vault',
+      type: AccountType.asset,
+      subType: AccountSubType.savingsVault,
+      currencyCode: 'ETB',
+      openingBalanceCents: 300000,
+      openingBalanceDate: '2026-01-01',
+    ),
+    AccountModel(
+      id: 'acc-card-prepaid',
+      name: 'Prepaid Card',
+      type: AccountType.liability,
+      subType: AccountSubType.creditCard,
+      currencyCode: 'ETB',
+      openingBalanceCents: -25000, // Prepaid credit per Option 1
+      openingBalanceDate: '2026-01-01',
+    ),
+    AccountModel(
+      id: 'acc-card-owed',
+      name: 'Revolving Credit',
+      type: AccountType.liability,
+      subType: AccountSubType.creditCard,
+      currencyCode: 'ETB',
+      openingBalanceCents: 40000, // Owed balance
+      openingBalanceDate: '2026-01-01',
+    ),
+  ]);
+  // Insert non-ETB and unverified accounts directly to test strict ETB isolation.
+  await db.into(db.accountsTable).insert(
+        AccountsTableCompanion.insert(
+          id: 'acc-usd',
+          name: 'USD Offshore',
+          type: 'asset',
+          subType: const Value('bank'),
+          currencyCode: const Value('USD'),
+          openingBalanceCents: const Value(150000),
+          createdAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+  await db.into(db.accountsTable).insert(
+        AccountsTableCompanion.insert(
+          id: 'acc-unverified',
+          name: 'Legacy Blank Currency',
+          type: 'asset',
+          subType: const Value('cash'),
+          currencyCode: const Value(''),
+          openingBalanceCents: const Value(50000),
+          createdAt: DateTime.utc(2026, 1, 1),
+        ),
+      );
+  await controller.loadAll();
+  return _StageF4Fixture(
+    db: db,
+    repo: repo,
+    controller: controller,
+    coordinator: coordinator,
+  );
+}
+
 void main() {
   setUpAll(configureSqliteForHostTests);
 
@@ -26,73 +116,11 @@ void main() {
     late DatabasePersistenceCoordinator coordinator;
 
     setUp(() async {
-      db = AppDatabase(NativeDatabase.memory());
-      await db.ensureInitialized();
-      repo = DriftFinanceRepository(db);
-      controller = FinanceController(repository: repo);
-      coordinator = DatabasePersistenceCoordinator(db);
-      await controller.completeSetup([
-        AccountModel(
-          id: 'acc-bank',
-          name: 'CBE Checking',
-          type: AccountType.asset,
-          subType: AccountSubType.bank,
-          currencyCode: 'ETB',
-          openingBalanceCents: 1000000,
-          openingBalanceDate: '2026-01-01',
-        ),
-        AccountModel(
-          id: 'acc-vault',
-          name: 'Emergency Vault',
-          type: AccountType.asset,
-          subType: AccountSubType.savingsVault,
-          currencyCode: 'ETB',
-          openingBalanceCents: 300000,
-          openingBalanceDate: '2026-01-01',
-        ),
-        AccountModel(
-          id: 'acc-card-prepaid',
-          name: 'Prepaid Card',
-          type: AccountType.liability,
-          subType: AccountSubType.creditCard,
-          currencyCode: 'ETB',
-          openingBalanceCents: -25000, // Prepaid credit per Option 1
-          openingBalanceDate: '2026-01-01',
-        ),
-        AccountModel(
-          id: 'acc-card-owed',
-          name: 'Revolving Credit',
-          type: AccountType.liability,
-          subType: AccountSubType.creditCard,
-          currencyCode: 'ETB',
-          openingBalanceCents: 40000, // Owed balance
-          openingBalanceDate: '2026-01-01',
-        ),
-      ]);
-      // Insert non-ETB and unverified accounts directly to test strict ETB isolation.
-      await db.into(db.accountsTable).insert(
-            AccountsTableCompanion.insert(
-              id: 'acc-usd',
-              name: 'USD Offshore',
-              type: 'asset',
-              subType: const Value('bank'),
-              currencyCode: const Value('USD'),
-              openingBalanceCents: const Value(150000),
-              createdAt: DateTime.utc(2026, 1, 1),
-            ),
-          );
-      await db.into(db.accountsTable).insert(
-            AccountsTableCompanion.insert(
-              id: 'acc-unverified',
-              name: 'Legacy Blank Currency',
-              type: 'asset',
-              subType: const Value('cash'),
-              currencyCode: const Value(''),
-              openingBalanceCents: const Value(50000),
-              createdAt: DateTime.utc(2026, 1, 1),
-            ),
-          );
-      await controller.loadAll();
+      final fixture = await _createSeededStageF4Fixture();
+      db = fixture.db;
+      repo = fixture.repo;
+      controller = fixture.controller;
+      coordinator = fixture.coordinator;
     });
 
     tearDown(() async {
@@ -753,16 +781,54 @@ void main() {
         );
       },
     );
+  });
 
+  group('Finance Stage F4 — Widget Parity', () {
     testWidgets(
       'Widget: FinanceReportsTab renders Stage F4 sections cleanly with no overflow',
       (tester) async {
-        await controller.recordDirectExpense(
-          accountId: 'acc-bank',
-          categoryId: 'cat-food',
-          amountCents: 25000,
-          date: CalendarDate(year: 2026, month: 11, day: 10),
-          description: 'Widget Report Expense',
+        final fixture = await tester.runAsync(_createSeededStageF4Fixture);
+        final db = fixture!.db;
+        final controller = fixture.controller;
+
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          controller.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+        });
+
+        Future<void> settle() => tester.pumpAndSettle(
+              const Duration(milliseconds: 100),
+              EnginePhase.sendSemanticsUpdate,
+              const Duration(seconds: 5),
+            );
+
+        await tester.runAsync(
+          () => controller.recordDirectExpense(
+            accountId: 'acc-bank',
+            categoryId: 'cat-food',
+            amountCents: 25000,
+            date: CalendarDate(year: 2026, month: 11, day: 10),
+            description: 'Widget Report Expense',
+          ),
         );
         await tester.pumpWidget(
           MaterialApp(
@@ -772,7 +838,7 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await settle();
 
         expect(find.text('Report Period'), findsOneWidget);
         await tester.scrollUntilVisible(

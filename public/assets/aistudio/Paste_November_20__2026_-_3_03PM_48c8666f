@@ -1,0 +1,2763 @@
+Run Automated Tests & Quality Checks
+cancelled 2 minutes ago in 15m 15s
+Search logs
+1s
+Current runner version: '2.338.2'
+Runner Image Provisioner
+Operating System
+Runner Image
+GITHUB_TOKEN Permissions
+Secret source: Actions
+Cache mode: write
+Prepare workflow directory
+Prepare all required actions
+Getting action download info
+Download action repository 'actions/checkout@v4' (SHA:11d5960a326750d5838078e36cf38b85af677262)
+Download action repository 'actions/setup-node@v4' (SHA:49933ea5288caeca8642d1e84afbd3f7d6820020)
+Download action repository 'actions/setup-java@v4' (SHA:cf277c60eb25467037889841efdb72551f06f6c3)
+Download action repository 'subosito/flutter-action@v2' (SHA:1a449444c387b1966244ae4d4f8c696479add0b2)
+Getting action download info
+Download action repository 'actions/cache@v5' (SHA:caa296126883cff596d87d8935842f9db880ef25)
+Complete job name: Run Automated Tests & Quality Checks
+2s
+Run actions/checkout@v4
+Syncing repository: nattyasaye/app-public-
+Getting Git version info
+Temporarily overriding HOME='/home/runner/work/_temp/fedfe87d-a761-4570-97e1-1662f0b5ad7e' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+/usr/bin/git config --global --add safe.directory /home/runner/work/app-public-/app-public-
+Deleting the contents of '/home/runner/work/app-public-/app-public-'
+Initializing the repository
+Disabling automatic garbage collection
+Setting up auth
+Fetching the repository
+Determining the checkout info
+/usr/bin/git sparse-checkout disable
+/usr/bin/git config --local --unset-all extensions.worktreeConfig
+Checking out the ref
+/usr/bin/git log -1 --format=%H
+6c8bc0da02e7c1080858c95a804be3d5fd01391a
+1s
+Run actions/setup-node@v4
+(node:2419) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+Found in cache @ /opt/hostedtoolcache/node/22.23.4/x64
+Environment details
+21s
+Run npm install --legacy-peer-deps
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+
+added 204 packages, and audited 211 packages in 12s
+
+38 packages are looking for funding
+  run `npm fund` for details
+
+1 high severity vulnerability
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+
+> react-example@0.0.0 check-foundation
+> node scripts/sync_foundation.mjs --check
+
+[sync_foundation] Foundation freshness, schemas, contracts, and schemaVersion check passed (baselineDiff=compared).
+
+> react-example@0.0.0 check-architecture
+> node scripts/check_architecture_boundaries.mjs
+
+[check_architecture_boundaries] Passed (114 Dart files, 55 TS/TSX files checked, 13 documented allowlist edges).
+
+> react-example@0.0.0 check-migrations
+> node scripts/check_migration_compatibility.mjs
+
+[check_migration_compatibility] Passed (schemaVersion=9, 8 ascending upgrade steps, downgrade=on-upgrade-explicit-throw-fail-closed).
+
+> react-example@0.0.0 check-ui
+> node scripts/check_ui_consistency.mjs
+
+[check_ui_consistency] Passed (29 Web UI files [0 hardcoded hexes], 47 Flutter UI files [0 Color(0x...)], 5 bounded legacy Flutter Colors.* allowlist entries, full primitive parity).
+
+> react-example@0.0.0 test
+> tsx --test src/domain/*.test.ts src/domain/date/*.test.ts
+
+TAP version 13
+# Subtest: ANDROID IN-PLACE UPDATE AND DATA PRESERVATION (TASKS 01–06)
+    # Subtest: Task 01 — Update Configuration & Persistent Storage Inspection
+        # Subtest: 1.1: Validates application ID / package name is preserved
+        ok 1 - 1.1: Validates application ID / package name is preserved
+          ---
+          duration_ms: 1.003468
+          type: 'test'
+          ...
+        # Subtest: 1.2: Confirms Android persistent storage path is internal application-private storage
+        ok 2 - 1.2: Confirms Android persistent storage path is internal application-private storage
+          ---
+          duration_ms: 0.353065
+          type: 'test'
+          ...
+        1..2
+    ok 1 - Task 01 — Update Configuration & Persistent Storage Inspection
+      ---
+      duration_ms: 2.24803
+      type: 'suite'
+      ...
+    # Subtest: Task 02 — Stable Application Identity & Signing Continuity
+        # Subtest: 2.1: Compatible signing certificate allows seamless in-place APK replacement
+        ok 1 - 2.1: Compatible signing certificate allows seamless in-place APK replacement
+          ---
+          duration_ms: 0.260701
+          type: 'test'
+          ...
+        # Subtest: 2.2: Cross-channel signing certificate mismatch is caught and rejected by Android OS
+        ok 2 - 2.2: Cross-channel signing certificate mismatch is caught and rejected by Android OS
+          ---
+          duration_ms: 0.166804
+          type: 'test'
+          ...
+        1..2
+    ok 2 - Task 02 — Stable Application Identity & Signing Continuity
+      ---
+      duration_ms: 0.758848
+      type: 'suite'
+      ...
+    # Subtest: Task 03 — Reliable Android Version Management
+        # Subtest: 3.1: Parses semantic version name and integer version code correctly
+        ok 1 - 3.1: Parses semantic version name and integer version code correctly
+          ---
+          duration_ms: 0.402948
+          type: 'test'
+          ...
+        # Subtest: 3.2: Strictly enforces monotonic version code increase (versionCode > installedVersionCode)
+        ok 2 - 3.2: Strictly enforces monotonic version code increase (versionCode > installedVersionCode)
+          ---
+          duration_ms: 0.199105
+          type: 'test'
+          ...
+        1..2
+    ok 3 - Task 03 — Reliable Android Version Management
+      ---
+      duration_ms: 0.980776
+      type: 'suite'
+      ...
+    # Subtest: Task 04 — Safe Database Upgrades & Migrations
+        # Subtest: 4.1: Schema migration v2 -> v3 preserves existing accounts and adds starting balance columns
+        ok 1 - 4.1: Schema migration v2 -> v3 preserves existing accounts and adds starting balance columns
+          ---
+          duration_ms: 0.274076
+          type: 'test'
+          ...
+        # Subtest: 4.2: Atomic migration prevents partial corrupted database state on failure
+        ok 2 - 4.2: Atomic migration prevents partial corrupted database state on failure
+          ---
+          duration_ms: 0.715236
+          type: 'test'
+          ...
+        1..2
+    ok 4 - Task 04 — Safe Database Upgrades & Migrations
+      ---
+      duration_ms: 1.279308
+      type: 'suite'
+      ...
+    # Subtest: Task 05 — Full In-Place Update Lifecycle & Multi-Module Verification
+        # Subtest: 5.1: Simulates in-place APK update over baseline installation without data loss
+        ok 1 - 5.1: Simulates in-place APK update over baseline installation without data loss
+          ---
+          duration_ms: 0.313349
+          type: 'test'
+          ...
+        # Subtest: 5.2: Reopening updated application persists all state and maintains offline capability
+        ok 2 - 5.2: Reopening updated application persists all state and maintains offline capability
+          ---
+          duration_ms: 0.272422
+          type: 'test'
+          ...
+        1..2
+    ok 5 - Task 05 — Full In-Place Update Lifecycle & Multi-Module Verification
+      ---
+      duration_ms: 0.71225
+      type: 'suite'
+      ...
+    # Subtest: Task 06 — Live Android Gradle, CI & Keystore Exclusion Verification
+        # Subtest: 6.1: Android build.gradle preserves stable applicationId and fails closed on missing release signing
+        ok 1 - 6.1: Android build.gradle preserves stable applicationId and fails closed on missing release signing
+          ---
+          duration_ms: 0.415843
+          type: 'test'
+          ...
+        # Subtest: 6.2: GitHub Actions Android CI never generates ephemeral release keystores and verifies APK metadata + certs
+        ok 2 - 6.2: GitHub Actions Android CI never generates ephemeral release keystores and verifies APK metadata + certs
+          ---
+          duration_ms: 0.245372
+          type: 'test'
+          ...
+        # Subtest: 6.3: pubspec.yaml declares semantic versionName + integer versionCode and .gitignore excludes keystores
+        ok 3 - 6.3: pubspec.yaml declares semantic versionName + integer versionCode and .gitignore excludes keystores
+          ---
+          duration_ms: 0.318138
+          type: 'test'
+          ...
+        1..3
+    ok 6 - Task 06 — Live Android Gradle, CI & Keystore Exclusion Verification
+      ---
+      duration_ms: 1.165423
+      type: 'suite'
+      ...
+    1..6
+ok 1 - ANDROID IN-PLACE UPDATE AND DATA PRESERVATION (TASKS 01–06)
+  ---
+  duration_ms: 8.251437
+  type: 'suite'
+  ...
+# Subtest: STAGE 2 FINAL INTEGRATION & ARCHITECTURAL CONSOLIDATION AUDIT
+    # Subtest: 1. Schema v5 Non-Destructive Migration: schemaVersion => 5, CalendarEvents, and full v1->v5 path preserved
+    ok 1 - 1. Schema v5 Non-Destructive Migration: schemaVersion => 5, CalendarEvents, and full v1->v5 path preserved
+      ---
+      duration_ms: 2.224957
+      type: 'test'
+      ...
+    # Subtest: 2. Deterministic First-Run-Only Seeding: Guarded by seedSentinelKey and insertOrIgnore
+    ok 2 - 2. Deterministic First-Run-Only Seeding: Guarded by seedSentinelKey and insertOrIgnore
+      ---
+      duration_ms: 0.354678
+      type: 'test'
+      ...
+    # Subtest: 3. Legacy Dual Repositories Removed: task_repository.dart, project_repository.dart, and note_repository.dart deleted
+    ok 3 - 3. Legacy Dual Repositories Removed: task_repository.dart, project_repository.dart, and note_repository.dart deleted
+      ---
+      duration_ms: 0.314592
+      type: 'test'
+      ...
+    # Subtest: 4. Strict Dependency Boundaries: Domain & Application layers contain zero Drift, SQLite, UI, or AppStateManager imports
+    ok 4 - 4. Strict Dependency Boundaries: Domain & Application layers contain zero Drift, SQLite, UI, or AppStateManager imports
+      ---
+      duration_ms: 3.961234
+      type: 'test'
+      ...
+    # Subtest: 5. Single Authoritative State Owner: AppStateManager is a thin composition root with async initialize() & dispose()
+    ok 5 - 5. Single Authoritative State Owner: AppStateManager is a thin composition root with async initialize() & dispose()
+      ---
+      duration_ms: 0.607774
+      type: 'test'
+      ...
+    # Subtest: 6. Startup Readiness Gate & Error Recovery: MainDaywellScreen awaits AppStateManager.initialize()
+    ok 6 - 6. Startup Readiness Gate & Error Recovery: MainDaywellScreen awaits AppStateManager.initialize()
+      ---
+      duration_ms: 0.297961
+      type: 'test'
+      ...
+    # Subtest: 6b. Native SQLite Verification Tests & CI Quality Gates Configured
+    ok 7 - 6b. Native SQLite Verification Tests & CI Quality Gates Configured
+      ---
+      duration_ms: 6.724134
+      type: 'test'
+      ...
+    # Subtest: 7. Presentation Routing: UI screens consume module controllers without shadow persistence state
+    ok 8 - 7. Presentation Routing: UI screens consume module controllers without shadow persistence state
+      ---
+      duration_ms: 0.667125
+      type: 'test'
+      ...
+    # Subtest: 8. SQLite-Backed Backup, Restore, Bridge & Web SharedStateBridge Parity (Schema v5)
+    ok 9 - 8. SQLite-Backed Backup, Restore, Bridge & Web SharedStateBridge Parity (Schema v5)
+      ---
+      duration_ms: 13.439661
+      type: 'test'
+      ...
+    1..9
+ok 2 - STAGE 2 FINAL INTEGRATION & ARCHITECTURAL CONSOLIDATION AUDIT
+  ---
+  duration_ms: 30.391131
+  type: 'suite'
+  ...
+# Subtest: Batch 1 — Application Foundation and Navigation (Tasks 001–005)
+    # Subtest: TASK 001 — Application startup and home screen
+        # Subtest: 1.1 Fresh start opens reliably to intended Home screen ("today") without blocking wizard
+        ok 1 - 1.1 Fresh start opens reliably to intended Home screen ("today") without blocking wizard
+          ---
+          duration_ms: 0.976487
+          type: 'test'
+          ...
+        # Subtest: 1.2 Existing user data is never wiped or corrupted during startup
+        ok 2 - 1.2 Existing user data is never wiped or corrupted during startup
+          ---
+          duration_ms: 0.404441
+          type: 'test'
+          ...
+        # Subtest: 1.3 Error boundary recovers gracefully from unexpected exceptions without losing data
+        ok 3 - 1.3 Error boundary recovers gracefully from unexpected exceptions without losing data
+          ---
+          duration_ms: 0.184547
+          type: 'test'
+          ...
+        1..3
+    ok 1 - TASK 001 — Application startup and home screen
+      ---
+      duration_ms: 2.673471
+      type: 'suite'
+      ...
+    # Subtest: TASK 002 — Main module navigation (Finance, To-Do, Notes, Calendar)
+        # Subtest: 2.1 All 4 core modules plus Today and More exist in main bottom navigation
+        ok 1 - 2.1 All 4 core modules plus Today and More exist in main bottom navigation
+          ---
+          duration_ms: 0.367221
+          type: 'test'
+          ...
+        # Subtest: 2.2 Tapping any module switches active screen and active tab synchronously
+        ok 2 - 2.2 Tapping any module switches active screen and active tab synchronously
+          ---
+          duration_ms: 0.238278
+          type: 'test'
+          ...
+        # Subtest: 2.3 Tapping already-active module avoids duplicate history entries
+        ok 3 - 2.3 Tapping already-active module avoids duplicate history entries
+          ---
+          duration_ms: 0.330312
+          type: 'test'
+          ...
+        1..3
+    ok 2 - TASK 002 — Main module navigation (Finance, To-Do, Notes, Calendar)
+      ---
+      duration_ms: 1.31232
+      type: 'suite'
+      ...
+    # Subtest: TASK 003 — Back navigation behavior
+        # Subtest: 3.1 Back navigation pops previous screen from stack predictably
+        ok 1 - 3.1 Back navigation pops previous screen from stack predictably
+          ---
+          duration_ms: 1.178047
+          type: 'test'
+          ...
+        # Subtest: 3.2 Navigating into sub-screens provides reliable return to previous parent
+        ok 2 - 3.2 Navigating into sub-screens provides reliable return to previous parent
+          ---
+          duration_ms: 0.256652
+          type: 'test'
+          ...
+        1..2
+    ok 3 - TASK 003 — Back navigation behavior
+      ---
+      duration_ms: 1.801841
+      type: 'suite'
+      ...
+    # Subtest: TASK 004 — Preserve screen state when switching modules
+        # Subtest: 4.1 Sub-tab, filters, search query, and drafts are preserved when switching modules
+        ok 1 - 4.1 Sub-tab, filters, search query, and drafts are preserved when switching modules
+          ---
+          duration_ms: 0.342895
+          type: 'test'
+          ...
+        1..1
+    ok 4 - TASK 004 — Preserve screen state when switching modules
+      ---
+      duration_ms: 0.606781
+      type: 'suite'
+      ...
+    # Subtest: TASK 005 — Navigation interaction details and visual feedback
+        # Subtest: 5.1 Navigation targets satisfy mobile touch target standards (>= 48px)
+        ok 1 - 5.1 Navigation targets satisfy mobile touch target standards (>= 48px)
+          ---
+          duration_ms: 0.360889
+          type: 'test'
+          ...
+        # Subtest: 5.2 Visual active-state classes use Daywell emerald palette in light and dark mode
+        ok 2 - 5.2 Visual active-state classes use Daywell emerald palette in light and dark mode
+          ---
+          duration_ms: 0.185219
+          type: 'test'
+          ...
+        1..2
+    ok 5 - TASK 005 — Navigation interaction details and visual feedback
+      ---
+      duration_ms: 0.712721
+      type: 'suite'
+      ...
+    1..5
+ok 3 - Batch 1 — Application Foundation and Navigation (Tasks 001–005)
+  ---
+  duration_ms: 8.215972
+  type: 'suite'
+  ...
+# Subtest: BATCH 2 — TASKS 06–10 (Forms, Inputs, Validation, Unsaved Changes, Navigation)
+    # Subtest: TASK 06 — Consistent text input and form field behavior
+        # Subtest: 6.1 Amount parsing handles valid integer and decimal values
+        ok 1 - 6.1 Amount parsing handles valid integer and decimal values
+          ---
+          duration_ms: 2.061439
+          type: 'test'
+          ...
+        # Subtest: 6.2 Leading/trailing whitespace and comma separation are trimmed cleanly
+        ok 2 - 6.2 Leading/trailing whitespace and comma separation are trimmed cleanly
+          ---
+          duration_ms: 0.291728
+          type: 'test'
+          ...
+        # Subtest: 6.3 Multiline and single-line field requirements
+        ok 3 - 6.3 Multiline and single-line field requirements
+          ---
+          duration_ms: 0.32953
+          type: 'test'
+          ...
+        1..3
+    ok 1 - TASK 06 — Consistent text input and form field behavior
+      ---
+      duration_ms: 3.891083
+      type: 'test'
+      ...
+    # Subtest: TASK 07 — Form validation and error messages
+        # Subtest: 7.1 Whitespace-only title is rejected for Tasks
+        ok 1 - 7.1 Whitespace-only title is rejected for Tasks
+          ---
+          duration_ms: 0.370577
+          type: 'test'
+          ...
+        # Subtest: 7.2 Optional fields (description, dates) are not rejected when empty
+        ok 2 - 7.2 Optional fields (description, dates) are not rejected when empty
+          ---
+          duration_ms: 0.226016
+          type: 'test'
+          ...
+        # Subtest: 7.3 Amount field rejects non-numeric, negative, and excessive decimal inputs
+        ok 3 - 7.3 Amount field rejects non-numeric, negative, and excessive decimal inputs
+          ---
+          duration_ms: 0.36661
+          type: 'test'
+          ...
+        # Subtest: 7.4 Calendar event validates date, start time, and ensures end time >= start time
+        ok 4 - 7.4 Calendar event validates date, start time, and ensures end time >= start time
+          ---
+          duration_ms: 0.8236
+          type: 'test'
+          ...
+        # Subtest: 7.5 Finance split transactions validate share sum equals total amount
+        ok 5 - 7.5 Finance split transactions validate share sum equals total amount
+          ---
+          duration_ms: 0.83936
+          type: 'test'
+          ...
+        # Subtest: 7.6 Transfer rejects same source and destination accounts
+        ok 6 - 7.6 Transfer rejects same source and destination accounts
+          ---
+          duration_ms: 0.507315
+          type: 'test'
+          ...
+        1..6
+    ok 2 - TASK 07 — Form validation and error messages
+      ---
+      duration_ms: 4.938453
+      type: 'test'
+      ...
+    # Subtest: TASK 08 — Save, cancel, and form submission behavior
+        # Subtest: 8.1 Rapid submission debounce prevents duplicate records
+        ok 1 - 8.1 Rapid submission debounce prevents duplicate records
+          ---
+          duration_ms: 0.296418
+          type: 'test'
+          ...
+        # Subtest: 8.2 Cancel leaves records unchanged and returns without modifying state
+        ok 2 - 8.2 Cancel leaves records unchanged and returns without modifying state
+          ---
+          duration_ms: 0.226807
+          type: 'test'
+          ...
+        # Subtest: 8.3 Editing an existing record updates it rather than appending a duplicate
+        ok 3 - 8.3 Editing an existing record updates it rather than appending a duplicate
+          ---
+          duration_ms: 0.244651
+          type: 'test'
+          ...
+        1..3
+    ok 3 - TASK 08 — Save, cancel, and form submission behavior
+      ---
+      duration_ms: 2.805168
+      type: 'test'
+      ...
+    # Subtest: TASK 09 — Protect unsaved changes
+        # Subtest: 9.1 Detects clean state when nothing has changed
+        ok 1 - 9.1 Detects clean state when nothing has changed
+          ---
+          duration_ms: 0.338647
+          type: 'test'
+          ...
+        # Subtest: 9.2 Detects dirty state when a text or select field changes
+        ok 2 - 9.2 Detects dirty state when a text or select field changes
+          ---
+          duration_ms: 0.187893
+          type: 'test'
+          ...
+        # Subtest: 9.3 Reverting a field to its original value resets dirty state to clean
+        ok 3 - 9.3 Reverting a field to its original value resets dirty state to clean
+          ---
+          duration_ms: 0.225995
+          type: 'test'
+          ...
+        # Subtest: 9.4 Subtask list changes mark form as dirty
+        ok 4 - 9.4 Subtask list changes mark form as dirty
+          ---
+          duration_ms: 0.294895
+          type: 'test'
+          ...
+        1..4
+    ok 4 - TASK 09 — Protect unsaved changes
+      ---
+      duration_ms: 1.686554
+      type: 'test'
+      ...
+    # Subtest: TASK 10 — Consistent back navigation and screen exit behavior
+        # Subtest: 10.1 Opening modal intercepts back action and closes modal first before navigating screen
+        ok 1 - 10.1 Opening modal intercepts back action and closes modal first before navigating screen
+          ---
+          duration_ms: 0.471848
+          type: 'test'
+          ...
+        # Subtest: 10.2 Tapping already active module does not push duplicate stack entries
+        ok 2 - 10.2 Tapping already active module does not push duplicate stack entries
+          ---
+          duration_ms: 0.191831
+          type: 'test'
+          ...
+        # Subtest: 10.3 Root screen back action produces safe noop without crash
+        ok 3 - 10.3 Root screen back action produces safe noop without crash
+          ---
+          duration_ms: 0.180199
+          type: 'test'
+          ...
+        1..3
+    ok 5 - TASK 10 — Consistent back navigation and screen exit behavior
+      ---
+      duration_ms: 1.372603
+      type: 'test'
+      ...
+    1..5
+ok 4 - BATCH 2 — TASKS 06–10 (Forms, Inputs, Validation, Unsaved Changes, Navigation)
+  ---
+  duration_ms: 16.055854
+  type: 'test'
+  ...
+# Subtest: BATCH 5 — TASKS 21–25: FINANCE MODULE RESET & FOUNDATION IMPLEMENTATION
+    # Subtest: TASK 21 — First-Time Setup and Opening Balances
+        # Subtest: 21.1 Default accounts (CBE, BOA, Dashen Bank, Telebirr, Cash) are available
+        ok 1 - 21.1 Default accounts (CBE, BOA, Dashen Bank, Telebirr, Cash) are available
+          ---
+          duration_ms: 0.92984
+          type: 'test'
+          ...
+        # Subtest: 21.2 User can configure starting balances, including valid zero balances
+        ok 2 - 21.2 User can configure starting balances, including valid zero balances
+          ---
+          duration_ms: 0.236345
+          type: 'test'
+          ...
+        # Subtest: 21.3 User can add custom accounts with opening balances and dates
+        ok 3 - 21.3 User can add custom accounts with opening balances and dates
+          ---
+          duration_ms: 0.292671
+          type: 'test'
+          ...
+        # Subtest: 21.4 Opening balances are strictly NEVER counted as income or salary
+        ok 4 - 21.4 Opening balances are strictly NEVER counted as income or salary
+          ---
+          duration_ms: 0.300746
+          type: 'test'
+          ...
+        1..4
+    ok 1 - TASK 21 — First-Time Setup and Opening Balances
+      ---
+      duration_ms: 3.10324
+      type: 'test'
+      ...
+    # Subtest: TASK 22 — Account Management and Combined Balance
+        # Subtest: 22.1 Combined balance equals the exact sum of all active account balances
+        ok 1 - 22.1 Combined balance equals the exact sum of all active account balances
+          ---
+          duration_ms: 0.318189
+          type: 'test'
+          ...
+        # Subtest: 22.2 Adding an account immediately updates the accounts list and combined balance
+        ok 2 - 22.2 Adding an account immediately updates the accounts list and combined balance
+          ---
+          duration_ms: 0.343496
+          type: 'test'
+          ...
+        # Subtest: 22.3 Renaming an account preserves historical transactions (stable IDs)
+        ok 3 - 22.3 Renaming an account preserves historical transactions (stable IDs)
+          ---
+          duration_ms: 0.321886
+          type: 'test'
+          ...
+        # Subtest: 22.4 Archived accounts are excluded from active combined balance but preserve history
+        ok 4 - 22.4 Archived accounts are excluded from active combined balance but preserve history
+          ---
+          duration_ms: 0.359427
+          type: 'test'
+          ...
+        # Subtest: 22.5 Accounts with transaction history cannot be deleted destructively
+        ok 5 - 22.5 Accounts with transaction history cannot be deleted destructively
+          ---
+          duration_ms: 0.37213
+          type: 'test'
+          ...
+        1..5
+    ok 2 - TASK 22 — Account Management and Combined Balance
+      ---
+      duration_ms: 3.333493
+      type: 'test'
+      ...
+    # Subtest: TASK 23 — Categories and Income/Expense Transaction Creation
+        # Subtest: 23.1 Default categories match Task 23.4 requirements
+        ok 1 - 23.1 Default categories match Task 23.4 requirements
+          ---
+          duration_ms: 0.344298
+          type: 'test'
+          ...
+        # Subtest: 23.2 Amount must be greater than zero and valid integer cents
+        ok 2 - 23.2 Amount must be greater than zero and valid integer cents
+          ---
+          duration_ms: 0.327656
+          type: 'test'
+          ...
+        # Subtest: 23.3 Category must match transaction type (expense vs income separation)
+        ok 3 - 23.3 Category must match transaction type (expense vs income separation)
+          ---
+          duration_ms: 2.039157
+          type: 'test'
+          ...
+        # Subtest: 23.4 Expense deducts from selected account, Income adds to selected account
+        ok 4 - 23.4 Expense deducts from selected account, Income adds to selected account
+          ---
+          duration_ms: 0.716499
+          type: 'test'
+          ...
+        # Subtest: 23.5 Category management: duplicate detection and safe deletion guard
+        ok 5 - 23.5 Category management: duplicate detection and safe deletion guard
+          ---
+          duration_ms: 0.287161
+          type: 'test'
+          ...
+        1..5
+    ok 3 - TASK 23 — Categories and Income/Expense Transaction Creation
+      ---
+      duration_ms: 4.39453
+      type: 'test'
+      ...
+    # Subtest: TASK 24 — Transaction History, Viewing, and Editing
+        # Subtest: 24.1 Balance recalculation Example A: Amount change
+        ok 1 - 24.1 Balance recalculation Example A: Amount change
+          ---
+          duration_ms: 0.225054
+          type: 'test'
+          ...
+        # Subtest: 24.2 Balance recalculation Example B: Account change
+        ok 2 - 24.2 Balance recalculation Example B: Account change
+          ---
+          duration_ms: 0.190278
+          type: 'test'
+          ...
+        # Subtest: 24.3 Balance recalculation Example C: Transaction type change
+        ok 3 - 24.3 Balance recalculation Example C: Transaction type change
+          ---
+          duration_ms: 0.166052
+          type: 'test'
+          ...
+        1..3
+    ok 4 - TASK 24 — Transaction History, Viewing, and Editing
+      ---
+      duration_ms: 1.068822
+      type: 'test'
+      ...
+    # Subtest: TASK 25 — Transaction Deletion, Balance Reversal, and Transfers
+        # Subtest: 25.1 Deleting an expense restores the deducted account balance
+        ok 1 - 25.1 Deleting an expense restores the deducted account balance
+          ---
+          duration_ms: 0.215806
+          type: 'test'
+          ...
+        # Subtest: 25.2 Deleting income reverses the added account balance
+        ok 2 - 25.2 Deleting income reverses the added account balance
+          ---
+          duration_ms: 0.193374
+          type: 'test'
+          ...
+        # Subtest: 25.3 Ephemeral Undo restores deleted transaction and its financial effect exactly once
+        ok 3 - 25.3 Ephemeral Undo restores deleted transaction and its financial effect exactly once
+          ---
+          duration_ms: 0.245081
+          type: 'test'
+          ...
+        # Subtest: 25.4 Account-to-account transfer decreases source, increases destination, and leaves Combined Balance UNCHANGED
+        ok 4 - 25.4 Account-to-account transfer decreases source, increases destination, and leaves Combined Balance UNCHANGED
+          ---
+          duration_ms: 0.303922
+          type: 'test'
+          ...
+        # Subtest: 25.5 Deleting a transfer restores both accounts
+        ok 5 - 25.5 Deleting a transfer restores both accounts
+          ---
+          duration_ms: 0.203543
+          type: 'test'
+          ...
+        # Subtest: 25.6 Transfer validation rejects identical source and destination accounts
+        ok 6 - 25.6 Transfer validation rejects identical source and destination accounts
+          ---
+          duration_ms: 0.186752
+          type: 'test'
+          ...
+        1..6
+    ok 5 - TASK 25 — Transaction Deletion, Balance Reversal, and Transfers
+      ---
+      duration_ms: 2.081607
+      type: 'test'
+      ...
+    1..5
+ok 5 - BATCH 5 — TASKS 21–25: FINANCE MODULE RESET & FOUNDATION IMPLEMENTATION
+  ---
+  duration_ms: 15.624012
+  type: 'test'
+  ...
+# Subtest: BATCH 6 — TASKS 26–30: FINANCE ACCOUNT HISTORY, ORGANIZATION, CORRECTIONS, SEARCH & INTEGRITY
+    # Subtest: Task 26 — Account Details & Account-Specific History
+        # Subtest: 26.1 & 26.2: getAccountMovements isolates transactions for a specific account
+        ok 1 - 26.1 & 26.2: getAccountMovements isolates transactions for a specific account
+          ---
+          duration_ms: 15.480341
+          type: 'test'
+          ...
+        # Subtest: 26.3: Clearly distinguishes income (+), expense (-), transfer in (+), and transfer out (-)
+        ok 2 - 26.3: Clearly distinguishes income (+), expense (-), transfer in (+), and transfer out (-)
+          ---
+          duration_ms: 0.70694
+          type: 'test'
+          ...
+        # Subtest: 26.4: Balance consistency: Account Balance = Opening Balance + All Inflows - All Outflows
+        ok 3 - 26.4: Balance consistency: Account Balance = Opening Balance + All Inflows - All Outflows
+          ---
+          duration_ms: 0.726327
+          type: 'test'
+          ...
+        1..3
+    ok 1 - Task 26 — Account Details & Account-Specific History
+      ---
+      duration_ms: 18.061237
+      type: 'suite'
+      ...
+    # Subtest: Task 27 — Transaction History Organization & Grouping
+        # Subtest: 27.1: Sorts transactions in strict reverse-chronological order
+        ok 1 - 27.1: Sorts transactions in strict reverse-chronological order
+          ---
+          duration_ms: 0.453443
+          type: 'test'
+          ...
+        # Subtest: 27.2: Groups transactions by date with Today and Yesterday labels
+        ok 2 - 27.2: Groups transactions by date with Today and Yesterday labels
+          ---
+          duration_ms: 0.840011
+          type: 'test'
+          ...
+        # Subtest: 27.6: Empty transactions list returns empty group array gracefully
+        ok 3 - 27.6: Empty transactions list returns empty group array gracefully
+          ---
+          duration_ms: 0.260901
+          type: 'test'
+          ...
+        1..3
+    ok 2 - Task 27 — Transaction History Organization & Grouping
+      ---
+      duration_ms: 1.904503
+      type: 'suite'
+      ...
+    # Subtest: Task 28 — Correcting Opening Balances & History Protection
+        # Subtest: 28.1 & 28.2: Correcting opening balance updates account balance and combined balance
+        ok 1 - 28.1 & 28.2: Correcting opening balance updates account balance and combined balance
+          ---
+          duration_ms: 0.655133
+          type: 'test'
+          ...
+        # Subtest: 28.3: History protection: zero historical transactions are altered or created
+        ok 2 - 28.3: History protection: zero historical transactions are altered or created
+          ---
+          duration_ms: 0.234461
+          type: 'test'
+          ...
+        # Subtest: 28.4: Rejects non-integer cents opening balances
+        ok 3 - 28.4: Rejects non-integer cents opening balances
+          ---
+          duration_ms: 0.809824
+          type: 'test'
+          ...
+        1..3
+    ok 3 - Task 28 — Correcting Opening Balances & History Protection
+      ---
+      duration_ms: 2.206983
+      type: 'suite'
+      ...
+    # Subtest: Task 29 — Search and Multi-Filtering
+        # Subtest: 29.1: Text search matches description, category name, or account name case-insensitively
+        ok 1 - 29.1: Text search matches description, category name, or account name case-insensitively
+          ---
+          duration_ms: 1.085493
+          type: 'test'
+          ...
+        # Subtest: 29.2: Date preset filters (today, yesterday, this_week, this_month, custom)
+        ok 2 - 29.2: Date preset filters (today, yesterday, this_week, this_month, custom)
+          ---
+          duration_ms: 0.350109
+          type: 'test'
+          ...
+        # Subtest: 29.3: Synergistic multi-filtering (Type + Account + Search Query)
+        ok 3 - 29.3: Synergistic multi-filtering (Type + Account + Search Query)
+          ---
+          duration_ms: 0.401105
+          type: 'test'
+          ...
+        # Subtest: 29.6: Clearing filters returns all transactions
+        ok 4 - 29.6: Clearing filters returns all transactions
+          ---
+          duration_ms: 0.198494
+          type: 'test'
+          ...
+        1..4
+    ok 4 - Task 29 — Search and Multi-Filtering
+      ---
+      duration_ms: 2.282055
+      type: 'suite'
+      ...
+    # Subtest: Task 30 — Financial Data Integrity, Reconciliation, and Recovery
+        # Subtest: 30.1: Health audit passes for consistent ledger and computes accurate per-account reconciliation
+        ok 1 - 30.1: Health audit passes for consistent ledger and computes accurate per-account reconciliation
+          ---
+          duration_ms: 1.084231
+          type: 'test'
+          ...
+        # Subtest: 30.3 & 30.4: Detects missing account reference, missing category, and identical transfer accounts
+        ok 2 - 30.3 & 30.4: Detects missing account reference, missing category, and identical transfer accounts
+          ---
+          duration_ms: 0.412025
+          type: 'test'
+          ...
+        # Subtest: 30.5 & 30.6: Detects duplicate transaction IDs and invalid transaction amounts
+        ok 3 - 30.5 & 30.6: Detects duplicate transaction IDs and invalid transaction amounts
+          ---
+          duration_ms: 0.492556
+          type: 'test'
+          ...
+        1..3
+    ok 5 - Task 30 — Financial Data Integrity, Reconciliation, and Recovery
+      ---
+      duration_ms: 2.182638
+      type: 'suite'
+      ...
+    1..5
+ok 6 - BATCH 6 — TASKS 26–30: FINANCE ACCOUNT HISTORY, ORGANIZATION, CORRECTIONS, SEARCH & INTEGRITY
+  ---
+  duration_ms: 29.266964
+  type: 'suite'
+  ...
+# Subtest: DAYWELL FINANCE MODULE ARCHITECTURE & BOUNDARIES AUDIT (PROMPT 2.3)
+    # Subtest: 1. Domain Layer Isolation: domain/finance/ contains zero Drift, SQLite, or Flutter widget imports
+    ok 1 - 1. Domain Layer Isolation: domain/finance/ contains zero Drift, SQLite, or Flutter widget imports
+      ---
+      duration_ms: 8.627315
+      type: 'test'
+      ...
+    # Subtest: 2. Repository Contract Decomposition: finance_contracts.dart defines cohesive sub-contracts and unified IFinanceRepository
+    ok 2 - 2. Repository Contract Decomposition: finance_contracts.dart defines cohesive sub-contracts and unified IFinanceRepository
+      ---
+      duration_ms: 0.325412
+      type: 'test'
+      ...
+    # Subtest: 3. Data Layer Implementation: DriftFinanceRepository implements IFinanceRepository with atomic transactions and safety guards
+    ok 3 - 3. Data Layer Implementation: DriftFinanceRepository implements IFinanceRepository with atomic transactions and safety guards
+      ---
+      duration_ms: 0.996716
+      type: 'test'
+      ...
+    # Subtest: 4. Application Layer Encapsulation: FinanceController and FinanceModuleState decouple workflows from UI
+    ok 4 - 4. Application Layer Encapsulation: FinanceController and FinanceModuleState decouple workflows from UI
+      ---
+      duration_ms: 3.513933
+      type: 'test'
+      ...
+    # Subtest: 5. AppStateManager Integration: Composes and hydrates FinanceController from SQLite without sync bridges
+    ok 5 - 5. AppStateManager Integration: Composes and hydrates FinanceController from SQLite without sync bridges
+      ---
+      duration_ms: 0.492016
+      type: 'test'
+      ...
+    # Subtest: 6. Presentation Layer: FinanceView supports direct FinanceController injection
+    ok 6 - 6. Presentation Layer: FinanceView supports direct FinanceController injection
+      ---
+      duration_ms: 0.25468
+      type: 'test'
+      ...
+    1..6
+ok 7 - DAYWELL FINANCE MODULE ARCHITECTURE & BOUNDARIES AUDIT (PROMPT 2.3)
+  ---
+  duration_ms: 18.108626
+  type: 'suite'
+  ...
+# Subtest: DAYWELL TO-DO & PROJECTS MODULE ARCHITECTURE AUDIT (PROMPT 2.4)
+    # Subtest: 1. Domain Layer Isolation: domain/tasks/ contains zero Drift, SQLite, or Flutter widget imports
+    ok 1 - 1. Domain Layer Isolation: domain/tasks/ contains zero Drift, SQLite, or Flutter widget imports
+      ---
+      duration_ms: 1.826867
+      type: 'test'
+      ...
+    # Subtest: 2. Repository Contract Decomposition: task_contracts.dart defines sub-contracts and unified ITasksRepository
+    ok 2 - 2. Repository Contract Decomposition: task_contracts.dart defines sub-contracts and unified ITasksRepository
+      ---
+      duration_ms: 0.252455
+      type: 'test'
+      ...
+    # Subtest: 3. Data Layer Implementation: DriftTasksRepository implements ITasksRepository with atomic transactions
+    ok 3 - 3. Data Layer Implementation: DriftTasksRepository implements ITasksRepository with atomic transactions
+      ---
+      duration_ms: 0.261201
+      type: 'test'
+      ...
+    # Subtest: 4. Application Layer Encapsulation: TasksController and TasksModuleState decouple workflows from UI
+    ok 4 - 4. Application Layer Encapsulation: TasksController and TasksModuleState decouple workflows from UI
+      ---
+      duration_ms: 0.313019
+      type: 'test'
+      ...
+    # Subtest: 5. AppStateManager Integration: Composes and hydrates TasksController from SQLite without sync bridges
+    ok 5 - 5. AppStateManager Integration: Composes and hydrates TasksController from SQLite without sync bridges
+      ---
+      duration_ms: 0.424439
+      type: 'test'
+      ...
+    # Subtest: 6. Presentation Layer: TasksView supports direct TasksController injection
+    ok 6 - 6. Presentation Layer: TasksView supports direct TasksController injection
+      ---
+      duration_ms: 0.240192
+      type: 'test'
+      ...
+    # Subtest: 7. Schema Version 5 Integrity Verification: app_database.dart upgrades to schemaVersion 5 and preserves historical migrations
+    ok 7 - 7. Schema Version 5 Integrity Verification: app_database.dart upgrades to schemaVersion 5 and preserves historical migrations
+      ---
+      duration_ms: 0.498047
+      type: 'test'
+      ...
+    1..7
+ok 8 - DAYWELL TO-DO & PROJECTS MODULE ARCHITECTURE AUDIT (PROMPT 2.4)
+  ---
+  duration_ms: 5.382499
+  type: 'suite'
+  ...
+# Subtest: DAYWELL NOTES & INBOX MODULE ARCHITECTURE AUDIT (PROMPT 2.5)
+    # Subtest: 1. Domain Layer Isolation: domain/notes and domain/inbox have zero Drift, SQLite, or Flutter imports
+    ok 1 - 1. Domain Layer Isolation: domain/notes and domain/inbox have zero Drift, SQLite, or Flutter imports
+      ---
+      duration_ms: 1.728123
+      type: 'test'
+      ...
+    # Subtest: 2. Legacy Drift-Coupled Note Repository Removed & Pure Contract Implementations Present
+    ok 2 - 2. Legacy Drift-Coupled Note Repository Removed & Pure Contract Implementations Present
+      ---
+      duration_ms: 0.312488
+      type: 'test'
+      ...
+    # Subtest: 3. Application Layer Encapsulation & No Cross-Module Coupling or Drift Leaks
+    ok 3 - 3. Application Layer Encapsulation & No Cross-Module Coupling or Drift Leaks
+      ---
+      duration_ms: 0.471637
+      type: 'test'
+      ...
+    # Subtest: 4. Single Authoritative Owner: AppStateManager holds zero duplicate Notes or Inbox lists/sync bridges
+    ok 4 - 4. Single Authoritative Owner: AppStateManager holds zero duplicate Notes or Inbox lists/sync bridges
+      ---
+      duration_ms: 0.550486
+      type: 'test'
+      ...
+    # Subtest: 5. Presentation Routing: NotesView and QuickCaptureDialog route exclusively through module controllers
+    ok 5 - 5. Presentation Routing: NotesView and QuickCaptureDialog route exclusively through module controllers
+      ---
+      duration_ms: 0.463562
+      type: 'test'
+      ...
+    # Subtest: 6. Schema Version 5 Non-Destructive Migration Persists Note Metadata
+    ok 6 - 6. Schema Version 5 Non-Destructive Migration Persists Note Metadata
+      ---
+      duration_ms: 0.418587
+      type: 'test'
+      ...
+    1..6
+ok 9 - DAYWELL NOTES & INBOX MODULE ARCHITECTURE AUDIT (PROMPT 2.5)
+  ---
+  duration_ms: 5.703883
+  type: 'suite'
+  ...
+# Subtest: Daywell Projects Stage 4 — BIM Company Outreach Campaign Template
+    # Subtest: 1. Defines exactly 100 unique US cities summing to 1,000 across 4 US Census regions with exact Hidar 9–30, 2019 E.C. dates
+    ok 1 - 1. Defines exactly 100 unique US cities summing to 1,000 across 4 US Census regions with exact Hidar 9–30, 2019 E.C. dates
+      ---
+      duration_ms: 1.777976
+      type: 'test'
+      ...
+    # Subtest: 2. Fixture bim_outreach_campaign_v1.daywellproject matches template builder and imports cleanly via standard Stage 3 package pipeline
+    ok 2 - 2. Fixture bim_outreach_campaign_v1.daywellproject matches template builder and imports cleanly via standard Stage 3 package pipeline
+      ---
+      duration_ms: 40.215491
+      type: 'test'
+      ...
+    # Subtest: 3. Preserves actual sent counts while capping city contribution to 1,000-email target completion and supporting corrections + re-export
+    ok 3 - 3. Preserves actual sent counts while capping city contribution to 1,000-email target completion and supporting corrections + re-export
+      ---
+      duration_ms: 19.270162
+      type: 'test'
+      ...
+    1..3
+ok 10 - Daywell Projects Stage 4 — BIM Company Outreach Campaign Template
+  ---
+  duration_ms: 63.356547
+  type: 'suite'
+  ...
+# Subtest: 1. Ethiopian Dual Calendar Julian Day Number Fidelity and Month Consistency
+ok 11 - 1. Ethiopian Dual Calendar Julian Day Number Fidelity and Month Consistency
+  ---
+  duration_ms: 2.113157
+  type: 'test'
+  ...
+# Subtest: 2. To-Do Tasks Module: Priority Sorting and Subtask Progress Math
+ok 12 - 2. To-Do Tasks Module: Priority Sorting and Subtask Progress Math
+  ---
+  duration_ms: 0.315173
+  type: 'test'
+  ...
+# Subtest: 3. To-Do Tasks Module: Hard Deadline vs Scheduled Date Separation
+ok 13 - 3. To-Do Tasks Module: Hard Deadline vs Scheduled Date Separation
+  ---
+  duration_ms: 0.260149
+  type: 'test'
+  ...
+# Subtest: 4. Notes Module: Pinned Ordering, Folder Grouping, and Tag Retrieval
+ok 14 - 4. Notes Module: Pinned Ordering, Folder Grouping, and Tag Retrieval
+  ---
+  duration_ms: 0.263065
+  type: 'test'
+  ...
+# Subtest: 5. Calendar Module: Event Scheduling, Category Theming, and Task Integration
+ok 15 - 5. Calendar Module: Event Scheduling, Category Theming, and Task Integration
+  ---
+  duration_ms: 0.35088
+  type: 'test'
+  ...
+# Subtest: 6. Universal Quick Capture: Text Expense Parser to Balanced Ledger
+ok 16 - 6. Universal Quick Capture: Text Expense Parser to Balanced Ledger
+  ---
+  duration_ms: 1.999973
+  type: 'test'
+  ...
+# Subtest: STAGE 2.6 SHARED CALENDAR FOUNDATION & ETHIOPIAN/GREGORIAN DATE ENGINE
+    # Subtest: 1. Shared Golden Test Vectors & Independent Historical Anchors
+    ok 1 - 1. Shared Golden Test Vectors & Independent Historical Anchors
+      ---
+      duration_ms: 2.755655
+      type: 'test'
+      ...
+    # Subtest: 2. Exhaustive Continuity Invariant (1890-2120): Every consecutive day increments JDN by 1 in both systems without gaps or drift
+    ok 2 - 2. Exhaustive Continuity Invariant (1890-2120): Every consecutive day increments JDN by 1 in both systems without gaps or drift
+      ---
+      duration_ms: 42.619501
+      type: 'test'
+      ...
+    # Subtest: 3. Ethiopian Leap Year Rules (year % 4 === 3), Pagume Days, JDN Bounds, and Strict Input Validation
+    ok 3 - 3. Ethiopian Leap Year Rules (year % 4 === 3), Pagume Days, JDN Bounds, and Strict Input Validation
+      ---
+      duration_ms: 1.026242
+      type: 'test'
+      ...
+    # Subtest: 4. Date Arithmetic & Calendar-Specific Month/Year Grids and Bounds
+    ok 4 - 4. Date Arithmetic & Calendar-Specific Month/Year Grids and Bounds
+      ---
+      duration_ms: 0.579851
+      type: 'test'
+      ...
+    # Subtest: 5. Fixed Ethiopia Civil Time (UTC+3) Midnight Boundary, Strict Timestamp Parsing, and LocalDateTime Separation
+    ok 5 - 5. Fixed Ethiopia Civil Time (UTC+3) Midnight Boundary, Strict Timestamp Parsing, and LocalDateTime Separation
+      ---
+      duration_ms: 1.53044
+      type: 'test'
+      ...
+    # Subtest: 6. DateRange Parity, Formatting, Legacy Wrappers, and Module Integration Validation
+    ok 6 - 6. DateRange Parity, Formatting, Legacy Wrappers, and Module Integration Validation
+      ---
+      duration_ms: 3.729479
+      type: 'test'
+      ...
+    1..6
+ok 17 - STAGE 2.6 SHARED CALENDAR FOUNDATION & ETHIOPIAN/GREGORIAN DATE ENGINE
+  ---
+  duration_ms: 53.653905
+  type: 'suite'
+  ...
+# (node:2834) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: STAGE 2.6.2 REAL SQLITE MIGRATION & DATA-SAFETY VERIFICATION
+    # Subtest: 1. Dart AppDatabase migration SQL matches verified normalized date semantics across epoch sec/ms, zoned/bare ISO, garbage/overflow rejection, and zero today-date synthesis
+    ok 1 - 1. Dart AppDatabase migration SQL matches verified normalized date semantics across epoch sec/ms, zoned/bare ISO, garbage/overflow rejection, and zero today-date synthesis
+      ---
+      duration_ms: 5.291698
+      type: 'test'
+      ...
+    # Subtest: 2. File-backed SQLite v4 -> v5 migration preserves all user rows, Amharic UTF-8, FKs, and endures close/reopen
+    ok 2 - 2. File-backed SQLite v4 -> v5 migration preserves all user rows, Amharic UTF-8, FKs, and endures close/reopen
+      ---
+      duration_ms: 52.354188
+      type: 'test'
+      ...
+    # Subtest: 3. File-backed SQLite v4 -> v5 migration aborts atomically and rolls back cleanly on corrupt/uninterpretable required or nullable dates
+    ok 3 - 3. File-backed SQLite v4 -> v5 migration aborts atomically and rolls back cleanly on corrupt/uninterpretable required or nullable dates
+      ---
+      duration_ms: 26.385834
+      type: 'test'
+      ...
+    1..3
+ok 18 - STAGE 2.6.2 REAL SQLITE MIGRATION & DATA-SAFETY VERIFICATION
+  ---
+  duration_ms: 85.494663
+  type: 'suite'
+  ...
+# Subtest: 1. Balanced entry validation passes for valid debits == credits
+ok 19 - 1. Balanced entry validation passes for valid debits == credits
+  ---
+  duration_ms: 1.163048
+  type: 'test'
+  ...
+# Subtest: 2. Unbalanced entry throws DoubleEntryValidationError
+ok 20 - 2. Unbalanced entry throws DoubleEntryValidationError
+  ---
+  duration_ms: 0.444596
+  type: 'test'
+  ...
+# Subtest: 3. Safe Harbor Available to Spend strictly excludes receivables
+ok 21 - 3. Safe Harbor Available to Spend strictly excludes receivables
+  ---
+  duration_ms: 0.17023
+  type: 'test'
+  ...
+# Subtest: 4. Boundary Test: Jan 30 third-party paid meal repaid on Feb 2
+ok 22 - 4. Boundary Test: Jan 30 third-party paid meal repaid on Feb 2
+  ---
+  duration_ms: 2.051821
+  type: 'test'
+  ...
+# Subtest: 5. Transfer with Bank Fee records balanced postings without false income/expense on principal
+ok 23 - 5. Transfer with Bank Fee records balanced postings without false income/expense on principal
+  ---
+  duration_ms: 0.496304
+  type: 'test'
+  ...
+# Subtest: 6. Voided transactions are strictly excluded from balance reconstruction
+ok 24 - 6. Voided transactions are strictly excluded from balance reconstruction
+  ---
+  duration_ms: 0.304453
+  type: 'test'
+  ...
+# Subtest: 7. Quick capture expense text parser extracts amounts, keywords, and categories
+ok 25 - 7. Quick capture expense text parser extracts amounts, keywords, and categories
+  ---
+  duration_ms: 1.568151
+  type: 'test'
+  ...
+# Subtest: 8. Category budget status triggers warning at 80% and over-budget above 100%
+ok 26 - 8. Category budget status triggers warning at 80% and over-budget above 100%
+  ---
+  duration_ms: 0.222318
+  type: 'test'
+  ...
+# Subtest: 9. Option 1 Prepaid Card Credit + ETB-only isolation in Cash/NetPosition
+ok 27 - 9. Option 1 Prepaid Card Credit + ETB-only isolation in Cash/NetPosition
+  ---
+  duration_ms: 0.79078
+  type: 'test'
+  ...
+# Subtest: 10. buildDebtSettlement rejects over-allocation and records fees properly
+ok 28 - 10. buildDebtSettlement rejects over-allocation and records fees properly
+  ---
+  duration_ms: 0.724814
+  type: 'test'
+  ...
+# Subtest: Finance Stage A — Cross-Platform Enum Unification & Safe Legacy Backup/Restore
+    # Subtest: 1. Every canonical EntryType value round-trips identically through domain parsers and SharedStateBridge
+    ok 1 - 1. Every canonical EntryType value round-trips identically through domain parsers and SharedStateBridge
+      ---
+      duration_ms: 9.404467
+      type: 'test'
+      ...
+    # Subtest: 2. Every canonical DebtStatus value round-trips identically through domain parsers and SharedStateBridge
+    ok 2 - 2. Every canonical DebtStatus value round-trips identically through domain parsers and SharedStateBridge
+      ---
+      duration_ms: 1.797593
+      type: 'test'
+      ...
+    # Subtest: 3. All documented legacy EntryType & DebtStatus aliases normalize cleanly to canonical snake_case
+    ok 3 - 3. All documented legacy EntryType & DebtStatus aliases normalize cleanly to canonical snake_case
+      ---
+      duration_ms: 1.191321
+      type: 'test'
+      ...
+    # Subtest: 4. Web, Flutter, and shared_foundation schema_contracts.json define identical canonical enum contracts
+    ok 4 - 4. Web, Flutter, and shared_foundation schema_contracts.json define identical canonical enum contracts
+      ---
+      duration_ms: 1.290719
+      type: 'test'
+      ...
+    # Subtest: 5. Unknown, blank, and non-string enum values fail closed safely without corrupting persisted storage
+    ok 5 - 5. Unknown, blank, and non-string enum values fail closed safely without corrupting persisted storage
+      ---
+      duration_ms: 2.544247
+      type: 'test'
+      ...
+    # Subtest: 6 & 7. v7/v8 and canonical format-2 snapshots preserve isolated non-ETB and empty-currency accounts with full ledger relationships across round-trips
+    ok 6 - 6 & 7. v7/v8 and canonical format-2 snapshots preserve isolated non-ETB and empty-currency accounts with full ledger relationships across round-trips
+      ---
+      duration_ms: 9.566355
+      type: 'test'
+      ...
+    # Subtest: 8. Preserved non-ETB and empty-currency accounts stay isolated from ETB totals and reject normal ETB writes
+    ok 7 - 8. Preserved non-ETB and empty-currency accounts stay isolated from ETB totals and reject normal ETB writes
+      ---
+      duration_ms: 3.063145
+      type: 'test'
+      ...
+    1..7
+ok 29 - Finance Stage A — Cross-Platform Enum Unification & Safe Legacy Backup/Restore
+  ---
+  duration_ms: 30.308047
+  type: 'suite'
+  ...
+# Subtest: FINANCE STAGE F2 — WEB QUICK CAPTURE, CANONICAL CATEGORIES & MONTHLY BUDGETS
+    # Subtest: 1. Web default category IDs match CANONICAL_SEED_DATABASE exactly
+    ok 1 - 1. Web default category IDs match CANONICAL_SEED_DATABASE exactly
+      ---
+      duration_ms: 1.584201
+      type: 'test'
+      ...
+    # Subtest: 2. Legacy category IDs resolve non-destructively across lookup, validation, filter, and reports
+    ok 2 - 2. Legacy category IDs resolve non-destructively across lookup, validation, filter, and reports
+      ---
+      duration_ms: 3.099503
+      type: 'test'
+      ...
+    # Subtest: 3. Quick Capture parses live active expense categories cleanly and falls back to cat-other-exp
+    ok 3 - 3. Quick Capture parses live active expense categories cleanly and falls back to cat-other-exp
+      ---
+      duration_ms: 3.271196
+      type: 'test'
+      ...
+    # Subtest: 4. buildQuickCaptureExpenseEntryV7 builds balanced postings matching SimpleTransaction and does not double-hydrate
+    ok 4 - 4. buildQuickCaptureExpenseEntryV7 builds balanced postings matching SimpleTransaction and does not double-hydrate
+      ---
+      duration_ms: 4.335508
+      type: 'test'
+      ...
+    # Subtest: 5. SharedStateBridge round-trips Quick Capture expenses atomically across canonical DB & module stores
+    ok 5 - 5. SharedStateBridge round-trips Quick Capture expenses atomically across canonical DB & module stores
+      ---
+      duration_ms: 13.79544
+      type: 'test'
+      ...
+    # Subtest: 6. Monthly budget upsert keys uniquely on (categoryId, monthIso) without overwriting other months
+    ok 6 - 6. Monthly budget upsert keys uniquely on (categoryId, monthIso) without overwriting other months
+      ---
+      duration_ms: 0.786469
+      type: 'test'
+      ...
+    1..6
+ok 30 - FINANCE STAGE F2 — WEB QUICK CAPTURE, CANONICAL CATEGORIES & MONTHLY BUDGETS
+  ---
+  duration_ms: 29.165813
+  type: 'suite'
+  ...
+# Subtest: Finance v7 Web Engine & Cross-Platform Parity
+    # Subtest: computes AvailableToSpend(H) with Option 1 PrepaidCardCredit, Non-ETB exclusion, and Horizon H filtering
+    ok 1 - computes AvailableToSpend(H) with Option 1 PrepaidCardCredit, Non-ETB exclusion, and Horizon H filtering
+      ---
+      duration_ms: 4.165068
+      type: 'test'
+      ...
+    # Subtest: tracks opening balance :rev:{n} provenance cleanly without double counting
+    ok 2 - tracks opening balance :rev:{n} provenance cleanly without double counting
+      ---
+      duration_ms: 1.020239
+      type: 'test'
+      ...
+    # Subtest: supports partial commitment settlements (outflow & inflow) and settlement void reversal
+    ok 3 - supports partial commitment settlements (outflow & inflow) and settlement void reversal
+      ---
+      duration_ms: 1.188587
+      type: 'test'
+      ...
+    # Subtest: enforces debt origin voiding guards, write-off + void-restore, and Tier A control balance parity
+    ok 4 - enforces debt origin voiding guards, write-off + void-restore, and Tier A control balance parity
+      ---
+      duration_ms: 2.787936
+      type: 'test'
+      ...
+    # Subtest: handles savings goals overfunding retention, recurring skip/due processing, and SimpleTransaction hydration
+    ok 5 - handles savings goals overfunding retention, recurring skip/due processing, and SimpleTransaction hydration
+      ---
+      duration_ms: 2.167669
+      type: 'test'
+      ...
+    # Subtest: preserves v7 finance tables across SharedStateBridge JSON export and import while retaining schemaVersion 5
+    ok 6 - preserves v7 finance tables across SharedStateBridge JSON export and import while retaining schemaVersion 5
+      ---
+      duration_ms: 6.902048
+      type: 'test'
+      ...
+    # Subtest: Stage B (F1): enforces debt-origin/settlement void guards, unvoid checks, and debt reconciliation
+    ok 7 - Stage B (F1): enforces debt-origin/settlement void guards, unvoid checks, and debt reconciliation
+      ---
+      duration_ms: 2.909415
+      type: 'test'
+      ...
+    # Subtest: Stage B (F1): blocks unsafe edits/corrections and preserves payee, movementDate, feeCategoryId, and dual-write consistency
+    ok 8 - Stage B (F1): blocks unsafe edits/corrections and preserves payee, movementDate, feeCategoryId, and dual-write consistency
+      ---
+      duration_ms: 2.116352
+      type: 'test'
+      ...
+    # Subtest: Stage B (F1): synchronizes vault SavingsGoals, blocks nonzero archival, and validates expense refunds
+    ok 9 - Stage B (F1): synchronizes vault SavingsGoals, blocks nonzero archival, and validates expense refunds
+      ---
+      duration_ms: 24.164622
+      type: 'test'
+      ...
+    # Subtest: Stage B (F1): SharedStateBridge.importFromAndroidJson reconciles stale debt and vault-goal state
+    ok 10 - Stage B (F1): SharedStateBridge.importFromAndroidJson reconciles stale debt and vault-goal state
+      ---
+      duration_ms: 2.840695
+      type: 'test'
+      ...
+    1..10
+ok 31 - Finance v7 Web Engine & Cross-Platform Parity
+  ---
+  duration_ms: 52.042293
+  type: 'suite'
+  ...
+# Subtest: Daywell Projects Stage 3 — Portable .daywellproject Package Format, Import & Export
+    # Subtest: 1. Parses canonical shared fixture v1, imports into Web storage, preserves all 4 block types, archived blocks, rollups, corrections & metrics
+    ok 1 - 1. Parses canonical shared fixture v1, imports into Web storage, preserves all 4 block types, archived blocks, rollups, corrections & metrics
+      ---
+      duration_ms: 23.658369
+      type: 'test'
+      ...
+    # Subtest: 2. Round-trips Web-created projects through export & double-import, keeping original titles and stripping goalId/linkedTaskId
+    ok 2 - 2. Round-trips Web-created projects through export & double-import, keeping original titles and stripping goalId/linkedTaskId
+      ---
+      duration_ms: 7.091715
+      type: 'test'
+      ...
+    # Subtest: 3. Rejects malformed JSON, wrong formatId, future/zero formatVersion, dangling references, and preserves existing projects atomically on failure
+    ok 3 - 3. Rejects malformed JSON, wrong formatId, future/zero formatVersion, dangling references, and preserves existing projects atomically on failure
+      ---
+      duration_ms: 6.489172
+      type: 'test'
+      ...
+    # Subtest: 4. Filename helper sanitizes titles and prepareProjectPackageForImport handles out-of-order blocks/records cleanly
+    ok 4 - 4. Filename helper sanitizes titles and prepareProjectPackageForImport handles out-of-order blocks/records cleanly
+      ---
+      duration_ms: 2.56135
+      type: 'test'
+      ...
+    1..4
+ok 32 - Daywell Projects Stage 3 — Portable .daywellproject Package Format, Import & Export
+  ---
+  duration_ms: 41.223164
+  type: 'suite'
+  ...
+# Subtest: PROJECTS STAGE 1: DOMAIN VALIDATION, PROGRESS ENGINE, REPOSITORY & BRIDGE PARITY
+    # Subtest: 1. Project & customFields schema validation enforces types, required fields, date order, bounds, and rejects nested objects
+    ok 1 - 1. Project & customFields schema validation enforces types, required fields, date order, bounds, and rejects nested objects
+      ---
+      duration_ms: 3.540292
+      type: 'test'
+      ...
+    # Subtest: 2. Tracking block validation enforces 32-block limit, schedule bounds, and rollup counter guards
+    ok 2 - 2. Tracking block validation enforces 32-block limit, schedule bounds, and rollup counter guards
+      ---
+      duration_ms: 1.035329
+      type: 'test'
+      ...
+    # Subtest: 3. Tracking record invariants & append-only progress_log protection enforce compensating corrections and reject mutations/cycles
+    ok 3 - 3. Tracking record invariants & append-only progress_log protection enforce compensating corrections and reject mutations/cycles
+      ---
+      duration_ms: 1.588529
+      type: 'test'
+      ...
+    # Subtest: 4. ProgressEngine preserves multi-block independence, computes schedule duration rules, and tracks tasks/milestones separately
+    ok 4 - 4. ProgressEngine preserves multi-block independence, computes schedule duration rules, and tracks tasks/milestones separately
+      ---
+      duration_ms: 1.929842
+      type: 'test'
+      ...
+    # Subtest: 5. WebProjectsRepository persists Projects/Blocks/Records, separates isArchived from status, validates FKs, and detaches tasks on deleteProject
+    ok 5 - 5. WebProjectsRepository persists Projects/Blocks/Records, separates isArchived from status, validates FKs, and detaches tasks on deleteProject
+      ---
+      duration_ms: 21.2188
+      type: 'test'
+      ...
+    # Subtest: 6. SharedStateBridge supports v9 export/import round-trip (Video Learning fixture), unordered parent/correction topological import, v4..v8 compat, purgeKnownSeedData, and fail-closed rejection
+    ok 6 - 6. SharedStateBridge supports v9 export/import round-trip (Video Learning fixture), unordered parent/correction topological import, v4..v8 compat, purgeKnownSeedData, and fail-closed rejection
+      ---
+      duration_ms: 17.825714
+      type: 'test'
+      ...
+    1..6
+ok 33 - PROJECTS STAGE 1: DOMAIN VALIDATION, PROGRESS ENGINE, REPOSITORY & BRIDGE PARITY
+  ---
+  duration_ms: 48.760376
+  type: 'suite'
+  ...
+# Subtest: Daywell Projects Stage 2 — Workspace UI & Service Flows
+    # Subtest: 1. Creates a project with inline non-rollup + rollup blocks and resolves primaryDraftTempId cleanly
+    ok 1 - 1. Creates a project with inline non-rollup + rollup blocks and resolves primaryDraftTempId cleanly
+      ---
+      duration_ms: 5.900113
+      type: 'test'
+      ...
+    # Subtest: 2. Supports grouped_list, checklist, schedule rule auto-completion, and compensating adjustments
+    ok 2 - 2. Supports grouped_list, checklist, schedule rule auto-completion, and compensating adjustments
+      ---
+      duration_ms: 19.839474
+      type: 'test'
+      ...
+    # Subtest: 3. Enforces archive-first lifecycle rule before permanent deletion and detaches linked tasks
+    ok 3 - 3. Enforces archive-first lifecycle rule before permanent deletion and detaches linked tasks
+      ---
+      duration_ms: 1.155685
+      type: 'test'
+      ...
+    # Subtest: 4. Routes Web prototype project entries into live Tasks > Projects and keeps Flutter Stage 2 token-clean
+    ok 4 - 4. Routes Web prototype project entries into live Tasks > Projects and keeps Flutter Stage 2 token-clean
+      ---
+      duration_ms: 3.915699
+      type: 'test'
+      ...
+    1..4
+ok 34 - Daywell Projects Stage 2 — Workspace UI & Service Flows
+  ---
+  duration_ms: 32.406722
+  type: 'suite'
+  ...
+# Subtest: Daywell Projects Stage 5 — PC Workflow, Persistence & Bidirectional Transfer
+    # Subtest: 1. Supports full PC BIM workflow: load template, edit details/region/city/schedule, log batches, persist across reload, and export Android-compatible .daywellproject
+    ok 1 - 1. Supports full PC BIM workflow: load template, edit details/region/city/schedule, log batches, persist across reload, and export Android-compatible .daywellproject
+      ---
+      duration_ms: 53.832351
+      type: 'test'
+      ...
+    # Subtest: 2. Supports reverse transfer (Android Export -> Web Preview Import) creating a new ID-remapped project without overwriting existing projects
+    ok 2 - 2. Supports reverse transfer (Android Export -> Web Preview Import) creating a new ID-remapped project without overwriting existing projects
+      ---
+      duration_ms: 5.238117
+      type: 'test'
+      ...
+    1..2
+ok 35 - Daywell Projects Stage 5 — PC Workflow, Persistence & Bidirectional Transfer
+  ---
+  duration_ms: 60.466024
+  type: 'suite'
+  ...
+# Subtest: Daywell Projects Stage 6 — Final End-to-End Integration & Acceptance
+    # Subtest: A & B: Web Preview BIM campaign workflow, over-target preservation, correction coherence, reload persistence, and Android package parity
+    ok 1 - A & B: Web Preview BIM campaign workflow, over-target preservation, correction coherence, reload persistence, and Android package parity
+      ---
+      duration_ms: 65.937621
+      type: 'test'
+      ...
+    # Subtest: C: Reverse transfer (Android -> Web Preview) creates an isolated copy preserving shared fixture structure & history
+    ok 2 - C: Reverse transfer (Android -> Web Preview) creates an isolated copy preserving shared fixture structure & history
+      ---
+      duration_ms: 6.6107
+      type: 'test'
+      ...
+    # Subtest: D: General project compatibility preserves counter (direct + rollup), grouped_list, checklist, and all schedule completion rules across bidirectional transfer
+    ok 3 - D: General project compatibility preserves counter (direct + rollup), grouped_list, checklist, and all schedule completion rules across bidirectional transfer
+      ---
+      duration_ms: 7.539868
+      type: 'test'
+      ...
+    1..3
+ok 36 - Daywell Projects Stage 6 — Final End-to-End Integration & Acceptance
+  ---
+  duration_ms: 81.553797
+  type: 'suite'
+  ...
+# Subtest: SHARED FOUNDATION ARCHITECTURE & CROSS-PLATFORM PARITY (ITERATION 2)
+    # Subtest: 1. Design Tokens: Canonical identity and complete foundation groups match specification
+    ok 1 - 1. Design Tokens: Canonical identity and complete foundation groups match specification
+      ---
+      duration_ms: 1.621532
+      type: 'test'
+      ...
+    # Subtest: 2. Canonical Seed Database & Reconciliation Engine: Production seed is clean and ledger math reconciles identically
+    ok 2 - 2. Canonical Seed Database & Reconciliation Engine: Production seed is clean and ledger math reconciles identically
+      ---
+      duration_ms: 0.503378
+      type: 'test'
+      ...
+    # Subtest: 3. Business Rules: Finance math invariant (Account Balance = Opening + Inflows - Outflows + Transfers)
+    ok 3 - 3. Business Rules: Finance math invariant (Account Balance = Opening + Inflows - Outflows + Transfers)
+      ---
+      duration_ms: 0.248127
+      type: 'test'
+      ...
+    # Subtest: 4. Business Rules: Transfer strictly preserves Combined Balance across all asset accounts
+    ok 4 - 4. Business Rules: Transfer strictly preserves Combined Balance across all asset accounts
+      ---
+      duration_ms: 0.348365
+      type: 'test'
+      ...
+    # Subtest: 5. Business Rules: Total Income & Total Expense correctly sum without transfer distortion
+    ok 5 - 5. Business Rules: Total Income & Total Expense correctly sum without transfer distortion
+      ---
+      duration_ms: 0.370177
+      type: 'test'
+      ...
+    # Subtest: 6. Business Rules: Safe deletion guards block deletion of accounts or categories with history
+    ok 6 - 6. Business Rules: Safe deletion guards block deletion of accounts or categories with history
+      ---
+      duration_ms: 0.396205
+      type: 'test'
+      ...
+    # Subtest: 7. Transfer Validation rejects identical source and destination accounts or invalid amounts
+    ok 7 - 7. Transfer Validation rejects identical source and destination accounts or invalid amounts
+      ---
+      duration_ms: 0.352213
+      type: 'test'
+      ...
+    # Subtest: 8. Shared State Bridge: Live database state assembly and cross-module synchronization
+    ok 8 - 8. Shared State Bridge: Live database state assembly and cross-module synchronization
+      ---
+      duration_ms: 5.937212
+      type: 'test'
+      ...
+    # Subtest: 9. Design Token Cross-Platform Parity: JSON, TypeScript, and Dart expose identical values with zero duplicates
+    ok 9 - 9. Design Token Cross-Platform Parity: JSON, TypeScript, and Dart expose identical values with zero duplicates
+      ---
+      duration_ms: 2.881954
+      type: 'test'
+      ...
+    # Subtest: 10. Design Token Integrity: Semantic distinctions, monotonic scales, and WCAG AA contrast ratios hold
+    ok 10 - 10. Design Token Integrity: Semantic distinctions, monotonic scales, and WCAG AA contrast ratios hold
+      ---
+      duration_ms: 1.515542
+      type: 'test'
+      ...
+    # Subtest: 11. Generator Idempotence: Re-running sync_foundation.mjs produces byte-for-byte identical TS and Dart outputs
+    ok 11 - 11. Generator Idempotence: Re-running sync_foundation.mjs produces byte-for-byte identical TS and Dart outputs
+      ---
+      duration_ms: 110.45088
+      type: 'test'
+      ...
+    # Subtest: 11b. Layer Isolation: Pure-Dart core foundation and domain/application/data layers do not import Flutter UI
+    ok 12 - 11b. Layer Isolation: Pure-Dart core foundation and domain/application/data layers do not import Flutter UI
+      ---
+      duration_ms: 11.633101
+      type: 'test'
+      ...
+    # Subtest: 12. Generator Validation: Invalid JSON or malformed token schemas fail clearly without silent drift
+    ok 13 - 12. Generator Validation: Invalid JSON or malformed token schemas fail clearly without silent drift
+      ---
+      duration_ms: 70.937105
+      type: 'test'
+      ...
+    1..13
+ok 37 - SHARED FOUNDATION ARCHITECTURE & CROSS-PLATFORM PARITY (ITERATION 2)
+  ---
+  duration_ms: 209.465702
+  type: 'suite'
+  ...
+# Subtest: SHARED STATE BRIDGE: PROJECTS, GOALS & INBOX PERSISTENCE INTEGRITY
+    # Subtest: 1. User-created Projects survive canonical-state assembly with IDs and goalId relationships
+    ok 1 - 1. User-created Projects survive canonical-state assembly with IDs and goalId relationships
+      ---
+      duration_ms: 3.483907
+      type: 'test'
+      ...
+    # Subtest: 2. Edited Projects retain their updated fields across assembly
+    ok 2 - 2. Edited Projects retain their updated fields across assembly
+      ---
+      duration_ms: 0.651386
+      type: 'test'
+      ...
+    # Subtest: 3. User-created Goals survive canonical-state assembly
+    ok 3 - 3. User-created Goals survive canonical-state assembly
+      ---
+      duration_ms: 0.519417
+      type: 'test'
+      ...
+    # Subtest: 4. Edited Goals retain their updated changes across assembly
+    ok 4 - 4. Edited Goals retain their updated changes across assembly
+      ---
+      duration_ms: 0.582065
+      type: 'test'
+      ...
+    # Subtest: 5. Inbox records survive assembly (primary and legacy inbox stores)
+    ok 5 - 5. Inbox records survive assembly (primary and legacy inbox stores)
+      ---
+      duration_ms: 0.727519
+      type: 'test'
+      ...
+    # Subtest: 6. Deleted records are not silently recreated from seed data or stale canonical storage, and purgeKnownSeedData preserves user records
+    ok 6 - 6. Deleted records are not silently recreated from seed data or stale canonical storage, and purgeKnownSeedData preserves user records
+      ---
+      duration_ms: 4.89402
+      type: 'test'
+      ...
+    # Subtest: 7. Unrelated canonical-state collections and versions remain unchanged
+    ok 7 - 7. Unrelated canonical-state collections and versions remain unchanged
+      ---
+      duration_ms: 1.247799
+      type: 'test'
+      ...
+    # Subtest: 8. Hydration and subsequent assembly do not duplicate records
+    ok 8 - 8. Hydration and subsequent assembly do not duplicate records
+      ---
+      duration_ms: 6.388703
+      type: 'test'
+      ...
+    # Subtest: 9. Empty collections are handled cleanly without inserting demo records
+    ok 9 - 9. Empty collections are handled cleanly without inserting demo records
+      ---
+      duration_ms: 0.908129
+      type: 'test'
+      ...
+    # Subtest: 10. Stage 3.4.4: SharedStateBridge round-trips optional reminders and appSettings (including title/channelId & normalized targetId)
+    ok 10 - 10. Stage 3.4.4: SharedStateBridge round-trips optional reminders and appSettings (including title/channelId & normalized targetId)
+      ---
+      duration_ms: 2.026694
+      type: 'test'
+      ...
+    # Subtest: 11. Stage 3.4.4: Secret/internal keys in appSettings are excluded cleanly and malformed reminders/appSettings fail closed without mutating localStorage
+    ok 11 - 11. Stage 3.4.4: Secret/internal keys in appSettings are excluded cleanly and malformed reminders/appSettings fail closed without mutating localStorage
+      ---
+      duration_ms: 2.314055
+      type: 'test'
+      ...
+    # Subtest: 12. Stage 3.4.4: Omitted reminders and appSettings remain optional and backward-compatible with pre-3.4.4 payloads
+    ok 12 - 12. Stage 3.4.4: Omitted reminders and appSettings remain optional and backward-compatible with pre-3.4.4 payloads
+      ---
+      duration_ms: 0.411104
+      type: 'test'
+      ...
+    # Subtest: 13. Stage 3.4.4.1: Android v8 snapshot round-trips through Web bridge preserving Reminder title/channelId while emitting schemaVersion 5
+    ok 13 - 13. Stage 3.4.4.1: Android v8 snapshot round-trips through Web bridge preserving Reminder title/channelId while emitting schemaVersion 5
+      ---
+      duration_ms: 1.232519
+      type: 'test'
+      ...
+    # Subtest: 14. Stage 3.4.4.1: Enforces Drift string max lengths, strictly positive amounts, and v7+ vs pre-v7 transfer categoryId parity before mutating localStorage
+    ok 14 - 14. Stage 3.4.4.1: Enforces Drift string max lengths, strictly positive amounts, and v7+ vs pre-v7 transfer categoryId parity before mutating localStorage
+      ---
+      duration_ms: 7.330094
+      type: 'test'
+      ...
+    1..14
+ok 38 - SHARED STATE BRIDGE: PROJECTS, GOALS & INBOX PERSISTENCE INTEGRITY
+  ---
+  duration_ms: 37.543336
+  type: 'suite'
+  ...
+# Subtest: Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip Fidelity
+    # Subtest: 1. Full multi-module export -> import -> export round-trip preserves normalized data across all 22 collections
+    ok 1 - 1. Full multi-module export -> import -> export round-trip preserves normalized data across all 22 collections
+      ---
+      duration_ms: 6.616922
+      type: 'test'
+      ...
+    # Subtest: 2. Explicitly empty collections stay empty without resurrecting starter categories or stale settings
+    ok 2 - 2. Explicitly empty collections stay empty without resurrecting starter categories or stale settings
+      ---
+      duration_ms: 3.427848
+      type: 'test'
+      ...
+    # Subtest: 3. Records with missing optional fields normalize cleanly without undefined leaks
+    ok 3 - 3. Records with missing optional fields normalize cleanly without undefined leaks
+      ---
+      duration_ms: 1.351222
+      type: 'test'
+      ...
+    # Subtest: 4. Full Task and Note metadata survives bridge persistence and Web UI compatibility shapes
+    ok 4 - 4. Full Task and Note metadata survives bridge persistence and Web UI compatibility shapes
+      ---
+      duration_ms: 1.505092
+      type: 'test'
+      ...
+    # Subtest: 5. Reminders & AppSettings preserve full contracts and reject case-insensitive duplicate keys
+    ok 5 - 5. Reminders & AppSettings preserve full contracts and reject case-insensitive duplicate keys
+      ---
+      duration_ms: 1.352124
+      type: 'test'
+      ...
+    # Subtest: 6. System seed vs user data: purgeKnownSeedData cleans all seed collections and preserves user data and absent keys
+    ok 6 - 6. System seed vs user data: purgeKnownSeedData cleans all seed collections and preserves user data and absent keys
+      ---
+      duration_ms: 0.943205
+      type: 'test'
+      ...
+    # Subtest: 7. Relationships & foreign keys: preserves valid graph links while clearing dangling Tier-2 refs and breaking multi-node cycles
+    ok 7 - 7. Relationships & foreign keys: preserves valid graph links while clearing dangling Tier-2 refs and breaking multi-node cycles
+      ---
+      duration_ms: 1.604489
+      type: 'test'
+      ...
+    # Subtest: 8. Repeated imports of the same snapshot remain idempotent with zero duplication
+    ok 8 - 8. Repeated imports of the same snapshot remain idempotent with zero duplication
+      ---
+      duration_ms: 3.243083
+      type: 'test'
+      ...
+    # Subtest: 9. Malformed records and invalid Tier-1 references fail closed pre-mutation across all collections
+    ok 9 - 9. Malformed records and invalid Tier-1 references fail closed pre-mutation across all collections
+      ---
+      duration_ms: 5.230252
+      type: 'test'
+      ...
+    # Subtest: 10. Legacy v4-v8 Android snapshots, schema aliases, and Web legacy v3 rejection behave per contract
+    ok 10 - 10. Legacy v4-v8 Android snapshots, schema aliases, and Web legacy v3 rejection behave per contract
+      ---
+      duration_ms: 1.708956
+      type: 'test'
+      ...
+    # Subtest: 7. Finance Stage A preserves valid non-ETB & unverified legacy accounts across all snapshots while rejecting malformed currencies pre-mutation
+    ok 11 - 7. Finance Stage A preserves valid non-ETB & unverified legacy accounts across all snapshots while rejecting malformed currencies pre-mutation
+      ---
+      duration_ms: 1.718082
+      type: 'test'
+      ...
+    1..11
+ok 39 - Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip Fidelity
+  ---
+  duration_ms: 29.296948
+  type: 'suite'
+  ...
+# Subtest: Recovery Stage 2.2: Strict ETB Currency Isolation (Cases \#1-\#25)
+    # Subtest: Case \#1: Currency tier normalization classifies etb/ETB, USD/EUR, and blank/invalid/unrecognized
+    ok 1 - Case \#1: Currency tier normalization classifies etb/ETB, USD/EUR, and blank/invalid/unrecognized
+      ---
+      duration_ms: 1.603488
+      type: 'test'
+      ...
+    # Subtest: Cases \#2 & \#3: USD expense & USD income vs ETB nominal accounts classify as excluded_non_etb(USD) under Decision D
+    ok 2 - Cases \#2 & \#3: USD expense & USD income vs ETB nominal accounts classify as excluded_non_etb(USD) under Decision D
+      ---
+      duration_ms: 2.80585
+      type: 'test'
+      ...
+    # Subtest: Case \#4: Cross-currency transfer (ETB -> USD) classifies as mixed_or_ambiguous and is excluded from ETB P&L/Cashflow
+    ok 3 - Case \#4: Cross-currency transfer (ETB -> USD) classifies as mixed_or_ambiguous and is excluded from ETB P&L/Cashflow
+      ---
+      duration_ms: 2.076998
+      type: 'test'
+      ...
+    # Subtest: Cases \#5, \#6 & \#7: Unverified currency account, <2 postings / missing account, and acc-sys-legacy-offset classify as mixed_or_ambiguous and contribute 0 to ETB
+    ok 4 - Cases \#5, \#6 & \#7: Unverified currency account, <2 postings / missing account, and acc-sys-legacy-offset classify as mixed_or_ambiguous and contribute 0 to ETB
+      ---
+      duration_ms: 1.683889
+      type: 'test'
+      ...
+    # Subtest: Cases \#8 & \#9: Option 1 Prepaid Card Credit & Owed Card Debt include ETB cards and exclude USD cards
+    ok 5 - Cases \#8 & \#9: Option 1 Prepaid Card Credit & Owed Card Debt include ETB cards and exclude USD cards
+      ---
+      duration_ms: 0.756904
+      type: 'test'
+      ...
+    # Subtest: Case \#10: ETB split expense contributes to ETB expense & receivable while USD split expense is excluded
+    ok 6 - Case \#10: ETB split expense contributes to ETB expense & receivable while USD split expense is excluded
+      ---
+      duration_ms: 1.299145
+      type: 'test'
+      ...
+    # Subtest: Cases \#11, \#12 & \#13: Unsettled system-only third_party classifies as mixed_or_ambiguous, and reverses to ETB or USD upon verified settlement
+    ok 7 - Cases \#11, \#12 & \#13: Unsettled system-only third_party classifies as mixed_or_ambiguous, and reverses to ETB or USD upon verified settlement
+      ---
+      duration_ms: 2.105592
+      type: 'test'
+      ...
+    # Subtest: Case \#14: Cross-currency debt settlement (USD debt settled on ETB account) is blocked on write and flagged mixed_or_ambiguous if imported
+    ok 8 - Case \#14: Cross-currency debt settlement (USD debt settled on ETB account) is blocked on write and flagged mixed_or_ambiguous if imported
+      ---
+      duration_ms: 0.651817
+      type: 'test'
+      ...
+    # Subtest: Cases \#15 & \#16: Voided USD entry, system-only correction chain, and USD write-off inherit USD and never leak into ETB
+    ok 9 - Cases \#15 & \#16: Voided USD entry, system-only correction chain, and USD write-off inherit USD and never leak into ETB
+      ---
+      duration_ms: 1.225586
+      type: 'test'
+      ...
+    # Subtest: Cases \#17, \#18 & \#19: Unlinked commitments, recurring rule commitments, and expected inflows obey Decisions E/F & 5D
+    ok 10 - Cases \#17, \#18 & \#19: Unlinked commitments, recurring rule commitments, and expected inflows obey Decisions E/F & 5D
+      ---
+      duration_ms: 2.119669
+      type: 'test'
+      ...
+    # Subtest: Case \#20: Vault-linked ETB goal vs USD vault goal vs virtual savings goal
+    ok 11 - Case \#20: Vault-linked ETB goal vs USD vault goal vs virtual savings goal
+      ---
+      duration_ms: 1.015652
+      type: 'test'
+      ...
+    # Subtest: Cases \#21 & \#22: Occurrence Date vs Account Movement Date separation and Ethiopian Calendar month + Horizon H filtering
+    ok 12 - Cases \#21 & \#22: Occurrence Date vs Account Movement Date separation and Ethiopian Calendar month + Horizon H filtering
+      ---
+      duration_ms: 1.260542
+      type: 'test'
+      ...
+    # Subtest: Case \#23: Decision A write validation locks block non-ETB, unverified, archived accounts, cross-currency debts, unlinked commitments, USD goals & auto-downgrade USD recurring rules
+    ok 13 - Case \#23: Decision A write validation locks block non-ETB, unverified, archived accounts, cross-currency debts, unlinked commitments, USD goals & auto-downgrade USD recurring rules
+      ---
+      duration_ms: 2.323792
+      type: 'test'
+      ...
+    # Subtest: Case \#24: Export workbook, ZIP SQLite views/CSVs, and SharedStateBridge ETB opening balance enforce strict isolation
+    ok 14 - Case \#24: Export workbook, ZIP SQLite views/CSVs, and SharedStateBridge ETB opening balance enforce strict isolation
+      ---
+      duration_ms: 121.971626
+      type: 'test'
+      ...
+    # Subtest: Case \#25: Cross-Platform Canonical Parity Fixture matches exact 8 breakdown fields, Net Worth, P&L, and audit counters
+    ok 15 - Case \#25: Cross-Platform Canonical Parity Fixture matches exact 8 breakdown fields, Net Worth, P&L, and audit counters
+      ---
+      duration_ms: 1.165593
+      type: 'test'
+      ...
+    # Subtest: Case \#26: Quick Capture expense parser rejects explicit foreign currency tokens while keeping ordinary descriptions valid
+    ok 16 - Case \#26: Quick Capture expense parser rejects explicit foreign currency tokens while keeping ordinary descriptions valid
+      ---
+      duration_ms: 3.11904
+      type: 'test'
+      ...
+    # Subtest: Case \#27: Strict decimal minor-unit parser avoids floating-point rounding drift and rejects malformed fractions
+    ok 17 - Case \#27: Strict decimal minor-unit parser avoids floating-point rounding drift and rejects malformed fractions
+      ---
+      duration_ms: 1.096463
+      type: 'test'
+      ...
+    # Subtest: Case \#28: DataPortabilityService excludes savings_vault from Cash_Flow_Ledger and view_cash_flow while tagging non-ETB and unverified records cleanly
+    ok 18 - Case \#28: DataPortabilityService excludes savings_vault from Cash_Flow_Ledger and view_cash_flow while tagging non-ETB and unverified records cleanly
+      ---
+      duration_ms: 91.6468
+      type: 'test'
+      ...
+    1..18
+ok 40 - Recovery Stage 2.2: Strict ETB Currency Isolation (Cases \#1-\#25)
+  ---
+  duration_ms: 242.463887
+  type: 'suite'
+  ...
+# Subtest: STAGE 2: DUMMY DATA REMOVAL & CLEAN INITIALIZATION VERIFICATION
+    # Subtest: 1. Fresh Application Initialization: Canonical seed database starts with zero dummy records
+    ok 1 - 1. Fresh Application Initialization: Canonical seed database starts with zero dummy records
+      ---
+      duration_ms: 1.458525
+      type: 'test'
+      ...
+    # Subtest: 2. Legitimate Defaults Preserved: Standard Ethiopian income and expense categories remain available
+    ok 2 - 2. Legitimate Defaults Preserved: Standard Ethiopian income and expense categories remain available
+      ---
+      duration_ms: 0.369315
+      type: 'test'
+      ...
+    # Subtest: 3. Finance Setup: Allows user to initialize real accounts with real opening balances
+    ok 3 - 3. Finance Setup: Allows user to initialize real accounts with real opening balances
+      ---
+      duration_ms: 0.36134
+      type: 'test'
+      ...
+    # Subtest: 4. Creating Actual Records: Transaction creation updates account and combined balances accurately
+    ok 4 - 4. Creating Actual Records: Transaction creation updates account and combined balances accurately
+      ---
+      duration_ms: 0.269407
+      type: 'test'
+      ...
+    # Subtest: 5. Editing and Deleting Actual Records: Balance restores cleanly without synthetic entries
+    ok 5 - 5. Editing and Deleting Actual Records: Balance restores cleanly without synthetic entries
+      ---
+      duration_ms: 0.324541
+      type: 'test'
+      ...
+    # Subtest: 6. Known Seed ID Detection: Accurately identifies demonstration IDs across all modules
+    ok 6 - 6. Known Seed ID Detection: Accurately identifies demonstration IDs across all modules
+      ---
+      duration_ms: 0.422084
+      type: 'test'
+      ...
+    # Subtest: 7. Safe Purge Logic: Purges seed records while strictly preserving user records and accounts with history
+    ok 7 - 7. Safe Purge Logic: Purges seed records while strictly preserving user records and accounts with history
+      ---
+      duration_ms: 0.421352
+      type: 'test'
+      ...
+    # Subtest: 8. Cross-Platform Parity: Canonical export from Web produces clean payload for Android
+    ok 8 - 8. Cross-Platform Parity: Canonical export from Web produces clean payload for Android
+      ---
+      duration_ms: 0.887129
+      type: 'test'
+      ...
+    1..8
+ok 41 - STAGE 2: DUMMY DATA REMOVAL & CLEAN INITIALIZATION VERIFICATION
+  ---
+  duration_ms: 6.436182
+  type: 'suite'
+  ...
+# Subtest: GOVERNANCE STAGE 3.2: FOUNDATION FRESHNESS, VALIDATION & COMPATIBILITY GUARDS
+    # Subtest: 1. --check mode passes on fresh generated files and never writes to disk
+    ok 1 - 1. --check mode passes on fresh generated files and never writes to disk
+      ---
+      duration_ms: 134.072598
+      type: 'test'
+      ...
+    # Subtest: 2. --check mode detects stale TS or Dart generated files without overwriting them, and sync-foundation repairs them
+    ok 2 - 2. --check mode detects stale TS or Dart generated files without overwriting them, and sync-foundation repairs them
+      ---
+      duration_ms: 213.497618
+      type: 'test'
+      ...
+    # Subtest: 3. All 5 canonical Shared Foundation JSON schemas validate cleanly and reject malformed specs with actionable errors
+    ok 3 - 3. All 5 canonical Shared Foundation JSON schemas validate cleanly and reject malformed specs with actionable errors
+      ---
+      duration_ms: 5.265619
+      type: 'test'
+      ...
+    # Subtest: 4. ADR-007 contract non-regression rejects undocumented removals across tokens, schemas, rules, and control accounts
+    ok 4 - 4. ADR-007 contract non-regression rejects undocumented removals across tokens, schemas, rules, and control accounts
+      ---
+      duration_ms: 133.946078
+      type: 'test'
+      ...
+    # Subtest: 5. ADR-007 accepts explicitly documented intentional removals with valid accepted ADR reference, justification, migration strategy, consumers, and tests
+    ok 5 - 5. ADR-007 accepts explicitly documented intentional removals with valid accepted ADR reference, justification, migration strategy, consumers, and tests
+      ---
+      duration_ms: 44.883731
+      type: 'test'
+      ...
+    # Subtest: 6. Schema-version guard aligns AppDatabase.schemaVersion with schema_contracts.json while preserving seed v5 & bridge v5
+    ok 6 - 6. Schema-version guard aligns AppDatabase.schemaVersion with schema_contracts.json while preserving seed v5 & bridge v5
+      ---
+      duration_ms: 72.680197
+      type: 'test'
+      ...
+    1..6
+ok 42 - GOVERNANCE STAGE 3.2: FOUNDATION FRESHNESS, VALIDATION & COMPATIBILITY GUARDS
+  ---
+  duration_ms: 606.128826
+  type: 'suite'
+  ...
+# Subtest: GOVERNANCE STAGE 3.3: ARCHITECTURE BOUNDARIES, MIGRATION COMPATIBILITY & CI BASELINE GUARD
+    # Subtest: 1. Live repository passes architecture boundary, migration compatibility, and foundation checks
+    ok 1 - 1. Live repository passes architecture boundary, migration compatibility, and foundation checks
+      ---
+      duration_ms: 577.454493
+      type: 'test'
+      ...
+    # Subtest: 2. TS and Dart directive parsers ignore comments and string literals without false positives while catching multiline/re-export/package directives
+    ok 2 - 2. TS and Dart directive parsers ignore comments and string literals without false positives while catching multiline/re-export/package directives
+      ---
+      duration_ms: 0.545357
+      type: 'test'
+      ...
+    # Subtest: 3. Architecture checker catches forbidden Flutter & Web boundary crossings, pubspec leaks, and domain browser globals while avoiding comment/string/member false positives
+    ok 3 - 3. Architecture checker catches forbidden Flutter & Web boundary crossings, pubspec leaks, and domain browser globals while avoiding comment/string/member false positives
+      ---
+      duration_ms: 13.287956
+      type: 'test'
+      ...
+    # Subtest: 4. Migration compatibility checker rejects version decreases, missing/reordered/renumbered steps, destructive fallbacks, silent downgrades, and missing next-step upgrades
+    ok 4 - 4. Migration compatibility checker rejects version decreases, missing/reordered/renumbered steps, destructive fallbacks, silent downgrades, and missing next-step upgrades
+      ---
+      duration_ms: 88.517553
+      type: 'test'
+      ...
+    # Subtest: 5. Git base compatibility diff allows unchanged or additive baselines while blocking unauthorized baseline deletions or weakenings
+    ok 5 - 5. Git base compatibility diff allows unchanged or additive baselines while blocking unauthorized baseline deletions or weakenings
+      ---
+      duration_ms: 209.035253
+      type: 'test'
+      ...
+    # Subtest: 6. Authorizing ADRs require explicit accepted status, Justification, Migration Strategy, Affected Consumers, and existing consumer/test files
+    ok 6 - 6. Authorizing ADRs require explicit accepted status, Justification, Migration Strategy, Affected Consumers, and existing consumer/test files
+      ---
+      duration_ms: 164.998078
+      type: 'test'
+      ...
+    # Subtest: 7. CI Git base resolution fails closed when base revision is unavailable or caller attempts --base-rev override
+    ok 7 - 7. CI Git base resolution fails closed when base revision is unavailable or caller attempts --base-rev override
+      ---
+      duration_ms: 378.651605
+      type: 'test'
+      ...
+    1..7
+ok 43 - GOVERNANCE STAGE 3.3: ARCHITECTURE BOUNDARIES, MIGRATION COMPATIBILITY & CI BASELINE GUARD
+  ---
+  duration_ms: 1434.116905
+  type: 'suite'
+  ...
+# Subtest: Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Validation
+    # Subtest: 1. SharedStateBridge accepts canonical schemaVersion 4..9 (+ financeSchemaVersion 7) and omitted legacy default 5
+    ok 1 - 1. SharedStateBridge accepts canonical schemaVersion 4..9 (+ financeSchemaVersion 7) and omitted legacy default 5
+      ---
+      duration_ms: 5.714333
+      type: 'test'
+      ...
+    # Subtest: 1b. SharedStateBridge validates separated snapshotFormatVersion (1..2, omitted->1) and optional databaseSchemaVersion (1..9) fail-closed before mutating localStorage
+    ok 2 - 1b. SharedStateBridge validates separated snapshotFormatVersion (1..2, omitted->1) and optional databaseSchemaVersion (1..9) fail-closed before mutating localStorage
+      ---
+      duration_ms: 5.824672
+      type: 'test'
+      ...
+    # Subtest: 2. SharedStateBridge rejects unsupported future (> 9), legacy v3 (< 4), contradictory, invalid, and malformed payloads before mutating localStorage
+    ok 3 - 2. SharedStateBridge rejects unsupported future (> 9), legacy v3 (< 4), contradictory, invalid, and malformed payloads before mutating localStorage
+      ---
+      duration_ms: 2.397511
+      type: 'test'
+      ...
+    # Subtest: 3. Encrypted backup validation accepts format_version 1, PBKDF2 100000 rounds, and LocalDatabaseState v3
+    ok 4 - 3. Encrypted backup validation accepts format_version 1, PBKDF2 100000 rounds, and LocalDatabaseState v3
+      ---
+      duration_ms: 68.054877
+      type: 'test'
+      ...
+    # Subtest: 4. Encrypted backup reader rejects invalid headers, format_version, KDF, iterations, future schemas, and non-v3 inner versions fail-closed
+    ok 5 - 4. Encrypted backup reader rejects invalid headers, format_version, KDF, iterations, future schemas, and non-v3 inner versions fail-closed
+      ---
+      duration_ms: 32.206847
+      type: 'test'
+      ...
+    # Subtest: 5. Encrypted backup distinguishes authentication_failure, integrity_failure, invalid_payload, and Web legacy v3 inner-version rules
+    ok 6 - 5. Encrypted backup distinguishes authentication_failure, integrity_failure, invalid_payload, and Web legacy v3 inner-version rules
+      ---
+      duration_ms: 438.03537
+      type: 'test'
+      ...
+    1..6
+ok 44 - Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Validation
+  ---
+  duration_ms: 553.686923
+  type: 'suite'
+  ...
+# Subtest: STAGE 3: REPOSITORY RESOURCES & PRODUCTION APK SEPARATION AUDIT
+    # Subtest: 1. Flutter Assets Exclusion: pubspec.yaml does not bundle repository mockups or web assets
+    ok 1 - 1. Flutter Assets Exclusion: pubspec.yaml does not bundle repository mockups or web assets
+      ---
+      duration_ms: 1.205378
+      type: 'test'
+      ...
+    # Subtest: 2. Flutter Import Boundary: flutter_app/lib/ never imports web or parent src files
+    ok 2 - 2. Flutter Import Boundary: flutter_app/lib/ never imports web or parent src files
+      ---
+      duration_ms: 32.431593
+      type: 'test'
+      ...
+    # Subtest: 3. Gradle Source Isolation: Prototype android_room is excluded from main compile sourceSets
+    ok 3 - 3. Gradle Source Isolation: Prototype android_room is excluded from main compile sourceSets
+      ---
+      duration_ms: 0.206068
+      type: 'test'
+      ...
+    # Subtest: 4. Flutter UI Verification: TasksView and NotesView cleanly import SharedDesignTokens and valid callbacks
+    ok 4 - 4. Flutter UI Verification: TasksView and NotesView cleanly import SharedDesignTokens and valid callbacks
+      ---
+      duration_ms: 0.26036
+      type: 'test'
+      ...
+    # Subtest: 5. Web Preview Codebase Viewer: src/data/flutterCodebase.ts remains isolated in Web Preview
+    ok 5 - 5. Web Preview Codebase Viewer: src/data/flutterCodebase.ts remains isolated in Web Preview
+      ---
+      duration_ms: 9.601287
+      type: 'test'
+      ...
+    # Subtest: 6. Shared Foundation Parity: Design Tokens, Business Rules, and Seed Schemas remain identical
+    ok 6 - 6. Shared Foundation Parity: Design Tokens, Business Rules, and Seed Schemas remain identical
+      ---
+      duration_ms: 0.302389
+      type: 'test'
+      ...
+    # Subtest: 7. Shared UI Widgets & Zero Raster Images: shared_ui_widgets.dart provides clean foundation without raster assets
+    ok 7 - 7. Shared UI Widgets & Zero Raster Images: shared_ui_widgets.dart provides clean foundation without raster assets
+      ---
+      duration_ms: 11.168216
+      type: 'test'
+      ...
+    1..7
+ok 45 - STAGE 3: REPOSITORY RESOURCES & PRODUCTION APK SEPARATION AUDIT
+  ---
+  duration_ms: 56.49256
+  type: 'suite'
+  ...
+# Subtest: STAGE 4.1: CANONICAL V6 FINANCE SCHEMA CONTRACTS & CONTROL ACCOUNTS
+    # Subtest: 1. schema_contracts.json defines v6 entities and AccountSubType taxonomy
+    ok 1 - 1. schema_contracts.json defines v6 entities and AccountSubType taxonomy
+      ---
+      duration_ms: 1.677587
+      type: 'test'
+      ...
+    # Subtest: 2. System control account IDs and v7 TypeScript contracts match Flutter domain contracts
+    ok 2 - 2. System control account IDs and v7 TypeScript contracts match Flutter domain contracts
+      ---
+      duration_ms: 0.311115
+      type: 'test'
+      ...
+    1..2
+ok 46 - STAGE 4.1: CANONICAL V6 FINANCE SCHEMA CONTRACTS & CONTROL ACCOUNTS
+  ---
+  duration_ms: 3.464209
+  type: 'suite'
+  ...
+# Subtest: FINANCE STAGE F4 — REPORTING, EXPORT & FINANCE-ONLY PORTABILITY (WORKFLOWS 1-8)
+    # Subtest: Workflow 1: Dual-calendar period comparison (Ethiopian Pagume 5 non-leap vs Pagume 6 leap) and safe zero-baseline deltas
+    ok 1 - Workflow 1: Dual-calendar period comparison (Ethiopian Pagume 5 non-leap vs Pagume 6 leap) and safe zero-baseline deltas
+      ---
+      duration_ms: 3.908585
+      type: 'test'
+      ...
+    # Subtest: Workflow 2: Occurrence P&L separates from Liquid Cash Flow across months and excludes Vault/Card internal transfers from P&L
+    ok 2 - Workflow 2: Occurrence P&L separates from Liquid Cash Flow across months and excludes Vault/Card internal transfers from P&L
+      ---
+      duration_ms: 0.859688
+      type: 'test'
+      ...
+    # Subtest: Workflow 3: Hierarchical category spend, alias resolution, cycle safety, voided/correction exclusion, and Plan vs Reports bit-for-bit parity
+    ok 3 - Workflow 3: Hierarchical category spend, alias resolution, cycle safety, voided/correction exclusion, and Plan vs Reports bit-for-bit parity
+      ---
+      duration_ms: 2.308434
+      type: 'test'
+      ...
+    # Subtest: Workflow 4 & 5: Savings Vaults, Credit Card Option 1, Aligned Balance Sheet, and Strict USD/Unverified Currency Isolation
+    ok 4 - Workflow 4 & 5: Savings Vaults, Credit Card Option 1, Aligned Balance Sheet, and Strict USD/Unverified Currency Isolation
+      ---
+      duration_ms: 3.107959
+      type: 'test'
+      ...
+    # Subtest: Workflow 6: All 13 UTF-8 BOM CSVs (Amharic safe), 13-table SQLite .sql script, 7-sheet .xlsx, and SHA-256 ZIP bundle
+    ok 5 - Workflow 6: All 13 UTF-8 BOM CSVs (Amharic safe), 13-table SQLite .sql script, 7-sheet .xlsx, and SHA-256 ZIP bundle
+      ---
+      duration_ms: 91.323279
+      type: 'test'
+      ...
+    # Subtest: Workflow 7 & 8: Finance-only JSON exports 13 Finance tables cleanly, preserves all non-Finance modules on import, and rejects full backups & legacy regressions fail-closed
+    ok 6 - Workflow 7 & 8: Finance-only JSON exports 13 Finance tables cleanly, preserves all non-Finance modules on import, and rejects full backups & legacy regressions fail-closed
+      ---
+      duration_ms: 12.292101
+      type: 'test'
+      ...
+    1..6
+ok 47 - FINANCE STAGE F4 — REPORTING, EXPORT & FINANCE-ONLY PORTABILITY (WORKFLOWS 1-8)
+  ---
+  duration_ms: 115.136882
+  type: 'suite'
+  ...
+# Subtest: PERMANENT UI CONSISTENCY & CROSS-PLATFORM DESIGN GOVERNANCE
+    # Subtest: 1. Live repository passes checkUiConsistency with zero Web hexes, zero raw Color(0x...), and full primitive parity
+    ok 1 - 1. Live repository passes checkUiConsistency with zero Web hexes, zero raw Color(0x...), and full primitive parity
+      ---
+      duration_ms: 115.727295
+      type: 'test'
+      ...
+    # Subtest: 2. Enforces zero hardcoded hex colors in Web UI (fails closed on unallowlisted \#RGB/\#RRGGBB)
+    ok 2 - 2. Enforces zero hardcoded hex colors in Web UI (fails closed on unallowlisted \#RGB/\#RRGGBB)
+      ---
+      duration_ms: 67.630769
+      type: 'test'
+      ...
+    # Subtest: 3. Enforces canonical CSS token parity and index.css import (fails closed on token drift)
+    ok 3 - 3. Enforces canonical CSS token parity and index.css import (fails closed on token drift)
+      ---
+      duration_ms: 51.542312
+      type: 'test'
+      ...
+    # Subtest: 4. Enforces Flutter UI compliance: rejects raw Color(0x...), unallowlisted Colors.*, and allowlist growth
+    ok 4 - 4. Enforces Flutter UI compliance: rejects raw Color(0x...), unallowlisted Colors.*, and allowlist growth
+      ---
+      duration_ms: 89.316635
+      type: 'test'
+      ...
+    # Subtest: 5. Enforces cross-platform shared UI primitive symbol parity between Flutter widgets and Web components
+    ok 5 - 5. Enforces cross-platform shared UI primitive symbol parity between Flutter widgets and Web components
+      ---
+      duration_ms: 26.715794
+      type: 'test'
+      ...
+    # Subtest: 6. Migrated Flutter MoreView and DashboardView contain zero raw Colors.* or Color(0x...) literals
+    ok 6 - 6. Migrated Flutter MoreView and DashboardView contain zero raw Colors.* or Color(0x...) literals
+      ---
+      duration_ms: 0.591894
+      type: 'test'
+      ...
+    # Subtest: 7. Design tokens JSON, TypeScript, CSS variables, and Dart constants match on primary, surface, spacing, radii, and breakpoints
+    ok 7 - 7. Design tokens JSON, TypeScript, CSS variables, and Dart constants match on primary, surface, spacing, radii, and breakpoints
+      ---
+      duration_ms: 0.226486
+      type: 'test'
+      ...
+    # Subtest: 8. Web App shell removes Figma prototype header pill and explicitly labels static mockups Deprecated Prototype
+    ok 8 - 8. Web App shell removes Figma prototype header pill and explicitly labels static mockups Deprecated Prototype
+      ---
+      duration_ms: 0.602264
+      type: 'test'
+      ...
+    1..8
+ok 48 - PERMANENT UI CONSISTENCY & CROSS-PLATFORM DESIGN GOVERNANCE
+  ---
+  duration_ms: 354.408263
+  type: 'suite'
+  ...
+1..48
+# tests 298
+# suites 46
+# pass 298
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5913.76849
+
+> react-example@0.0.0 lint
+> npm run check-foundation && npm run check-architecture && npm run check-migrations && npm run check-ui && tsc --noEmit
+
+
+> react-example@0.0.0 check-foundation
+> node scripts/sync_foundation.mjs --check
+
+[sync_foundation] Foundation freshness, schemas, contracts, and schemaVersion check passed (baselineDiff=compared).
+
+> react-example@0.0.0 check-architecture
+> node scripts/check_architecture_boundaries.mjs
+
+[check_architecture_boundaries] Passed (114 Dart files, 55 TS/TSX files checked, 13 documented allowlist edges).
+
+> react-example@0.0.0 check-migrations
+> node scripts/check_migration_compatibility.mjs
+
+[check_migration_compatibility] Passed (schemaVersion=9, 8 ascending upgrade steps, downgrade=on-upgrade-explicit-throw-fail-closed).
+
+> react-example@0.0.0 check-ui
+> node scripts/check_ui_consistency.mjs
+
+[check_ui_consistency] Passed (29 Web UI files [0 hardcoded hexes], 47 Flutter UI files [0 Color(0x...)], 5 bounded legacy Flutter Colors.* allowlist entries, full primitive parity).
+0s
+Run actions/setup-java@v4
+Warning: setup-java v4 is deprecated and will no longer receive updates. Please migrate to actions/setup-java@v5.
+Installed distributions
+Creating settings.xml with server-id: github
+Writing to /home/runner/.m2/settings.xml
+10s
+Run subosito/flutter-action@v2
+Make setup script executable
+0s
+Set action inputs
+0s
+Cache Flutter
+7s
+Cache pub dependencies
+2s
+Run setup script
+0s
+14m 37s
+Run cd flutter_app
+
+  ╔════════════════════════════════════════════════════════════════════════════╗
+  ║                 Welcome to Flutter! - https://flutter.dev                  ║
+  ║                                                                            ║
+  ║ The Flutter tool uses Google Analytics to anonymously report feature usage ║
+  ║ statistics and basic crash reports. This data is used to help improve      ║
+  ║ Flutter tools over time.                                                   ║
+  ║                                                                            ║
+  ║ Flutter tool analytics are not sent on the very first run. To disable      ║
+  ║ reporting, type 'flutter config --no-analytics'. To display the current    ║
+  ║ setting, type 'flutter config'. If you opt out of analytics, an opt-out    ║
+  ║ event will be sent, and then no further information will be sent by the    ║
+  ║ Flutter tool.                                                              ║
+  ║                                                                            ║
+  ║ By downloading the Flutter SDK, you agree to the Google Terms of Service.  ║
+  ║ The Google Privacy Policy describes how data is handled in this service.   ║
+  ║                                                                            ║
+  ║ Moreover, Flutter includes the Dart SDK, which may send usage metrics and  ║
+  ║ crash reports to Google.                                                   ║
+  ║                                                                            ║
+  ║ Read about data we send with crash reports:                                ║
+  ║ https://flutter.dev/to/crash-reporting                                     ║
+  ║                                                                            ║
+  ║ See Google's privacy policy:                                               ║
+  ║ https://policies.google.com/privacy                                        ║
+  ║                                                                            ║
+  ║ To disable animations in this tool, use                                    ║
+  ║ 'flutter config --no-cli-animations'.                                      ║
+  ╚════════════════════════════════════════════════════════════════════════════╝
+
+Resolving dependencies...
+Downloading packages...
++ _fe_analyzer_shared 72.0.0 (111.0.0 available)
++ _macros 0.3.2 from sdk dart
++ analyzer 6.7.0 (14.7.0 available)
++ analyzer_plugin 0.11.3 (0.14.20 available)
++ args 2.7.0
++ async 2.11.0 (2.13.1 available)
++ boolean_selector 2.1.1 (2.1.2 available)
++ build 2.4.1 (5.0.0 available)
++ build_config 1.1.1 (1.4.0 available)
++ build_daemon 4.0.2 (4.1.7 available)
++ build_resolvers 2.4.2 (3.0.4 available)
++ build_runner 2.4.13 (2.17.1 available)
++ build_runner_core 7.3.2 (9.3.2 available)
++ built_collection 5.1.1 (6.0.0 available)
++ built_value 8.13.0
++ characters 1.3.0 (1.4.1 available)
++ charcode 1.4.0
++ checked_yaml 2.0.3 (2.0.4 available)
++ cli_util 0.4.2 (0.6.0 available)
++ clock 1.1.1 (1.1.3 available)
++ code_builder 4.10.1 (4.13.0 available)
++ collection 1.18.0 (1.19.1 available)
++ convert 3.1.2
++ cross_file 0.3.4+2 (0.4.0 available)
++ crypto 3.0.8
++ cryptography 2.9.0
++ custom_lint_core 0.7.0 (0.8.2 available)
++ custom_lint_visitor 1.0.0+6.7.0 (1.0.0+9.0.0 available)
++ dart_style 2.3.7 (3.1.14 available)
++ dbus 0.7.12 (0.8.1 available)
++ drift 2.19.1+1 (2.35.4 available)
++ drift_dev 2.19.1 (2.35.3 available)
++ drift_flutter 0.1.0 (0.3.1 available)
++ fake_async 1.3.1 (1.3.3 available)
++ ffi 2.1.3 (2.2.0 available)
++ file 7.0.1
++ fixnum 1.1.1
++ flutter 0.0.0 from sdk flutter
++ flutter_lints 3.0.2 (6.0.0 available)
++ flutter_local_notifications 17.2.4 (23.0.3 available)
++ flutter_local_notifications_linux 4.0.1 (9.0.0 available)
++ flutter_local_notifications_platform_interface 7.2.0 (13.0.0 available)
++ flutter_localizations 0.0.0 from sdk flutter
++ flutter_riverpod 2.6.1 (3.5.0 available)
++ flutter_secure_storage 9.2.4 (11.2.0 available)
++ flutter_secure_storage_linux 1.2.3 (3.0.3 available)
++ flutter_secure_storage_macos 3.1.3 (4.0.0 available)
++ flutter_secure_storage_platform_interface 1.1.2 (2.1.1 available)
++ flutter_secure_storage_web 1.2.1 (2.1.1 available)
++ flutter_secure_storage_windows 3.1.2 (4.2.2 available)
++ flutter_test 0.0.0 from sdk flutter
++ flutter_web_plugins 0.0.0 from sdk flutter
++ freezed_annotation 2.4.4 (3.1.0 available)
++ frontend_server_client 4.0.0 (4.2.0 available)
++ glob 2.2.0
++ graphs 2.3.2
++ http_multi_server 3.2.3
++ http_parser 4.0.2 (4.1.2 available)
++ intl 0.19.0 (0.20.3 available)
++ io 1.1.0
++ js 0.6.7 (0.7.2 available)
++ json_annotation 4.9.0 (4.12.0 available)
++ leak_tracker 10.0.5 (11.0.2 available)
++ leak_tracker_flutter_testing 3.0.5 (3.0.10 available)
++ leak_tracker_testing 3.0.1 (3.0.2 available)
++ lints 3.0.0 (6.1.0 available)
++ logging 1.3.0
++ macros 0.1.2-main.4 (0.1.3-main.0 available)
++ matcher 0.12.16+1 (0.12.20 available)
++ material_color_utilities 0.11.1 (0.13.1 available)
++ meta 1.15.0 (1.19.0 available)
++ mime 1.0.6 (2.1.0 available)
++ package_config 2.2.0 (3.0.0 available)
++ path 1.9.0 (1.9.1 available)
++ path_provider 2.1.5 (2.1.6 available)
++ path_provider_android 2.2.15 (2.3.1 available)
++ path_provider_foundation 2.4.1 (2.6.0 available)
++ path_provider_linux 2.2.1 (2.2.2 available)
++ path_provider_platform_interface 2.1.2 (2.1.3 available)
++ path_provider_windows 2.3.0
++ petitparser 6.0.2 (7.1.0 available)
++ platform 3.1.6 (3.2.0 available)
++ plugin_platform_interface 2.1.8
++ pool 1.5.3
++ pub_semver 2.2.1
++ pubspec_parse 1.4.0 (1.7.0 available)
++ recase 4.1.0
++ riverpod 2.6.1 (3.5.0 available)
++ riverpod_analyzer_utils 0.5.8 (1.0.0 available)
++ riverpod_annotation 2.6.1 (4.0.8 available)
++ riverpod_generator 2.6.3 (4.0.10 available)
++ share_plus 8.0.3 (13.3.1 available)
++ share_plus_platform_interface 3.4.0 (7.2.0 available)
++ shelf 1.4.1 (1.4.3 available)
++ shelf_web_socket 2.0.1 (3.0.0 available)
++ sky_engine 0.0.99 from sdk flutter
++ source_gen 1.5.0 (4.3.1 available)
++ source_span 1.10.0 (1.10.2 available)
++ sqlite3 2.4.5 (3.9.1 available)
++ sqlite3_flutter_libs 0.5.42 (0.6.0+eol available)
++ sqlparser 0.37.1 (0.45.1 available)
++ stack_trace 1.11.1 (1.12.2 available)
++ state_notifier 1.0.0
++ stream_channel 2.1.2 (2.1.4 available)
++ stream_transform 2.1.2
++ string_scanner 1.2.0 (1.4.1 available)
++ term_glyph 1.2.1 (1.2.2 available)
++ test_api 0.7.2 (0.7.15 available)
++ timezone 0.9.4 (0.11.2 available)
++ timing 1.0.2
++ typed_data 1.4.0
++ url_launcher_linux 3.2.1 (3.2.3 available)
++ url_launcher_platform_interface 2.3.2
++ url_launcher_web 2.3.3 (2.4.3 available)
++ url_launcher_windows 3.1.4 (3.1.6 available)
++ uuid 4.6.0
++ vector_math 2.1.4 (2.4.4 available)
++ vm_service 14.2.5 (15.4.0 available)
++ watcher 1.2.1
++ web 0.5.1 (1.1.2 available)
++ web_socket 1.0.1
++ web_socket_channel 3.0.3
++ win32 5.10.1 (6.4.0 available)
++ xdg_directories 1.1.0
++ xml 6.5.0 (7.1.0 available)
++ yaml 3.1.4
+Changed 126 dependencies!
+91 packages have newer versions incompatible with dependency constraints.
+Try `flutter pub outdated` for more information.
+[INFO] Generating build script...
+[INFO] Generating build script completed, took 390ms
+
+[INFO] Precompiling build script......
+[INFO] Precompiling build script... completed, took 5.8s
+
+[INFO] Initializing inputs
+[INFO] Building new asset graph...
+[INFO] Building new asset graph completed, took 1.3s
+
+[INFO] Checking for unexpected pre-existing outputs....
+[INFO] Deleting 1 declared outputs which already existed on disk.
+[INFO] Checking for unexpected pre-existing outputs. completed, took 2ms
+
+[INFO] Running build...
+[INFO] Generating SDK summary...
+[INFO] 2.2s elapsed, 0/16 actions completed.
+[INFO] 4.2s elapsed, 0/16 actions completed.
+[INFO] Generating SDK summary completed, took 5.2s
+
+[INFO] 6.3s elapsed, 101/124 actions completed.
+[INFO] 9.7s elapsed, 173/176 actions completed.
+[INFO] 10.7s elapsed, 174/176 actions completed.
+[INFO] 17.3s elapsed, 176/177 actions completed.
+[INFO] 18.5s elapsed, 214/236 actions completed.
+[INFO] 19.7s elapsed, 233/252 actions completed.
+[INFO] 20.7s elapsed, 236/252 actions completed.
+[INFO] 22.8s elapsed, 236/252 actions completed.
+[INFO] 23.9s elapsed, 238/254 actions completed.
+[INFO] 24.9s elapsed, 268/284 actions completed.
+[INFO] 26.0s elapsed, 284/300 actions completed.
+[INFO] 27.0s elapsed, 325/339 actions completed.
+[INFO] 28.1s elapsed, 455/463 actions completed.
+[INFO] 29.1s elapsed, 499/515 actions completed.
+[INFO] 30.2s elapsed, 514/530 actions completed.
+[INFO] 31.3s elapsed, 528/541 actions completed.
+[INFO] 32.3s elapsed, 539/541 actions completed.
+[INFO] 33.4s elapsed, 539/541 actions completed.
+[INFO] 34.4s elapsed, 539/541 actions completed.
+[INFO] 35.4s elapsed, 539/541 actions completed.
+[INFO] 36.5s elapsed, 539/541 actions completed.
+[INFO] 37.5s elapsed, 539/541 actions completed.
+[INFO] 38.5s elapsed, 539/541 actions completed.
+[INFO] 39.5s elapsed, 539/541 actions completed.
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "recurringRulesTableRefs" on table "$AccountsTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "recurringRulesTableRefs" on table "$AccountsTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "debtsTableRefs" on table "$JournalEntriesTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[WARNING] drift_dev on lib/data/database/app_database.dart:
+Duplicate orderings/filters detected for field "debtsTableRefs" on table "$JournalEntriesTableTable". Filter and orderings for this field wont be generated. Use the @ReferenceName() annotation to resolve this issue. See https://drift.simonbinder.eu/docs/manager/#name-clashes for more information
+[INFO] 41.3s elapsed, 751/751 actions completed.
+[INFO] Running build completed, took 41.6s
+
+[INFO] Caching finalized dependency graph...
+[INFO] Caching finalized dependency graph completed, took 358ms
+
+[INFO] Succeeded after 41.9s with 239 outputs (932 actions)
+
+Formatted 154 files (0 changed) in 2.57 seconds.
+Analyzing flutter_app...                                        
+No issues found! (ran in 19.4s)
+
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Converts Ethiopian New Year 2017 (Enkutatash - Sep 11, 2024)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Converts Gregorian date (Nov 07, 2024) to Ethiopian Tikimt 28, 2017
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Bidirectional round-trip conversion preserves exact dates
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Pagumē leap year calculation (Year % 4 == 3 has 6 days)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/ethiopian_calendar_test.dart: EthiopianCalendar Conversion Tests Dual calendar display formatting
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f4_test.dart: Finance Stage F4 — Reporting, Exports, Portability & Verification Workflow 1 & 2: Dual-calendar Pagume 5/6 resolution, safe deltas, and Occurrence P&L vs Cash Flow separation
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f4_test.dart: Finance Stage F4 — Reporting, Exports, Portability & Verification Workflow 3: Hierarchical category spend, alias matching, cycle safety, void exclusion, and Plan/Report budget parity
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f4_test.dart: Finance Stage F4 — Reporting, Exports, Portability & Verification Workflow 4 & 5: Vaults, Credit Card Option 1, Aligned Balance Sheet & Strict Currency Isolation
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f4_test.dart: Finance Stage F4 — Reporting, Exports, Portability & Verification Workflow 6: All 13 UTF-8 BOM CSVs (Amharic safe) & 13-table SQLite analytical export with topological categories
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f4_test.dart: Finance Stage F4 — Reporting, Exports, Portability & Verification Workflow 7 & 8: Finance-only JSON portability preserves non-Finance tables intact, rejects full backups/unbalanced payloads fail-closed, and accepts Web/legacy snapshots
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellThemeController & DaywellApp Contract Unit Tests Defaults to ThemeMode.system and notifies only on changes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellThemeController & DaywellApp Contract Unit Tests Asserts when non-system themeMode and themeController are both passed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests Manages typed tabs, lazy visited set, and secondary route unwind
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests Resolves indexes via destination registry independently of enum order and guards out-of-range indexes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellShellController & Destination Registry Unit Tests DaywellAdaptiveScaffold renders and navigates custom destination order via registry
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Displays DaywellShellStatusView error banner on failure and recovers on Retry
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Prevents FAB Hero collision across visited Tasks and Notes tabs and pushes Note editor cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Preserves visited tab State and user input live across 600dp breakpoint resize and back
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Routes real Dashboard and More callbacks and unwinds Backup via system PopScope back
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: DaywellAppShell Startup, Navigation, Hero & Adaptive Widget Tests Supports live ThemeMode switching via More Appearance dialog and renders on short wide landscape
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Buffers cold-start trigger and shared text while DB initializes and deduplicates repeat signals
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Preserves buffered shared text across startup failure and Retry recovery
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: Quick Capture & Shared Text MethodChannel Regression Tests Warm-start rapid duplicate triggers show 1 dialog at a time and flush distinct queued text on barrier dismiss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shell_test.dart: CalendarPlaceholderView States Tests Renders loading, error + Retry, populated preview, and empty states accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests Calculates recorded balance accurately without floating point error
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests Computes Available-to-Spend subtracting commitments and savings
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/financial_engine_test.dart: FinancialEngine Integer Calculation Tests String parsing handles fractional cents and negative values safely
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Notes preserve full Ge`ez/Amharic Unicode text faithfully
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Calendar converter handles Pagume leap years accurately (Year % 4 == 3)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Calendar converter handles Enkutatash (Meskerem 1) transitions
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Offline local notification parameters format properly without cloud server
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage5_notes_notifications_calendar_test.dart: Stage 5 Notes, Notifications & Localization Tests Share-Intent receiver extracts shared text into inbox format
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_contracts_v6_test.dart: Stage 4.1 V6 Finance Domain Models & Contracts AccountSubType taxonomy classifies liquid, vault, credit, and system accounts
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_contracts_v6_test.dart: Stage 4.1 V6 Finance Domain Models & Contracts AccountModel and JournalEntryModel round-trip v6 fields safely
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_contracts_v6_test.dart: Stage 4.1 V6 Finance Domain Models & Contracts BudgetModel, RecurringRuleModel, CommitmentModel, and SavingsGoalModel serialize cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation Accepts canonical snapshots v4..v9 and omitted-version legacy default 5
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation Rejects 0..3, 10, 99, negative, non-int, null, contradictory, and malformed snapshots with zero data/reminder/settings loss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation EncryptionBackupService validates format_version, KDF, iterations, headers, checksums, and inner snapshot bounds fail-closed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation Stage 1.1 separates snapshotFormatVersion (1..2) & databaseSchemaVersion (1..9) from exchange schemaVersion (4..9) across coordinator and encryption service
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation Enforces strict header vs effective inner-version matrix across EncryptionBackupService, DatabasePersistenceCoordinator, and AppStateManager restore/recovery paths
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation AppStateManager restore and SharedFoundationBridge reject unsupported backups BEFORE quarantine or DB replacement and expose detailed errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage342_backup_snapshot_validation_test.dart: Stage 3.4.2 Flutter Fail-Closed Snapshot & Backup Validation BackupView surfaces distinct error SnackBars for authentication failure, unsupported format, unsupported KDF, unsupported future schema, and invalid canonical payload
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_engine_v6_test.dart: Stage 4.4 — DoubleEntryEngine & AvailableToSpend(H) V6 Tests All 6 Numerical AvailableToSpend(H) Examples (H = 2026-11-30)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_engine_v6_test.dart: Stage 4.4 — DoubleEntryEngine & AvailableToSpend(H) V6 Tests Period Cashflow & Category Spend Rollup exclude transfers, opening equity, debt principal, and voided entries
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Token version and color tokens compile with expected ARGB values
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Typography tokens resolve TextStyle and tabularFigures FontFeature accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Spacing, radii, elevation, and breakpoints are monotonic doubles
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_design_tokens_test.dart: SharedDesignTokens & SharedFoundation Native Verification Pure-Dart core foundation exports rules and clean seed state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/bim_outreach_stage4_test.dart: Projects Stage 4 — BIM Company Outreach Campaign Template defines 100 unique US cities summing to 1,000 across 4 regions and Hidar 9–30, 2019 E.C.
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/bim_outreach_stage4_test.dart: Projects Stage 4 — BIM Company Outreach Campaign Template imports shared .daywellproject fixture into Drift, caps city over-targets while preserving actual sent counts, and round-trips export
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_a_compatibility_test.dart: Finance Stage A — Cross-Platform Enums & Legacy Backup/Restore 1. Every canonical EntryType serializes & deserializes cleanly across domain, snapshot coordinator, and DB round-trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_a_compatibility_test.dart: Finance Stage A — Cross-Platform Enums & Legacy Backup/Restore 2. Every canonical DebtStatus serializes & deserializes cleanly across domain, snapshot coordinator, and DB round-trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_a_compatibility_test.dart: Finance Stage A — Cross-Platform Enums & Legacy Backup/Restore 3 & 4. All documented EntryType and DebtStatus legacy aliases normalize to canonical snake_case matching SharedFinanceContracts
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_a_compatibility_test.dart: Finance Stage A — Cross-Platform Enums & Legacy Backup/Restore 5. Unknown, blank, and non-string enum values fail closed safely
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_a_compatibility_test.dart: Finance Stage A — Cross-Platform Enums & Legacy Backup/Restore 6 & 7. v7 and v8 snapshots preserve isolated non-ETB & empty-currency accounts and relationships across export/import & encrypted restore
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_a_compatibility_test.dart: Finance Stage A — Cross-Platform Enums & Legacy Backup/Restore 8. Preserved non-ETB and empty-currency accounts do not enter ETB calculations and reject new ETB ledger writes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 1. Reminders Round-Trip & Soft-Link Policy Export/import preserves valid task, commitment, calendar_event, and custom reminders with exact UTC triggerTimeUtc, isActive, and createdAt
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 1. Reminders Round-Trip & Soft-Link Policy Dangling entity reminders warn-skip while custom/valid reminders persist; omitted reminders clears on replace; invalid reminder scalars fail closed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 2. AppSettings Fidelity, Exclusions & Stale Cleanup User settings round-trip cleanly; internal sentinels and secret or device prefixes are excluded on export & skipped with warning on import
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 2. AppSettings Fidelity, Exclusions & Stale Cleanup Omitted appSettings preserves user settings, omitted ledgerMigrationReportV7 clears stale v7 report, and malformed settings fail closed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 3. Per-Table Duplicate-ID & Unique Index Enforcement Same-table duplicate PK or duplicate key rejects fail closed; cross-table ID reuse succeeds
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 4. Tier 1 Required vs Tier 2/3 Optional FK & Type Safety Broken Tier 1 FKs fail closed with zero synthetic category creation; unsafe scalar types fail pre-transaction
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 4. Tier 1 Required vs Tier 2/3 Optional FK & Type Safety Broken Tier 2 nullable FKs, cycles, and Tier 3 soft links warn-clear to null cleanly and pass PRAGMA foreign_key_check
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary All 4 entrypoints reject broken Tier 1 FK snapshots pre-quarantine and pre-clear, and propagate diagnostics on warn-clear
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary 8-Step Rollback on healthy session failure: preserves quarantine, restores .sqlite+-wal+-shm copy-back, and rehydrates original healthy DB
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary 8-Step Rollback on corrupt startup recovery failure: preserves corrupt-startup recovery state, diagnostics, and quarantined .sqlite/-wal/-shm
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4 — 5. Unified 4-Entrypoint Validation, Quarantine Rollback & Best-Effort Boundary Best-effort post-commit notification failure does not roll back verified restore
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Post-commit deleteQuarantine() and clearFailureDiagnostic() failures never reverse a committed restore and emit warning diagnostics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Concurrent recovery/import calls fail fast without state corruption and release lock cleanly in finally on success or error
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Case/whitespace normalized appSettings policy, clearExisting: false merge cleanup, and merge reminders targeting live DB entities
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Phase A enforces all 12 Drift withLength bounds, allocatedCents >= 1, and v7+ fail-closed vs pre-v7 fallback for transfer categoryId
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage344_snapshot_fidelity_restore_test.dart: Stage 3.4.4.1 — Recovery Cleanup Warnings, Concurrency Lock, Settings Normalization & Phase A Bounds Stage 1.1.2 format-2 snapshots enforce Finance v7 rules, skip legacy V6/V7 migration, preserve ledgerMigrationReportV7, and isolate databaseSchemaVersion
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/projects_stage1_test.dart: Projects Stage 1 — Domain Validation validates project lifecycle, dates, and typed customFields
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/projects_stage1_test.dart: Projects Stage 1 — Domain Validation validates block configs, rollup guards, and max block count
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/projects_stage1_test.dart: Projects Stage 1 — Domain Validation enforces record ownership, hierarchy cycles, checklist rules, and append-only logs
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/projects_stage1_test.dart: Projects Stage 1 — ProgressEngine Independent Metrics keeps metrics independent without primaryBlockId and respects explicit primary
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/projects_stage1_test.dart: Projects Stage 1 — DriftProjectsRepository & ProjectsController SQLite Persistence persists BIM outreach representative fixture across SQLite close & reopen
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/projects_stage1_test.dart: Projects Stage 1 — DriftProjectsRepository & ProjectsController SQLite Persistence enforces video learning fixture, append-only errors, FK validation, and task-preserving deletion
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/notes_inbox_architecture_test.dart: NotesController & NotesModuleState Architecture Tests Create, pin, tag, archive, trash, and reload persists metadata under schema v4
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/notes_inbox_architecture_test.dart: NotesController & NotesModuleState Architecture Tests Repository errors are captured cleanly in NotesModuleState.errorMessage
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/notes_inbox_architecture_test.dart: InboxController & InboxModuleState Architecture Tests Captures quick thoughts, triggers decoupled triage callback, and disposes stream cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Decimal-safe integer calculations prevent floating point rounding drift
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Available-to-Spend formula deducts period commitments and savings allocations
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Avoid double-counting: Paid commitment is excluded from unpaid commitments
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage4_finance_test.dart: Stage 4 Financial Management Specification Tests Transaction correction audit trail preserves original transaction history
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration schedules outflow and inflow commitment due reminders safely
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration QuickCaptureDialog hands off expense text to Finance Composer
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration Overview & Reports display Option 1 Prepaid Card Credit and v7 audit info
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_stage416_test.dart: Stage 4.8 / 4.15 / 4.16 Finance Integration restoreFromEncryptedBackup uses quarantine swap when builder is present
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Scenarios 7–8 (Option 1): Overpaid credit card prepaid credit IS included in AvailableToSpend(H) and NetPosition and tracked separately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Scenario 9–11: Partial outflow commitments, inflow = 0 until received, legacyPaidUnverified = 0, and archived savings goal = 0 reserve
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) ETB-only filter excludes non-ETB account from LiquidCash and NetPosition
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Debt settlement validates over-allocation, inactive status, and fees
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) buildCommitmentReceipt generates balanced asset debit & income credit
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) RecurringEngine pause/resume >= today and skipNext work cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_domain_test.dart: Stage 4.1 — Stage 4.0.5 V7 Domain Scenarios (Option 1 + ETB) Stage 2.2: AccountModel.fromJson preserves omitted user currencyCode as empty and FinancialEngine.formatBirr labels tiers cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellTheme & ThemeMode Construction Light and Dark ThemeData use Material 3 and canonical design tokens
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellTheme & ThemeMode Construction DaywellApp defaults to ThemeMode.system and accepts custom ThemeMode
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension Both themes register DaywellSemanticColors with canonical values
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension copyWith and lerp behave accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellSemanticColors ThemeExtension BuildContext.daywellColors resolves registered extension
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellTypography & Ethiopic Font Fallback Maps canonical typography tokens and Ethiopic fallbacks cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: Material Component Themes & Accessibility Contrast Registers all centralized Material component themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: Material Component Themes & Accessibility Contrast Foreground/background contrast meets WCAG AA requirements
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Renders cleanly in light theme at 1.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Renders cleanly in dark theme at 1.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Handles enlarged 2.0x text scaling without layout overflow in light and dark themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_theme_test.dart: DaywellThemeShowcase Widget & Text Scale Verification Interactive controls, dialog, snackbar, and input work
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 1. Enforces SQLite ON DELETE RESTRICT across all finance FKs under PRAGMA foreign_keys = ON
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 2. Level 0-3 v6->v7 upgrade cleans orphans, recreates indices, preserves DDL without temp names, and produces convergence report
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 3. Misconfigured PRAGMA foreign_keys = ON before v6->v7 upgrade throws LedgerMigrationException cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 4. Snapshot convergence across v5/v6/v7 + immutable :rev:n 1x balance + voidDebtOrigin guard
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v7_migration_test.dart: Stage 4.2-4.5 Schema v7, Hardener, Repository & Cold Recovery 5. Cold WAL/SHM recovery closes failed DB first, exports SHA-256 manifest without Drift, handles corruption quarantine & restores backup
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/project_package_test.dart: Projects Stage 3 — ProjectPackageCodec Unit Tests parses shared canonical v1 fixture, remaps IDs without collision, and clears cross-module refs
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/project_package_test.dart: Projects Stage 3 — ProjectPackageCodec Unit Tests buildFilename sanitizes project titles and rejects unsupported versions/malformed payloads
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/project_package_test.dart: Projects Stage 3 — DriftProjectsRepository & ProjectsController Import/Export imports shared fixture twice keeping original title, preserves history & metrics, and exports portable JSON without goalId/linkedTaskId
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Matches all shared golden vectors (Ethiopian, Gregorian, weekday)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Independent historical & century-leap astronomical anchors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Exhaustive daily JDN & dual-calendar continuity (1890..2120)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Strict validation rejects impossible dates, zones, and malformed strings
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Fixed Ethiopia UTC+3 clock boundary and LocalDateTime conversion
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/shared_date_foundation_test.dart: Shared Date Foundation & Dual-Calendar Engine Month clamping, bounds, grids, DateRange, CalendarEventEntity, and formatting
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f3_composer_test.dart: Finance Stage F3 — Composer Parity, Ledger Workflows & Validation 1. Income & expense creation with separate movement dates and dual-write mirrors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f3_composer_test.dart: Finance Stage F3 — Composer Parity, Ledger Workflows & Validation 2. Transfers support Savings Vaults, custom fee category, movement date, and valid dual-write mirror
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f3_composer_test.dart: Finance Stage F3 — Composer Parity, Ledger Workflows & Validation 3. Lend, borrow, settlement, split expense, and expense refunds work end-to-end
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f3_composer_test.dart: Finance Stage F3 — Composer Parity, Ledger Workflows & Validation 4. Corrections preserve metadata (payee removal, category, fee, fee category, distinct movement date) and dual-write supersede chain
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f3_composer_test.dart: Finance Stage F3 — Composer Parity, Ledger Workflows & Validation 5. Category aliases resolve cleanly without rewriting historical ledger records
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f3_composer_test.dart: Finance Stage F3 — Composer Parity, Ledger Workflows & Validation 6. Rejects Vaults outside Transfers, rejects non-ETB/archived accounts and invalid amounts, and clears stale errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_f3_composer_test.dart: Finance Stage F3 — Composer Widget Parity 7. Widget: FinanceComposerSheet enforces 6 modes, Vault-in-Transfer-only filtering, conditional Fee Category, synced Movement Date, validation, and Lend submission
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSectionContainer Composes optional header, subtitle, surface card, and footer across themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSectionContainer Renders without overflow at 2.0x text scale on 320px width and preserves header semantics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Switches cleanly across loading, empty, error, and lazy content states
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Renders empty and error states in dark mode at 2.0x text scale on 320px width
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellContentState Omits empty or whitespace-only action labels instead of rendering blank buttons
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSearchFilterBar Forwards search input, clear button, filter selection, and reset action
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellSearchFilterBar Handles horizontal scroll layout, 320px width, 2.0x text scale, dark mode, and semantics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellConfirmationDialog Resolves true on confirm, false on cancel, and false on barrier dismiss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellConfirmationDialog Renders safely at 2.0x text scale on 320px width in dark mode with clean semantics
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: DaywellThemeShowcase Stage 3.5 section Displays and interacts with composed patterns at 2.0x text scale in light and dark themes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellConfirmationDialog scrolls cleanly on short landscape viewport at 2.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellSearchFilterBar renders safely with button/badge controls and unbounded horizontal parents
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_patterns_test.dart: Stage 3.6 Adaptive Pattern Edge Cases DaywellSectionContainer wraps cleanly at tight 260px width and 2.0x text scale
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Calculates project progress percentage accurately
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Zero tasks or milestones returns 0% without divide-by-zero error
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Manually completed project always returns 100%
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Unfinished tasks are preserved and postponed without data loss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/task_and_project_test.dart: Stage 3 Task & Project Logic Tests Task can exist with or without Project association
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Stage 2 Unit Controller Hydration CalendarController persists events and rehydrates cleanly on fresh restart instance
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Stage 2 Unit Controller Hydration TasksController persists Schema v4 task metadata across restart
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Real File-Backed SQLite Restart Persistence (Part E) Persists all 5 modules + Schema v5 metadata across full AppStateManager teardown & restart without duplicate seeding
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 1. Concurrent initialize() calls share one startup run and stay idempotent
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 2. Startup failure sets initializationError cleanly and recovers on retry initialize()
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 3. Calling disposeAsync() mid-initialization waits cleanly before closing DB with zero post-dispose errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 4. Stream subscriptions cancel safely on disposeAsync() without late listener crashes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage2_consolidation_test.dart: Application Lifecycle, Concurrency, Failure Recovery & Disposal (Part F) 5. SharedFoundationBridge.auditConsistency excludes non-ETB, unverified, and receivable asset accounts
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 1 & 2: Boundary Test (Jan 30 Expense, Feb 2 Repayment)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 3: Direct Income and Direct Expense Recording
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 4: Account Transfer creates Zero Income and Zero Expense
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 5 & 6: Lending Money and Collecting Repayment
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 7 & 8: Borrowing Money and Repaying Loan
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 10: Split Expense (Dinner 1,000 ETB, My share 400 ETB, Colleague owes 600 ETB)
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 12: Interest separated from Principal
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 13: Invariant Rejection on Unbalanced Entries
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 14 & 15: Net Financial Position & Available to Spend Formula
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 18: Transfer with Bank Service Fee
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios Scenario 19: Voided Transaction Strictly Excluded from Account Balances and Net Position
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/double_entry_finance_test.dart: Double-Entry Finance Engine - 17 Critical Scenarios AccountModel and PartyModel copyWith produces clean immutable copies
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/inbox_repository_test.dart: Inbox Repository Offline Logic Tests Quick capture assigns UUID v4, defaults category, and marks isProcessed false
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/inbox_repository_test.dart: Inbox Repository Offline Logic Tests Mark processed flags item without deleting history
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 1. Setup, opening balance update, and direct cashflows unify on double-entry ledger
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 2. Debts, settlements, write-offs, commitments, vaults, budgets, and recurring rules stay consistent
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 3. Controller propagates errors cleanly into state.errorMessage without losing responsiveness
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 4. Default planningPeriodEnd uses endOfGregorianMonth and Option 1 PrepaidCardCredit flows into AvailableToSpend & NetPosition
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 5. v7 partial outflow/inflow commitments, releaseAndArchiveSavingsGoal, :rev:n history, voidDebtOrigin, and recurring skip/pause/resume
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_controller_test.dart: Stage 4.6 FinanceController & FinanceModuleState Tests 2. Stage 2.2 strict ETB-only controller guards block non-ETB account creation and addDoubleEntryDirectExpense
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/local_search_test.dart: Local Offline Search Tests Searches English text case-insensitively
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/local_search_test.dart: Local Offline Search Tests Searches Amharic Unicode text faithfully
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v6_migration_test.dart: Stage 4.3 — Schema v5 -> v6 Double-Entry Ledger Migration Tests Fixture 1 (Mixed v5 DB): converts opening balances, 15 income/expense rows, and 2 paired transfers without duplication or balance drift
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v6_migration_test.dart: Stage 4.3 — Schema v5 -> v6 Double-Entry Ledger Migration Tests Fixture 2 (Inconsistent Legacy DB): deduplicates entry-open-*, isolates null-account payments to acc-sys-legacy-offset, voids superseded chains, and recalculates stale debt balances
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_v6_migration_test.dart: Stage 4.3 — Schema v5 -> v6 Double-Entry Ledger Migration Tests Fixture 3: Idempotency, Atomic Rollback on Corrupt Posting, & v5 Backup Import Round-Trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_b_test.dart: Finance Stage B (F1) — Ledger Mutation Guards, Vault Sync & Refunds 1. Prevents voiding debt-origin entries with active settlements/write-offs and reconciles debts across void/unvoid
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_b_test.dart: Finance Stage B (F1) — Ledger Mutation Guards, Vault Sync & Refunds 2. Blocks unsafe corrections, commitment over-settlement unvoids, and preserves feeCategoryId, movementDate, and dual-write rows
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_b_test.dart: Finance Stage B (F1) — Ledger Mutation Guards, Vault Sync & Refunds 3. Vault SavingsGoals synchronize across deposits, withdrawals, voids, unvoids, opening edits, and block nonzero archiving
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_stage_b_test.dart: Finance Stage B (F1) — Ledger Mutation Guards, Vault Sync & Refunds 4. Expense refund supports active cash/bank/card destinations, caps totals, blocks voiding refunded expenses, and syncs on snapshot restore
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 1. Fresh installation creates all 24 v9 tables, indices, FK enforcement, system control accounts, and 11 starter categories
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 2. Real v3 -> v5 upgrade preserves Finance, Tasks, Notes, and Inbox records without data loss or duplicates
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 3. Real v4 -> v5 upgrade converts legacy timestamps under Ethiopia UTC+3 to canonical YYYY-MM-DD and adds end_date_iso
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 4. Mixed v4 ms-epochs, bare vs zoned ISO strings, empty optional dates, and DatabasePersistenceCoordinator Goals/goalId round-trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Native SQLite Schema v5 & Non-Destructive Migration Tests 5. v4 -> v5 aborts atomically on corrupt/garbage nullable or required dates, never silencing to NULL or today and leaving v4 database completely intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / Projects Stage 1 Forward Database Migration Safety (v9 Baseline) 1. Baseline v9 database opens cleanly with PRAGMA foreign_keys = ON and preserves seeded relational user data
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / Projects Stage 1 Forward Database Migration Safety (v9 Baseline) 2. Simulated v9 -> v10 upgrade preserves v9 data, applies defaults, enforces FKs, and reopens idempotently
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / Projects Stage 1 Forward Database Migration Safety (v9 Baseline) 3. Deliberate mid-migration failure (DDL + DML throw and FK check failure) rolls back atomically leaving v9 schema and data intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.3 / Projects Stage 1 Forward Database Migration Safety (v9 Baseline) 4. Production v9 AppDatabase and AppStateManager fail closed when opening a v10 database without modifying user data or user_version
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8->v9 Migration & Reminder Fidelity 1. Real v7 database upgrades to v9 preserving all reminders with null title/channelId, valid FKs, and idempotent reopen
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8->v9 Migration & Reminder Fidelity 2. New Reminder with title and channelId persists across database reopen and v9 snapshot export/import round-trip
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8->v9 Migration & Reminder Fidelity 3. Multi-hop v4 -> v9 and v6 -> v9 migrations preserve reminders with null title/channelId and valid FKs without nested-transaction errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Stage 3.4.4.1 Schema v8->v9 Migration & Reminder Fidelity 4. Deliberately failed v7 -> v8 migration rolls back atomically leaving v7 reminders schema (no title/channel_id) and data intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 1. Real v8 database upgrades to v9 preserving projects with is_archived=0, custom_fields_json={}, updated_at=created_at, new tables, FKs, and idempotent reopen
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 2. Deliberately failed v8 -> v9 migration rolls back atomically leaving v8 projects schema intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 3. DatabasePersistenceCoordinator round-trips v9 tracking blocks & unordered records/corrections, accepts v8 snapshots, and rejects cycles fail-closed
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 4. Real v1 -> v9 upgrade preserves populated Projects and all legacy tables without TableMigration or duplicate-column errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 5. Real v2 -> v9 upgrade preserves populated Projects, tasks, and pre-v3 double-entry ledger cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 6. Real v5 -> v9 upgrade preserves populated Projects, civil dates, and hardens v6/v7 finance cleanly
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 6b. Real v6 -> v9 upgrade preserves populated Projects, sets v9 defaults, reads via DriftProjectsRepository, passes FK check, and persists across reopen
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/database_migration_test.dart: Projects Stage 1 Schema v9 Migration & Coordinator Fidelity 7. Deliberately failed pre-v5 (v4 -> v9) migration rolls back atomically leaving v4 projects schema, user_version=4, and data intact
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Passphrase-derived AES-GCM-256 generates complete authenticated envelope
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Decryption with correct passphrase restores identical plaintext and verifies SHA-256
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Decryption fails when an incorrect passphrase is supplied
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Tampering with ciphertext or authentication tag triggers integrity failure
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/stage6_backup_restore_test.dart: Stage 6 Passphrase-Derived Encrypted Backup & Restore Tests Multi-device full restore equivalence test on clean secondary instance
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 1. Setup, direct income/expense, and transfer with fee maintain balanced ledger
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 2. Split expense creates balanced 3-leg entry and receivable debt atomically
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 3. Void, unvoid, correct entry, and write-off maintain debt & commitment consistency
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 4. Commitment payment supports both expense bills and linked debt settlements, and unmarks on void
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 5. Vault-linked vs virtual savings goals sync vault ledger balance without double-counting
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 6. Budgets upsert enforces unique (month, category) and recurring rules process idempotently
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 7. Delete protection blocks deleting referenced accounts, categories, or system accounts
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 8. Stage 2.2 unvoidJournalEntry rejects excluded non-ETB/legacyOffset entries and markCommitmentPaid handles lowercase etb
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/finance_repository_test.dart: Stage 4.5 DriftFinanceRepository Integration Tests 9. Stage 2.2 restoreTransaction rejects unlinked, non-ETB, and legacy clearing-offset records before writing
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton Renders all variants, invokes callbacks, and enforces >=48x48 touch targets
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton Disabled and loading states prevent interaction and expose loading indicator
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: DaywellButton & DaywellIconButton DaywellIconButton supports tooltips, selection, destructive tint, and 48x48 hit target
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Cards, SectionHeader & EmptyState Preserves existing constructors, supports light/dark themes, and handles taps
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Cards, SectionHeader & EmptyState DaywellSectionHeader handles narrow width and 2.0x text scale without overflow
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellTextField handles labels, required indicator, errors, callbacks, and disabled state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellSearchField clear action fires onChanged("") and onCleared once without duplicates
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellSearchField safely replaces controllers and does not dispose external controllers
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Input Primitives & Search Controller Lifecycle DaywellDropdownField selects values and respects disabled state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Selection Controls Switch, Checkbox, and Radio tiles toggle via row tap and respect disabled state
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Feedback & Status Indicators DaywellStatusBadge and DaywellStatusBanner render all tones with icons, actions, and dismiss
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Responsive Narrow Screen, 2.0x Text Scale & Expanded Showcase Expanded DaywellThemeShowcase renders without overflow at 2.0x text scale and narrow width
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions DaywellButton and DaywellIconButton expose single button SemanticsNodes without duplicate labels
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions Input and selection primitives preserve native Material semantics without wrapper duplication
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions Feedback & indicator semantics avoid duplication, liveRegion spam, and NaN crashes
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.4.1 Semantics & Edge-Case Regressions DaywellSearchField updates clear button visibility across disabled-to-enabled controller swaps
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Shared primitives survive unbounded horizontal constraints without Flex errors
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Handles 320px width and 2.0x text scale across stacked headers, progress headers, badges, buttons, and banners
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Custom semanticLabel binds cleanly to interactive inputs without double-reading static labels
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/daywell_shared_primitives_test.dart: Stage 3.6 Adaptive Layout & Accessibility Keyboard Tab focus moves across DaywellButton and interactive DaywellCard
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Stage 3.8 Integration & SQLite Tests Renders live hydrated values across all 5 modules from SQLite and persists inline task toggle
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Displays initial loading per module, preserves populated data during reload, and isolates module failures
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Deduplicates concurrent RefreshIndicator reloads and preserves Inbox includeProcessed=true
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Loading, Error, Preserved Data & Refresh Tests Renders empty states for all modules and Finance incomplete-setup notice banner
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Rebuild Isolation Tests Rebuilds only the affected section and metric tile when an individual controller notifies
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Routes all Dashboard navigation, Quick Capture, Backup callbacks and shell flows
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Renders under Light and Dark themes without exceptions
+✅ /home/runner/work/app-public-/app-public-/flutter_app/test/dashboard_view_test.dart: DashboardView Navigation, Themes & Responsive Layout Stress Tests Switches single-column (<720dp) vs two-column (>=720dp) cleanly and avoids overflow at 320dp + 2.0x textScale
+Error: The operation was canceled.
+0s
+Post job cleanup.
+0s
+Post job cleanup.
+(node:4425) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+0s
+0s
+Post job cleanup.
+/usr/bin/git version
+git version 2.56.1
+Temporarily overriding HOME='/home/runner/work/_temp/e81754a0-2e2d-4cdc-8774-363bba99df85' before making global git config changes
+Adding repository directory to the temporary git global config as a safe directory
+/usr/bin/git config --global --add safe.directory /home/runner/work/app-public-/app-public-
+/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+http.https://github.com/.extraheader
+/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+1s
+Cleaning up orphan processes
+Terminate orphan process: pid (3883) (dart:flutter_to)
+Terminate orphan process: pid (3909) (dart:frontend_s)
+Terminate orphan process: pid (3918) (flutter_tester)
+Warning: Node.js 20 is deprecated. The following actions target Node.js 20 but are being forced to run on Node.js 24: actions/checkout@v4, actions/setup-java@v4, actions/setup-node@v4. For more information see: https://github.blog/changelog/2025-09-19-deprecation-of-node-20-on-github-actions-runners/
