@@ -15,6 +15,79 @@ import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
 
 import 'support/sqlite_test_helper.dart';
 
+class _FinanceFixture {
+  final AppDatabase db;
+  final DriftFinanceRepository repo;
+  final FinanceController controller;
+
+  const _FinanceFixture({
+    required this.db,
+    required this.repo,
+    required this.controller,
+  });
+}
+
+Future<_FinanceFixture> _createSeededFinanceFixture() async {
+  final db = AppDatabase(NativeDatabase.memory());
+  await db.ensureInitialized();
+  final repo = DriftFinanceRepository(db);
+  final controller = FinanceController(repository: repo);
+  await controller.completeSetup([
+    AccountModel(
+      id: 'acc-bank',
+      name: 'CBE Checking',
+      type: AccountType.asset,
+      subType: AccountSubType.bank,
+      currencyCode: 'ETB',
+      openingBalanceCents: 1000000,
+      openingBalanceDate: '2026-11-01',
+    ),
+    AccountModel(
+      id: 'acc-cash',
+      name: 'Cash Wallet',
+      type: AccountType.asset,
+      subType: AccountSubType.cash,
+      currencyCode: 'ETB',
+      openingBalanceCents: 300000,
+      openingBalanceDate: '2026-11-01',
+    ),
+    AccountModel(
+      id: 'acc-vault',
+      name: 'Emergency Vault',
+      type: AccountType.asset,
+      subType: AccountSubType.savingsVault,
+      currencyCode: 'ETB',
+      openingBalanceCents: 500000,
+      openingBalanceDate: '2026-11-01',
+    ),
+  ]);
+  // Insert non-ETB and archived accounts directly to verify strict filtering.
+  await db.into(db.accountsTable).insert(
+        AccountsTableCompanion.insert(
+          id: 'acc-usd',
+          name: 'USD Offshore',
+          type: 'asset',
+          subType: const Value('bank'),
+          currencyCode: const Value('USD'),
+          openingBalanceCents: const Value(25000),
+          createdAt: DateTime.utc(2026, 11, 1),
+        ),
+      );
+  await db.into(db.accountsTable).insert(
+        AccountsTableCompanion.insert(
+          id: 'acc-archived',
+          name: 'Old Archived Bank',
+          type: 'asset',
+          subType: const Value('bank'),
+          currencyCode: const Value('ETB'),
+          isArchived: const Value(true),
+          createdAt: DateTime.utc(2026, 11, 1),
+        ),
+      );
+  await controller.loadAll();
+  return _FinanceFixture(db: db, repo: repo, controller: controller);
+}
+
 void main() {
   setUpAll(configureSqliteForHostTests);
 
@@ -25,63 +98,10 @@ void main() {
     late FinanceController controller;
 
     setUp(() async {
-      db = AppDatabase(NativeDatabase.memory());
-      await db.ensureInitialized();
-      repo = DriftFinanceRepository(db);
-      controller = FinanceController(repository: repo);
-      await controller.completeSetup([
-        AccountModel(
-          id: 'acc-bank',
-          name: 'CBE Checking',
-          type: AccountType.asset,
-          subType: AccountSubType.bank,
-          currencyCode: 'ETB',
-          openingBalanceCents: 1000000,
-          openingBalanceDate: '2026-11-01',
-        ),
-        AccountModel(
-          id: 'acc-cash',
-          name: 'Cash Wallet',
-          type: AccountType.asset,
-          subType: AccountSubType.cash,
-          currencyCode: 'ETB',
-          openingBalanceCents: 300000,
-          openingBalanceDate: '2026-11-01',
-        ),
-        AccountModel(
-          id: 'acc-vault',
-          name: 'Emergency Vault',
-          type: AccountType.asset,
-          subType: AccountSubType.savingsVault,
-          currencyCode: 'ETB',
-          openingBalanceCents: 500000,
-          openingBalanceDate: '2026-11-01',
-        ),
-      ]);
-      // Insert non-ETB and archived accounts directly to verify strict filtering.
-      await db.into(db.accountsTable).insert(
-            AccountsTableCompanion.insert(
-              id: 'acc-usd',
-              name: 'USD Offshore',
-              type: 'asset',
-              subType: const Value('bank'),
-              currencyCode: const Value('USD'),
-              openingBalanceCents: const Value(25000),
-              createdAt: DateTime.utc(2026, 11, 1),
-            ),
-          );
-      await db.into(db.accountsTable).insert(
-            AccountsTableCompanion.insert(
-              id: 'acc-archived',
-              name: 'Old Archived Bank',
-              type: 'asset',
-              subType: const Value('bank'),
-              currencyCode: const Value('ETB'),
-              isArchived: const Value(true),
-              createdAt: DateTime.utc(2026, 11, 1),
-            ),
-          );
-      await controller.loadAll();
+      final fixture = await _createSeededFinanceFixture();
+      db = fixture.db;
+      repo = fixture.repo;
+      controller = fixture.controller;
     });
 
     tearDown(() async {
@@ -504,10 +524,46 @@ void main() {
         expect(controller.state.errorMessage, isNotNull);
       },
     );
+  });
 
+  group('Finance Stage F3 — Composer Widget Parity', () {
     testWidgets(
       '7. Widget: FinanceComposerSheet enforces 6 modes, Vault-in-Transfer-only filtering, conditional Fee Category, synced Movement Date, validation, and Lend submission',
       (tester) async {
+        final fixture = await tester.runAsync(_createSeededFinanceFixture);
+        final db = fixture!.db;
+        final controller = fixture.controller;
+
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          controller.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+        });
+
+        Future<void> settle() => tester.pumpAndSettle(
+              const Duration(milliseconds: 100),
+              EnginePhase.sendSemanticsUpdate,
+              const Duration(seconds: 5),
+            );
+
         Finder fieldByLabel(String exactLabel) => find.descendant(
               of: find.widgetWithText(DaywellTextField, exactLabel),
               matching: find.byType(TextFormField),
@@ -531,9 +587,9 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await settle();
         await tester.tap(find.text('Open Composer'));
-        await tester.pumpAndSettle();
+        await settle();
 
         // All 6 mode chips are present.
         for (final label in const [
@@ -554,14 +610,14 @@ void main() {
         );
         await tester.ensureVisible(find.text('Separate Movement Date'));
         await tester.tap(find.text('Separate Movement Date'));
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.text('Pick Movement Date'), findsOneWidget);
         expect(find.text('Sync to Occurrence'), findsOneWidget);
 
         // Submitting empty amount displays validation banner without closing.
         await tester.ensureVisible(find.text('Post Expense'));
         await tester.tap(find.text('Post Expense'));
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.byType(FinanceComposerSheet), findsOneWidget);
         expect(find.byType(DaywellStatusBanner), findsWidgets);
         expect(find.textContaining('valid ETB amount'), findsOneWidget);
@@ -572,45 +628,45 @@ void main() {
         // Switch to Transfer -> Vault is available and Fee Category appears ONLY when fee > 0.
         await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Transfer'));
         await tester.tap(find.widgetWithText(ChoiceChip, 'Transfer'));
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.text('Fee Category'), findsNothing);
 
         final feeField = fieldByLabel('Bank / Service Fee (ETB, optional)');
         await tester.ensureVisible(feeField);
         await tester.enterText(feeField, '15.50');
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.text('Fee Category'), findsOneWidget);
         expect(find.text('Financial Fees'), findsOneWidget);
 
         // Switch to Lend and verify Vault & Fee Category are hidden.
         await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Lend'));
         await tester.tap(find.widgetWithText(ChoiceChip, 'Lend'));
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.text('Source Account'), findsOneWidget);
         expect(find.text('Fee Category'), findsNothing);
 
         final amountField = fieldByLabel('Amount (ETB) *');
         await tester.ensureVisible(amountField);
-        await tester.pumpAndSettle();
+        await settle();
         await tester.enterText(amountField, '250.00');
-        await tester.pumpAndSettle();
+        await settle();
 
         final partyField = fieldByLabel('New Person / Party Name *');
         await tester.ensureVisible(partyField);
-        await tester.pumpAndSettle();
+        await settle();
         await tester.enterText(partyField, 'Dawit');
-        await tester.pumpAndSettle();
+        await settle();
 
         final descField = fieldByLabel('Description');
         await tester.ensureVisible(descField);
-        await tester.pumpAndSettle();
+        await settle();
         await tester.enterText(descField, 'Taxi loan');
-        await tester.pumpAndSettle();
+        await settle();
 
         final postLoanButton =
             find.widgetWithText(DaywellButton, 'Post Loan Out');
         await tester.ensureVisible(postLoanButton);
-        await tester.pumpAndSettle();
+        await settle();
         await tester.tap(postLoanButton);
         await tester.pump();
         final stopwatch = Stopwatch()..start();
@@ -627,11 +683,7 @@ void main() {
             () => Future<void>.delayed(const Duration(milliseconds: 5)),
           );
         }
-        await tester.pumpAndSettle(
-          const Duration(milliseconds: 100),
-          EnginePhase.sendSemanticsUpdate,
-          const Duration(seconds: 5),
-        );
+        await settle();
 
         expect(find.byType(FinanceComposerSheet), findsNothing);
         expect(controller.state.debts.length, 1);
