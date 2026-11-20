@@ -17,13 +17,11 @@ import 'support/sqlite_test_helper.dart';
 
 class _StageF4Fixture {
   final AppDatabase db;
-  final DriftFinanceRepository repo;
   final FinanceController controller;
   final DatabasePersistenceCoordinator coordinator;
 
   const _StageF4Fixture({
     required this.db,
-    required this.repo,
     required this.controller,
     required this.coordinator,
   });
@@ -99,7 +97,6 @@ Future<_StageF4Fixture> _createSeededStageF4Fixture() async {
   await controller.loadAll();
   return _StageF4Fixture(
     db: db,
-    repo: repo,
     controller: controller,
     coordinator: coordinator,
   );
@@ -111,14 +108,12 @@ void main() {
   group('Finance Stage F4 — Reporting, Exports, Portability & Verification',
       () {
     late AppDatabase db;
-    late DriftFinanceRepository repo;
     late FinanceController controller;
     late DatabasePersistenceCoordinator coordinator;
 
     setUp(() async {
       final fixture = await _createSeededStageF4Fixture();
       db = fixture.db;
-      repo = fixture.repo;
       controller = fixture.controller;
       coordinator = fixture.coordinator;
     });
