@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -613,15 +615,23 @@ void main() {
         await tester.pump();
         final stopwatch = Stopwatch()..start();
         while (find.byType(FinanceComposerSheet).evaluate().isNotEmpty) {
-          if (stopwatch.elapsed > const Duration(seconds: 5)) {
-            break;
+          if (stopwatch.elapsed > const Duration(seconds: 15)) {
+            throw TimeoutException(
+              'FinanceComposerSheet did not close after Lend submission '
+              '(debts=${controller.state.debts.length}, '
+              'error=${controller.state.errorMessage}).',
+            );
           }
-          await tester.pump(const Duration(milliseconds: 20));
+          await tester.pump(const Duration(milliseconds: 50));
           await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 10)),
+            () => Future<void>.delayed(const Duration(milliseconds: 5)),
           );
         }
-        await tester.pumpAndSettle();
+        await tester.pumpAndSettle(
+          const Duration(milliseconds: 100),
+          EnginePhase.sendSemanticsUpdate,
+          const Duration(seconds: 5),
+        );
 
         expect(find.byType(FinanceComposerSheet), findsNothing);
         expect(controller.state.debts.length, 1);

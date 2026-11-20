@@ -83,6 +83,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
 
   bool _showNewPartyField = false;
   bool _isSaving = false;
+  bool _didSubmit = false;
   String? _validationError;
 
   bool get _isEditing => widget.editingEntry != null;
@@ -364,7 +365,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   }
 
   Future<void> _submit() async {
-    if (_isSaving) return;
+    if (_isSaving || _didSubmit) return;
 
     final state = widget.controller.state;
     final eligibleAccounts = _eligibleAccountsForMode(state, _mode);
@@ -492,6 +493,10 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         await _submitNew(amountCents: amountCents, description: description);
       }
       if (mounted) {
+        setState(() {
+          _isSaving = false;
+          _didSubmit = true;
+        });
         Navigator.of(context).pop(true);
       }
     } catch (e) {
@@ -1254,7 +1259,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                 leadingIcon: Icons.check,
                 isLoading: _isSaving,
                 fullWidth: true,
-                onPressed: _isSaving ? null : _submit,
+                onPressed: (_isSaving || _didSubmit) ? null : _submit,
               ),
             ],
           ],
