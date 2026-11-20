@@ -10,8 +10,6 @@ import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/database_persistence_coordinator.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
-import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
-import 'package:personal_management_app/domain/finance/finance_models.dart';
 import 'package:personal_management_app/services/export/finance_export_service.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_reports_tab.dart';
 
@@ -157,10 +155,10 @@ void main() {
 
         // Oct occurrence has expense; Oct cashflow is 0
         expect(cmp.previousOccurrence.expenseCents, 75000);
-        expect(cmp.previousCashFlow.outflowCents, 0);
+        expect(cmp.previousLiquidCash.outflowCents, 0);
         // Nov occurrence has 0 expense; Nov cashflow has 750 + 1000 outflows
         expect(cmp.currentOccurrence.expenseCents, 0);
-        expect(cmp.currentCashFlow.outflowCents, 175000);
+        expect(cmp.currentLiquidCash.outflowCents, 175000);
 
         // Safe zero-baseline percentage change verification
         final zeroBasePos =
@@ -177,7 +175,7 @@ void main() {
       () async {
         // Insert nested subcategory + cyclic pair + legacy alias category
         await db.into(db.financialCategories).insert(
-              FinancialCategoriesTableCompanion.insert(
+              FinancialCategoriesCompanion.insert(
                 id: 'cat-food-dining',
                 name: 'Dining Out',
                 type: 'expense',
@@ -186,7 +184,7 @@ void main() {
               ),
             );
         await db.into(db.financialCategories).insert(
-              FinancialCategoriesTableCompanion.insert(
+              FinancialCategoriesCompanion.insert(
                 id: 'cat-food-coffee',
                 name: 'Buna & Cafes',
                 type: 'expense',
@@ -195,7 +193,7 @@ void main() {
               ),
             );
         await db.into(db.financialCategories).insert(
-              FinancialCategoriesTableCompanion.insert(
+              FinancialCategoriesCompanion.insert(
                 id: 'cat-communication',
                 name: 'Legacy Telecom',
                 type: 'expense',
@@ -203,7 +201,7 @@ void main() {
               ),
             );
         await db.into(db.financialCategories).insert(
-              FinancialCategoriesTableCompanion.insert(
+              FinancialCategoriesCompanion.insert(
                 id: 'cat-cycle-a',
                 name: 'Cycle A',
                 type: 'expense',
@@ -211,7 +209,7 @@ void main() {
               ),
             );
         await db.into(db.financialCategories).insert(
-              FinancialCategoriesTableCompanion.insert(
+              FinancialCategoriesCompanion.insert(
                 id: 'cat-cycle-b',
                 name: 'Cycle B',
                 type: 'expense',
@@ -373,9 +371,11 @@ void main() {
         );
         expect(savings.goals.single.allocatedCents, 300000);
 
-        final breakdown = controller.state.calculateAvailableToSpendBreakdown(
-          planningPeriodEndIso: '2026-11-30',
-        );
+        final breakdown = controller.state
+            .copyWith(
+              planningPeriodEnd: CalendarDate(year: 2026, month: 11, day: 30),
+            )
+            .availableToSpendBreakdown;
         final bs = DoubleEntryEngine.buildAlignedBalanceSheetReport(
           accounts: controller.state.accounts,
           entries: controller.state.journalEntries,
@@ -399,7 +399,7 @@ void main() {
       'Workflow 6: All 13 UTF-8 BOM CSVs (Amharic safe) & 13-table SQLite analytical export with topological categories',
       () async {
         await db.into(db.financialCategories).insert(
-              FinancialCategoriesTableCompanion.insert(
+              FinancialCategoriesCompanion.insert(
                 id: 'cat-amharic',
                 name: 'ምግብ / ቡና',
                 type: 'expense',

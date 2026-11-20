@@ -605,7 +605,7 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
               if (report.archivedCount > 0)
                 DaywellStatusBadge(
                   label: '${report.archivedCount} Archived',
-                  tone: DaywellStatusTone.neutral,
+                  tone: DaywellStatusTone.info,
                   showIcon: false,
                 ),
             ],
@@ -768,7 +768,7 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
                               ? DaywellStatusTone.warning
                               : (goal.status == SavingsGoalStatus.completed
                                   ? DaywellStatusTone.success
-                                  : DaywellStatusTone.neutral),
+                                  : DaywellStatusTone.info),
                           showIcon: false,
                         ),
                       ],
@@ -929,7 +929,6 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
     required int depth,
   }) {
     final semantic = context.daywellColors;
-    final textTheme = Theme.of(context).textTheme;
     final labelSuffix = row.children.isNotEmpty
         ? ' (incl. ${row.children.length} sub)'
         : (row.isArchived ? ' (Archived)' : '');

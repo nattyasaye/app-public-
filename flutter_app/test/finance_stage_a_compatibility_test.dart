@@ -1,11 +1,13 @@
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
+import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/core/shared_foundation_core.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/database_persistence_coordinator.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
-import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
 import 'package:personal_management_app/services/backup/encryption_backup_service.dart';
 
 import 'support/sqlite_test_helper.dart';
@@ -586,12 +588,17 @@ void main() {
           await sourceDb.close();
 
           // Round-trip into a fresh DB instance via encrypted backup payload
-          final payloadBytes =
-              EncryptionBackupService.encryptBackup(exported, 'stage-a-pass');
-          final decrypted = EncryptionBackupService.decryptBackup(
-            payloadBytes,
-            'stage-a-pass',
+          final backupService = EncryptionBackupService();
+          final payloadJson = await backupService.encryptDatabasePayload(
+            rawDatabaseJson: jsonEncode(exported),
+            passphrase: 'stage-a-pass',
+            schemaVersion: (exported['schemaVersion'] as int?) ?? 5,
           );
+          final decryptedJson = await backupService.decryptDatabasePayload(
+            encryptedEnvelopeJson: payloadJson,
+            passphrase: 'stage-a-pass',
+          );
+          final decrypted = jsonDecode(decryptedJson) as Map<String, dynamic>;
 
           final targetDb = AppDatabase(NativeDatabase.memory());
           final targetCoord = DatabasePersistenceCoordinator(targetDb);
@@ -916,7 +923,7 @@ void main() {
             accountId: 'acc-usd',
             categoryId: 'cat-food',
             amountCents: 1000,
-            date: const CalendarDate(year: 2026, month: 11, day: 15),
+            date: CalendarDate(year: 2026, month: 11, day: 15),
             description: 'Blocked USD write',
           ),
           throwsA(isA<DoubleEntryValidationError>()),
@@ -926,7 +933,7 @@ void main() {
             accountId: 'acc-unv',
             categoryId: 'cat-food',
             amountCents: 1000,
-            date: const CalendarDate(year: 2026, month: 11, day: 15),
+            date: CalendarDate(year: 2026, month: 11, day: 15),
             description: 'Blocked unverified write',
           ),
           throwsA(isA<DoubleEntryValidationError>()),

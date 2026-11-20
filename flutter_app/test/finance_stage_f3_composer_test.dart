@@ -7,8 +7,6 @@ import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
-import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
-import 'package:personal_management_app/domain/finance/finance_models.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_composer_sheet.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_formatters.dart';
 import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
@@ -137,11 +135,11 @@ void main() {
             .firstWhere((t) => t.id == 'tx-${expEntry.id}');
         final incMirror = controller.state.transactions
             .firstWhere((t) => t.id == 'tx-${incEntry!.id}');
-        expect(expMirror.type, TransactionType.expense);
+        expect(expMirror.type, 'expense');
         expect(expMirror.amountCents, 45000);
         expect(expMirror.payee, 'Tomoca');
         expect(expMirror.isSuperseded, isFalse);
-        expect(incMirror.type, TransactionType.income);
+        expect(incMirror.type, 'income');
         expect(incMirror.amountCents, 120000);
         expect(incMirror.payee, 'Client A');
         expect(incMirror.isSuperseded, isFalse);
@@ -190,9 +188,9 @@ void main() {
 
         final mirror = controller.state.transactions
             .firstWhere((t) => t.id == 'tx-${transferEntry.id}');
-        expect(mirror.type, TransactionType.transfer);
+        expect(mirror.type, 'transfer');
         expect(mirror.accountId, 'acc-bank');
-        expect(mirror.toAccountId, 'acc-vault');
+        expect(mirror.destinationAccountId, 'acc-vault');
         expect(mirror.categoryId, isNot('cat-transfer'));
       },
     );
@@ -356,15 +354,15 @@ void main() {
       '5. Category aliases resolve cleanly without rewriting historical ledger records',
       () async {
         // Insert a historical posting directly with legacy alias 'cat-communication'.
-        await db.into(db.financialCategoriesTable).insert(
-              FinancialCategoriesTableCompanion.insert(
+        await db.into(db.financialCategories).insert(
+              FinancialCategoriesCompanion.insert(
                 id: 'cat-communication',
                 name: 'Telecom Legacy',
                 type: 'expense',
                 sortOrder: const Value(99),
               ),
             );
-        final categories = await repo.getAllCategories();
+        final categories = await repo.getCategories();
         final byId = {for (final c in categories) c.id: c};
         // Remove legacy row from lookup map to simulate alias-only historical posting.
         final canonicalOnlyMap =
