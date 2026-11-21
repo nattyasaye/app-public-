@@ -38,16 +38,16 @@ void main() {
     });
 
     test(
-      '1. Fresh installation creates all 24 v9 tables, indices, '
+      '1. Fresh installation creates all 25 v10 tables, indices, '
       'FK enforcement, system control accounts, and 11 starter categories',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'fresh_v9.sqlite'));
+        final dbFile = File(p.join(tempDir.path, 'fresh_v10.sqlite'));
         final db = AppDatabase(NativeDatabase(dbFile));
 
         await db.ensureInitialized();
 
         final versionRows = await db.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 9);
+        expect(versionRows.single.read<int>('user_version'), 10);
 
         final reminderCols =
             await db.customSelect("PRAGMA table_info('reminders')").get();
@@ -59,6 +59,35 @@ void main() {
             'target_type',
             'title',
             'channel_id',
+          ]),
+        );
+
+        final taskCols =
+            await db.customSelect("PRAGMA table_info('tasks')").get();
+        expect(
+          taskCols.map((r) => r.read<String>('name')).toSet(),
+          containsAll(<String>[
+            'completed_at',
+            'scheduled_time',
+            'my_day_date',
+            'recurrence_config_json',
+            'is_archived',
+            'sort_order',
+          ]),
+        );
+
+        final dailyPlanCols = await db
+            .customSelect("PRAGMA table_info('daily_planning_entries')")
+            .get();
+        expect(
+          dailyPlanCols.map((r) => r.read<String>('name')).toSet(),
+          containsAll(<String>[
+            'id',
+            'plan_date',
+            'task_id',
+            'action',
+            'created_at',
+            'updated_at',
           ]),
         );
 
@@ -120,9 +149,10 @@ void main() {
             'recurring_rules_table',
             'project_tracking_blocks',
             'project_tracking_records',
+            'daily_planning_entries',
           ]),
         );
-        expect(tableNames.length, 24);
+        expect(tableNames.length, 25);
 
         final indexRows = await db
             .customSelect(
@@ -154,6 +184,10 @@ void main() {
             'idx_project_records_parent',
             'idx_project_records_recorded_date',
             'idx_project_records_linked_task',
+            'idx_daily_planning_task_date',
+            'idx_daily_planning_plan_date',
+            'idx_tasks_my_day_date',
+            'idx_tasks_archived_sort',
           ]),
         );
 
@@ -499,7 +533,7 @@ void main() {
         // 1. Upgraded schema version & FK integrity
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 9);
+        expect(versionRows.single.read<int>('user_version'), 10);
 
         final fkCheckRows =
             await migratedDb.customSelect('PRAGMA foreign_key_check').get();
@@ -638,7 +672,7 @@ void main() {
 
         final reopenedVersion =
             await reopenedDb.customSelect('PRAGMA user_version').get();
-        expect(reopenedVersion.single.read<int>('user_version'), 9);
+        expect(reopenedVersion.single.read<int>('user_version'), 10);
 
         final reopenedEvents =
             await DriftCalendarRepository(reopenedDb).getEvents();
@@ -959,7 +993,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 9);
+        expect(versionRows.single.read<int>('user_version'), 10);
 
         final fkCheck =
             await migratedDb.customSelect('PRAGMA foreign_key_check').get();
@@ -1248,7 +1282,7 @@ void main() {
   });
 
   group(
-      'Stage 3.4.3 / Projects Stage 1 Forward Database Migration Safety (v9 Baseline)',
+      'Stage 3.4.3 / Tasks Stage 0.2B Forward Database Migration Safety (v10 Baseline)',
       () {
     late Directory tempDir;
 
@@ -1263,18 +1297,18 @@ void main() {
     });
 
     test(
-      '1. Baseline v9 database opens cleanly with PRAGMA foreign_keys = ON '
+      '1. Baseline v10 database opens cleanly with PRAGMA foreign_keys = ON '
       'and preserves seeded relational user data',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'baseline_v9.sqlite'));
-        await _seedRealisticV9Database(dbFile);
+        final dbFile = File(p.join(tempDir.path, 'baseline_v10.sqlite'));
+        await _seedRealisticV10Database(dbFile);
 
         final reopened = AppDatabase(NativeDatabase(dbFile));
         await reopened.ensureInitialized();
 
         final versionRows =
             await reopened.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 9);
+        expect(versionRows.single.read<int>('user_version'), 10);
 
         final fkRows = await reopened.customSelect('PRAGMA foreign_keys').get();
         expect(fkRows.single.read<int>('foreign_keys'), 1);
@@ -1318,19 +1352,19 @@ void main() {
     );
 
     test(
-      '2. Simulated v9 -> v10 upgrade preserves v9 data, applies defaults, '
+      '2. Simulated v10 -> v11 upgrade preserves v10 data, applies defaults, '
       'enforces FKs, and reopens idempotently',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'forward_v10.sqlite'));
-        await _seedRealisticV9Database(dbFile);
+        final dbFile = File(p.join(tempDir.path, 'forward_v11.sqlite'));
+        await _seedRealisticV10Database(dbFile);
 
-        final upgradedDb = _TestForwardV10Database(NativeDatabase(dbFile));
+        final upgradedDb = _TestForwardV11Database(NativeDatabase(dbFile));
         await upgradedDb.ensureInitialized();
 
-        expect(upgradedDb.v10UpgradeCalls, 1);
+        expect(upgradedDb.v11UpgradeCalls, 1);
         final versionRows =
             await upgradedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 10);
+        expect(versionRows.single.read<int>('user_version'), 11);
 
         final fkEnabledRows =
             await upgradedDb.customSelect('PRAGMA foreign_keys').get();
@@ -1411,38 +1445,38 @@ void main() {
 
         await upgradedDb.close();
 
-        // Reopen existing v10 database: onUpgrade must NOT re-run
-        final reopenedV10 = _TestForwardV10Database(NativeDatabase(dbFile));
-        await reopenedV10.ensureInitialized();
-        expect(reopenedV10.v10UpgradeCalls, 0);
+        // Reopen existing v11 database: onUpgrade must NOT re-run
+        final reopenedV11 = _TestForwardV11Database(NativeDatabase(dbFile));
+        await reopenedV11.ensureInitialized();
+        expect(reopenedV11.v11UpgradeCalls, 0);
         final reopenedVersion =
-            await reopenedV10.customSelect('PRAGMA user_version').get();
-        expect(reopenedVersion.single.read<int>('user_version'), 10);
-        expect((await DriftTasksRepository(reopenedV10).getTasks()).length, 1);
-        expect((await DriftNotesRepository(reopenedV10).getNotes()).length, 1);
-        final reopenedChecklists = await reopenedV10
+            await reopenedV11.customSelect('PRAGMA user_version').get();
+        expect(reopenedVersion.single.read<int>('user_version'), 11);
+        expect((await DriftTasksRepository(reopenedV11).getTasks()).length, 1);
+        expect((await DriftNotesRepository(reopenedV11).getNotes()).length, 1);
+        final reopenedChecklists = await reopenedV11
             .customSelect('SELECT id FROM task_checklists_v10')
             .get();
         expect(reopenedChecklists.length, 1);
-        await reopenedV10.close();
+        await reopenedV11.close();
       },
     );
 
     test(
       '3. Deliberate mid-migration failure (DDL + DML throw and FK check '
-      'failure) rolls back atomically leaving v9 schema and data intact',
+      'failure) rolls back atomically leaving v10 schema and data intact',
       () async {
         for (final mode in <({String name, bool failMid, bool failFk})>[
           (name: 'mid_upgrade_throw', failMid: true, failFk: false),
           (name: 'fk_check_abort', failMid: false, failFk: true),
         ]) {
           final dbFile = File(p.join(tempDir.path, '${mode.name}.sqlite'));
-          await _seedRealisticV9Database(dbFile);
+          await _seedRealisticV10Database(dbFile);
 
-          final failingUpgrade = _TestForwardV10Database(
+          final failingUpgrade = _TestForwardV11Database(
             NativeDatabase(dbFile),
-            failMidV10Migration: mode.failMid,
-            failForeignKeyCheckInV10: mode.failFk,
+            failMidV11Migration: mode.failMid,
+            failForeignKeyCheckInV11: mode.failFk,
           );
 
           await expectLater(
@@ -1455,7 +1489,7 @@ void main() {
           try {
             expect(
               rawDb.select('PRAGMA user_version;').single['user_version'],
-              9,
+              10,
             );
             final v10Table = rawDb.select(
               "SELECT name FROM sqlite_master "
@@ -1504,32 +1538,32 @@ void main() {
     );
 
     test(
-      '4. Production v9 AppDatabase and AppStateManager fail closed when '
-      'opening a v10 database without modifying user data or user_version',
+      '4. Production v10 AppDatabase and AppStateManager fail closed when '
+      'opening a v11 database without modifying user data or user_version',
       () async {
         final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
         final supportDir = Directory(p.join(tempDir.path, 'support'))
           ..createSync();
         final dbFile = File(p.join(docsDir.path, 'personal_management.sqlite'));
 
-        await _seedRealisticV9Database(dbFile);
-        final v10Prep = _TestForwardV10Database(NativeDatabase(dbFile));
-        await v10Prep.ensureInitialized();
-        await v10Prep.close();
+        await _seedRealisticV10Database(dbFile);
+        final v11Prep = _TestForwardV11Database(NativeDatabase(dbFile));
+        await v11Prep.ensureInitialized();
+        await v11Prep.close();
 
-        final v10BytesBeforeOpen = dbFile.readAsBytesSync();
+        final v11BytesBeforeOpen = dbFile.readAsBytesSync();
 
         final prodDb = AppDatabase(NativeDatabase(dbFile));
         await expectLater(
           prodDb.ensureInitialized(),
           throwsA(
             isA<UnsupportedDatabaseVersionException>()
-                .having((e) => e.fromVersion, 'fromVersion', 10)
-                .having((e) => e.toVersion, 'toVersion', 9),
+                .having((e) => e.fromVersion, 'fromVersion', 11)
+                .having((e) => e.toVersion, 'toVersion', 10),
           ),
         );
         await prodDb.close();
-        expect(dbFile.readAsBytesSync(), equals(v10BytesBeforeOpen));
+        expect(dbFile.readAsBytesSync(), equals(v11BytesBeforeOpen));
 
         final exporter = RawDatabaseRecoveryExporter(
           documentsDirProvider: () async => docsDir,
@@ -1581,13 +1615,13 @@ void main() {
         await manager.disposeAsync();
 
         expect(dbFile.existsSync(), isTrue);
-        expect(dbFile.readAsBytesSync(), equals(v10BytesBeforeOpen));
+        expect(dbFile.readAsBytesSync(), equals(v11BytesBeforeOpen));
 
         final rawCheck = sqlite3.open(dbFile.path);
         try {
           expect(
             rawCheck.select('PRAGMA user_version;').single['user_version'],
-            10,
+            11,
           );
           expect(
             rawCheck.select('SELECT id FROM task_checklists_v10;').length,
@@ -1627,7 +1661,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 9);
+        expect(versionRows.single.read<int>('user_version'), 10);
         expect(
           (await migratedDb.customSelect('PRAGMA foreign_keys').get())
               .single
@@ -1667,14 +1701,14 @@ void main() {
         expect(accounts.single.id, 'acc-v7');
         await migratedDb.close();
 
-        // Idempotent reopen at v9
+        // Idempotent reopen at v10
         final reopened = AppDatabase(NativeDatabase(dbFile));
         await reopened.ensureInitialized();
         expect(
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await reopened.customSelect('PRAGMA foreign_key_check').get(),
@@ -1754,7 +1788,7 @@ void main() {
           (await migratedFromV6.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await migratedFromV6.customSelect('PRAGMA foreign_key_check').get(),
@@ -1767,7 +1801,7 @@ void main() {
         expect(v6Reminders.single.channelId, isNull);
         await migratedFromV6.close();
 
-        // 3b. Multi-hop v4 -> v9
+        // 3b. Multi-hop v4 -> v10
         final v4File = File(p.join(tempDir.path, 'multihop_v4.sqlite'));
         _createRawV4DatabaseWithReminder(v4File);
         final migratedFromV4 = AppDatabase(NativeDatabase(v4File));
@@ -1776,7 +1810,7 @@ void main() {
           (await migratedFromV4.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await migratedFromV4.customSelect('PRAGMA foreign_key_check').get(),
@@ -1861,7 +1895,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 9);
+        expect(versionRows.single.read<int>('user_version'), 10);
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
           isEmpty,
@@ -1885,7 +1919,7 @@ void main() {
         final tableNames = (await migratedDb
                 .customSelect(
                   "SELECT name FROM sqlite_master WHERE type='table' "
-                  "AND name IN ('project_tracking_blocks', 'project_tracking_records');",
+                  "AND name IN ('project_tracking_blocks', 'project_tracking_records', 'daily_planning_entries');",
                 )
                 .get())
             .map((r) => r.read<String>('name'))
@@ -1895,19 +1929,20 @@ void main() {
           equals(<String>{
             'project_tracking_blocks',
             'project_tracking_records',
+            'daily_planning_entries',
           }),
         );
 
         await migratedDb.close();
 
-        // Idempotent reopen at v9
+        // Idempotent reopen at v10
         final reopened = AppDatabase(NativeDatabase(dbFile));
         await reopened.ensureInitialized();
         expect(
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await reopened.customSelect('PRAGMA foreign_key_check').get(),
@@ -1918,7 +1953,7 @@ void main() {
     );
 
     test(
-      '2. Deliberately failed v8 -> v9 migration rolls back atomically '
+      '2. Deliberately failed v8 -> v9/v10 migration rolls back atomically '
       'leaving v8 projects schema intact',
       () async {
         final dbFile = File(p.join(tempDir.path, 'v8_to_v9_fail.sqlite'));
@@ -1954,14 +1989,14 @@ void main() {
           rawCheck.dispose();
         }
 
-        // Subsequent real v9 open succeeds cleanly
+        // Subsequent real v10 open succeeds cleanly
         final prodDb = AppDatabase(NativeDatabase(dbFile));
         await prodDb.ensureInitialized();
         expect(
           (await prodDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         await prodDb.close();
       },
@@ -2178,7 +2213,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           (await migratedDb.customSelect('PRAGMA foreign_keys').get())
@@ -2232,7 +2267,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await DriftProjectsRepository(reopened).getProjectById('proj-v1'),
@@ -2252,10 +2287,10 @@ void main() {
     );
 
     test(
-      '5. Real v2 -> v9 upgrade preserves populated Projects, tasks, and '
+      '5. Real v2 -> v10 upgrade preserves populated Projects, tasks, and '
       'pre-v3 double-entry ledger cleanly',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'real_v2_to_v9.sqlite'));
+        final dbFile = File(p.join(tempDir.path, 'real_v2_to_v10.sqlite'));
         _createRawV2Database(dbFile);
 
         final migratedDb = AppDatabase(NativeDatabase(dbFile));
@@ -2265,7 +2300,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2310,7 +2345,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await DriftProjectsRepository(reopened).getProjectById('proj-v2'),
@@ -2326,10 +2361,10 @@ void main() {
     );
 
     test(
-      '6. Real v5 -> v9 upgrade preserves populated Projects, civil dates, '
+      '6. Real v5 -> v10 upgrade preserves populated Projects, civil dates, '
       'and hardens v6/v7 finance cleanly',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'real_v5_to_v9.sqlite'));
+        final dbFile = File(p.join(tempDir.path, 'real_v5_to_v10.sqlite'));
         _createRawV5Database(dbFile);
 
         final migratedDb = AppDatabase(NativeDatabase(dbFile));
@@ -2339,7 +2374,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2381,7 +2416,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await DriftProjectsRepository(reopened).getProjectById('proj-v5'),
@@ -2397,11 +2432,11 @@ void main() {
     );
 
     test(
-      '6b. Real v6 -> v9 upgrade preserves populated Projects, sets v9 '
+      '6b. Real v6 -> v10 upgrade preserves populated Projects, sets v9/v10 '
       'defaults, reads via DriftProjectsRepository, passes FK check, and '
       'persists across reopen',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'real_v6_to_v9.sqlite'));
+        final dbFile = File(p.join(tempDir.path, 'real_v6_to_v10.sqlite'));
         _createRawV6Database(dbFile);
 
         final migratedDb = AppDatabase(NativeDatabase(dbFile));
@@ -2411,7 +2446,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2462,7 +2497,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await reopened.customSelect('PRAGMA foreign_key_check').get(),
@@ -2545,7 +2580,7 @@ void main() {
           );
           expect(rawCheck.select('SELECT id FROM projects;').length, 2);
 
-          // Fix corrupt date and verify clean v4 -> v9 recovery
+          // Fix corrupt date and verify clean v4 -> v10 recovery
           rawCheck.execute(
             "UPDATE projects SET target_date = $ts WHERE id = 'proj-v4-corrupt';",
           );
@@ -2559,7 +2594,7 @@ void main() {
           (await recoveredDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          9,
+          10,
         );
         expect(
           await recoveredDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2570,6 +2605,224 @@ void main() {
           2,
         );
         await recoveredDb.close();
+      },
+    );
+  });
+
+  group('Stage 0.2B Schema v9->v10 Tasks & DailyPlanningEntries Migration', () {
+    late Directory tempDir;
+
+    setUp(() {
+      tempDir = Directory.systemTemp.createTempSync('daywell_stage02b_v10_');
+    });
+
+    tearDown(() {
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    });
+
+    test(
+      '1. Real v9 database upgrades non-destructively to v10 preserving tasks '
+      'with approved defaults, creating daily_planning_entries, enforcing '
+      '(task_id, plan_date) uniqueness and cascade delete, and reopening idempotently',
+      () async {
+        final dbFile = File(p.join(tempDir.path, 'real_v9_to_v10.sqlite'));
+        await _seedRealisticV9Database(dbFile);
+
+        final migratedDb = AppDatabase(NativeDatabase(dbFile));
+        await migratedDb.ensureInitialized();
+
+        final versionRows =
+            await migratedDb.customSelect('PRAGMA user_version').get();
+        expect(versionRows.single.read<int>('user_version'), 10);
+        expect(
+          (await migratedDb.customSelect('PRAGMA foreign_keys').get())
+              .single
+              .read<int>('foreign_keys'),
+          1,
+        );
+        expect(
+          await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+
+        final taskCols = (await migratedDb
+                .customSelect("PRAGMA table_info('tasks')")
+                .get())
+            .map((r) => r.read<String>('name'))
+            .toSet();
+        expect(
+          taskCols,
+          containsAll(<String>[
+            'completed_at',
+            'scheduled_time',
+            'my_day_date',
+            'recurrence_config_json',
+            'is_archived',
+            'sort_order',
+          ]),
+        );
+
+        final preservedTask = await migratedDb
+            .customSelect(
+              'SELECT id, title, status, completed_at, scheduled_time, '
+              'my_day_date, recurrence_config_json, is_archived, sort_order '
+              "FROM tasks WHERE id = 'task-v7-1';",
+            )
+            .getSingle();
+        expect(preservedTask.read<String>('title'), 'Review ledger integrity');
+        expect(preservedTask.read<String>('status'), 'in_progress');
+        expect(preservedTask.readNullable<int>('completed_at'), isNull);
+        expect(preservedTask.readNullable<String>('scheduled_time'), isNull);
+        expect(preservedTask.readNullable<String>('my_day_date'), isNull);
+        expect(
+          preservedTask.readNullable<String>('recurrence_config_json'),
+          isNull,
+        );
+        expect(preservedTask.read<int>('is_archived'), 0);
+        expect(preservedTask.read<int>('sort_order'), 0);
+
+        // Verify composite uniqueness on (task_id, plan_date) & cascade delete
+        const nowSec = 1794304800;
+        await migratedDb.customStatement(
+          'INSERT INTO daily_planning_entries '
+          '(id, plan_date, task_id, action, created_at, updated_at) '
+          "VALUES ('dpe-1', '2026-11-20', 'task-v7-1', 'planned', $nowSec, NULL);",
+        );
+        await migratedDb.customStatement(
+          'INSERT INTO daily_planning_entries '
+          '(id, plan_date, task_id, action, created_at, updated_at) '
+          "VALUES ('dpe-2', '2026-11-21', 'task-v7-1', 'carried_forward', $nowSec, $nowSec);",
+        );
+        await expectLater(
+          migratedDb.customStatement(
+            'INSERT INTO daily_planning_entries '
+            '(id, plan_date, task_id, action, created_at, updated_at) '
+            "VALUES ('dpe-dup', '2026-11-20', 'task-v7-1', 'completed', $nowSec, NULL);",
+          ),
+          throwsA(
+            predicate<Object>(
+              (e) => e.toString().toLowerCase().contains('unique'),
+            ),
+          ),
+        );
+
+        // Insert disposable task with planning entry and verify cascade delete
+        await migratedDb.customStatement(
+          'INSERT INTO tasks '
+          '(id, title, status, priority, subtasks_json, labels_json, '
+          'is_pinned, is_my_day, created_at, updated_at) '
+          "VALUES ('task-v10-temp', 'Cascade Check', 'not_started', 'medium', "
+          "'[]', '[]', 0, 1, $nowSec, $nowSec);",
+        );
+        await migratedDb.customStatement(
+          'INSERT INTO daily_planning_entries '
+          '(id, plan_date, task_id, action, created_at) '
+          "VALUES ('dpe-temp', '2026-11-21', 'task-v10-temp', 'planned', $nowSec);",
+        );
+        await migratedDb.customStatement(
+          "DELETE FROM tasks WHERE id = 'task-v10-temp';",
+        );
+        expect(
+          await migratedDb
+              .customSelect(
+                "SELECT id FROM daily_planning_entries WHERE id = 'dpe-temp';",
+              )
+              .get(),
+          isEmpty,
+        );
+        expect(
+          (await migratedDb
+                  .customSelect(
+                    "SELECT id FROM daily_planning_entries WHERE task_id = 'task-v7-1';",
+                  )
+                  .get())
+              .length,
+          2,
+        );
+
+        await migratedDb.close();
+
+        // Idempotent reopen at v10
+        final reopened = AppDatabase(NativeDatabase(dbFile));
+        await reopened.ensureInitialized();
+        expect(
+          (await reopened.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          10,
+        );
+        expect(
+          await reopened.customSelect('PRAGMA foreign_key_check').get(),
+          isEmpty,
+        );
+        expect(
+          (await reopened
+                  .customSelect(
+                    "SELECT id FROM daily_planning_entries WHERE task_id = 'task-v7-1';",
+                  )
+                  .get())
+              .length,
+          2,
+        );
+        await reopened.close();
+      },
+    );
+
+    test(
+      '2. Deliberately failed v9 -> v10 migration rolls back atomically '
+      'leaving v9 tasks schema intact and opens cleanly on retry',
+      () async {
+        final dbFile = File(p.join(tempDir.path, 'v9_to_v10_fail.sqlite'));
+        await _seedRealisticV9Database(dbFile);
+
+        final failingDb = _TestFailingV10FromV9Database(NativeDatabase(dbFile));
+        await expectLater(
+          failingDb.ensureInitialized(),
+          throwsA(isA<StateError>()),
+        );
+        await failingDb.close();
+
+        final rawCheck = sqlite3.open(dbFile.path);
+        try {
+          expect(
+            rawCheck.select('PRAGMA user_version;').single['user_version'],
+            9,
+          );
+          final taskCols = rawCheck
+              .select("PRAGMA table_info('tasks');")
+              .map((r) => r['name'] as String)
+              .toSet();
+          expect(taskCols, isNot(contains('completed_at')));
+          expect(taskCols, isNot(contains('scheduled_time')));
+          expect(taskCols, isNot(contains('my_day_date')));
+          expect(taskCols, isNot(contains('recurrence_config_json')));
+          expect(taskCols, isNot(contains('is_archived')));
+          expect(taskCols, isNot(contains('sort_order')));
+          expect(
+            rawCheck.select(
+              "SELECT name FROM sqlite_master WHERE type='table' "
+              "AND name='daily_planning_entries';",
+            ),
+            isEmpty,
+          );
+          expect(rawCheck.select('SELECT id FROM tasks;').length, 1);
+          expect(rawCheck.select('PRAGMA foreign_key_check;'), isEmpty);
+        } finally {
+          rawCheck.dispose();
+        }
+
+        final prodDb = AppDatabase(NativeDatabase(dbFile));
+        await prodDb.ensureInitialized();
+        expect(
+          (await prodDb.customSelect('PRAGMA user_version').get())
+              .single
+              .read<int>('user_version'),
+          10,
+        );
+        expect((await DriftTasksRepository(prodDb).getTasks()).length, 1);
+        await prodDb.close();
       },
     );
   });
@@ -3395,6 +3648,342 @@ class _TestFailingV9FromV8Database extends AppDatabase {
 }
 
 Future<void> _seedRealisticV9Database(File dbFile) async {
+  final rawDb = sqlite3.open(dbFile.path);
+  const ts = 1794304800; // 2026-11-16T08:00:00Z
+  try {
+    rawDb.execute('PRAGMA foreign_keys = OFF;');
+    rawDb.execute('''
+      CREATE TABLE inbox_items (
+        id TEXT NOT NULL PRIMARY KEY,
+        raw_text TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        is_processed INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE goals (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        target_date TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE projects (
+        id TEXT NOT NULL PRIMARY KEY,
+        goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        target_date TEXT,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        start_date TEXT,
+        custom_fields_json TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER
+      );
+      CREATE TABLE project_tracking_blocks (
+        id TEXT NOT NULL PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        block_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        unit_label TEXT,
+        target_value REAL,
+        daily_target_value REAL,
+        config_json TEXT NOT NULL DEFAULT '{}',
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE project_tracking_records (
+        id TEXT NOT NULL PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        block_id TEXT NOT NULL REFERENCES project_tracking_blocks (id) ON DELETE CASCADE,
+        parent_record_id TEXT REFERENCES project_tracking_records (id) ON DELETE RESTRICT,
+        record_type TEXT NOT NULL,
+        title TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        target_value REAL,
+        delta_value REAL,
+        duration_minutes INTEGER,
+        is_completed INTEGER NOT NULL DEFAULT 0,
+        completed_at INTEGER,
+        recorded_date TEXT,
+        scheduled_date TEXT,
+        linked_task_id TEXT REFERENCES tasks (id) ON DELETE SET NULL,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE milestones (
+        id TEXT NOT NULL PRIMARY KEY,
+        project_id TEXT NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+        title TEXT NOT NULL,
+        due_date TEXT,
+        is_completed INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE tasks (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        status TEXT NOT NULL DEFAULT 'inbox',
+        priority TEXT NOT NULL DEFAULT 'medium',
+        due_date TEXT,
+        scheduled_date TEXT,
+        estimated_duration_minutes INTEGER,
+        project_id TEXT REFERENCES projects (id) ON DELETE SET NULL,
+        milestone_id TEXT REFERENCES milestones (id) ON DELETE SET NULL,
+        subtasks_json TEXT NOT NULL DEFAULT '[]',
+        labels_json TEXT NOT NULL DEFAULT '[]',
+        is_pinned INTEGER NOT NULL DEFAULT 0,
+        is_my_day INTEGER NOT NULL DEFAULT 0,
+        recurrence_rule TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE notes (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        content TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'general',
+        project_id TEXT REFERENCES projects (id) ON DELETE SET NULL,
+        goal_id TEXT REFERENCES goals (id) ON DELETE SET NULL,
+        tags_json TEXT NOT NULL DEFAULT '[]',
+        is_pinned INTEGER NOT NULL DEFAULT 0,
+        is_favorite INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        is_trashed INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE calendar_events (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        date_iso TEXT NOT NULL,
+        end_date_iso TEXT,
+        start_time TEXT,
+        end_time TEXT,
+        is_all_day INTEGER NOT NULL DEFAULT 0,
+        category TEXT NOT NULL DEFAULT 'personal',
+        color_hex TEXT NOT NULL DEFAULT '#1B4D3E',
+        has_reminder INTEGER NOT NULL DEFAULT 0,
+        notes TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE financial_categories (
+        id TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        color_hex TEXT NOT NULL DEFAULT '#4CAF50',
+        is_default INTEGER NOT NULL DEFAULT 0,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        parent_id TEXT REFERENCES financial_categories (id) ON DELETE RESTRICT,
+        sort_order INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE TABLE accounts_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        sub_type TEXT NOT NULL DEFAULT 'cash',
+        is_system INTEGER NOT NULL DEFAULT 0,
+        currency_code TEXT NOT NULL DEFAULT 'ETB',
+        opening_balance_cents INTEGER NOT NULL DEFAULT 0,
+        opening_balance_date TEXT,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE parties_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL,
+        phone TEXT,
+        notes TEXT,
+        is_archived INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE journal_entries_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        entry_type TEXT NOT NULL,
+        description TEXT NOT NULL,
+        occurrence_date TEXT NOT NULL,
+        is_voided INTEGER NOT NULL DEFAULT 0,
+        void_reason TEXT,
+        legacy_source_tx_id TEXT,
+        corrected_from_entry_id TEXT REFERENCES journal_entries_table (id) ON DELETE RESTRICT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE postings_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        entry_id TEXT NOT NULL REFERENCES journal_entries_table (id) ON DELETE RESTRICT,
+        account_id TEXT NOT NULL REFERENCES accounts_table (id) ON DELETE RESTRICT,
+        amount_cents INTEGER NOT NULL,
+        direction TEXT NOT NULL,
+        account_movement_date TEXT NOT NULL,
+        category_id TEXT REFERENCES financial_categories (id) ON DELETE RESTRICT,
+        note TEXT
+      );
+      CREATE TABLE debts_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        origin_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id) ON DELETE RESTRICT,
+        party_id TEXT NOT NULL REFERENCES parties_table (id) ON DELETE RESTRICT,
+        debt_type TEXT NOT NULL,
+        principal_cents INTEGER NOT NULL,
+        outstanding_cents INTEGER NOT NULL,
+        due_date TEXT,
+        status TEXT NOT NULL DEFAULT 'active',
+        write_off_entry_id TEXT REFERENCES journal_entries_table (id) ON DELETE RESTRICT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE settlement_allocations_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        settlement_entry_id TEXT NOT NULL REFERENCES journal_entries_table (id) ON DELETE RESTRICT,
+        debt_id TEXT NOT NULL REFERENCES debts_table (id) ON DELETE RESTRICT,
+        allocated_cents INTEGER NOT NULL,
+        settlement_date TEXT NOT NULL
+      );
+      CREATE TABLE budgets_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        category_id TEXT NOT NULL REFERENCES financial_categories (id) ON DELETE RESTRICT,
+        month_iso TEXT NOT NULL,
+        limit_cents INTEGER NOT NULL,
+        rollover_enabled INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE recurring_rules_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        rule_type TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        frequency TEXT NOT NULL,
+        interval INTEGER NOT NULL DEFAULT 1,
+        start_date TEXT NOT NULL,
+        next_occurrence_date TEXT NOT NULL,
+        end_date TEXT,
+        account_id TEXT REFERENCES accounts_table (id) ON DELETE RESTRICT,
+        destination_account_id TEXT REFERENCES accounts_table (id) ON DELETE RESTRICT,
+        category_id TEXT REFERENCES financial_categories (id) ON DELETE RESTRICT,
+        linked_debt_id TEXT REFERENCES debts_table (id) ON DELETE RESTRICT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        auto_post INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE financial_transactions (
+        id TEXT NOT NULL PRIMARY KEY,
+        category_id TEXT NOT NULL REFERENCES financial_categories (id) ON DELETE RESTRICT,
+        amount_cents INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        transaction_date TEXT NOT NULL,
+        note TEXT,
+        payee TEXT,
+        account_id TEXT,
+        destination_account_id TEXT,
+        is_superseded INTEGER NOT NULL DEFAULT 0,
+        corrected_from_id TEXT,
+        correction_reason TEXT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE financial_commitments (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        due_date TEXT NOT NULL,
+        is_paid INTEGER NOT NULL DEFAULT 0,
+        direction TEXT NOT NULL DEFAULT 'outflow',
+        legacy_paid_unverified INTEGER NOT NULL DEFAULT 0,
+        recurring_rule TEXT,
+        linked_account_id TEXT REFERENCES accounts_table (id) ON DELETE RESTRICT,
+        category_id TEXT REFERENCES financial_categories (id) ON DELETE RESTRICT,
+        linked_debt_id TEXT REFERENCES debts_table (id) ON DELETE RESTRICT,
+        settlement_entry_id TEXT REFERENCES journal_entries_table (id) ON DELETE RESTRICT,
+        recurring_rule_id TEXT REFERENCES recurring_rules_table (id) ON DELETE RESTRICT,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE commitment_settlements_table (
+        id TEXT NOT NULL PRIMARY KEY,
+        commitment_id TEXT NOT NULL REFERENCES financial_commitments (id) ON DELETE RESTRICT,
+        entry_id TEXT NOT NULL REFERENCES journal_entries_table (id) ON DELETE RESTRICT,
+        amount_cents INTEGER NOT NULL,
+        settled_date TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE savings_goals (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        target_cents INTEGER NOT NULL,
+        current_allocated_cents INTEGER NOT NULL DEFAULT 0,
+        target_date TEXT,
+        linked_account_id TEXT REFERENCES accounts_table (id) ON DELETE RESTRICT,
+        status TEXT NOT NULL DEFAULT 'active',
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE reminders (
+        id TEXT NOT NULL PRIMARY KEY,
+        target_id TEXT NOT NULL,
+        target_type TEXT NOT NULL,
+        title TEXT,
+        channel_id TEXT,
+        trigger_time_utc INTEGER NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE app_settings (
+        key TEXT NOT NULL PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+
+      INSERT INTO goals (id, title, target_date, created_at)
+      VALUES ('goal-v7-1', 'Financial Clarity', '2026-12-31', $ts);
+      INSERT INTO projects (id, goal_id, title, target_date, created_at, updated_at)
+      VALUES ('proj-v7-1', 'goal-v7-1', 'Stage 343 Project', '2026-12-15', $ts, $ts);
+      INSERT INTO milestones (id, project_id, title, due_date, created_at)
+      VALUES ('ms-v7-1', 'proj-v7-1', 'v9 Baseline', '2026-11-30', $ts);
+      INSERT INTO tasks (id, title, status, priority, due_date, project_id, milestone_id, created_at, updated_at)
+      VALUES ('task-v7-1', 'Review ledger integrity', 'in_progress', 'high', '2026-11-20', 'proj-v7-1', 'ms-v7-1', $ts, $ts);
+      INSERT INTO notes (id, title, content, category, project_id, goal_id, tags_json, created_at, updated_at)
+      VALUES ('note-v7-1', 'የዕለት ማስታወሻ', 'v9 baseline note', 'reflection', 'proj-v7-1', 'goal-v7-1', '["governance"]', $ts, $ts);
+      INSERT INTO financial_categories (id, name, type) VALUES ('cat-other-exp', 'Other Expense', 'expense');
+      INSERT INTO accounts_table (id, name, type, sub_type, is_system, opening_balance_cents, opening_balance_date, created_at)
+      VALUES ('acc-sys-equity', 'Opening Equity', 'equity', 'opening_equity', 1, 0, NULL, $ts),
+             ('acc-sys-income', 'Income Equity', 'equity', 'nominal_income', 1, 0, NULL, $ts),
+             ('acc-sys-expense', 'Expense Equity', 'equity', 'nominal_expense', 1, 0, NULL, $ts),
+             ('acc-sys-receivable', 'Receivable Control', 'asset', 'receivable', 1, 0, NULL, $ts),
+             ('acc-sys-payable', 'Payable Control', 'liability', 'payable', 1, 0, NULL, $ts),
+             ('acc-sys-legacy-offset', 'Legacy Offset', 'equity', 'legacy_clearing', 1, 0, NULL, $ts);
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES ('initial_seed_completed', 'true', $ts),
+             ('v6_ledger_migrated', 'true', $ts);
+      PRAGMA user_version = 9;
+    ''');
+  } finally {
+    rawDb.dispose();
+  }
+}
+
+class _TestFailingV10FromV9Database extends AppDatabase {
+  _TestFailingV10FromV9Database(super.e);
+
+  @override
+  MigrationStrategy get migration {
+    final baseStrategy = super.migration;
+    return MigrationStrategy(
+      onCreate: (Migrator m) => baseStrategy.onCreate(m),
+      onUpgrade: (Migrator m, int from, int to) async {
+        await transaction(() async {
+          await baseStrategy.onUpgrade(m, from, to);
+          throw StateError(
+            'Simulated v9 -> v10 failure after additive task columns and table.',
+          );
+        });
+      },
+      beforeOpen: baseStrategy.beforeOpen,
+    );
+  }
+}
+
+Future<void> _seedRealisticV10Database(File dbFile) async {
   final db = AppDatabase(NativeDatabase(dbFile));
   await db.ensureInitialized();
   final now = DateTime.utc(2026, 11, 16, 8, 0);
@@ -3420,7 +4009,7 @@ Future<void> _seedRealisticV9Database(File dbFile) async {
         MilestonesCompanion.insert(
           id: 'ms-v7-1',
           projectId: 'proj-v7-1',
-          title: 'v9 Baseline',
+          title: 'v10 Baseline',
           dueDate: const Value('2026-11-30'),
           createdAt: now,
         ),
@@ -3506,19 +4095,19 @@ Future<void> _seedRealisticV9Database(File dbFile) async {
   await db.close();
 }
 
-class _TestForwardV10Database extends AppDatabase {
-  final bool failMidV10Migration;
-  final bool failForeignKeyCheckInV10;
-  int v10UpgradeCalls = 0;
+class _TestForwardV11Database extends AppDatabase {
+  final bool failMidV11Migration;
+  final bool failForeignKeyCheckInV11;
+  int v11UpgradeCalls = 0;
 
-  _TestForwardV10Database(
+  _TestForwardV11Database(
     super.e, {
-    this.failMidV10Migration = false,
-    this.failForeignKeyCheckInV10 = false,
+    this.failMidV11Migration = false,
+    this.failForeignKeyCheckInV11 = false,
   });
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration {
@@ -3533,11 +4122,11 @@ class _TestForwardV10Database extends AppDatabase {
           );
         }
         await transaction(() async {
-          if (from < 9) {
-            await baseStrategy.onUpgrade(m, from, 9);
-          }
           if (from < 10) {
-            v10UpgradeCalls += 1;
+            await baseStrategy.onUpgrade(m, from, 10);
+          }
+          if (from < 11) {
+            v11UpgradeCalls += 1;
             await customStatement(
               "ALTER TABLE notes ADD COLUMN review_status TEXT NOT NULL "
               "DEFAULT 'active';",
@@ -3558,17 +4147,17 @@ class _TestForwardV10Database extends AppDatabase {
               'ON task_checklists_v10(task_id);',
             );
 
-            if (failMidV10Migration) {
+            if (failMidV11Migration) {
               await customStatement(
                 "UPDATE notes SET category = 'mutated_mid_upgrade' "
                 "WHERE id = 'note-v7-1';",
               );
               throw StateError(
-                'Simulated v9->v10 failure after partial DDL and DML',
+                'Simulated v10->v11 failure after partial DDL and DML',
               );
             }
 
-            if (failForeignKeyCheckInV10) {
+            if (failForeignKeyCheckInV11) {
               await customStatement(
                 'INSERT INTO task_checklists_v10 (id, task_id, label, is_done) '
                 "VALUES ('chk-orphan', 'missing-task-id', 'Orphan item', 0);",
@@ -3585,7 +4174,7 @@ class _TestForwardV10Database extends AppDatabase {
                 await customSelect('PRAGMA foreign_key_check').get();
             if (fkViolations.isNotEmpty) {
               throw StateError(
-                'Schema v9->v10 migration aborted due to foreign key integrity '
+                'Schema v10->v11 migration aborted due to foreign key integrity '
                 'violations (${fkViolations.length} row(s)).',
               );
             }

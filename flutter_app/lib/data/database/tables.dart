@@ -137,11 +137,38 @@ class Tasks extends Table {
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
   BoolColumn get isMyDay => boolean().withDefault(const Constant(false))();
   TextColumn get recurrenceRule => text().nullable()();
+  // Schema v10 additions
+  DateTimeColumn get completedAt => dateTime().nullable()();
+  TextColumn get scheduledTime => text().nullable()(); // HH:MM
+  TextColumn get myDayDate => text().nullable()(); // YYYY-MM-DD
+  TextColumn get recurrenceConfigJson => text().nullable()();
+  BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};
+}
+
+/// Daily My Day planning history entries (Schema v10)
+class DailyPlanningEntries extends Table {
+  TextColumn get id => text()(); // UUID v4
+  TextColumn get planDate => text()(); // Canonical YYYY-MM-DD (Africa/Addis_Ababa)
+  TextColumn get taskId =>
+      text().references(Tasks, #id, onDelete: KeyAction.cascade)();
+  TextColumn get action => text().withDefault(const Constant(
+      'planned'))(); // planned, carried_forward, completed, dismissed
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {taskId, planDate},
+      ];
 }
 
 /// Notes and Personal Information

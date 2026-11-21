@@ -39,6 +39,7 @@ part 'app_database.g.dart';
   RecurringRulesTable,
   ProjectTrackingBlocks,
   ProjectTrackingRecords,
+  DailyPlanningEntries,
 ])
 class AppDatabase extends _$AppDatabase {
   static const String seedSentinelKey = 'initial_seed_completed';
@@ -48,7 +49,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 10;
 
   @override
   MigrationStrategy get migration {
@@ -183,12 +184,22 @@ class AppDatabase extends _$AppDatabase {
               },
             ),
           );
+          final existingTaskCols = await _existingTableColumns('tasks');
+          final taskNewCols = <GeneratedColumn>[
+            for (final col in tasks.$columns)
+              if (!existingTaskCols.contains(col.$name)) col,
+          ];
           await m.alterTable(
             TableMigration(
               tasks,
+              newColumns: taskNewCols,
               columnTransformer: {
                 tasks.dueDate: _nullableDateToIsoSql('due_date'),
                 tasks.scheduledDate: _nullableDateToIsoSql('scheduled_date'),
+                if (!existingTaskCols.contains('is_archived'))
+                  tasks.isArchived: const Constant(false),
+                if (!existingTaskCols.contains('sort_order'))
+                  tasks.sortOrder: const Constant(0),
               },
             ),
           );
@@ -538,6 +549,54 @@ class AppDatabase extends _$AppDatabase {
             );
           }
         }
+        if (from < 10) {
+          // Schema v9 -> v10: Non-destructive Tasks v10 fields & DailyPlanningEntries
+          await _addColumnIfMissing(
+            table: 'tasks',
+            column: 'completed_at',
+            addFn: () => m.addColumn(tasks, tasks.completedAt),
+          );
+          await _addColumnIfMissing(
+            table: 'tasks',
+            column: 'scheduled_time',
+            addFn: () => m.addColumn(tasks, tasks.scheduledTime),
+          );
+          await _addColumnIfMissing(
+            table: 'tasks',
+            column: 'my_day_date',
+            addFn: () => m.addColumn(tasks, tasks.myDayDate),
+          );
+          await _addColumnIfMissing(
+            table: 'tasks',
+            column: 'recurrence_config_json',
+            addFn: () => m.addColumn(tasks, tasks.recurrenceConfigJson),
+          );
+          await _addColumnIfMissing(
+            table: 'tasks',
+            column: 'is_archived',
+            addFn: () => m.addColumn(tasks, tasks.isArchived),
+          );
+          await _addColumnIfMissing(
+            table: 'tasks',
+            column: 'sort_order',
+            addFn: () => m.addColumn(tasks, tasks.sortOrder),
+          );
+
+          await _createTableIfMissing(
+            table: 'daily_planning_entries',
+            createFn: () => m.createTable(dailyPlanningEntries),
+          );
+          await _createV10TaskPerformanceIndices();
+
+          final fkViolations =
+              await customSelect('PRAGMA foreign_key_check').get();
+          if (fkViolations.isNotEmpty) {
+            throw LedgerMigrationException(
+              'Schema v10 upgrade aborted due to foreign key violations '
+              '(${fkViolations.length} row(s)).',
+            );
+          }
+        }
       },
       beforeOpen: (details) async {
         // Enforce foreign key constraints in SQLite
@@ -843,7 +902,7 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
-  /// Schema performance indices (including v7 and v9 tables/columns)
+  /// Schema performance indices (including v7, v9, and v10 tables/columns)
   Future<void> createPerformanceIndices() async {
     await _createPreV7PerformanceIndices();
     await customStatement(
@@ -864,6 +923,17 @@ class AppDatabase extends _$AppDatabase {
     ).get();
     if (blockTableRows.isNotEmpty && recordTableRows.isNotEmpty) {
       await _createV9ProjectPerformanceIndices();
+    }
+    final dailyPlanTableRows = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' "
+      "AND name = 'daily_planning_entries';",
+    ).get();
+    final taskCols = await _existingTableColumns('tasks');
+    if (dailyPlanTableRows.isNotEmpty &&
+        taskCols.contains('my_day_date') &&
+        taskCols.contains('is_archived') &&
+        taskCols.contains('sort_order')) {
+      await _createV10TaskPerformanceIndices();
     }
   }
 
@@ -887,6 +957,25 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_project_records_linked_task '
       'ON project_tracking_records(linked_task_id);',
+    );
+  }
+
+  Future<void> _createV10TaskPerformanceIndices() async {
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_planning_task_date '
+      'ON daily_planning_entries(task_id, plan_date);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_daily_planning_plan_date '
+      'ON daily_planning_entries(plan_date);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tasks_my_day_date '
+      'ON tasks(my_day_date);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_tasks_archived_sort '
+      'ON tasks(is_archived, sort_order);',
     );
   }
 

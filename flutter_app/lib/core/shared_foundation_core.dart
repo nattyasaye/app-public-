@@ -287,6 +287,11 @@ class SharedTaskContracts {
     'yearly',
   ];
 
+  static const List<String> canonicalRecurrenceRepeatFrom = [
+    'due_date',
+    'completion_date',
+  ];
+
   static const List<String> canonicalDailyPlanningActions = [
     'planned',
     'carried_forward',
@@ -294,10 +299,44 @@ class SharedTaskContracts {
     'dismissed',
   ];
 
+  static const List<String> subtaskCanonicalFields = [
+    'id',
+    'title',
+    'done',
+  ];
+
+  static const List<String> dailyPlanningUniqueKey = [
+    'taskId',
+    'planDate',
+  ];
+
+  static const List<String> plannedV10TaskFields = [
+    'completedAt',
+    'scheduledTime',
+    'myDayDate',
+    'recurrenceConfig',
+    'isArchived',
+    'sortOrder',
+  ];
+
   static const String defaultStatus =
       'not_started';
   static const String defaultPriority =
       'medium';
+  static const String defaultRecurrenceRepeatFrom =
+      'due_date';
+  static const String recurrenceCalendarBasis =
+      'gregorian';
+  static const String weekdayConvention =
+      'iso_1_to_7';
+  static const int minWeekday = 1;
+  static const int maxWeekday = 7;
+  static const int minRecurrenceInterval = 1;
+  static const String subtaskLegacyDoneAlias =
+      'completed';
+  static const bool subtaskLegacyIdOptional = true;
+  static const String dailyPlanningOnTaskDelete =
+      'cascade';
 
   static const Map<String, int> priorityWeights = {
     'urgent': 4,
@@ -310,6 +349,9 @@ class SharedTaskContracts {
   static const bool singleCompletionSourceInStatus = true;
   static const bool utcIsoCompletedAt = true;
   static const bool preserveMyDayPlanningHistory = true;
+  static const bool separateInboxFromUnassignedTasks = true;
+  static const bool uniqueDailyPlanningEntryPerTaskDate = true;
+  static const bool cascadeDeleteDailyPlanningOnTaskDelete = true;
 }
 
 class SharedProjectRules {

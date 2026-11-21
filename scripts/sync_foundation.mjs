@@ -434,6 +434,103 @@ export function validateBusinessRules(rules) {
       );
     }
   }
+  if (rules.tasks.recurrenceRepeatFromModes !== undefined) {
+    if (
+      !Array.isArray(rules.tasks.recurrenceRepeatFromModes) ||
+      rules.tasks.recurrenceRepeatFromModes.length === 0
+    ) {
+      throw new Error(`Missing or empty "${fileLabel}" array "tasks.recurrenceRepeatFromModes".`);
+    }
+    for (let i = 0; i < rules.tasks.recurrenceRepeatFromModes.length; i += 1) {
+      assertFieldNonEmptyString(
+        rules.tasks.recurrenceRepeatFromModes[i],
+        fileLabel,
+        `tasks.recurrenceRepeatFromModes[${i}]`
+      );
+    }
+    assertFieldNonEmptyString(
+      rules.tasks.defaultRecurrenceRepeatFrom,
+      fileLabel,
+      'tasks.defaultRecurrenceRepeatFrom'
+    );
+    if (!rules.tasks.recurrenceRepeatFromModes.includes(rules.tasks.defaultRecurrenceRepeatFrom)) {
+      throw new Error(
+        `Invalid ${fileLabel} field "tasks.defaultRecurrenceRepeatFrom": "${rules.tasks.defaultRecurrenceRepeatFrom}" is not in tasks.recurrenceRepeatFromModes.`
+      );
+    }
+  }
+  if (rules.tasks.recurrenceCalendarBasis !== undefined) {
+    if (rules.tasks.recurrenceCalendarBasis !== 'gregorian') {
+      throw new Error(
+        `Invalid ${fileLabel} field "tasks.recurrenceCalendarBasis": expected "gregorian", got ${JSON.stringify(rules.tasks.recurrenceCalendarBasis)}.`
+      );
+    }
+  }
+  if (rules.tasks.weekdayConvention !== undefined) {
+    if (rules.tasks.weekdayConvention !== 'iso_1_to_7') {
+      throw new Error(
+        `Invalid ${fileLabel} field "tasks.weekdayConvention": expected "iso_1_to_7", got ${JSON.stringify(rules.tasks.weekdayConvention)}.`
+      );
+    }
+    assertFieldInteger(rules.tasks.minWeekday, fileLabel, 'tasks.minWeekday', { min: 1, max: 1 });
+    assertFieldInteger(rules.tasks.maxWeekday, fileLabel, 'tasks.maxWeekday', { min: 7, max: 7 });
+  }
+  if (rules.tasks.minRecurrenceInterval !== undefined) {
+    assertFieldInteger(rules.tasks.minRecurrenceInterval, fileLabel, 'tasks.minRecurrenceInterval', {
+      min: 1,
+    });
+  }
+  if (rules.tasks.dailyPlanningUniqueKey !== undefined) {
+    if (
+      !Array.isArray(rules.tasks.dailyPlanningUniqueKey) ||
+      rules.tasks.dailyPlanningUniqueKey.length === 0
+    ) {
+      throw new Error(`Missing or empty "${fileLabel}" array "tasks.dailyPlanningUniqueKey".`);
+    }
+    for (let i = 0; i < rules.tasks.dailyPlanningUniqueKey.length; i += 1) {
+      assertFieldNonEmptyString(
+        rules.tasks.dailyPlanningUniqueKey[i],
+        fileLabel,
+        `tasks.dailyPlanningUniqueKey[${i}]`
+      );
+    }
+  }
+  if (rules.tasks.dailyPlanningOnTaskDelete !== undefined) {
+    if (!['cascade', 'restrict', 'set_null'].includes(rules.tasks.dailyPlanningOnTaskDelete)) {
+      throw new Error(
+        `Invalid ${fileLabel} field "tasks.dailyPlanningOnTaskDelete": got ${JSON.stringify(rules.tasks.dailyPlanningOnTaskDelete)}.`
+      );
+    }
+  }
+  if (rules.tasks.subtaskCanonicalFields !== undefined) {
+    if (
+      !Array.isArray(rules.tasks.subtaskCanonicalFields) ||
+      rules.tasks.subtaskCanonicalFields.length === 0
+    ) {
+      throw new Error(`Missing or empty "${fileLabel}" array "tasks.subtaskCanonicalFields".`);
+    }
+    for (let i = 0; i < rules.tasks.subtaskCanonicalFields.length; i += 1) {
+      assertFieldNonEmptyString(
+        rules.tasks.subtaskCanonicalFields[i],
+        fileLabel,
+        `tasks.subtaskCanonicalFields[${i}]`
+      );
+    }
+  }
+  if (rules.tasks.subtaskLegacyDoneAlias !== undefined) {
+    assertFieldNonEmptyString(
+      rules.tasks.subtaskLegacyDoneAlias,
+      fileLabel,
+      'tasks.subtaskLegacyDoneAlias'
+    );
+  }
+  if (rules.tasks.subtaskLegacyIdOptional !== undefined) {
+    assertFieldBoolean(
+      rules.tasks.subtaskLegacyIdOptional,
+      fileLabel,
+      'tasks.subtaskLegacyIdOptional'
+    );
+  }
   if (rules.tasks.rules !== undefined) {
     if (!isPlainObject(rules.tasks.rules)) {
       throw new Error(`Missing or invalid "tasks.rules" object in ${fileLabel}.`);
@@ -443,6 +540,9 @@ export function validateBusinessRules(rules) {
       'singleCompletionSourceInStatus',
       'utcIsoCompletedAt',
       'preserveMyDayPlanningHistory',
+      'separateInboxFromUnassignedTasks',
+      'uniqueDailyPlanningEntryPerTaskDate',
+      'cascadeDeleteDailyPlanningOnTaskDelete',
     ]) {
       assertFieldBoolean(rules.tasks.rules[flagKey], fileLabel, `tasks.rules.${flagKey}`);
     }
@@ -582,6 +682,83 @@ export function validateSchemaContracts(contracts) {
     throw new Error(`Missing or empty "entities" object in ${fileLabel}.`);
   }
 
+  const validateSchemaFieldDef = (fieldDef, fieldPath) => {
+    if (!isPlainObject(fieldDef)) {
+      throw new Error(`Invalid ${fileLabel} field "${fieldPath}": expected object.`);
+    }
+    if (typeof fieldDef.type !== 'string' || !ALLOWED_SCHEMA_TYPES.has(fieldDef.type)) {
+      throw new Error(
+        `Invalid ${fileLabel} field "${fieldPath}.type": expected one of ${Array.from(ALLOWED_SCHEMA_TYPES).join('|')}, got ${JSON.stringify(fieldDef.type)}.`
+      );
+    }
+    if (fieldDef.required !== undefined && typeof fieldDef.required !== 'boolean') {
+      throw new Error(`Invalid ${fileLabel} field "${fieldPath}.required": expected boolean.`);
+    }
+    if (fieldDef.plannedDatabaseSchemaVersion !== undefined) {
+      assertFieldInteger(
+        fieldDef.plannedDatabaseSchemaVersion,
+        fileLabel,
+        `${fieldPath}.plannedDatabaseSchemaVersion`,
+        { min: contracts.schemaVersion }
+      );
+    }
+    if (fieldDef.enum !== undefined) {
+      if (!Array.isArray(fieldDef.enum) || fieldDef.enum.length === 0) {
+        throw new Error(`Invalid ${fileLabel} field "${fieldPath}.enum": expected non-empty array.`);
+      }
+      if (new Set(fieldDef.enum).size !== fieldDef.enum.length) {
+        throw new Error(`Invalid ${fileLabel} field "${fieldPath}.enum": contains duplicate values.`);
+      }
+      if (fieldDef.default !== undefined && !fieldDef.enum.includes(fieldDef.default)) {
+        throw new Error(
+          `Invalid ${fileLabel} field "${fieldPath}.default": "${fieldDef.default}" must exist in enum.`
+        );
+      }
+    }
+    for (const boundKey of ['minimum', 'maximum']) {
+      if (fieldDef[boundKey] !== undefined) {
+        if (fieldDef.type !== 'number' && fieldDef.type !== 'integer') {
+          throw new Error(
+            `Invalid ${fileLabel} field "${fieldPath}.${boundKey}": only valid on numeric types.`
+          );
+        }
+        if (typeof fieldDef[boundKey] !== 'number' || !Number.isFinite(fieldDef[boundKey])) {
+          throw new Error(
+            `Invalid ${fileLabel} field "${fieldPath}.${boundKey}": expected finite number.`
+          );
+        }
+      }
+    }
+    if (
+      fieldDef.minimum !== undefined &&
+      fieldDef.maximum !== undefined &&
+      fieldDef.minimum > fieldDef.maximum
+    ) {
+      throw new Error(
+        `Invalid ${fileLabel} field "${fieldPath}": minimum (${fieldDef.minimum}) exceeds maximum (${fieldDef.maximum}).`
+      );
+    }
+    if (fieldDef.format !== undefined) {
+      assertFieldNonEmptyString(fieldDef.format, fileLabel, `${fieldPath}.format`);
+    }
+    if (fieldDef.properties !== undefined) {
+      if (fieldDef.type !== 'object' || !isPlainObject(fieldDef.properties)) {
+        throw new Error(
+          `Invalid ${fileLabel} field "${fieldPath}.properties": expected object on object field.`
+        );
+      }
+      for (const [propName, propDef] of Object.entries(fieldDef.properties)) {
+        validateSchemaFieldDef(propDef, `${fieldPath}.properties.${propName}`);
+      }
+    }
+    if (fieldDef.items !== undefined) {
+      if (fieldDef.type !== 'array' || !isPlainObject(fieldDef.items)) {
+        throw new Error(`Invalid ${fileLabel} field "${fieldPath}.items": expected object on array field.`);
+      }
+      validateSchemaFieldDef(fieldDef.items, `${fieldPath}.items`);
+    }
+  };
+
   for (const [entityName, entityDef] of Object.entries(contracts.entities)) {
     if (!isPlainObject(entityDef)) {
       throw new Error(`Invalid ${fileLabel} entity "entities.${entityName}": expected object.`);
@@ -589,55 +766,35 @@ export function validateSchemaContracts(contracts) {
     if (!isPlainObject(entityDef.fields) || Object.keys(entityDef.fields).length === 0) {
       throw new Error(`Missing or empty "entities.${entityName}.fields" in ${fileLabel}.`);
     }
-    for (const [fieldName, fieldDef] of Object.entries(entityDef.fields)) {
-      const fieldPath = `entities.${entityName}.fields.${fieldName}`;
-      if (!isPlainObject(fieldDef)) {
-        throw new Error(`Invalid ${fileLabel} field "${fieldPath}": expected object.`);
+    if (entityDef.plannedDatabaseSchemaVersion !== undefined) {
+      assertFieldInteger(
+        entityDef.plannedDatabaseSchemaVersion,
+        fileLabel,
+        `entities.${entityName}.plannedDatabaseSchemaVersion`,
+        { min: contracts.schemaVersion }
+      );
+    }
+    if (entityDef.uniqueKey !== undefined) {
+      if (!Array.isArray(entityDef.uniqueKey) || entityDef.uniqueKey.length === 0) {
+        throw new Error(`Invalid ${fileLabel} field "entities.${entityName}.uniqueKey": expected non-empty array.`);
       }
-      if (typeof fieldDef.type !== 'string' || !ALLOWED_SCHEMA_TYPES.has(fieldDef.type)) {
+      for (const keyField of entityDef.uniqueKey) {
+        if (typeof keyField !== 'string' || !(keyField in entityDef.fields)) {
+          throw new Error(
+            `Invalid ${fileLabel} field "entities.${entityName}.uniqueKey": "${keyField}" is not a declared field.`
+          );
+        }
+      }
+    }
+    if (entityDef.onTaskDelete !== undefined) {
+      if (!['cascade', 'restrict', 'set_null'].includes(entityDef.onTaskDelete)) {
         throw new Error(
-          `Invalid ${fileLabel} field "${fieldPath}.type": expected one of ${Array.from(ALLOWED_SCHEMA_TYPES).join('|')}, got ${JSON.stringify(fieldDef.type)}.`
+          `Invalid ${fileLabel} field "entities.${entityName}.onTaskDelete": got ${JSON.stringify(entityDef.onTaskDelete)}.`
         );
       }
-      if (fieldDef.required !== undefined && typeof fieldDef.required !== 'boolean') {
-        throw new Error(`Invalid ${fileLabel} field "${fieldPath}.required": expected boolean.`);
-      }
-      if (fieldDef.enum !== undefined) {
-        if (!Array.isArray(fieldDef.enum) || fieldDef.enum.length === 0) {
-          throw new Error(`Invalid ${fileLabel} field "${fieldPath}.enum": expected non-empty array.`);
-        }
-        if (new Set(fieldDef.enum).size !== fieldDef.enum.length) {
-          throw new Error(`Invalid ${fileLabel} field "${fieldPath}.enum": contains duplicate values.`);
-        }
-        if (fieldDef.default !== undefined && !fieldDef.enum.includes(fieldDef.default)) {
-          throw new Error(
-            `Invalid ${fileLabel} field "${fieldPath}.default": "${fieldDef.default}" must exist in enum.`
-          );
-        }
-      }
-      if (fieldDef.minimum !== undefined) {
-        if (fieldDef.type !== 'number' && fieldDef.type !== 'integer') {
-          throw new Error(
-            `Invalid ${fileLabel} field "${fieldPath}.minimum": only valid on numeric types.`
-          );
-        }
-        if (typeof fieldDef.minimum !== 'number' || !Number.isFinite(fieldDef.minimum)) {
-          throw new Error(`Invalid ${fileLabel} field "${fieldPath}.minimum": expected finite number.`);
-        }
-      }
-      if (fieldDef.format !== undefined) {
-        assertFieldNonEmptyString(fieldDef.format, fileLabel, `${fieldPath}.format`);
-      }
-      if (fieldDef.items !== undefined) {
-        if (fieldDef.type !== 'array' || !isPlainObject(fieldDef.items)) {
-          throw new Error(`Invalid ${fileLabel} field "${fieldPath}.items": expected object on array field.`);
-        }
-        if (typeof fieldDef.items.type !== 'string' || !ALLOWED_SCHEMA_TYPES.has(fieldDef.items.type)) {
-          throw new Error(
-            `Invalid ${fileLabel} field "${fieldPath}.items.type": invalid type ${JSON.stringify(fieldDef.items.type)}.`
-          );
-        }
-      }
+    }
+    for (const [fieldName, fieldDef] of Object.entries(entityDef.fields)) {
+      validateSchemaFieldDef(fieldDef, `entities.${entityName}.fields.${fieldName}`);
     }
   }
 
@@ -876,6 +1033,11 @@ const DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES = [
   'yearly',
 ];
 
+const DEFAULT_CANONICAL_TASK_RECURRENCE_REPEAT_FROM = [
+  'due_date',
+  'completion_date',
+];
+
 const DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS = [
   'planned',
   'carried_forward',
@@ -893,10 +1055,19 @@ export function buildTypeScriptFoundation({ tokens, rules, seedDb, contracts = n
   const taskPriorityEnum =
     contracts?.entities?.Task?.fields?.priority?.enum ?? DEFAULT_CANONICAL_TASK_PRIORITIES;
   const taskRecurrenceFreqEnum =
-    rules?.tasks?.recurrenceFrequencies ?? DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES;
+    contracts?.entities?.Task?.fields?.recurrenceConfig?.properties?.frequency?.enum ??
+    rules?.tasks?.recurrenceFrequencies ??
+    DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES;
+  const taskRepeatFromEnum =
+    contracts?.entities?.Task?.fields?.recurrenceConfig?.properties?.repeatFrom?.enum ??
+    rules?.tasks?.recurrenceRepeatFromModes ??
+    DEFAULT_CANONICAL_TASK_RECURRENCE_REPEAT_FROM;
   const dailyPlanningActionEnum =
     contracts?.entities?.DailyPlanningEntry?.fields?.action?.enum ??
     DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS;
+  const plannedV10TaskFields = Object.entries(contracts?.entities?.Task?.fields ?? {})
+    .filter(([, def]) => def?.plannedDatabaseSchemaVersion === 10)
+    .map(([fieldName]) => fieldName);
   return `/**
  * SHARED FOUNDATION CORE (Single Source of Truth)
  * Generated automatically from /shared_foundation/*.json
@@ -923,13 +1094,32 @@ export const CANONICAL_TASK_RECURRENCE_FREQUENCIES = ${JSON.stringify(taskRecurr
 export type SharedTaskRecurrenceFrequency =
   (typeof CANONICAL_TASK_RECURRENCE_FREQUENCIES)[number];
 
+export const CANONICAL_TASK_RECURRENCE_REPEAT_FROM = ${JSON.stringify(taskRepeatFromEnum)} as const;
+export type SharedTaskRecurrenceRepeatFrom =
+  (typeof CANONICAL_TASK_RECURRENCE_REPEAT_FROM)[number];
+
 export const CANONICAL_DAILY_PLANNING_ACTIONS = ${JSON.stringify(dailyPlanningActionEnum)} as const;
 export type SharedDailyPlanningAction = (typeof CANONICAL_DAILY_PLANNING_ACTIONS)[number];
+
+export const PLANNED_TASK_V10_FIELDS = ${JSON.stringify(plannedV10TaskFields)} as const;
+
+export interface SharedCanonicalTaskSubtask {
+  id: string;
+  title: string;
+  done: boolean;
+}
 
 export interface SharedTaskSubtask {
   id?: string;
   title: string;
   done: boolean;
+}
+
+export interface SharedLegacyTaskSubtask {
+  id?: string;
+  title: string;
+  done?: boolean;
+  completed?: boolean;
 }
 
 export interface SharedTaskRecurrenceConfig {
@@ -938,8 +1128,7 @@ export interface SharedTaskRecurrenceConfig {
   weekdays?: number[];
   startDate?: string;
   endDate?: string;
-  repeatFrom?: 'due_date' | 'completion_date';
-  lastGeneratedDate?: string;
+  repeatFrom?: SharedTaskRecurrenceRepeatFrom;
 }
 
 export interface SharedTask {
@@ -1611,10 +1800,24 @@ export function buildDartFoundationCore({ seedDb, rules, contracts = null }) {
   const taskPriorityEnum =
     contracts?.entities?.Task?.fields?.priority?.enum ?? DEFAULT_CANONICAL_TASK_PRIORITIES;
   const taskRecurrenceFreqEnum =
-    rules?.tasks?.recurrenceFrequencies ?? DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES;
+    contracts?.entities?.Task?.fields?.recurrenceConfig?.properties?.frequency?.enum ??
+    rules?.tasks?.recurrenceFrequencies ??
+    DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES;
+  const taskRepeatFromEnum =
+    contracts?.entities?.Task?.fields?.recurrenceConfig?.properties?.repeatFrom?.enum ??
+    rules?.tasks?.recurrenceRepeatFromModes ??
+    DEFAULT_CANONICAL_TASK_RECURRENCE_REPEAT_FROM;
   const dailyPlanningActionEnum =
     contracts?.entities?.DailyPlanningEntry?.fields?.action?.enum ??
     DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS;
+  const subtaskCanonicalFields =
+    rules?.tasks?.subtaskCanonicalFields ?? ['id', 'title', 'done'];
+  const dailyPlanningUniqueKey =
+    contracts?.entities?.DailyPlanningEntry?.uniqueKey ??
+    rules?.tasks?.dailyPlanningUniqueKey ?? ['taskId', 'planDate'];
+  const plannedV10TaskFields = Object.entries(contracts?.entities?.Task?.fields ?? {})
+    .filter(([, def]) => def?.plannedDatabaseSchemaVersion === 10)
+    .map(([fieldName]) => fieldName);
   const taskRules = rules?.tasks?.rules ?? {};
   const priorityWeights = rules?.tasks?.priorityWeights ?? {
     urgent: 4,
@@ -1782,12 +1985,36 @@ ${renderDartEnumList('canonicalPriorities', taskPriorityEnum)}
 
 ${renderDartEnumList('canonicalRecurrenceFrequencies', taskRecurrenceFreqEnum)}
 
+${renderDartEnumList('canonicalRecurrenceRepeatFrom', taskRepeatFromEnum)}
+
 ${renderDartEnumList('canonicalDailyPlanningActions', dailyPlanningActionEnum)}
+
+${renderDartEnumList('subtaskCanonicalFields', subtaskCanonicalFields)}
+
+${renderDartEnumList('dailyPlanningUniqueKey', dailyPlanningUniqueKey)}
+
+${renderDartEnumList('plannedV10TaskFields', plannedV10TaskFields)}
 
   static const String defaultStatus =
       '${escapeDartString(rules?.tasks?.defaultStatus ?? 'not_started')}';
   static const String defaultPriority =
       '${escapeDartString(rules?.tasks?.defaultPriority ?? 'medium')}';
+  static const String defaultRecurrenceRepeatFrom =
+      '${escapeDartString(rules?.tasks?.defaultRecurrenceRepeatFrom ?? 'due_date')}';
+  static const String recurrenceCalendarBasis =
+      '${escapeDartString(rules?.tasks?.recurrenceCalendarBasis ?? 'gregorian')}';
+  static const String weekdayConvention =
+      '${escapeDartString(rules?.tasks?.weekdayConvention ?? 'iso_1_to_7')}';
+  static const int minWeekday = ${rules?.tasks?.minWeekday ?? 1};
+  static const int maxWeekday = ${rules?.tasks?.maxWeekday ?? 7};
+  static const int minRecurrenceInterval = ${rules?.tasks?.minRecurrenceInterval ?? 1};
+  static const String subtaskLegacyDoneAlias =
+      '${escapeDartString(rules?.tasks?.subtaskLegacyDoneAlias ?? 'completed')}';
+  static const bool subtaskLegacyIdOptional = ${
+    rules?.tasks?.subtaskLegacyIdOptional !== false
+  };
+  static const String dailyPlanningOnTaskDelete =
+      '${escapeDartString(contracts?.entities?.DailyPlanningEntry?.onTaskDelete ?? rules?.tasks?.dailyPlanningOnTaskDelete ?? 'cascade')}';
 
   static const Map<String, int> priorityWeights = {
     'urgent': ${priorityWeights.urgent},
@@ -1807,6 +2034,15 @@ ${renderDartEnumList('canonicalDailyPlanningActions', dailyPlanningActionEnum)}
   };
   static const bool preserveMyDayPlanningHistory = ${
     taskRules.preserveMyDayPlanningHistory !== false
+  };
+  static const bool separateInboxFromUnassignedTasks = ${
+    taskRules.separateInboxFromUnassignedTasks !== false
+  };
+  static const bool uniqueDailyPlanningEntryPerTaskDate = ${
+    taskRules.uniqueDailyPlanningEntryPerTaskDate !== false
+  };
+  static const bool cascadeDeleteDailyPlanningOnTaskDelete = ${
+    taskRules.cascadeDeleteDailyPlanningOnTaskDelete !== false
   };
 }
 

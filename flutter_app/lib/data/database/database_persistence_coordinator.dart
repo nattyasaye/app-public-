@@ -154,7 +154,8 @@ class DatabasePersistenceCoordinator {
     return {
       'schemaVersion': canonicalExchangeSchemaVersion,
       'snapshotFormatVersion': supportedSnapshotFormatVersion,
-      'databaseSchemaVersion': _db.schemaVersion,
+      'databaseSchemaVersion':
+          SnapshotVersionPolicy.supportedDatabaseSchemaVersion,
       'appVersion': CanonicalSeedDatabase.appVersion,
       'exportedAt': LocalDateTime.now().toEthiopiaIsoString(),
       'isFinanceSetupCompleted': isSetupCompleted,
@@ -554,7 +555,8 @@ class DatabasePersistenceCoordinator {
       'exportScope': 'finance_only',
       'schemaVersion': canonicalExchangeSchemaVersion,
       'snapshotFormatVersion': supportedSnapshotFormatVersion,
-      'databaseSchemaVersion': _db.schemaVersion,
+      'databaseSchemaVersion':
+          SnapshotVersionPolicy.supportedDatabaseSchemaVersion,
       'financeSchemaVersion': 7,
       'appVersion': CanonicalSeedDatabase.appVersion,
       'exportedAt': LocalDateTime.now().toEthiopiaIsoString(),

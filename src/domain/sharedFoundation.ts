@@ -256,13 +256,38 @@ export const SHARED_BUSINESS_RULES = {
       "monthly",
       "yearly"
     ],
+    "recurrenceRepeatFromModes": [
+      "due_date",
+      "completion_date"
+    ],
+    "defaultRecurrenceRepeatFrom": "due_date",
+    "recurrenceCalendarBasis": "gregorian",
+    "weekdayConvention": "iso_1_to_7",
+    "minWeekday": 1,
+    "maxWeekday": 7,
+    "minRecurrenceInterval": 1,
+    "dailyPlanningUniqueKey": [
+      "taskId",
+      "planDate"
+    ],
+    "dailyPlanningOnTaskDelete": "cascade",
+    "subtaskCanonicalFields": [
+      "id",
+      "title",
+      "done"
+    ],
+    "subtaskLegacyDoneAlias": "completed",
+    "subtaskLegacyIdOptional": true,
     "defaultPriority": "medium",
     "defaultStatus": "not_started",
     "rules": {
       "deriveReminderStateFromReminders": true,
       "singleCompletionSourceInStatus": true,
       "utcIsoCompletedAt": true,
-      "preserveMyDayPlanningHistory": true
+      "preserveMyDayPlanningHistory": true,
+      "separateInboxFromUnassignedTasks": true,
+      "uniqueDailyPlanningEntryPerTaskDate": true,
+      "cascadeDeleteDailyPlanningOnTaskDelete": true
     }
   },
   "calendar": {
@@ -448,13 +473,32 @@ export const CANONICAL_TASK_RECURRENCE_FREQUENCIES = ["daily","weekly","monthly"
 export type SharedTaskRecurrenceFrequency =
   (typeof CANONICAL_TASK_RECURRENCE_FREQUENCIES)[number];
 
+export const CANONICAL_TASK_RECURRENCE_REPEAT_FROM = ["due_date","completion_date"] as const;
+export type SharedTaskRecurrenceRepeatFrom =
+  (typeof CANONICAL_TASK_RECURRENCE_REPEAT_FROM)[number];
+
 export const CANONICAL_DAILY_PLANNING_ACTIONS = ["planned","carried_forward","completed","dismissed"] as const;
 export type SharedDailyPlanningAction = (typeof CANONICAL_DAILY_PLANNING_ACTIONS)[number];
+
+export const PLANNED_TASK_V10_FIELDS = ["completedAt","scheduledTime","myDayDate","recurrenceConfig","isArchived","sortOrder"] as const;
+
+export interface SharedCanonicalTaskSubtask {
+  id: string;
+  title: string;
+  done: boolean;
+}
 
 export interface SharedTaskSubtask {
   id?: string;
   title: string;
   done: boolean;
+}
+
+export interface SharedLegacyTaskSubtask {
+  id?: string;
+  title: string;
+  done?: boolean;
+  completed?: boolean;
 }
 
 export interface SharedTaskRecurrenceConfig {
@@ -463,8 +507,7 @@ export interface SharedTaskRecurrenceConfig {
   weekdays?: number[];
   startDate?: string;
   endDate?: string;
-  repeatFrom?: 'due_date' | 'completion_date';
-  lastGeneratedDate?: string;
+  repeatFrom?: SharedTaskRecurrenceRepeatFrom;
 }
 
 export interface SharedTask {

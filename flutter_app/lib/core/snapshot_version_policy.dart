@@ -62,6 +62,9 @@ class SnapshotVersionPolicy {
   /// - Format-2 snapshots (`snapshotFormatVersion == 2`) require explicit
   ///   canonical exchange `schemaVersion == 5`, optional `databaseSchemaVersion == 9`
   ///   (when present), and optional `financeSchemaVersion == 7` (when present).
+  ///   Database schema v10 (`AppDatabase.schemaVersion => 10`) stays separate
+  ///   from snapshot compatibility until Stage 0.2C serializes v10 Task fields
+  ///   and DailyPlanningEntries.
   /// - When [expectedHeaderVersion] is provided (for `.daywell` envelopes), the
   ///   resolved exchange schemaVersion must match it exactly.
   static SnapshotVersionInterpretation parseAndValidate(

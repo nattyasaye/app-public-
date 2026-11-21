@@ -249,8 +249,18 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
           expectedKind: 'invalid_snapshot_version',
         },
         {
-          name: 'future databaseSchemaVersion 10',
+          name: 'unserialized v10 databaseSchemaVersion 10 (format-2)',
           overrides: { snapshotFormatVersion: 2, databaseSchemaVersion: 10 },
+          expectedKind: 'unsupported_future_schema',
+        },
+        {
+          name: 'unserialized v10 databaseSchemaVersion 10 (format-1)',
+          overrides: { snapshotFormatVersion: 1, databaseSchemaVersion: 10 },
+          expectedKind: 'unsupported_future_schema',
+        },
+        {
+          name: 'future databaseSchemaVersion 11',
+          overrides: { snapshotFormatVersion: 2, databaseSchemaVersion: 11 },
           expectedKind: 'unsupported_future_schema',
         },
         {

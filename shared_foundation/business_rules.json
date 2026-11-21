@@ -26,13 +26,28 @@
     "statuses": ["not_started", "in_progress", "completed", "cancelled", "inbox"],
     "priorities": ["low", "medium", "high", "urgent"],
     "recurrenceFrequencies": ["daily", "weekly", "monthly", "yearly"],
+    "recurrenceRepeatFromModes": ["due_date", "completion_date"],
+    "defaultRecurrenceRepeatFrom": "due_date",
+    "recurrenceCalendarBasis": "gregorian",
+    "weekdayConvention": "iso_1_to_7",
+    "minWeekday": 1,
+    "maxWeekday": 7,
+    "minRecurrenceInterval": 1,
+    "dailyPlanningUniqueKey": ["taskId", "planDate"],
+    "dailyPlanningOnTaskDelete": "cascade",
+    "subtaskCanonicalFields": ["id", "title", "done"],
+    "subtaskLegacyDoneAlias": "completed",
+    "subtaskLegacyIdOptional": true,
     "defaultPriority": "medium",
     "defaultStatus": "not_started",
     "rules": {
       "deriveReminderStateFromReminders": true,
       "singleCompletionSourceInStatus": true,
       "utcIsoCompletedAt": true,
-      "preserveMyDayPlanningHistory": true
+      "preserveMyDayPlanningHistory": true,
+      "separateInboxFromUnassignedTasks": true,
+      "uniqueDailyPlanningEntryPerTaskDate": true,
+      "cascadeDeleteDailyPlanningOnTaskDelete": true
     }
   },
   "calendar": {

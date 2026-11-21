@@ -676,7 +676,7 @@ void main() {
     });
 
     test(
-        'Stage 1.1 separates snapshotFormatVersion (1..2) & databaseSchemaVersion (1..9) from exchange schemaVersion (4..9) across coordinator and encryption service',
+        'Stage 1.1 / 0.2B separates snapshotFormatVersion (1..2) & databaseSchemaVersion (1..9) from exchange schemaVersion (4..9) across coordinator and encryption service',
         () async {
       final service = EncryptionBackupService();
 
@@ -690,7 +690,7 @@ void main() {
           ..['financeSchemaVersion'] = 7,
         _minimalValidSnapshot(schemaVersion: 5)
           ..['snapshotFormatVersion'] = 1
-          ..['databaseSchemaVersion'] = 8,
+          ..['databaseSchemaVersion'] = 9,
         _minimalValidSnapshot(
             schemaVersion: 8), // omitted snapshotFormatVersion -> legacy 1
         _minimalValidSnapshot(
@@ -753,10 +753,24 @@ void main() {
           kind: BackupFailureKind.invalidSnapshotVersion,
         ),
         (
-          name: 'future databaseSchemaVersion 10',
+          name: 'unserialized v10 databaseSchemaVersion 10 (format-2)',
           snap: _minimalValidSnapshot(schemaVersion: 5)
             ..['snapshotFormatVersion'] = 2
             ..['databaseSchemaVersion'] = 10,
+          kind: BackupFailureKind.unsupportedFutureSchema,
+        ),
+        (
+          name: 'unserialized v10 databaseSchemaVersion 10 (format-1)',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 1
+            ..['databaseSchemaVersion'] = 10,
+          kind: BackupFailureKind.unsupportedFutureSchema,
+        ),
+        (
+          name: 'future databaseSchemaVersion 11',
+          snap: _minimalValidSnapshot(schemaVersion: 5)
+            ..['snapshotFormatVersion'] = 2
+            ..['databaseSchemaVersion'] = 11,
           kind: BackupFailureKind.unsupportedFutureSchema,
         ),
         (
