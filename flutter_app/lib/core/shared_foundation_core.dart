@@ -264,6 +264,54 @@ class SharedFinanceContracts {
   ];
 }
 
+class SharedTaskContracts {
+  static const List<String> canonicalStatuses = [
+    'not_started',
+    'in_progress',
+    'completed',
+    'cancelled',
+    'inbox',
+  ];
+
+  static const List<String> canonicalPriorities = [
+    'low',
+    'medium',
+    'high',
+    'urgent',
+  ];
+
+  static const List<String> canonicalRecurrenceFrequencies = [
+    'daily',
+    'weekly',
+    'monthly',
+    'yearly',
+  ];
+
+  static const List<String> canonicalDailyPlanningActions = [
+    'planned',
+    'carried_forward',
+    'completed',
+    'dismissed',
+  ];
+
+  static const String defaultStatus =
+      'not_started';
+  static const String defaultPriority =
+      'medium';
+
+  static const Map<String, int> priorityWeights = {
+    'urgent': 4,
+    'high': 3,
+    'medium': 2,
+    'low': 1,
+  };
+
+  static const bool deriveReminderStateFromReminders = true;
+  static const bool singleCompletionSourceInStatus = true;
+  static const bool utcIsoCompletedAt = true;
+  static const bool preserveMyDayPlanningHistory = true;
+}
+
 class SharedProjectRules {
   static const List<String> statuses = ['active', 'completed', 'on_hold'];
   static const List<String> blockTypes = [

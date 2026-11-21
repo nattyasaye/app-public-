@@ -393,6 +393,60 @@ export function validateBusinessRules(rules) {
     );
   }
   assertFieldNonEmptyString(rules.tasks.defaultStatus, fileLabel, 'tasks.defaultStatus');
+  if (rules.tasks.statuses !== undefined) {
+    if (!Array.isArray(rules.tasks.statuses) || rules.tasks.statuses.length === 0) {
+      throw new Error(`Missing or empty "${fileLabel}" array "tasks.statuses".`);
+    }
+    for (let i = 0; i < rules.tasks.statuses.length; i += 1) {
+      assertFieldNonEmptyString(rules.tasks.statuses[i], fileLabel, `tasks.statuses[${i}]`);
+    }
+    if (!rules.tasks.statuses.includes(rules.tasks.defaultStatus)) {
+      throw new Error(
+        `Invalid ${fileLabel} field "tasks.defaultStatus": "${rules.tasks.defaultStatus}" is not in tasks.statuses.`
+      );
+    }
+  }
+  if (rules.tasks.priorities !== undefined) {
+    if (!Array.isArray(rules.tasks.priorities) || rules.tasks.priorities.length === 0) {
+      throw new Error(`Missing or empty "${fileLabel}" array "tasks.priorities".`);
+    }
+    for (let i = 0; i < rules.tasks.priorities.length; i += 1) {
+      assertFieldNonEmptyString(rules.tasks.priorities[i], fileLabel, `tasks.priorities[${i}]`);
+    }
+    if (!rules.tasks.priorities.includes(rules.tasks.defaultPriority)) {
+      throw new Error(
+        `Invalid ${fileLabel} field "tasks.defaultPriority": "${rules.tasks.defaultPriority}" is not in tasks.priorities.`
+      );
+    }
+  }
+  if (rules.tasks.recurrenceFrequencies !== undefined) {
+    if (
+      !Array.isArray(rules.tasks.recurrenceFrequencies) ||
+      rules.tasks.recurrenceFrequencies.length === 0
+    ) {
+      throw new Error(`Missing or empty "${fileLabel}" array "tasks.recurrenceFrequencies".`);
+    }
+    for (let i = 0; i < rules.tasks.recurrenceFrequencies.length; i += 1) {
+      assertFieldNonEmptyString(
+        rules.tasks.recurrenceFrequencies[i],
+        fileLabel,
+        `tasks.recurrenceFrequencies[${i}]`
+      );
+    }
+  }
+  if (rules.tasks.rules !== undefined) {
+    if (!isPlainObject(rules.tasks.rules)) {
+      throw new Error(`Missing or invalid "tasks.rules" object in ${fileLabel}.`);
+    }
+    for (const flagKey of [
+      'deriveReminderStateFromReminders',
+      'singleCompletionSourceInStatus',
+      'utcIsoCompletedAt',
+      'preserveMyDayPlanningHistory',
+    ]) {
+      assertFieldBoolean(rules.tasks.rules[flagKey], fileLabel, `tasks.rules.${flagKey}`);
+    }
+  }
 
   if (!isPlainObject(rules.calendar)) {
     throw new Error(`Missing or invalid "calendar" object in ${fileLabel}.`);
@@ -800,11 +854,49 @@ const DEFAULT_CANONICAL_DEBT_STATUSES = [
   'voided',
 ];
 
+const DEFAULT_CANONICAL_TASK_STATUSES = [
+  'not_started',
+  'in_progress',
+  'completed',
+  'cancelled',
+  'inbox',
+];
+
+const DEFAULT_CANONICAL_TASK_PRIORITIES = [
+  'low',
+  'medium',
+  'high',
+  'urgent',
+];
+
+const DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES = [
+  'daily',
+  'weekly',
+  'monthly',
+  'yearly',
+];
+
+const DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS = [
+  'planned',
+  'carried_forward',
+  'completed',
+  'dismissed',
+];
+
 export function buildTypeScriptFoundation({ tokens, rules, seedDb, contracts = null }) {
   const entryTypeEnum =
     contracts?.entities?.JournalEntry?.fields?.entryType?.enum ?? DEFAULT_CANONICAL_ENTRY_TYPES;
   const debtStatusEnum =
     contracts?.entities?.Debt?.fields?.status?.enum ?? DEFAULT_CANONICAL_DEBT_STATUSES;
+  const taskStatusEnum =
+    contracts?.entities?.Task?.fields?.status?.enum ?? DEFAULT_CANONICAL_TASK_STATUSES;
+  const taskPriorityEnum =
+    contracts?.entities?.Task?.fields?.priority?.enum ?? DEFAULT_CANONICAL_TASK_PRIORITIES;
+  const taskRecurrenceFreqEnum =
+    rules?.tasks?.recurrenceFrequencies ?? DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES;
+  const dailyPlanningActionEnum =
+    contracts?.entities?.DailyPlanningEntry?.fields?.action?.enum ??
+    DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS;
   return `/**
  * SHARED FOUNDATION CORE (Single Source of Truth)
  * Generated automatically from /shared_foundation/*.json
@@ -821,22 +913,75 @@ export const SHARED_PROJECT_PACKAGE_SPEC = SHARED_BUSINESS_RULES.projectPackage;
 
 export const CANONICAL_SEED_DATABASE = ${JSON.stringify(seedDb, null, 2)} as const;
 
+export const CANONICAL_TASK_STATUSES = ${JSON.stringify(taskStatusEnum)} as const;
+export type SharedTaskStatus = (typeof CANONICAL_TASK_STATUSES)[number];
+
+export const CANONICAL_TASK_PRIORITIES = ${JSON.stringify(taskPriorityEnum)} as const;
+export type SharedTaskPriority = (typeof CANONICAL_TASK_PRIORITIES)[number];
+
+export const CANONICAL_TASK_RECURRENCE_FREQUENCIES = ${JSON.stringify(taskRecurrenceFreqEnum)} as const;
+export type SharedTaskRecurrenceFrequency =
+  (typeof CANONICAL_TASK_RECURRENCE_FREQUENCIES)[number];
+
+export const CANONICAL_DAILY_PLANNING_ACTIONS = ${JSON.stringify(dailyPlanningActionEnum)} as const;
+export type SharedDailyPlanningAction = (typeof CANONICAL_DAILY_PLANNING_ACTIONS)[number];
+
+export interface SharedTaskSubtask {
+  id?: string;
+  title: string;
+  done: boolean;
+}
+
+export interface SharedTaskRecurrenceConfig {
+  frequency: SharedTaskRecurrenceFrequency;
+  interval?: number;
+  weekdays?: number[];
+  startDate?: string;
+  endDate?: string;
+  repeatFrom?: 'due_date' | 'completion_date';
+  lastGeneratedDate?: string;
+}
+
 export interface SharedTask {
   id: string;
   title: string;
   description?: string;
-  status: 'not_started' | 'in_progress' | 'completed' | 'cancelled' | 'inbox';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: SharedTaskStatus;
+  priority: SharedTaskPriority;
+  completedAt?: string;
   dueDate?: string;
   scheduledDate?: string;
+  scheduledTime?: string;
   projectId?: string;
   milestoneId?: string;
   estimatedDurationMinutes?: number;
-  subtasks?: Array<{ title: string; done: boolean }>;
+  subtasks?: SharedTaskSubtask[];
   labels?: string[];
   isPinned?: boolean;
   isMyDay?: boolean;
+  myDayDate?: string;
   recurrenceRule?: string;
+  recurrenceConfig?: SharedTaskRecurrenceConfig;
+  isArchived?: boolean;
+  sortOrder?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface SharedMilestone {
+  id: string;
+  projectId: string;
+  title: string;
+  dueDate?: string;
+  isCompleted: boolean;
+  createdAt: string;
+}
+
+export interface SharedDailyPlanningEntry {
+  id: string;
+  planDate: string;
+  taskId: string;
+  action: SharedDailyPlanningAction;
   createdAt: string;
   updatedAt?: string;
 }
@@ -1131,8 +1276,10 @@ export interface SharedDatabaseState {
   tasks: SharedTask[];
   notes: SharedNote[];
   projects: SharedProject[];
+  milestones?: SharedMilestone[];
   projectTrackingBlocks?: SharedProjectTrackingBlock[];
   projectTrackingRecords?: SharedProjectTrackingRecord[];
+  dailyPlanningEntries?: SharedDailyPlanningEntry[];
   goals: SharedGoal[];
   inboxItems: SharedInboxItem[];
   calendarEvents?: SharedCalendarEvent[];
@@ -1459,6 +1606,22 @@ export function buildDartFoundationCore({ seedDb, rules, contracts = null }) {
     contracts?.entities?.JournalEntry?.fields?.entryType?.enum ?? DEFAULT_CANONICAL_ENTRY_TYPES;
   const debtStatusEnum =
     contracts?.entities?.Debt?.fields?.status?.enum ?? DEFAULT_CANONICAL_DEBT_STATUSES;
+  const taskStatusEnum =
+    contracts?.entities?.Task?.fields?.status?.enum ?? DEFAULT_CANONICAL_TASK_STATUSES;
+  const taskPriorityEnum =
+    contracts?.entities?.Task?.fields?.priority?.enum ?? DEFAULT_CANONICAL_TASK_PRIORITIES;
+  const taskRecurrenceFreqEnum =
+    rules?.tasks?.recurrenceFrequencies ?? DEFAULT_CANONICAL_TASK_RECURRENCE_FREQUENCIES;
+  const dailyPlanningActionEnum =
+    contracts?.entities?.DailyPlanningEntry?.fields?.action?.enum ??
+    DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS;
+  const taskRules = rules?.tasks?.rules ?? {};
+  const priorityWeights = rules?.tasks?.priorityWeights ?? {
+    urgent: 4,
+    high: 3,
+    medium: 2,
+    low: 1,
+  };
   const renderDartEnumList = (fieldName, values) =>
     `  static const List<String> ${fieldName} = [\n${values
       .map((v) => `    '${escapeDartString(v)}',`)
@@ -1610,6 +1773,41 @@ class SharedFinanceContracts {
 ${renderDartEnumList('canonicalEntryTypes', entryTypeEnum)}
 
 ${renderDartEnumList('canonicalDebtStatuses', debtStatusEnum)}
+}
+
+class SharedTaskContracts {
+${renderDartEnumList('canonicalStatuses', taskStatusEnum)}
+
+${renderDartEnumList('canonicalPriorities', taskPriorityEnum)}
+
+${renderDartEnumList('canonicalRecurrenceFrequencies', taskRecurrenceFreqEnum)}
+
+${renderDartEnumList('canonicalDailyPlanningActions', dailyPlanningActionEnum)}
+
+  static const String defaultStatus =
+      '${escapeDartString(rules?.tasks?.defaultStatus ?? 'not_started')}';
+  static const String defaultPriority =
+      '${escapeDartString(rules?.tasks?.defaultPriority ?? 'medium')}';
+
+  static const Map<String, int> priorityWeights = {
+    'urgent': ${priorityWeights.urgent},
+    'high': ${priorityWeights.high},
+    'medium': ${priorityWeights.medium},
+    'low': ${priorityWeights.low},
+  };
+
+  static const bool deriveReminderStateFromReminders = ${
+    taskRules.deriveReminderStateFromReminders !== false
+  };
+  static const bool singleCompletionSourceInStatus = ${
+    taskRules.singleCompletionSourceInStatus !== false
+  };
+  static const bool utcIsoCompletedAt = ${
+    taskRules.utcIsoCompletedAt !== false
+  };
+  static const bool preserveMyDayPlanningHistory = ${
+    taskRules.preserveMyDayPlanningHistory !== false
+  };
 }
 
 class SharedProjectRules {

@@ -237,8 +237,33 @@ export const SHARED_BUSINESS_RULES = {
       "medium": 2,
       "low": 1
     },
+    "statuses": [
+      "not_started",
+      "in_progress",
+      "completed",
+      "cancelled",
+      "inbox"
+    ],
+    "priorities": [
+      "low",
+      "medium",
+      "high",
+      "urgent"
+    ],
+    "recurrenceFrequencies": [
+      "daily",
+      "weekly",
+      "monthly",
+      "yearly"
+    ],
     "defaultPriority": "medium",
-    "defaultStatus": "not_started"
+    "defaultStatus": "not_started",
+    "rules": {
+      "deriveReminderStateFromReminders": true,
+      "singleCompletionSourceInStatus": true,
+      "utcIsoCompletedAt": true,
+      "preserveMyDayPlanningHistory": true
+    }
   },
   "calendar": {
     "system": "ethiopian_dual",
@@ -413,22 +438,75 @@ export const CANONICAL_SEED_DATABASE = {
   "calendarEvents": []
 } as const;
 
+export const CANONICAL_TASK_STATUSES = ["not_started","in_progress","completed","cancelled","inbox"] as const;
+export type SharedTaskStatus = (typeof CANONICAL_TASK_STATUSES)[number];
+
+export const CANONICAL_TASK_PRIORITIES = ["low","medium","high","urgent"] as const;
+export type SharedTaskPriority = (typeof CANONICAL_TASK_PRIORITIES)[number];
+
+export const CANONICAL_TASK_RECURRENCE_FREQUENCIES = ["daily","weekly","monthly","yearly"] as const;
+export type SharedTaskRecurrenceFrequency =
+  (typeof CANONICAL_TASK_RECURRENCE_FREQUENCIES)[number];
+
+export const CANONICAL_DAILY_PLANNING_ACTIONS = ["planned","carried_forward","completed","dismissed"] as const;
+export type SharedDailyPlanningAction = (typeof CANONICAL_DAILY_PLANNING_ACTIONS)[number];
+
+export interface SharedTaskSubtask {
+  id?: string;
+  title: string;
+  done: boolean;
+}
+
+export interface SharedTaskRecurrenceConfig {
+  frequency: SharedTaskRecurrenceFrequency;
+  interval?: number;
+  weekdays?: number[];
+  startDate?: string;
+  endDate?: string;
+  repeatFrom?: 'due_date' | 'completion_date';
+  lastGeneratedDate?: string;
+}
+
 export interface SharedTask {
   id: string;
   title: string;
   description?: string;
-  status: 'not_started' | 'in_progress' | 'completed' | 'cancelled' | 'inbox';
-  priority: 'low' | 'medium' | 'high' | 'urgent';
+  status: SharedTaskStatus;
+  priority: SharedTaskPriority;
+  completedAt?: string;
   dueDate?: string;
   scheduledDate?: string;
+  scheduledTime?: string;
   projectId?: string;
   milestoneId?: string;
   estimatedDurationMinutes?: number;
-  subtasks?: Array<{ title: string; done: boolean }>;
+  subtasks?: SharedTaskSubtask[];
   labels?: string[];
   isPinned?: boolean;
   isMyDay?: boolean;
+  myDayDate?: string;
   recurrenceRule?: string;
+  recurrenceConfig?: SharedTaskRecurrenceConfig;
+  isArchived?: boolean;
+  sortOrder?: number;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface SharedMilestone {
+  id: string;
+  projectId: string;
+  title: string;
+  dueDate?: string;
+  isCompleted: boolean;
+  createdAt: string;
+}
+
+export interface SharedDailyPlanningEntry {
+  id: string;
+  planDate: string;
+  taskId: string;
+  action: SharedDailyPlanningAction;
   createdAt: string;
   updatedAt?: string;
 }
@@ -723,8 +801,10 @@ export interface SharedDatabaseState {
   tasks: SharedTask[];
   notes: SharedNote[];
   projects: SharedProject[];
+  milestones?: SharedMilestone[];
   projectTrackingBlocks?: SharedProjectTrackingBlock[];
   projectTrackingRecords?: SharedProjectTrackingRecord[];
+  dailyPlanningEntries?: SharedDailyPlanningEntry[];
   goals: SharedGoal[];
   inboxItems: SharedInboxItem[];
   calendarEvents?: SharedCalendarEvent[];

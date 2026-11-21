@@ -23,8 +23,17 @@
       "medium": 2,
       "low": 1
     },
+    "statuses": ["not_started", "in_progress", "completed", "cancelled", "inbox"],
+    "priorities": ["low", "medium", "high", "urgent"],
+    "recurrenceFrequencies": ["daily", "weekly", "monthly", "yearly"],
     "defaultPriority": "medium",
-    "defaultStatus": "not_started"
+    "defaultStatus": "not_started",
+    "rules": {
+      "deriveReminderStateFromReminders": true,
+      "singleCompletionSourceInStatus": true,
+      "utcIsoCompletedAt": true,
+      "preserveMyDayPlanningHistory": true
+    }
   },
   "calendar": {
     "system": "ethiopian_dual",

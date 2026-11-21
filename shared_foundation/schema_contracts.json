@@ -16,16 +16,46 @@
         "description": { "type": "string", "required": false },
         "status": { "type": "string", "enum": ["not_started", "in_progress", "completed", "cancelled", "inbox"], "default": "not_started" },
         "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"], "default": "medium" },
+        "completedAt": { "type": "string", "format": "date-time", "required": false },
         "dueDate": { "type": "string", "format": "date", "required": false },
         "scheduledDate": { "type": "string", "format": "date", "required": false },
+        "scheduledTime": { "type": "string", "format": "time", "required": false },
         "projectId": { "type": "string", "required": false },
         "milestoneId": { "type": "string", "required": false },
         "estimatedDurationMinutes": { "type": "number", "required": false },
-        "subtasks": { "type": "array", "default": [] },
+        "subtasks": { "type": "array", "items": { "type": "object" }, "default": [] },
         "labels": { "type": "array", "items": { "type": "string" }, "default": [] },
         "isPinned": { "type": "boolean", "default": false },
         "isMyDay": { "type": "boolean", "default": false },
+        "myDayDate": { "type": "string", "format": "date", "required": false },
         "recurrenceRule": { "type": "string", "required": false },
+        "recurrenceConfig": { "type": "object", "required": false },
+        "isArchived": { "type": "boolean", "default": false },
+        "sortOrder": { "type": "integer", "minimum": 0, "default": 0, "required": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
+        "updatedAt": { "type": "string", "format": "date-time", "required": false }
+      }
+    },
+    "Milestone": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "projectId": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true },
+        "dueDate": { "type": "string", "format": "date", "required": false },
+        "isCompleted": { "type": "boolean", "default": false },
+        "createdAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "DailyPlanningEntry": {
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "planDate": { "type": "string", "format": "date", "required": true },
+        "taskId": { "type": "string", "required": true },
+        "action": {
+          "type": "string",
+          "enum": ["planned", "carried_forward", "completed", "dismissed"],
+          "default": "planned"
+        },
         "createdAt": { "type": "string", "format": "date-time", "required": true },
         "updatedAt": { "type": "string", "format": "date-time", "required": false }
       }
