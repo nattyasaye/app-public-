@@ -1706,11 +1706,25 @@ class DashboardTasksSection extends StatelessWidget {
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     if (overview.totalActiveAndCompleted == 0)
-                      Text(
-                        'All recorded tasks are archived. View them in Tasks > Archived.',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: semantic.textMuted,
-                        ),
+                      Wrap(
+                        spacing: SharedDesignTokens.spacingSm,
+                        runSpacing: SharedDesignTokens.spacingXs,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          Text(
+                            'All recorded tasks are archived. View them in Tasks > Archived.',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: semantic.textMuted,
+                            ),
+                          ),
+                          DaywellButton(
+                            label: 'View Archived',
+                            variant: DaywellButtonVariant.text,
+                            size: DaywellButtonSize.compact,
+                            onPressed: () =>
+                                _openFilteredTasks(viewFilter: 'archived'),
+                          ),
+                        ],
                       )
                     else if (pendingTasks.isEmpty)
                       Text(
@@ -1759,59 +1773,70 @@ class DashboardTasksSection extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              content: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    task.title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: textTheme.bodyMedium?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                      color: semantic.textPrimary,
-                                      decoration: task.isCompleted
-                                          ? TextDecoration.lineThrough
-                                          : null,
-                                    ),
-                                  ),
-                                  if (task.dueDate != null)
+                              content: InkWell(
+                                onTap: onOpenTasks,
+                                borderRadius: BorderRadius.circular(
+                                  SharedDesignTokens.radiusSm,
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
                                     Text(
-                                      'Due: ${SharedDateFormatter.formatDual(task.dueDate!, useAmharic: false)}',
+                                      task.title,
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
-                                      style: textTheme.bodySmall?.copyWith(
-                                        color: semantic.textSecondary,
+                                      style: textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: semantic.textPrimary,
+                                        decoration: task.isCompleted
+                                            ? TextDecoration.lineThrough
+                                            : null,
                                       ),
                                     ),
-                                  if (TaskRecurrenceEngine.resolveEffectiveConfig(
-                                        task,
-                                      ) !=
-                                      null)
-                                    Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.repeat,
-                                          size: 12,
-                                          color: colorScheme.primary,
+                                    if (task.dueDate != null)
+                                      Text(
+                                        'Due: ${SharedDateFormatter.formatDual(task.dueDate!, useAmharic: false)}',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: textTheme.bodySmall?.copyWith(
+                                          color: semantic.textSecondary,
                                         ),
-                                        const SizedBox(width: 4),
-                                        Flexible(
-                                          child: Text(
-                                            TaskRecurrenceEngine.formatSummary(
+                                      ),
+                                    if (TaskRecurrenceEngine
+                                            .resolveEffectiveConfig(
+                                          task,
+                                        ) !=
+                                        null)
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.repeat,
+                                            size: 12,
+                                            color: colorScheme.primary,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Flexible(
+                                            child: Text(
                                               TaskRecurrenceEngine
-                                                  .resolveEffectiveConfig(task),
-                                            ),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: textTheme.bodySmall?.copyWith(
-                                              color: semantic.textSecondary,
+                                                  .formatSummary(
+                                                TaskRecurrenceEngine
+                                                    .resolveEffectiveConfig(
+                                                  task,
+                                                ),
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style:
+                                                  textTheme.bodySmall?.copyWith(
+                                                color: semantic.textSecondary,
+                                              ),
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                ],
+                                        ],
+                                      ),
+                                  ],
+                                ),
                               ),
                               trailing: DaywellStatusBadge(
                                 label: badgeLabel,
@@ -2103,11 +2128,16 @@ class DashboardProjectProgressSection extends StatelessWidget {
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     ...overview.projects.take(4).map(
                       (ProjectProgressOverviewItem item) {
-                        final subtitleParts = <String>[
-                          '${item.completedTasks}/${item.totalTasks} ${item.totalTasks == 1 ? 'task' : 'tasks'} · ${item.remainingTasks} remaining',
-                          if (item.hasMilestones)
-                            '${item.completedMilestones}/${item.totalMilestones} ${item.totalMilestones == 1 ? 'milestone' : 'milestones'}',
-                        ];
+                        final taskCountLabel =
+                            '${item.completedTasks}/${item.totalTasks} ${item.totalTasks == 1 ? 'task' : 'tasks'} · ${item.remainingTasks} remaining';
+                        final milestoneLabel = item.hasMilestones
+                            ? '· ${item.completedMilestones}/${item.totalMilestones} ${item.totalMilestones == 1 ? 'milestone' : 'milestones'}'
+                            : null;
+                        final trackingLabel =
+                            (item.primaryMetricTitle != null &&
+                                    item.primaryMetricTitle!.trim().isNotEmpty)
+                                ? '· Tracking: ${item.primaryMetricTitle!.trim()}'
+                                : null;
 
                         return Padding(
                           padding: const EdgeInsets.only(
@@ -2201,11 +2231,40 @@ class DashboardProjectProgressSection extends StatelessWidget {
                                     const SizedBox(
                                       height: SharedDesignTokens.spacingXs,
                                     ),
-                                    Text(
-                                      subtitleParts.join(' · '),
-                                      style: DaywellTypography.caption(
-                                        color: semantic.textMuted,
-                                      ),
+                                    Wrap(
+                                      spacing: SharedDesignTokens.spacingXs,
+                                      runSpacing: 2,
+                                      children: [
+                                        Text(
+                                          taskCountLabel,
+                                          style: DaywellTypography.caption(
+                                            color: semantic.textMuted,
+                                          ),
+                                        ),
+                                        if (milestoneLabel != null)
+                                          Text(
+                                            milestoneLabel,
+                                            style: DaywellTypography.caption(
+                                              color: semantic.textMuted,
+                                            ),
+                                          ),
+                                        if (item.overdueTasks > 0)
+                                          Text(
+                                            '· ${item.overdueTasks} overdue',
+                                            style: DaywellTypography.caption(
+                                              color: semantic.error,
+                                            ).copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        if (trackingLabel != null)
+                                          Text(
+                                            trackingLabel,
+                                            style: DaywellTypography.caption(
+                                              color: semantic.textMuted,
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ],
                                 ),

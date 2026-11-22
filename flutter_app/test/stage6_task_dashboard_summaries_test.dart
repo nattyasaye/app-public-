@@ -462,11 +462,12 @@ void main() {
         expect(find.text("Today's Plan (My Day)"), findsOneWidget);
         expect(find.text('0 completed · 1 remaining'), findsOneWidget);
 
-        // Project Progress omits archived project & hides milestones when none exist
+        // Project Progress omits archived project, surfaces overdue count, & hides milestones when none exist
         expect(find.text('Project Progress'), findsOneWidget);
         expect(find.text('Active Roadmap'), findsOneWidget);
         expect(find.text('Hidden Archived Project'), findsNothing);
         expect(find.textContaining('1/3 tasks · 2 remaining'), findsWidgets);
+        expect(find.textContaining('1 overdue'), findsOneWidget);
         expect(find.textContaining('milestone'), findsNothing);
 
         // Tap Due Today summary tile -> routes to active + dueDateFilter: 'today'
@@ -526,6 +527,71 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Projects'), findsWidgets);
+      },
+    );
+
+    testWidgets(
+      '5. DashboardTasksSection offers View Archived for archived-only stores and TasksView surfaces Due Today active filter context',
+      (WidgetTester tester) async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        final state = _Stage6WidgetState(db: db);
+        addTearDown(() async {
+          state.dispose();
+          await db.close();
+        });
+
+        final tasksRepo = DriftTasksRepository(db);
+        await tasksRepo.createTask(
+          TaskEntity(
+            id: 't-arch-only',
+            title: 'Archived Only Item',
+            isArchived: true,
+          ),
+        );
+        await state.loadAllControllers();
+
+        var openedTasks = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: DaywellTheme.light,
+            home: Scaffold(
+              body: ListView(
+                children: [
+                  DashboardTasksSection(
+                    state: state,
+                    onOpenTasks: () => openedTasks += 1,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.text('View Archived'), findsOneWidget);
+        await tester.tap(find.text('View Archived'));
+        await tester.pumpAndSettle();
+        expect(openedTasks, 1);
+        expect(state.tasksController.state.viewFilter, 'archived');
+
+        // Verify TasksView active filter summary renders Due Today when routed from Dashboard
+        state.tasksController.openDashboardFilter(
+          viewFilter: 'active',
+          dueDateFilter: 'today',
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: DaywellTheme.light,
+            home: TasksView(
+              controller: state.tasksController,
+              projectsController: state.projectsController,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(find.textContaining('Due Today'), findsOneWidget);
       },
     );
   });

@@ -428,6 +428,8 @@ describe('Stage 6 — Task Dashboard & Progress Summaries (Web Domain & Integrat
       'utf8'
     );
     assert.match(workspaceSrc, /taskRemaining/);
+    assert.match(workspaceSrc, /remaining/);
+    assert.doesNotMatch(workspaceSrc, /taskRemaining\}\s+left/);
 
     const detailSrc = fs.readFileSync(
       path.join(root, 'src/components/projects/ProjectDetailView.tsx'),
@@ -435,5 +437,93 @@ describe('Stage 6 — Task Dashboard & Progress Summaries (Web Domain & Integrat
     );
     assert.match(detailSrc, /} remaining`/);
     assert.match(detailSrc, /Marked complete/);
+    assert.match(appSrc, /View Archived/);
+    assert.match(appSrc, /overdueTasks > 0/);
+    assert.match(appSrc, /Tracking: \{item\.primaryMetricTitle\}/);
+  });
+
+  it('5. Handles archived-only tasks cleanly in overview and includes archived tasks only when explicitly viewing an archived project detail', async () => {
+    const { projectsService } = await import('../services/projectsService');
+
+    const archivedOnlyTask = makeTask('t-only-arch', 'Old Archived Task', {
+      isArchived: true,
+    });
+    const archivedOnlyOverview = buildTaskOverviewSummary({
+      tasks: [archivedOnlyTask],
+      todayIso: TODAY_ISO,
+    });
+    assert.strictEqual(archivedOnlyOverview.totalActiveAndCompleted, 0);
+    assert.strictEqual(archivedOnlyOverview.archivedCount, 1);
+
+    const store = new Map<string, string>();
+    const prevWindow = (globalThis as any).window;
+    const prevLocalStorage = (globalThis as any).localStorage;
+    (globalThis as any).localStorage = {
+      getItem: (k: string) => (store.has(k) ? store.get(k)! : null),
+      setItem: (k: string, v: string) => void store.set(k, String(v)),
+      removeItem: (k: string) => void store.delete(k),
+      clear: () => void store.clear(),
+    };
+    (globalThis as any).window = {
+      dispatchEvent: () => true,
+      CustomEvent: class CustomEvent {
+        type: string;
+        constructor(type: string) {
+          this.type = type;
+        }
+      },
+    };
+
+    try {
+      const activeProj = projectsService.createProjectWithBlocks({
+        title: 'Active Proj',
+        status: 'active',
+        blocks: [],
+      });
+      const archivedProj = projectsService.createProjectWithBlocks({
+        title: 'Archived Proj',
+        status: 'active',
+        blocks: [],
+      });
+      projectsService.setProjectArchived(archivedProj.id, true);
+
+      const tActive = makeTask('ta', 'Active Task', { projectId: activeProj.id });
+      const tActiveArch = makeTask('taa', 'Archived Task in Active Proj', {
+        projectId: activeProj.id,
+        isArchived: true,
+      });
+      const tArchProjDone = makeTask('tapd', 'Done in Archived Proj', {
+        projectId: archivedProj.id,
+        status: 'completed',
+        isArchived: true,
+      });
+      const tArchProjOpen = makeTask('tapo', 'Open in Archived Proj', {
+        projectId: archivedProj.id,
+        isArchived: true,
+      });
+      store.set(
+        'daywell_tasks',
+        JSON.stringify([tActive, tActiveArch, tArchProjDone, tArchProjOpen])
+      );
+
+      // Active project detail keeps archived task excluded
+      const activeSnap = projectsService.getProjectDetailSnapshot(activeProj.id)!;
+      assert.strictEqual(activeSnap.derivedProgress.totalTasks, 1);
+      assert.strictEqual(activeSnap.summary.linkedTasksTotal, 1);
+
+      // Explicitly opening archived project detail includes its archived tasks
+      const archivedSnap = projectsService.getProjectDetailSnapshot(archivedProj.id)!;
+      assert.strictEqual(archivedSnap.derivedProgress.totalTasks, 2);
+      assert.strictEqual(archivedSnap.derivedProgress.completedTasks, 1);
+      assert.strictEqual(archivedSnap.derivedProgress.percentage, 50);
+      assert.strictEqual(archivedSnap.summary.linkedTasksTotal, 2);
+      assert.strictEqual(
+        archivedSnap.sectionsView.unsectionedTasks.length,
+        2
+      );
+    } finally {
+      (globalThis as any).window = prevWindow;
+      (globalThis as any).localStorage = prevLocalStorage;
+    }
   });
 });

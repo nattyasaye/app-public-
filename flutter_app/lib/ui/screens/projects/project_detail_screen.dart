@@ -163,7 +163,7 @@ class ProjectDetailScreen extends StatelessWidget {
             .where(
               (t) =>
                   t.projectId == project.id &&
-                  !t.isArchived &&
+                  (project.isArchived || !t.isArchived) &&
                   t.status != 'cancelled',
             )
             .toList(growable: false);

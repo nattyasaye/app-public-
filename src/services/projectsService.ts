@@ -206,6 +206,7 @@ class ProjectsService {
     for (const proj of projects) {
       out[proj.id] = this.repo.getProjectProgressSummary(proj.id, {
         asOfDate: options.asOfDate,
+        includeArchivedTasks: Boolean(proj.isArchived),
       });
     }
     return out;
@@ -213,10 +214,12 @@ class ProjectsService {
 
   public getDerivedTaskMilestoneProgress(
     project: SharedProject,
-    summary?: ProjectProgressSummary
+    summary?: ProjectProgressSummary,
+    options: { includeArchivedTasks?: boolean } = {}
   ): DerivedTaskMilestoneProgress {
+    const includeArchivedTasks = options.includeArchivedTasks === true;
     const activeLinkedTasks = this.getLinkedTasks(project.id).filter(
-      (t) => !t.isArchived && t.status !== 'cancelled'
+      (t) => (includeArchivedTasks || !t.isArchived) && t.status !== 'cancelled'
     );
     const completedTasks = activeLinkedTasks.filter((t) =>
       isTaskRecordDone(t)
@@ -242,19 +245,24 @@ class ProjectsService {
   ): ProjectDetailSnapshot | undefined {
     const project = this.repo.getProjectById(projectId);
     if (!project) return undefined;
+    const includeArchivedTasks = Boolean(project.isArchived);
     const blocks = this.repo.getBlocksForProject(projectId, {
       includeArchived: true,
     });
     const records = this.repo.getRecordsForProject(projectId);
     const summary = this.repo.getProjectProgressSummary(projectId, {
       asOfDate: options.asOfDate,
+      includeArchivedTasks,
     });
     const linkedTasks = this.getLinkedTasks(projectId);
     const milestones = this.repo.getMilestonesForProject(projectId);
-    const sectionsView = this.getProjectSectionsViewModel(projectId);
+    const sectionsView = this.getProjectSectionsViewModel(projectId, {
+      includeArchivedTasks,
+    });
     const derivedProgress = this.getDerivedTaskMilestoneProgress(
       project,
-      summary
+      summary,
+      { includeArchivedTasks }
     );
     return {
       project,
@@ -1085,14 +1093,16 @@ class ProjectsService {
   // --- Stage 1.3 Project Sections & Linked Task Organization ---
 
   public getProjectSectionsViewModel(
-    projectId: string
+    projectId: string,
+    options: { includeArchivedTasks?: boolean } = {}
   ): ProjectSectionsViewModel {
+    const includeArchivedTasks = options.includeArchivedTasks === true;
     const blocks = this.repo
       .getBlocksForProject(projectId, { includeArchived: false })
       .filter((b) => b.blockType === 'grouped_list');
     const records = this.repo.getRecordsForProject(projectId);
     const activeTasks = this.getLinkedTasks(projectId).filter(
-      (t) => !t.isArchived && t.status !== 'cancelled'
+      (t) => (includeArchivedTasks || !t.isArchived) && t.status !== 'cancelled'
     );
 
     const preferredBlock =

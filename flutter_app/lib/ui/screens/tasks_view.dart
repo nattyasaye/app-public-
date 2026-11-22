@@ -2628,6 +2628,45 @@ class _TasksViewState extends State<TasksView>
     );
   }
 
+  String _buildActiveFilterSummary(
+    TasksModuleState moduleState,
+    ProjectsModuleState? projectsState,
+    int matchCount,
+  ) {
+    final parts = <String>[];
+    if (moduleState.dueDateFilter != null) {
+      final dueLabel = switch (moduleState.dueDateFilter) {
+        'overdue' => 'Overdue',
+        'today' => 'Due Today',
+        'upcoming' => 'Upcoming',
+        'no_due_date' => 'No Due Date',
+        _ => moduleState.dueDateFilter!,
+      };
+      parts.add(dueLabel);
+    }
+    if (moduleState.statusFilter != null) {
+      parts.add('Status: ${moduleState.statusFilter}');
+    }
+    if (moduleState.priorityFilter != null) {
+      parts.add('Priority: ${moduleState.priorityFilter}');
+    }
+    if (moduleState.selectedProjectId != null) {
+      final projectTitle = projectsState
+              ?.findProjectById(moduleState.selectedProjectId!)
+              ?.title ??
+          moduleState.selectedProjectId!;
+      parts.add('Project: $projectTitle');
+    }
+    if (moduleState.tagFilters.isNotEmpty) {
+      parts.add(moduleState.tagFilters.map((t) => '@$t').join(', '));
+    }
+    if (moduleState.searchQuery.trim().isNotEmpty) {
+      parts.add('"${moduleState.searchQuery.trim()}"');
+    }
+    final countLabel = '$matchCount matching tasks';
+    return parts.isEmpty ? countLabel : '${parts.join(' · ')} · $countLabel';
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.effectiveController;
@@ -2792,7 +2831,11 @@ class _TasksViewState extends State<TasksView>
                         : const [],
                     hasActiveFilters: moduleState.hasActiveFilters,
                     activeSummary: moduleState.hasActiveFilters
-                        ? '${tasks.length} matching tasks'
+                        ? _buildActiveFilterSummary(
+                            moduleState,
+                            projectsState,
+                            tasks.length,
+                          )
                         : null,
                     onClearFilters: () {
                       _searchController.clear();

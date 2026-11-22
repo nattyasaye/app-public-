@@ -1272,588 +1272,661 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* "YOUR NEXT RIGHT THING" Deprecated Prototype Hero Card */}
                   <div
-                    onClick={() => navigateTo('project_detail')}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault();
-                        navigateTo('project_detail');
-                      }
-                    }}
-                    className="bg-[var(--dw-primary-brand)] text-white rounded-[var(--dw-radius-xl)] p-5 shadow-sm cursor-pointer hover:opacity-95 transition-all relative overflow-hidden"
+                    className={
+                      viewMode === 'desktop'
+                        ? 'grid grid-cols-1 lg:grid-cols-12 gap-4 items-start'
+                        : 'space-y-4'
+                    }
                   >
-                    <div className="flex items-center justify-between gap-2 text-xs font-bold tracking-wider text-white/85 uppercase">
-                      <span>YOUR NEXT RIGHT THING</span>
-                      <div className="flex items-center gap-1.5">
-                        <DaywellStatusBadge
-                          tone="warning"
-                          showIcon={false}
-                          label="Deprecated Prototype"
+                    {/* Primary Operational Column: Tasks Overview, Project Progress, Inbox */}
+                    <div
+                      className={
+                        viewMode === 'desktop'
+                          ? 'lg:col-span-7 space-y-4 lg:order-2 order-1'
+                          : 'space-y-4'
+                      }
+                    >
+                      {/* Live Task Overview, Today's Plan & Priorities */}
+                      <div className="space-y-2.5 pt-1">
+                        <DaywellSectionHeader
+                          title="Tasks Overview"
+                          count={taskOverview.remainingCount > 0 ? taskOverview.remainingCount : undefined}
+                          actionLabel="Open Tasks"
+                          onActionPressed={() => openTasksFromDashboard('active')}
                         />
-                        <ArrowUpRight className="w-4 h-4 text-white/85" />
-                      </div>
-                    </div>
-                    <h3 className="text-xl font-bold text-white mt-3 leading-snug">
-                      Review portfolio case study
-                    </h3>
-                    <div className="flex items-center gap-2 text-xs text-white/85 mt-3">
-                      <Clock3 className="w-3.5 h-3.5" />
-                      <span>Sample focus card · Portfolio refresh prototype</span>
-                    </div>
-                  </div>
 
-                  {/* Live Task Overview, Today's Plan & Priorities */}
-                  <div className="space-y-2.5 pt-1">
-                    <DaywellSectionHeader
-                      title="Tasks Overview"
-                      count={taskOverview.remainingCount > 0 ? taskOverview.remainingCount : undefined}
-                      actionLabel="Open Tasks"
-                      onActionPressed={() => openTasksFromDashboard('active')}
-                    />
+                        <DaywellCard padding="md" radius="lg" className="space-y-3">
+                          <div className="flex items-center justify-between gap-2 text-xs">
+                            <span className="font-semibold text-[var(--dw-text-secondary)]">
+                              Task completion
+                            </span>
+                            <span className="font-bold text-[var(--dw-text-primary)] dw-type-numeric-body">
+                              {taskOverview.completedCount} / {taskOverview.totalActiveAndCompleted} done
+                            </span>
+                          </div>
+                          <DaywellProgressBar
+                            value={taskOverview.completionPercentage}
+                            label="Overall task completion"
+                          />
 
-                    <DaywellCard padding="md" radius="lg" className="space-y-3">
-                      <div className="flex items-center justify-between gap-2 text-xs">
-                        <span className="font-semibold text-[var(--dw-text-secondary)]">
-                          Task completion
-                        </span>
-                        <span className="font-bold text-[var(--dw-text-primary)] dw-type-numeric-body">
-                          {taskOverview.completedCount} / {taskOverview.totalActiveAndCompleted} done
-                        </span>
-                      </div>
-                      <DaywellProgressBar
-                        value={taskOverview.completionPercentage}
-                        label="Overall task completion"
-                      />
-
-                      <div className="grid grid-cols-5 gap-1.5">
-                        {[
-                          {
-                            key: 'overdue',
-                            label: 'Overdue',
-                            count: taskOverview.overdueCount,
-                            toneClass:
-                              taskOverview.overdueCount > 0
-                                ? 'bg-[var(--dw-error-container)] text-[var(--dw-on-error-container)] border-[var(--dw-error)]/25'
-                                : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border-[var(--dw-border)]',
-                            onClick: () => openTasksFromDashboard('overdue'),
-                          },
-                          {
-                            key: 'due_today',
-                            label: 'Due Today',
-                            count: taskOverview.dueTodayCount,
-                            toneClass:
-                              taskOverview.dueTodayCount > 0
-                                ? 'bg-[var(--dw-warning-container)] text-[var(--dw-on-warning-container)] border-[var(--dw-warning)]/25'
-                                : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border-[var(--dw-border)]',
-                            onClick: () => openTasksFromDashboard('active', 'today'),
-                          },
-                          {
-                            key: 'upcoming',
-                            label: 'Upcoming',
-                            count: taskOverview.upcomingCount,
-                            toneClass:
-                              'bg-[var(--dw-info-container)] text-[var(--dw-on-info-container)] border-[var(--dw-info)]/20',
-                            onClick: () => openTasksFromDashboard('upcoming'),
-                          },
-                          {
-                            key: 'completed',
-                            label: 'Completed',
-                            count: taskOverview.completedCount,
-                            toneClass:
-                              'bg-[var(--dw-success-container)] text-[var(--dw-on-success-container)] border-[var(--dw-success)]/20',
-                            onClick: () => openTasksFromDashboard('completed'),
-                          },
-                          {
-                            key: 'remaining',
-                            label: 'Remaining',
-                            count: taskOverview.remainingCount,
-                            toneClass:
-                              'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-primary)] border-[var(--dw-border)]',
-                            onClick: () => openTasksFromDashboard('active'),
-                          },
-                        ].map((item) => (
-                          <button
-                            key={item.key}
-                            type="button"
-                            onClick={item.onClick}
-                            className={`rounded-[var(--dw-radius-md)] border px-1.5 py-2 text-center transition-opacity hover:opacity-90 cursor-pointer ${item.toneClass}`}
+                          <div
+                            className={`grid gap-1.5 ${
+                              viewMode === 'desktop'
+                                ? 'grid-cols-3 sm:grid-cols-5'
+                                : 'grid-cols-3'
+                            }`}
                           >
-                            <span className="block text-sm font-extrabold dw-type-numeric-body">
-                              {item.count}
-                            </span>
-                            <span className="block text-[10px] font-semibold leading-tight mt-0.5 truncate">
-                              {item.label}
-                            </span>
-                          </button>
-                        ))}
+                            {[
+                              {
+                                key: 'overdue',
+                                label: 'Overdue',
+                                count: taskOverview.overdueCount,
+                                toneClass:
+                                  taskOverview.overdueCount > 0
+                                    ? 'bg-[var(--dw-error-container)] text-[var(--dw-on-error-container)] border-[var(--dw-error)]/25'
+                                    : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border-[var(--dw-border)]',
+                                onClick: () => openTasksFromDashboard('overdue'),
+                              },
+                              {
+                                key: 'due_today',
+                                label: 'Due Today',
+                                count: taskOverview.dueTodayCount,
+                                toneClass:
+                                  taskOverview.dueTodayCount > 0
+                                    ? 'bg-[var(--dw-warning-container)] text-[var(--dw-on-warning-container)] border-[var(--dw-warning)]/25'
+                                    : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border-[var(--dw-border)]',
+                                onClick: () => openTasksFromDashboard('active', 'today'),
+                              },
+                              {
+                                key: 'upcoming',
+                                label: 'Upcoming',
+                                count: taskOverview.upcomingCount,
+                                toneClass:
+                                  'bg-[var(--dw-info-container)] text-[var(--dw-on-info-container)] border-[var(--dw-info)]/20',
+                                onClick: () => openTasksFromDashboard('upcoming'),
+                              },
+                              {
+                                key: 'completed',
+                                label: 'Completed',
+                                count: taskOverview.completedCount,
+                                toneClass:
+                                  'bg-[var(--dw-success-container)] text-[var(--dw-on-success-container)] border-[var(--dw-success)]/20',
+                                onClick: () => openTasksFromDashboard('completed'),
+                              },
+                              {
+                                key: 'remaining',
+                                label: 'Remaining',
+                                count: taskOverview.remainingCount,
+                                toneClass:
+                                  'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-primary)] border-[var(--dw-border)]',
+                                onClick: () => openTasksFromDashboard('active'),
+                              },
+                            ].map((item) => (
+                              <button
+                                key={item.key}
+                                type="button"
+                                onClick={item.onClick}
+                                className={`rounded-[var(--dw-radius-md)] border px-1.5 py-2 text-center transition-opacity hover:opacity-90 cursor-pointer ${item.toneClass}`}
+                              >
+                                <span className="block text-sm font-extrabold dw-type-numeric-body">
+                                  {item.count}
+                                </span>
+                                <span className="block text-[10px] font-semibold leading-tight mt-0.5 truncate">
+                                  {item.label}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Today's Planned Tasks (My Day) */}
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            onClick={() =>
+                              openTasksFromDashboard('my_day', '', taskOverview.todayPlan.planDateIso)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                openTasksFromDashboard('my_day', '', taskOverview.todayPlan.planDateIso);
+                              }
+                            }}
+                            className="p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] hover:border-[var(--dw-primary)] transition-colors cursor-pointer space-y-1.5"
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <Sun className="w-3.5 h-3.5 text-[var(--dw-warning)] shrink-0" />
+                                <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                                  Today&apos;s Plan (My Day)
+                                </span>
+                              </div>
+                              <span className="text-[11px] font-semibold text-[var(--dw-primary)] shrink-0">
+                                Open My Day
+                              </span>
+                            </div>
+                            {taskOverview.todayPlan.totalPlannedCount === 0 ? (
+                              <p className="text-[11px] text-[var(--dw-text-muted)]">
+                                No tasks planned for today yet. Tap to choose priorities in My Day.
+                              </p>
+                            ) : (
+                              <>
+                                <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body">
+                                  <span>
+                                    {taskOverview.todayPlan.completedCount} completed ·{' '}
+                                    {taskOverview.todayPlan.remainingCount} remaining
+                                  </span>
+                                  <span className="font-bold text-[var(--dw-text-primary)]">
+                                    {taskOverview.todayPlan.progressPercentage}%
+                                  </span>
+                                </div>
+                                <DaywellProgressBar
+                                  value={taskOverview.todayPlan.progressPercentage}
+                                  label="Today's planned tasks progress"
+                                />
+                              </>
+                            )}
+                          </div>
+
+                          {/* Compact Pending Priorities */}
+                          {taskOverview.totalActiveAndCompleted === 0 ? (
+                            taskOverview.archivedCount > 0 ? (
+                              <div className="flex items-center justify-between gap-2 text-xs text-[var(--dw-text-muted)] py-1">
+                                <span>
+                                  All recorded tasks are archived.
+                                </span>
+                                <DaywellButton
+                                  label="View Archived"
+                                  variant="text"
+                                  size="compact"
+                                  onClick={() => openTasksFromDashboard('archived')}
+                                />
+                              </div>
+                            ) : (
+                              <p className="text-xs text-[var(--dw-text-muted)] text-center py-1">
+                                No active tasks yet. Add one via Quick Capture or To-Do.
+                              </p>
+                            )
+                          ) : prioritizedDashboardTasks.length === 0 ? (
+                            <p className="text-xs font-semibold text-[var(--dw-primary)] py-1">
+                              All active tasks are completed.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5 pt-1 border-t border-[var(--dw-divider)]">
+                              <div className="flex items-center justify-between text-[11px] text-[var(--dw-text-muted)]">
+                                <span className="font-semibold uppercase tracking-wider">
+                                  Up Next
+                                </span>
+                                <span>{prioritizedDashboardTasks.length} remaining</span>
+                              </div>
+                              {prioritizedDashboardTasks.slice(0, 3).map((item) => {
+                                const isOverdue = Boolean(
+                                  item.dueDate && item.dueDate < taskOverview.todayIso
+                                );
+                                return (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-start gap-2.5 py-1.5"
+                                  >
+                                    <button
+                                      type="button"
+                                      aria-label={`Toggle ${item.title}`}
+                                      onClick={() => toggleTask(item.id)}
+                                      className={`w-4 h-4 rounded-[4px] border mt-0.5 flex items-center justify-center shrink-0 cursor-pointer transition-colors ${
+                                        isTaskCompleted(item)
+                                          ? 'bg-[var(--dw-primary-brand)] border-[var(--dw-primary-brand)] text-white'
+                                          : 'border-[var(--dw-border)] bg-transparent hover:border-[var(--dw-primary)]'
+                                      }`}
+                                    >
+                                      {isTaskCompleted(item) && <Check className="w-3 h-3 stroke-[3]" />}
+                                    </button>
+                                    <div
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={() => {
+                                        setTasksSubTab('tasks');
+                                        setRequestedTaskFocus({
+                                          taskId: item.id,
+                                          openMode: 'details',
+                                          nonce: Date.now(),
+                                        });
+                                        navigateTo('tasks');
+                                      }}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' || e.key === ' ') {
+                                          e.preventDefault();
+                                          setTasksSubTab('tasks');
+                                          setRequestedTaskFocus({
+                                            taskId: item.id,
+                                            openMode: 'details',
+                                            nonce: Date.now(),
+                                          });
+                                          navigateTo('tasks');
+                                        }
+                                      }}
+                                      className="flex-1 min-w-0 cursor-pointer hover:opacity-85"
+                                    >
+                                      <p className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
+                                        {item.title}
+                                      </p>
+                                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--dw-text-muted)] mt-0.5">
+                                        {(item.priority === 'urgent' || item.priority === 'high') && (
+                                          <Flag className="w-3 h-3 text-[var(--dw-warning)]" />
+                                        )}
+                                        {item.dueDate && (
+                                          <span className={isOverdue ? 'text-[var(--dw-error)] font-semibold' : ''}>
+                                            {isOverdue ? 'Overdue' : 'Due'} {item.dueDate}
+                                          </span>
+                                        )}
+                                        {!item.dueDate && (
+                                          <span>{item.category || item.projectName || 'Personal'}</span>
+                                        )}
+                                        {(() => {
+                                          const rec = resolveEffectiveRecurrenceConfig(item);
+                                          if (!rec) return null;
+                                          return (
+                                            <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                                              <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                                              {formatRecurrenceSummary(rec)}
+                                            </span>
+                                          );
+                                        })()}
+                                      </div>
+                                    </div>
+                                    {item.hasReminder && (
+                                      <Bell className="w-3.5 h-3.5 text-[var(--dw-text-muted)] mt-0.5 shrink-0" />
+                                    )}
+                                  </div>
+                                );
+                              })}
+                              {prioritizedDashboardTasks.length > 3 && (
+                                <DaywellButton
+                                  label={`+ ${prioritizedDashboardTasks.length - 3} more remaining tasks`}
+                                  variant="text"
+                                  size="compact"
+                                  onClick={() => openTasksFromDashboard('active')}
+                                />
+                              )}
+                            </div>
+                          )}
+                        </DaywellCard>
                       </div>
 
-                      {/* Today's Planned Tasks (My Day) */}
+                      {/* Live Project Progress Summary */}
+                      <div className="space-y-2 pt-1">
+                        <DaywellSectionHeader
+                          title="Project Progress"
+                          count={
+                            projectsOverview.totalProjectsCount > 0
+                              ? projectsOverview.totalProjectsCount
+                              : undefined
+                          }
+                          actionLabel="All Projects"
+                          onActionPressed={() => openProjectsFromDashboard(null)}
+                        />
+                        {projectsOverview.totalProjectsCount === 0 ? (
+                          <DaywellCard padding="md" radius="lg">
+                            <DaywellEmptyState
+                              icon={<Layers className="w-6 h-6" />}
+                              message="No active projects yet"
+                              subtitle="Group related tasks and milestones into a project to track completion."
+                              actionLabel="Open Projects"
+                              onActionPressed={() => openProjectsFromDashboard(null)}
+                            />
+                          </DaywellCard>
+                        ) : (
+                          <DaywellCard padding="md" radius="lg" className="space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body">
+                              <span>
+                                {projectsOverview.completedTasks}/{projectsOverview.totalTasks}{' '}
+                                {projectsOverview.totalTasks === 1 ? 'task' : 'tasks'} ·{' '}
+                                {projectsOverview.remainingTasks} remaining
+                              </span>
+                              {projectsOverview.totalMilestones > 0 && (
+                                <span>
+                                  {projectsOverview.completedMilestones}/{projectsOverview.totalMilestones}{' '}
+                                  {projectsOverview.totalMilestones === 1 ? 'milestone' : 'milestones'}
+                                </span>
+                              )}
+                            </div>
+                            <div className="space-y-2.5">
+                              {projectsOverview.projects.slice(0, 4).map((item) => (
+                                <div
+                                  key={item.project.id}
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={() => openProjectsFromDashboard(item.project.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      openProjectsFromDashboard(item.project.id);
+                                    }
+                                  }}
+                                  className="p-2.5 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] bg-[var(--dw-surface-subtle)] hover:border-[var(--dw-primary)] transition-colors cursor-pointer space-y-1.5"
+                                >
+                                  <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center gap-1.5 min-w-0">
+                                      <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                                        {item.project.title}
+                                      </span>
+                                      {item.project.status !== 'active' && (
+                                        <DaywellStatusBadge
+                                          label={item.project.status === 'on_hold' ? 'On Hold' : 'Completed'}
+                                          tone={item.project.status === 'completed' ? 'success' : 'warning'}
+                                          showIcon={false}
+                                        />
+                                      )}
+                                    </div>
+                                    <span className="text-xs font-extrabold text-[var(--dw-text-primary)] dw-type-numeric-body shrink-0">
+                                      {item.displayPercentage}%
+                                    </span>
+                                  </div>
+                                  <DaywellProgressBar
+                                    value={item.displayPercentage}
+                                    label={`${item.project.title} progress`}
+                                  />
+                                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                                    <span>
+                                      {item.completedTasks}/{item.totalTasks}{' '}
+                                      {item.totalTasks === 1 ? 'task' : 'tasks'} · {item.remainingTasks}{' '}
+                                      remaining
+                                    </span>
+                                    {item.hasMilestones && (
+                                      <span>
+                                        · {item.completedMilestones}/{item.totalMilestones}{' '}
+                                        {item.totalMilestones === 1 ? 'milestone' : 'milestones'}
+                                      </span>
+                                    )}
+                                    {item.overdueTasks > 0 && (
+                                      <span className="text-[var(--dw-error)] font-semibold">
+                                        · {item.overdueTasks} overdue
+                                      </span>
+                                    )}
+                                    {item.primaryMetricTitle && (
+                                      <span>· Tracking: {item.primaryMetricTitle}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                            {projectsOverview.totalProjectsCount > 4 && (
+                              <DaywellButton
+                                label={`+ ${projectsOverview.totalProjectsCount - 4} more projects`}
+                                variant="text"
+                                size="compact"
+                                onClick={() => openProjectsFromDashboard(null)}
+                              />
+                            )}
+                          </DaywellCard>
+                        )}
+                      </div>
+
+                      {/* Shared Quick Capture Inbox Section (Live Store) */}
+                      <div className="space-y-2 pt-1">
+                        <DaywellSectionHeader
+                          title="Inbox Captures"
+                          count={unprocessedInboxItems.length > 0 ? unprocessedInboxItems.length : undefined}
+                          actionLabel="Review Inbox"
+                          onActionPressed={() => {
+                            setRequestedTasksFilter({ filter: 'inbox', nonce: Date.now() });
+                            setTasksSubTab('tasks');
+                            navigateTo('tasks');
+                          }}
+                        />
+                        <DaywellCard padding="compact" className="space-y-2">
+                          <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)]">
+                            <span>
+                              {unprocessedInboxItems.length} unorganized · {processedInboxCount} processed
+                            </span>
+                            <DaywellButton
+                              label="Quick capture"
+                              variant="text"
+                              size="compact"
+                              onClick={() => setIsQuickCaptureOpen(true)}
+                            />
+                          </div>
+                          {inboxItems.length === 0 ? (
+                            <p className="text-xs text-[var(--dw-text-muted)] text-center py-1.5">
+                              Inbox is clear. Use Quick Capture to save tasks, ideas, notes, or expenses fast.
+                            </p>
+                          ) : unprocessedInboxItems.length === 0 ? (
+                            <p className="text-xs font-semibold text-[var(--dw-primary)] py-1">
+                              All captured items have been processed.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {unprocessedInboxItems.slice(0, 3).map((item) => (
+                                <div
+                                  key={item.id}
+                                  onClick={() => {
+                                    setRequestedTasksFilter({ filter: 'inbox', nonce: Date.now() });
+                                    setTasksSubTab('tasks');
+                                    navigateTo('tasks');
+                                  }}
+                                  className="flex items-start justify-between gap-2 py-1 border-t border-[var(--dw-divider)] first:border-t-0 first:pt-0 cursor-pointer"
+                                >
+                                  <p className="text-xs font-medium text-[var(--dw-text-primary)] line-clamp-2 flex-1 min-w-0">
+                                    {item.rawText}
+                                  </p>
+                                  <DaywellStatusBadge
+                                    tone="info"
+                                    showIcon={false}
+                                    label={INBOX_CATEGORY_LABELS[item.category].toUpperCase()}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </DaywellCard>
+                      </div>
+
+                      {/* A Little Later (Deprecated Sample Card) */}
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-2">
+                            <h3 className="dw-type-title text-[var(--dw-text-primary)]">
+                              A little later
+                            </h3>
+                            <DaywellStatusBadge
+                              tone="warning"
+                              showIcon={false}
+                              label="Deprecated Prototype"
+                            />
+                          </div>
+                          <DaywellButton
+                            label="Open tasks"
+                            variant="text"
+                            size="compact"
+                            onClick={() => navigateTo('tasks')}
+                          />
+                        </div>
+
+                        <DaywellCard padding="compact" className="flex items-center gap-3">
+                          <span className="dw-type-mono font-bold text-[var(--dw-text-muted)]">
+                            21:00
+                          </span>
+                          <div className="flex-1">
+                            <p className="text-xs font-semibold text-[var(--dw-text-primary)]">
+                              Read 20 pages
+                            </p>
+                            <p className="text-[11px] text-[var(--dw-text-muted)]">
+                              Sample habit card · Not backed by live schedule persistence
+                            </p>
+                          </div>
+                          <Repeat2 className="w-4 h-4 text-[var(--dw-text-muted)]" />
+                        </DaywellCard>
+                      </div>
+                    </div>
+
+                    {/* Finance, Prototype Focus & Storage Column */}
+                    <div
+                      className={
+                        viewMode === 'desktop'
+                          ? 'lg:col-span-5 space-y-4 lg:order-1 order-2'
+                          : 'space-y-4'
+                      }
+                    >
+                      {/* Safe Harbor v7 Hero Snippet (Live Finance Data) */}
+                      <DaywellCard padding="md" radius="xl" className="space-y-2">
+                        <div className="flex items-center justify-between text-[10px] font-bold tracking-wider uppercase">
+                          <span
+                            className={
+                              todaySafeHarbor.isShortfall
+                                ? 'text-[var(--dw-on-expense-container)]'
+                                : 'text-[var(--dw-text-muted)]'
+                            }
+                          >
+                            {todaySafeHarbor.isShortfall ? 'SHORTFALL · ' : ''}AVAILABLE TO SPEND (H:{' '}
+                            {todaySafeHarbor.planningPeriodEndIso})
+                          </span>
+                        </div>
+                        <div className="flex items-baseline justify-between gap-2 mt-0.5">
+                          <span
+                            className={`dw-type-numeric-hero ${
+                              todaySafeHarbor.isShortfall
+                                ? 'text-[var(--dw-on-expense-container)]'
+                                : 'text-[var(--dw-text-primary)]'
+                            }`}
+                          >
+                            {(todaySafeHarbor.availableToSpendCents / 100).toLocaleString('en-US', {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}{' '}
+                            <span className="text-sm font-bold text-[var(--dw-primary)]">
+                              ETB
+                            </span>
+                          </span>
+                          <DaywellButton
+                            label="View ledger"
+                            variant="text"
+                            size="compact"
+                            trailingIcon={<ChevronRight className="w-3.5 h-3.5" />}
+                            onClick={() => navigateTo('finance')}
+                          />
+                        </div>
+                        {(todaySafeHarbor.prepaidCardCreditCents > 0 ||
+                          todaySafeHarbor.nonEtbAccountCount > 0 ||
+                          (todaySafeHarbor.unverifiedAccountCount || 0) > 0 ||
+                          todaySafeHarbor.currencyReviewEntryCount > 0 ||
+                          todaySafeHarbor.unverifiedLegacyPaidCount > 0) && (
+                          <div className="text-[11px] text-[var(--dw-text-muted)] flex flex-wrap gap-x-3 gap-y-0.5 tabular-nums">
+                            {todaySafeHarbor.prepaidCardCreditCents > 0 && (
+                              <span className="text-[var(--dw-on-income-container)] font-medium">
+                                Includes +{formatBirr(todaySafeHarbor.prepaidCardCreditCents)} Prepaid
+                                Credit
+                              </span>
+                            )}
+                            {todaySafeHarbor.nonEtbAccountCount > 0 && (
+                              <span>
+                                {todaySafeHarbor.nonEtbAccountCount} non-ETB account(s) excluded
+                              </span>
+                            )}
+                            {(todaySafeHarbor.unverifiedAccountCount || 0) > 0 && (
+                              <span className="text-[var(--dw-on-warning-container)]">
+                                {todaySafeHarbor.unverifiedAccountCount} unverified account(s) excluded
+                              </span>
+                            )}
+                            {todaySafeHarbor.currencyReviewEntryCount > 0 && (
+                              <span className="text-[var(--dw-on-expense-container)] font-medium">
+                                {todaySafeHarbor.currencyReviewEntryCount} entry review notice(s)
+                              </span>
+                            )}
+                            {todaySafeHarbor.unverifiedLegacyPaidCount > 0 && (
+                              <span className="text-[var(--dw-on-warning-container)]">
+                                {todaySafeHarbor.unverifiedLegacyPaidCount} unverified legacy bill(s)
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {todayFinanceSummary.recentEntries.length > 0 && (
+                          <div className="pt-2 space-y-1.5 border-t border-[var(--dw-divider)]">
+                            {todayFinanceSummary.recentEntries.map(({ entry, cls, formattedAmount }) => (
+                              <div
+                                key={entry.id}
+                                className={`flex items-center justify-between gap-2 text-[11px] ${
+                                  entry.isVoided ? 'opacity-55' : ''
+                                }`}
+                              >
+                                <div className="min-w-0 flex items-center gap-1.5">
+                                  <span
+                                    className={`truncate font-medium text-[var(--dw-text-primary)] ${
+                                      entry.isVoided ? 'line-through' : ''
+                                    }`}
+                                  >
+                                    {entry.description}
+                                  </span>
+                                  {entry.isVoided ? (
+                                    <DaywellStatusBadge tone="neutral" showIcon={false} label="Voided" />
+                                  ) : cls?.status === 'excluded_non_etb' ? (
+                                    <DaywellStatusBadge
+                                      tone="warning"
+                                      showIcon={false}
+                                      label={`Excluded (${cls.nativeCurrencyCode || cls.touchedCurrencies[0] || 'Non-ETB'})`}
+                                    />
+                                  ) : cls?.status === 'mixed_or_ambiguous' ? (
+                                    <DaywellStatusBadge
+                                      tone="error"
+                                      showIcon={false}
+                                      label="Currency Review"
+                                    />
+                                  ) : null}
+                                </div>
+                                <span className="dw-type-mono font-semibold text-[var(--dw-text-secondary)] shrink-0">
+                                  {formattedAmount}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </DaywellCard>
+
+                      {/* "YOUR NEXT RIGHT THING" Deprecated Prototype Hero Card */}
                       <div
+                        onClick={() => navigateTo('project_detail')}
                         role="button"
                         tabIndex={0}
-                        onClick={() =>
-                          openTasksFromDashboard('my_day', '', taskOverview.todayPlan.planDateIso)
-                        }
                         onKeyDown={(e) => {
                           if (e.key === 'Enter' || e.key === ' ') {
                             e.preventDefault();
-                            openTasksFromDashboard('my_day', '', taskOverview.todayPlan.planDateIso);
+                            navigateTo('project_detail');
                           }
                         }}
-                        className="p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] hover:border-[var(--dw-primary)] transition-colors cursor-pointer space-y-1.5"
+                        className="bg-[var(--dw-primary-brand)] text-white rounded-[var(--dw-radius-xl)] p-5 shadow-sm cursor-pointer hover:opacity-95 transition-all relative overflow-hidden"
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <Sun className="w-3.5 h-3.5 text-[var(--dw-warning)] shrink-0" />
-                            <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
-                              Today&apos;s Plan (My Day)
-                            </span>
-                          </div>
-                          <span className="text-[11px] font-semibold text-[var(--dw-primary)] shrink-0">
-                            Open My Day
-                          </span>
-                        </div>
-                        {taskOverview.todayPlan.totalPlannedCount === 0 ? (
-                          <p className="text-[11px] text-[var(--dw-text-muted)]">
-                            No tasks planned for today yet. Tap to choose priorities in My Day.
-                          </p>
-                        ) : (
-                          <>
-                            <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body">
-                              <span>
-                                {taskOverview.todayPlan.completedCount} completed ·{' '}
-                                {taskOverview.todayPlan.remainingCount} remaining
-                              </span>
-                              <span className="font-bold text-[var(--dw-text-primary)]">
-                                {taskOverview.todayPlan.progressPercentage}%
-                              </span>
-                            </div>
-                            <DaywellProgressBar
-                              value={taskOverview.todayPlan.progressPercentage}
-                              label="Today's planned tasks progress"
+                        <div className="flex items-center justify-between gap-2 text-xs font-bold tracking-wider text-white/85 uppercase">
+                          <span>YOUR NEXT RIGHT THING</span>
+                          <div className="flex items-center gap-1.5">
+                            <DaywellStatusBadge
+                              tone="warning"
+                              showIcon={false}
+                              label="Deprecated Prototype"
                             />
-                          </>
-                        )}
-                      </div>
-
-                      {/* Compact Pending Priorities */}
-                      {taskOverview.totalActiveAndCompleted === 0 ? (
-                        <p className="text-xs text-[var(--dw-text-muted)] text-center py-1">
-                          No active tasks yet. Add one via Quick Capture or To-Do.
-                        </p>
-                      ) : prioritizedDashboardTasks.length === 0 ? (
-                        <p className="text-xs font-semibold text-[var(--dw-primary)] py-1">
-                          All active tasks are completed.
-                        </p>
-                      ) : (
-                        <div className="space-y-1.5 pt-1 border-t border-[var(--dw-divider)]">
-                          <div className="flex items-center justify-between text-[11px] text-[var(--dw-text-muted)]">
-                            <span className="font-semibold uppercase tracking-wider">
-                              Up Next
-                            </span>
-                            <span>{prioritizedDashboardTasks.length} remaining</span>
+                            <ArrowUpRight className="w-4 h-4 text-white/85" />
                           </div>
-                          {prioritizedDashboardTasks.slice(0, 3).map((item) => {
-                            const isOverdue = Boolean(
-                              item.dueDate && item.dueDate < taskOverview.todayIso
-                            );
-                            return (
-                              <div
-                                key={item.id}
-                                onClick={() => toggleTask(item.id)}
-                                role="button"
-                                tabIndex={0}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' || e.key === ' ') {
-                                    e.preventDefault();
-                                    toggleTask(item.id);
-                                  }
-                                }}
-                                className="flex items-start gap-2.5 py-1.5 cursor-pointer hover:opacity-90"
-                              >
-                                <div
-                                  className={`w-4 h-4 rounded-[4px] border mt-0.5 flex items-center justify-center shrink-0 ${
-                                    isTaskCompleted(item)
-                                      ? 'bg-[var(--dw-primary-brand)] border-[var(--dw-primary-brand)] text-white'
-                                      : 'border-[var(--dw-border)] bg-transparent'
-                                  }`}
-                                >
-                                  {isTaskCompleted(item) && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
-                                    {item.title}
-                                  </p>
-                                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--dw-text-muted)] mt-0.5">
-                                    {(item.priority === 'urgent' || item.priority === 'high') && (
-                                      <Flag className="w-3 h-3 text-[var(--dw-warning)]" />
-                                    )}
-                                    {item.dueDate && (
-                                      <span className={isOverdue ? 'text-[var(--dw-error)] font-semibold' : ''}>
-                                        {isOverdue ? 'Overdue' : 'Due'} {item.dueDate}
-                                      </span>
-                                    )}
-                                    {!item.dueDate && (
-                                      <span>{item.category || item.projectName || 'Personal'}</span>
-                                    )}
-                                    {(() => {
-                                      const rec = resolveEffectiveRecurrenceConfig(item);
-                                      if (!rec) return null;
-                                      return (
-                                        <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
-                                          <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
-                                          {formatRecurrenceSummary(rec)}
-                                        </span>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                                {item.hasReminder && (
-                                  <Bell className="w-3.5 h-3.5 text-[var(--dw-text-muted)] mt-0.5 shrink-0" />
-                                )}
-                              </div>
-                            );
-                          })}
-                          {prioritizedDashboardTasks.length > 3 && (
-                            <DaywellButton
-                              label={`+ ${prioritizedDashboardTasks.length - 3} more remaining tasks`}
-                              variant="text"
-                              size="compact"
-                              onClick={() => openTasksFromDashboard('active')}
-                            />
-                          )}
                         </div>
-                      )}
-                    </DaywellCard>
-                  </div>
-
-                  {/* Shared Quick Capture Inbox Section (Live Store) */}
-                  <div className="space-y-2 pt-1">
-                    <DaywellSectionHeader
-                      title="Inbox Captures"
-                      count={unprocessedInboxItems.length > 0 ? unprocessedInboxItems.length : undefined}
-                      actionLabel="Review Inbox"
-                      onActionPressed={() => {
-                        setRequestedTasksFilter({ filter: 'inbox', nonce: Date.now() });
-                        setTasksSubTab('tasks');
-                        navigateTo('tasks');
-                      }}
-                    />
-                    <DaywellCard padding="compact" className="space-y-2">
-                      <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)]">
-                        <span>
-                          {unprocessedInboxItems.length} unorganized · {processedInboxCount} processed
-                        </span>
-                        <DaywellButton
-                          label="Quick capture"
-                          variant="text"
-                          size="compact"
-                          onClick={() => setIsQuickCaptureOpen(true)}
-                        />
-                      </div>
-                      {inboxItems.length === 0 ? (
-                        <p className="text-xs text-[var(--dw-text-muted)] text-center py-1.5">
-                          Inbox is clear. Use Quick Capture to save tasks, ideas, notes, or expenses fast.
-                        </p>
-                      ) : unprocessedInboxItems.length === 0 ? (
-                        <p className="text-xs font-semibold text-[var(--dw-primary)] py-1">
-                          All captured items have been processed.
-                        </p>
-                      ) : (
-                        <div className="space-y-1.5">
-                          {unprocessedInboxItems.slice(0, 3).map((item) => (
-                            <div
-                              key={item.id}
-                              onClick={() => {
-                                setRequestedTasksFilter({ filter: 'inbox', nonce: Date.now() });
-                                setTasksSubTab('tasks');
-                                navigateTo('tasks');
-                              }}
-                              className="flex items-start justify-between gap-2 py-1 border-t border-[var(--dw-divider)] first:border-t-0 first:pt-0 cursor-pointer"
-                            >
-                              <p className="text-xs font-medium text-[var(--dw-text-primary)] line-clamp-2 flex-1 min-w-0">
-                                {item.rawText}
-                              </p>
-                              <DaywellStatusBadge
-                                tone="info"
-                                showIcon={false}
-                                label={INBOX_CATEGORY_LABELS[item.category].toUpperCase()}
-                              />
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </DaywellCard>
-                  </div>
-
-                  {/* A Little Later (Deprecated Sample Card) */}
-                  <div className="space-y-2 pt-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <h3 className="dw-type-title text-[var(--dw-text-primary)]">
-                          A little later
+                        <h3 className="text-xl font-bold text-white mt-3 leading-snug">
+                          Review portfolio case study
                         </h3>
-                        <DaywellStatusBadge
-                          tone="warning"
-                          showIcon={false}
-                          label="Deprecated Prototype"
-                        />
-                      </div>
-                      <DaywellButton
-                        label="Open tasks"
-                        variant="text"
-                        size="compact"
-                        onClick={() => navigateTo('tasks')}
-                      />
-                    </div>
-
-                    <DaywellCard padding="compact" className="flex items-center gap-3">
-                      <span className="dw-type-mono font-bold text-[var(--dw-text-muted)]">
-                        21:00
-                      </span>
-                      <div className="flex-1">
-                        <p className="text-xs font-semibold text-[var(--dw-text-primary)]">
-                          Read 20 pages
-                        </p>
-                        <p className="text-[11px] text-[var(--dw-text-muted)]">
-                          Sample habit card · Not backed by live schedule persistence
-                        </p>
-                      </div>
-                      <Repeat2 className="w-4 h-4 text-[var(--dw-text-muted)]" />
-                    </DaywellCard>
-                  </div>
-
-                  {/* Live Project Progress Summary */}
-                  <div className="space-y-2 pt-1">
-                    <DaywellSectionHeader
-                      title="Project Progress"
-                      count={
-                        projectsOverview.totalProjectsCount > 0
-                          ? projectsOverview.totalProjectsCount
-                          : undefined
-                      }
-                      actionLabel="All Projects"
-                      onActionPressed={() => openProjectsFromDashboard(null)}
-                    />
-                    {projectsOverview.totalProjectsCount === 0 ? (
-                      <DaywellCard padding="md" radius="lg">
-                        <DaywellEmptyState
-                          icon={<Layers className="w-6 h-6" />}
-                          message="No active projects yet"
-                          subtitle="Group related tasks and milestones into a project to track completion."
-                          actionLabel="Open Projects"
-                          onActionPressed={() => openProjectsFromDashboard(null)}
-                        />
-                      </DaywellCard>
-                    ) : (
-                      <DaywellCard padding="md" radius="lg" className="space-y-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body">
-                          <span>
-                            {projectsOverview.completedTasks}/{projectsOverview.totalTasks}{' '}
-                            {projectsOverview.totalTasks === 1 ? 'task' : 'tasks'} ·{' '}
-                            {projectsOverview.remainingTasks} remaining
-                          </span>
-                          {projectsOverview.totalMilestones > 0 && (
-                            <span>
-                              {projectsOverview.completedMilestones}/{projectsOverview.totalMilestones}{' '}
-                              {projectsOverview.totalMilestones === 1 ? 'milestone' : 'milestones'}
-                            </span>
-                          )}
+                        <div className="flex items-center gap-2 text-xs text-white/85 mt-3">
+                          <Clock3 className="w-3.5 h-3.5" />
+                          <span>Sample focus card · Portfolio refresh prototype</span>
                         </div>
-                        <div className="space-y-2.5">
-                          {projectsOverview.projects.slice(0, 4).map((item) => (
-                            <div
-                              key={item.project.id}
-                              role="button"
-                              tabIndex={0}
-                              onClick={() => openProjectsFromDashboard(item.project.id)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  openProjectsFromDashboard(item.project.id);
-                                }
-                              }}
-                              className="p-2.5 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] bg-[var(--dw-surface-subtle)] hover:border-[var(--dw-primary)] transition-colors cursor-pointer space-y-1.5"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-1.5 min-w-0">
-                                  <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
-                                    {item.project.title}
-                                  </span>
-                                  {item.project.status !== 'active' && (
-                                    <DaywellStatusBadge
-                                      label={item.project.status === 'on_hold' ? 'On Hold' : 'Completed'}
-                                      tone={item.project.status === 'completed' ? 'success' : 'warning'}
-                                      showIcon={false}
-                                    />
-                                  )}
-                                </div>
-                                <span className="text-xs font-extrabold text-[var(--dw-text-primary)] dw-type-numeric-body shrink-0">
-                                  {item.displayPercentage}%
-                                </span>
-                              </div>
-                              <DaywellProgressBar
-                                value={item.displayPercentage}
-                                label={`${item.project.title} progress`}
-                              />
-                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
-                                <span>
-                                  {item.completedTasks}/{item.totalTasks}{' '}
-                                  {item.totalTasks === 1 ? 'task' : 'tasks'} · {item.remainingTasks}{' '}
-                                  remaining
-                                </span>
-                                {item.hasMilestones && (
-                                  <span>
-                                    · {item.completedMilestones}/{item.totalMilestones}{' '}
-                                    {item.totalMilestones === 1 ? 'milestone' : 'milestones'}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          ))}
+                      </div>
+
+                      {/* Device Storage & Local Export Link */}
+                      <DaywellCard
+                        padding="compact"
+                        onClick={() => navigateTo('sync_backup')}
+                        className="flex items-center justify-between text-xs text-[var(--dw-text-secondary)]"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <HardDrive className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
+                          <span className="truncate">Saved on this device · Local backup</span>
                         </div>
-                        {projectsOverview.totalProjectsCount > 4 && (
-                          <DaywellButton
-                            label={`+ ${projectsOverview.totalProjectsCount - 4} more projects`}
-                            variant="text"
-                            size="compact"
-                            onClick={() => openProjectsFromDashboard(null)}
-                          />
-                        )}
+                        <ChevronRight className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
                       </DaywellCard>
-                    )}
+                    </div>
                   </div>
-
-                  {/* Safe Harbor v7 Hero Snippet (Live Finance Data) */}
-                  <DaywellCard padding="md" radius="xl" className="space-y-2">
-                    <div className="flex items-center justify-between text-[10px] font-bold tracking-wider uppercase">
-                      <span
-                        className={
-                          todaySafeHarbor.isShortfall
-                            ? 'text-[var(--dw-on-expense-container)]'
-                            : 'text-[var(--dw-text-muted)]'
-                        }
-                      >
-                        {todaySafeHarbor.isShortfall ? 'SHORTFALL · ' : ''}AVAILABLE TO SPEND (H:{' '}
-                        {todaySafeHarbor.planningPeriodEndIso})
-                      </span>
-                    </div>
-                    <div className="flex items-baseline justify-between gap-2 mt-0.5">
-                      <span
-                        className={`dw-type-numeric-hero ${
-                          todaySafeHarbor.isShortfall
-                            ? 'text-[var(--dw-on-expense-container)]'
-                            : 'text-[var(--dw-text-primary)]'
-                        }`}
-                      >
-                        {(todaySafeHarbor.availableToSpendCents / 100).toLocaleString('en-US', {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}{' '}
-                        <span className="text-sm font-bold text-[var(--dw-primary)]">
-                          ETB
-                        </span>
-                      </span>
-                      <DaywellButton
-                        label="View ledger"
-                        variant="text"
-                        size="compact"
-                        trailingIcon={<ChevronRight className="w-3.5 h-3.5" />}
-                        onClick={() => navigateTo('finance')}
-                      />
-                    </div>
-                    {(todaySafeHarbor.prepaidCardCreditCents > 0 ||
-                      todaySafeHarbor.nonEtbAccountCount > 0 ||
-                      (todaySafeHarbor.unverifiedAccountCount || 0) > 0 ||
-                      todaySafeHarbor.currencyReviewEntryCount > 0 ||
-                      todaySafeHarbor.unverifiedLegacyPaidCount > 0) && (
-                      <div className="text-[11px] text-[var(--dw-text-muted)] flex flex-wrap gap-x-3 gap-y-0.5 tabular-nums">
-                        {todaySafeHarbor.prepaidCardCreditCents > 0 && (
-                          <span className="text-[var(--dw-on-income-container)] font-medium">
-                            Includes +{formatBirr(todaySafeHarbor.prepaidCardCreditCents)} Prepaid
-                            Credit
-                          </span>
-                        )}
-                        {todaySafeHarbor.nonEtbAccountCount > 0 && (
-                          <span>
-                            {todaySafeHarbor.nonEtbAccountCount} non-ETB account(s) excluded
-                          </span>
-                        )}
-                        {(todaySafeHarbor.unverifiedAccountCount || 0) > 0 && (
-                          <span className="text-[var(--dw-on-warning-container)]">
-                            {todaySafeHarbor.unverifiedAccountCount} unverified account(s) excluded
-                          </span>
-                        )}
-                        {todaySafeHarbor.currencyReviewEntryCount > 0 && (
-                          <span className="text-[var(--dw-on-expense-container)] font-medium">
-                            {todaySafeHarbor.currencyReviewEntryCount} entry review notice(s)
-                          </span>
-                        )}
-                        {todaySafeHarbor.unverifiedLegacyPaidCount > 0 && (
-                          <span className="text-[var(--dw-on-warning-container)]">
-                            {todaySafeHarbor.unverifiedLegacyPaidCount} unverified legacy bill(s)
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    {todayFinanceSummary.recentEntries.length > 0 && (
-                      <div className="pt-2 space-y-1.5 border-t border-[var(--dw-divider)]">
-                        {todayFinanceSummary.recentEntries.map(({ entry, cls, formattedAmount }) => (
-                          <div
-                            key={entry.id}
-                            className={`flex items-center justify-between gap-2 text-[11px] ${
-                              entry.isVoided ? 'opacity-55' : ''
-                            }`}
-                          >
-                            <div className="min-w-0 flex items-center gap-1.5">
-                              <span
-                                className={`truncate font-medium text-[var(--dw-text-primary)] ${
-                                  entry.isVoided ? 'line-through' : ''
-                                }`}
-                              >
-                                {entry.description}
-                              </span>
-                              {entry.isVoided ? (
-                                <DaywellStatusBadge tone="neutral" showIcon={false} label="Voided" />
-                              ) : cls?.status === 'excluded_non_etb' ? (
-                                <DaywellStatusBadge
-                                  tone="warning"
-                                  showIcon={false}
-                                  label={`Excluded (${cls.nativeCurrencyCode || cls.touchedCurrencies[0] || 'Non-ETB'})`}
-                                />
-                              ) : cls?.status === 'mixed_or_ambiguous' ? (
-                                <DaywellStatusBadge
-                                  tone="error"
-                                  showIcon={false}
-                                  label="Currency Review"
-                                />
-                              ) : null}
-                            </div>
-                            <span className="dw-type-mono font-semibold text-[var(--dw-text-secondary)] shrink-0">
-                              {formattedAmount}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </DaywellCard>
-
-                  {/* Device Storage & Local Export Link */}
-                  <DaywellCard
-                    padding="compact"
-                    onClick={() => navigateTo('sync_backup')}
-                    className="flex items-center justify-between text-xs text-[var(--dw-text-secondary)]"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <HardDrive className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
-                      <span className="truncate">Saved on this device · Local backup</span>
-                    </div>
-                    <ChevronRight className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
-                  </DaywellCard>
                 </div>
               )}
 

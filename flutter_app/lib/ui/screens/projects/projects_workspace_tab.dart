@@ -388,7 +388,7 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                         .where(
                           (t) =>
                               t.projectId == project.id &&
-                              !t.isArchived &&
+                              (project.isArchived || !t.isArchived) &&
                               t.status != 'cancelled',
                         )
                         .toList(growable: false);
@@ -502,8 +502,7 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                                   [
                                     if (blocks.isNotEmpty)
                                       '${blocks.length} ${blocks.length == 1 ? "block" : "blocks"}',
-                                    if (projectTasks.isNotEmpty)
-                                      '$completedTasksCount/${projectTasks.length} ${projectTasks.length == 1 ? "task" : "tasks"} · $remainingTasksCount remaining',
+                                    '$completedTasksCount/${projectTasks.length} ${projectTasks.length == 1 ? "task" : "tasks"} · $remainingTasksCount remaining',
                                     if (projectMilestones.isNotEmpty)
                                       '$completedMilestonesCount/${projectMilestones.length} ${projectMilestones.length == 1 ? "milestone" : "milestones"}',
                                     if (project.targetDate != null)

@@ -104,7 +104,8 @@ export function ProjectsWorkspaceView({
       for (const proj of all) {
         nextDerived[proj.id] = projectsService.getDerivedTaskMilestoneProgress(
           proj,
-          nextSummaries[proj.id]
+          nextSummaries[proj.id],
+          { includeArchivedTasks: Boolean(proj.isArchived) }
         );
       }
       setProjects(all);
@@ -363,11 +364,9 @@ export function ProjectsWorkspaceView({
                     activeMetrics.length === 1 ? 'block' : 'blocks'
                   }`
                 : null,
-              taskTotal > 0
-                ? `${taskCompleted}/${taskTotal} ${
-                    taskTotal === 1 ? 'task' : 'tasks'
-                  } · ${taskRemaining} left`
-                : null,
+              `${taskCompleted}/${taskTotal} ${
+                taskTotal === 1 ? 'task' : 'tasks'
+              } · ${taskRemaining} remaining`,
               msTotal > 0
                 ? `${msCompleted}/${msTotal} ${msTotal === 1 ? 'milestone' : 'milestones'}`
                 : null,

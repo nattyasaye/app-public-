@@ -612,7 +612,7 @@ export class WebProjectsRepository implements IWebProjectsRepository {
 
   public getProjectProgressSummary(
     projectId: string,
-    options: { asOfDate?: CalendarDate } = {}
+    options: { asOfDate?: CalendarDate; includeArchivedTasks?: boolean } = {}
   ): ProjectProgressSummary {
     const project = this.getProjectById(projectId);
     if (!project) {
@@ -633,6 +633,7 @@ export class WebProjectsRepository implements IWebProjectsRepository {
       linkedTasks,
       milestones,
       asOfDate: options.asOfDate,
+      includeArchivedTasks: options.includeArchivedTasks,
     });
   }
 

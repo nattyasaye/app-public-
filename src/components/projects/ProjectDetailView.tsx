@@ -354,7 +354,7 @@ export function ProjectDetailView({
                     />
                   )}
                   <div className="flex items-center flex-wrap gap-2 text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
-                    {derivedProgress && derivedProgress.totalTasks > 0 && (
+                    {derivedProgress && (
                       <span>
                         {derivedProgress.completedTasks}/{derivedProgress.totalTasks}{' '}
                         {derivedProgress.totalTasks === 1 ? 'task' : 'tasks'} ·{' '}
@@ -367,8 +367,7 @@ export function ProjectDetailView({
                     )}
                     {derivedProgress && derivedProgress.totalMilestones > 0 && (
                       <span>
-                        {derivedProgress.totalTasks > 0 ? '· ' : ''}
-                        {derivedProgress.completedMilestones}/{derivedProgress.totalMilestones}{' '}
+                        · {derivedProgress.completedMilestones}/{derivedProgress.totalMilestones}{' '}
                         {derivedProgress.totalMilestones === 1 ? 'milestone' : 'milestones'}
                       </span>
                     )}
