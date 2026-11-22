@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/tasks/tasks_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
+import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/core/shared_foundation_core.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/database_persistence_coordinator.dart';
@@ -33,8 +34,8 @@ void main() {
           frequency: 'weekly',
           interval: 2,
           weekdays: const [1, 4],
-          startDate: CalendarDate(2026, 11, 1),
-          endDate: CalendarDate(2027, 1, 31),
+          startDate: CalendarDate(year: 2026, month: 11, day: 1),
+          endDate: CalendarDate(year: 2027, month: 1, day: 31),
           repeatFrom: 'completion_date',
         );
 
@@ -43,11 +44,11 @@ void main() {
           title: 'Design Audit',
           description: 'Review color contrast and tokens',
           priority: 'high',
-          dueDate: CalendarDate(2026, 11, 25),
-          scheduledDate: CalendarDate(2026, 11, 21),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 25),
+          scheduledDate: CalendarDate(year: 2026, month: 11, day: 21),
           scheduledTime: '09:45',
           isMyDay: true,
-          myDayDate: CalendarDate(2026, 11, 21),
+          myDayDate: CalendarDate(year: 2026, month: 11, day: 21),
           recurrenceRule: 'weekly',
           recurrenceConfig: recurrence,
           isArchived: true,
@@ -62,7 +63,7 @@ void main() {
         expect(task.status, 'completed');
         expect(task.completedAt, isNotNull);
         expect(task.scheduledTime, '09:45');
-        expect(task.myDayDate, CalendarDate(2026, 11, 21));
+        expect(task.myDayDate, CalendarDate(year: 2026, month: 11, day: 21));
         expect(task.recurrenceConfig, recurrence);
         expect(task.isArchived, isTrue);
         expect(task.sortOrder, 5);
@@ -72,7 +73,7 @@ void main() {
         // Upsert DailyPlanningEntry and verify query by date & taskId
         final entry = DailyPlanningEntryEntity(
           id: 'dpe-1',
-          planDate: CalendarDate(2026, 11, 21),
+          planDate: CalendarDate(year: 2026, month: 11, day: 21),
           taskId: 'task-ctrl-1',
           action: 'completed',
           createdAt: DateTime.utc(2026, 11, 21, 6, 0),
@@ -80,7 +81,7 @@ void main() {
         );
         await repo.upsertDailyPlanningEntry(entry);
         final entries = await repo.getDailyPlanningEntries(
-          planDate: CalendarDate(2026, 11, 21),
+          planDate: CalendarDate(year: 2026, month: 11, day: 21),
         );
         expect(entries.length, 1);
         expect(entries.single.id, 'dpe-1');
@@ -113,8 +114,8 @@ void main() {
             status: 'completed',
             priority: 'urgent',
             completedAt: DateTime.utc(2026, 11, 21, 12, 30),
-            dueDate: CalendarDate(2026, 11, 21),
-            scheduledDate: CalendarDate(2026, 11, 21),
+            dueDate: CalendarDate(year: 2026, month: 11, day: 21),
+            scheduledDate: CalendarDate(year: 2026, month: 11, day: 21),
             scheduledTime: '15:20',
             projectId: 'proj-v10',
             subtasks: const [
@@ -122,13 +123,13 @@ void main() {
               TaskSubtask(id: 'sub-custom-2', title: 'Restore', done: false),
             ],
             isMyDay: true,
-            myDayDate: CalendarDate(2026, 11, 21),
+            myDayDate: CalendarDate(year: 2026, month: 11, day: 21),
             recurrenceRule: 'daily',
             recurrenceConfig: TaskRecurrenceConfig(
               frequency: 'daily',
               interval: 1,
-              startDate: CalendarDate(2026, 11, 1),
-              endDate: CalendarDate(2026, 12, 31),
+              startDate: CalendarDate(year: 2026, month: 11, day: 1),
+              endDate: CalendarDate(year: 2026, month: 12, day: 31),
               repeatFrom: 'due_date',
             ),
             isArchived: true,
@@ -138,7 +139,7 @@ void main() {
         await repo.upsertDailyPlanningEntry(
           DailyPlanningEntryEntity(
             id: 'dpe-v10-1',
-            planDate: CalendarDate(2026, 11, 21),
+            planDate: CalendarDate(year: 2026, month: 11, day: 21),
             taskId: 'task-v10',
             action: 'carried_forward',
             createdAt: DateTime.utc(2026, 11, 21, 5, 0),
@@ -182,7 +183,10 @@ void main() {
         expect(restoredTasks.single.completedAt,
             DateTime.utc(2026, 11, 21, 12, 30));
         expect(restoredTasks.single.scheduledTime, '15:20');
-        expect(restoredTasks.single.myDayDate, CalendarDate(2026, 11, 21));
+        expect(
+          restoredTasks.single.myDayDate,
+          CalendarDate(year: 2026, month: 11, day: 21),
+        );
         expect(restoredTasks.single.recurrenceConfig?.frequency, 'daily');
         expect(restoredTasks.single.isArchived, isTrue);
         expect(restoredTasks.single.sortOrder, 9);
@@ -195,7 +199,10 @@ void main() {
             await DriftTasksRepository(targetDb).getDailyPlanningEntries();
         expect(restoredEntries.single.id, 'dpe-v10-1');
         expect(restoredEntries.single.action, 'carried_forward');
-        expect(restoredEntries.single.planDate, CalendarDate(2026, 11, 21));
+        expect(
+          restoredEntries.single.planDate,
+          CalendarDate(year: 2026, month: 11, day: 21),
+        );
       },
     );
 
@@ -277,7 +284,7 @@ void main() {
                 type: 'asset',
                 subType: const Value('cash'),
                 currencyCode: const Value('ETB'),
-                balanceCents: const Value(50000),
+                openingBalanceCents: const Value(50000),
                 createdAt: DateTime.utc(2026, 11, 20),
               ),
             );
@@ -291,7 +298,7 @@ void main() {
         await DriftTasksRepository(db).upsertDailyPlanningEntry(
           DailyPlanningEntryEntity(
             id: 'dpe-keep-fin',
-            planDate: CalendarDate(2026, 11, 21),
+            planDate: CalendarDate(year: 2026, month: 11, day: 21),
             taskId: 'task-keep-fin',
             action: 'planned',
           ),
@@ -346,7 +353,7 @@ void main() {
         await DriftTasksRepository(db).upsertDailyPlanningEntry(
           DailyPlanningEntryEntity(
             id: 'dpe-existing',
-            planDate: CalendarDate(2026, 11, 21),
+            planDate: CalendarDate(year: 2026, month: 11, day: 21),
             taskId: 'task-existing',
             action: 'planned',
           ),

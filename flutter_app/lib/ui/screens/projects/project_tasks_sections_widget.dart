@@ -819,7 +819,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                         label: task.isCompleted ? 'Completed' : 'Active',
                         tone: task.isCompleted
                             ? DaywellStatusTone.success
-                            : DaywellStatusTone.neutral,
+                            : DaywellStatusTone.info,
                         showIcon: false,
                       ),
                       DaywellStatusBadge(
@@ -829,7 +829,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                             ? DaywellStatusTone.error
                             : task.priority == 'high'
                                 ? DaywellStatusTone.warning
-                                : DaywellStatusTone.neutral,
+                                : DaywellStatusTone.info,
                         showIcon: false,
                       ),
                       if (milestone != null)
@@ -1074,8 +1074,9 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                           ctrl.state.findReminderForTask(task.id);
                       unawaited(() async {
                         await ctrl.removeTaskReminder(task.id);
-                        if (!hostContext.mounted || prevReminder == null)
+                        if (!hostContext.mounted || prevReminder == null) {
                           return;
+                        }
                         ScaffoldMessenger.of(hostContext).clearSnackBars();
                         ScaffoldMessenger.of(hostContext).showSnackBar(
                           SnackBar(

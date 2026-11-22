@@ -1407,7 +1407,12 @@ class TasksController extends ChangeNotifier {
     return result.updatedTask;
   }
 
-  Future<({TaskEntity? updatedTask, TaskEntity? generatedNextTask})>
+  Future<
+      ({
+        TaskEntity? updatedTask,
+        TaskEntity? generatedNextTask,
+        bool seriesEnded,
+      })>
       updateTaskWithRecurrence({
     required String id,
     required String title,
@@ -1438,12 +1443,14 @@ class TasksController extends ChangeNotifier {
     if (trimmedTitle.isEmpty) {
       _state = _state.copyWith(errorMessage: 'Task title is required');
       notifyListeners();
-      return (updatedTask: null, generatedNextTask: null);
+      return (updatedTask: null, generatedNextTask: null, seriesEnded: false);
     }
 
     final existing =
         _state.findTaskById(id) ?? await _repository.getTaskById(id);
-    if (existing == null) return (updatedTask: null, generatedNextTask: null);
+    if (existing == null) {
+      return (updatedTask: null, generatedNextTask: null, seriesEnded: false);
+    }
 
     if (!clearRecurrenceConfig && recurrenceConfig != null) {
       final recValidation =
@@ -1453,7 +1460,7 @@ class TasksController extends ChangeNotifier {
           errorMessage: recValidation.errors.values.first,
         );
         notifyListeners();
-        return (updatedTask: null, generatedNextTask: null);
+        return (updatedTask: null, generatedNextTask: null, seriesEnded: false);
       }
     }
 
@@ -1529,6 +1536,7 @@ class TasksController extends ChangeNotifier {
           await _repository.getTaskReminderForTask(persisted.id);
 
       TaskEntity? generatedNextTask;
+      var seriesEnded = false;
       final transitionedToCompleted =
           !existing.isCompleted && updated.isCompleted;
       if (transitionedToCompleted &&
@@ -1548,6 +1556,7 @@ class TasksController extends ChangeNotifier {
           existing.id,
           nowUtc: now,
         );
+        seriesEnded = recResult.seriesEnded;
         if (recResult.generatedNextTask != null) {
           generatedNextTask =
               await _repository.createTask(recResult.generatedNextTask!);
@@ -1585,11 +1594,15 @@ class TasksController extends ChangeNotifier {
         nowUtc: now,
       );
       notifyListeners();
-      return (updatedTask: persisted, generatedNextTask: generatedNextTask);
+      return (
+        updatedTask: persisted,
+        generatedNextTask: generatedNextTask,
+        seriesEnded: seriesEnded,
+      );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
       notifyListeners();
-      return (updatedTask: null, generatedNextTask: null);
+      return (updatedTask: null, generatedNextTask: null, seriesEnded: false);
     }
   }
 
@@ -2029,7 +2042,7 @@ class TasksController extends ChangeNotifier {
           await _repository.getTaskReminderForTask(id);
       await _repository.deleteTask(id);
       if (_onTaskDeleted != null) {
-        await _onTaskDeleted!(id);
+        await _onTaskDeleted(id);
       }
       await _cancelNotificationId(
         existingReminder?.id ?? TaskReminderEngine.canonicalReminderId(id),
@@ -2131,7 +2144,7 @@ class TasksController extends ChangeNotifier {
             await _repository.getTaskReminderForTask(id);
         await _repository.deleteTask(id);
         if (_onTaskDeleted != null) {
-          await _onTaskDeleted!(id);
+          await _onTaskDeleted(id);
         }
         await _cancelNotificationId(
           existingReminder?.id ?? TaskReminderEngine.canonicalReminderId(id),

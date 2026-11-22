@@ -47,8 +47,9 @@ class _InMemoryNotesRepository implements INotesRepository {
     // Simulates schema v4/v11 SQLite returning full persisted note metadata columns.
     return _store
         .where((n) {
-          if (linkedModule != null && n.linkedModule != linkedModule)
+          if (linkedModule != null && n.linkedModule != linkedModule) {
             return false;
+          }
           if (linkedId != null && n.linkedId != linkedId) return false;
           return true;
         })

@@ -751,8 +751,10 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         final isTaskLinked =
             effectiveLinkedModule == NoteEntity.taskLinkModule &&
                 effectiveLinkedId != null;
-        final linkedTask = isTaskLinked && tasksCtrl != null
-            ? tasksCtrl.state.findTaskById(effectiveLinkedId!)
+        final linkedTask = effectiveLinkedModule == NoteEntity.taskLinkModule &&
+                effectiveLinkedId != null &&
+                tasksCtrl != null
+            ? tasksCtrl.state.findTaskById(effectiveLinkedId)
             : null;
         final semantic = context.daywellColors;
         final colorScheme = Theme.of(context).colorScheme;

@@ -167,8 +167,9 @@ class TaskReminderEngine {
     final diffMs = anchor.utcInstant.millisecondsSinceEpoch -
         triggerTimeUtc.toUtc().millisecondsSinceEpoch;
     if (diffMs == 0) return TaskReminderPreset.atTime;
-    if (diffMs == 15 * 60 * 1000)
+    if (diffMs == 15 * 60 * 1000) {
       return TaskReminderPreset.fifteenMinutesBefore;
+    }
     if (diffMs == 60 * 60 * 1000) return TaskReminderPreset.oneHourBefore;
     if (diffMs == 24 * 60 * 60 * 1000) return TaskReminderPreset.oneDayBefore;
     return TaskReminderPreset.custom;

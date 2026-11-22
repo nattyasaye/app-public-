@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/tasks/tasks_controller.dart';
@@ -5,7 +6,6 @@ import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
-import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/domain/tasks/task_reminder_engine.dart';
 import 'package:personal_management_app/services/notifications/local_notification_service.dart';
 
@@ -106,9 +106,9 @@ void main() {
         final task = TaskEntity(
           id: 'eng-1',
           title: 'Submit audit packet',
-          scheduledDate: const CalendarDate(year: 2026, month: 12, day: 10),
+          scheduledDate: CalendarDate(year: 2026, month: 12, day: 10),
           scheduledTime: '14:00',
-          dueDate: const CalendarDate(year: 2026, month: 12, day: 12),
+          dueDate: CalendarDate(year: 2026, month: 12, day: 12),
         );
 
         final anchor = TaskReminderEngine.resolveAnchor(task);
@@ -121,7 +121,7 @@ void main() {
         final dueOnly = TaskEntity(
           id: 'eng-due',
           title: 'Pay utility bill',
-          dueDate: const CalendarDate(year: 2026, month: 12, day: 15),
+          dueDate: CalendarDate(year: 2026, month: 12, day: 15),
         );
         final dueAnchor = TaskReminderEngine.resolveAnchor(dueOnly);
         expect(dueAnchor, isNotNull);
@@ -151,7 +151,7 @@ void main() {
 
         // Date/time shift updates relative trigger automatically
         final shiftedTask = task.copyWith(
-          scheduledDate: const CalendarDate(year: 2026, month: 12, day: 11),
+          scheduledDate: CalendarDate(year: 2026, month: 12, day: 11),
           scheduledTime: '16:00',
         );
         final shiftedReminder = TaskReminderEngine.reconcileForUpdatedTask(

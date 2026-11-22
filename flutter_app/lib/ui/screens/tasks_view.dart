@@ -2437,7 +2437,7 @@ class _TasksViewState extends State<TasksView>
               for (final sec in sections)
                 DropdownMenuItem<String?>(
                   value: sec.id,
-                  child: Text(sec.title),
+                  child: Text(sec.title ?? 'Untitled Section'),
                 ),
               const DropdownMenuItem<String?>(
                 value: '__unsectioned__',
@@ -2614,9 +2614,7 @@ class _TasksViewState extends State<TasksView>
               ),
               DaywellStatusBadge(
                 label: '${sorted.length} Pending',
-                tone: sorted.isNotEmpty
-                    ? DaywellStatusTone.info
-                    : DaywellStatusTone.neutral,
+                tone: DaywellStatusTone.info,
               ),
             ],
           ),
@@ -3046,7 +3044,7 @@ class _TasksViewState extends State<TasksView>
                                   await controller.carryForwardUnfinishedTasks(
                                 toDate: targetDate,
                               );
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).clearSnackBars();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
@@ -3068,7 +3066,7 @@ class _TasksViewState extends State<TasksView>
                                 toDate: today,
                               );
                               controller.setSelectedPlanDate(today);
-                              if (!mounted) return;
+                              if (!context.mounted) return;
                               ScaffoldMessenger.of(context).clearSnackBars();
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(

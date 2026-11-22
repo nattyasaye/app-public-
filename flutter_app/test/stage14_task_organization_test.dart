@@ -320,7 +320,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: TasksView(
               controller: h.tasksCtrl,
               projectsController: h.projectsCtrl,

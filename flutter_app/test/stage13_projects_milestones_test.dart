@@ -56,8 +56,8 @@ void main() {
           id: 'proj-f13-1',
           title: 'Portfolio Website',
           description: 'Ship dark and light modes',
-          startDate: const CalendarDate(year: 2026, month: 11, day: 1),
-          targetDate: const CalendarDate(year: 2026, month: 12, day: 15),
+          startDate: CalendarDate(year: 2026, month: 11, day: 1),
+          targetDate: CalendarDate(year: 2026, month: 12, day: 15),
         );
         expect(project, isNotNull);
 
@@ -65,14 +65,14 @@ void main() {
         final ms = await h.tasksCtrl.addMilestone(
           projectId: project!.id,
           title: 'Design System Ready',
-          dueDate: const CalendarDate(year: 2026, month: 11, day: 28),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 28),
         );
         expect(ms, isNotNull);
 
         final updatedMs = await h.tasksCtrl.updateMilestone(
           milestoneId: ms!.id,
           title: 'Design System Approved',
-          dueDate: const CalendarDate(year: 2026, month: 12, day: 2),
+          dueDate: CalendarDate(year: 2026, month: 12, day: 2),
         );
         expect(updatedMs?.title, 'Design System Approved');
 
@@ -205,7 +205,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: Scaffold(
               body: ProjectsWorkspaceTab(
                 projectsController: h.projectsCtrl,
@@ -224,7 +224,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: ProjectDetailScreen(
               projectId: project.id,
               projectsController: h.projectsCtrl,

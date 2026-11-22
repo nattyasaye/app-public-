@@ -57,77 +57,77 @@ void main() {
       () {
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2026, month: 11, day: 22),
+            CalendarDate(year: 2026, month: 11, day: 22),
             const TaskRecurrenceConfig(frequency: 'daily', interval: 3),
           ),
-          const CalendarDate(year: 2026, month: 11, day: 25),
+          CalendarDate(year: 2026, month: 11, day: 25),
         );
 
         // Weekly Mon(1), Wed(3), Fri(5) every 2 weeks
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2026, month: 11, day: 23), // Mon
+            CalendarDate(year: 2026, month: 11, day: 23), // Mon
             const TaskRecurrenceConfig(
               frequency: 'weekly',
               interval: 2,
               weekdays: [1, 3, 5],
             ),
           ),
-          const CalendarDate(year: 2026, month: 11, day: 25), // Wed same week
+          CalendarDate(year: 2026, month: 11, day: 25), // Wed same week
         );
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2026, month: 11, day: 27), // Fri
+            CalendarDate(year: 2026, month: 11, day: 27), // Fri
             const TaskRecurrenceConfig(
               frequency: 'weekly',
               interval: 2,
               weekdays: [1, 3, 5],
             ),
           ),
-          const CalendarDate(year: 2026, month: 12, day: 7), // Mon + 2 weeks
+          CalendarDate(year: 2026, month: 12, day: 7), // Mon + 2 weeks
         );
 
         // Monthly Jan 31 -> Feb 28 (2026) and Feb 29 (2024 leap)
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2026, month: 1, day: 31),
+            CalendarDate(year: 2026, month: 1, day: 31),
             const TaskRecurrenceConfig(frequency: 'monthly', interval: 1),
           ),
-          const CalendarDate(year: 2026, month: 2, day: 28),
+          CalendarDate(year: 2026, month: 2, day: 28),
         );
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2024, month: 1, day: 31),
+            CalendarDate(year: 2024, month: 1, day: 31),
             const TaskRecurrenceConfig(frequency: 'monthly', interval: 1),
           ),
-          const CalendarDate(year: 2024, month: 2, day: 29),
+          CalendarDate(year: 2024, month: 2, day: 29),
         );
 
         // Yearly leap clamping
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2024, month: 2, day: 29),
+            CalendarDate(year: 2024, month: 2, day: 29),
             const TaskRecurrenceConfig(frequency: 'yearly', interval: 1),
           ),
-          const CalendarDate(year: 2025, month: 2, day: 28),
+          CalendarDate(year: 2025, month: 2, day: 28),
         );
 
         // Start date floor & end date cap
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2026, month: 11, day: 20),
-            const TaskRecurrenceConfig(
+            CalendarDate(year: 2026, month: 11, day: 20),
+            TaskRecurrenceConfig(
               frequency: 'daily',
               interval: 1,
               startDate: CalendarDate(year: 2026, month: 11, day: 28),
             ),
           ),
-          const CalendarDate(year: 2026, month: 11, day: 28),
+          CalendarDate(year: 2026, month: 11, day: 28),
         );
         expect(
           TaskRecurrenceEngine.computeNextRecurrenceDate(
-            const CalendarDate(year: 2026, month: 11, day: 28),
-            const TaskRecurrenceConfig(
+            CalendarDate(year: 2026, month: 11, day: 28),
+            TaskRecurrenceConfig(
               frequency: 'daily',
               interval: 2,
               endDate: CalendarDate(year: 2026, month: 11, day: 29),
@@ -138,7 +138,7 @@ void main() {
 
         // Validation catches endDate < startDate & interval < 1
         final invalid = TaskRecurrenceEngine.validateConfig(
-          const TaskRecurrenceConfig(
+          TaskRecurrenceConfig(
             frequency: 'weekly',
             interval: 0,
             startDate: CalendarDate(year: 2026, month: 12, day: 10),
@@ -153,8 +153,8 @@ void main() {
         final compTask = TaskEntity(
           id: 'comp-anchor',
           title: 'Water plants',
-          scheduledDate: const CalendarDate(year: 2026, month: 11, day: 19),
-          dueDate: const CalendarDate(year: 2026, month: 11, day: 20),
+          scheduledDate: CalendarDate(year: 2026, month: 11, day: 19),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 20),
           recurrenceConfig: const TaskRecurrenceConfig(
             frequency: 'daily',
             interval: 3,
@@ -168,10 +168,10 @@ void main() {
           nowUtc: DateTime.utc(2026, 11, 22, 22, 0), // 2026-11-23 01:00 UTC+3
         );
         expect(nextDates?.dueDate,
-            const CalendarDate(year: 2026, month: 11, day: 26));
+            CalendarDate(year: 2026, month: 11, day: 26));
         expect(
           nextDates?.scheduledDate,
-          const CalendarDate(year: 2026, month: 11, day: 25),
+          CalendarDate(year: 2026, month: 11, day: 25),
         );
       },
     );
@@ -185,10 +185,10 @@ void main() {
         final created = await ctrl.createTask(
           id: 'frec-1',
           title: 'Weekly tax summary',
-          dueDate: const CalendarDate(year: 2026, month: 11, day: 22),
-          scheduledDate: const CalendarDate(year: 2026, month: 11, day: 21),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 22),
+          scheduledDate: CalendarDate(year: 2026, month: 11, day: 21),
           isMyDay: true,
-          myDayDate: const CalendarDate(year: 2026, month: 11, day: 22),
+          myDayDate: CalendarDate(year: 2026, month: 11, day: 22),
           subtasks: const [
             TaskSubtask(
                 id: 'frec-1-sub-1', title: 'Gather receipts', done: true),
@@ -212,10 +212,10 @@ void main() {
         final spawned = firstToggle.generatedNextTask!;
         expect(spawned.isCompleted, isFalse);
         expect(spawned.dueDate,
-            const CalendarDate(year: 2026, month: 11, day: 29));
+            CalendarDate(year: 2026, month: 11, day: 29));
         expect(
           spawned.scheduledDate,
-          const CalendarDate(year: 2026, month: 11, day: 28),
+          CalendarDate(year: 2026, month: 11, day: 28),
         );
         expect(spawned.isMyDay, isFalse);
         expect(spawned.myDayDate, isNull);
@@ -234,25 +234,25 @@ void main() {
         final skipped = await ctrl.skipRecurrenceOccurrence(spawned.id);
         expect(
           skipped?.dueDate,
-          const CalendarDate(year: 2026, month: 12, day: 6),
+          CalendarDate(year: 2026, month: 12, day: 6),
         );
         expect(
           skipped?.scheduledDate,
-          const CalendarDate(year: 2026, month: 12, day: 5),
+          CalendarDate(year: 2026, month: 12, day: 5),
         );
 
         // Reschedule spawned occurrence preserves lead time and config
         final rescheduled = await ctrl.rescheduleTaskOccurrence(
           spawned.id,
-          const CalendarDate(year: 2026, month: 12, day: 10),
+          CalendarDate(year: 2026, month: 12, day: 10),
         );
         expect(
           rescheduled?.dueDate,
-          const CalendarDate(year: 2026, month: 12, day: 10),
+          CalendarDate(year: 2026, month: 12, day: 10),
         );
         expect(
           rescheduled?.scheduledDate,
-          const CalendarDate(year: 2026, month: 12, day: 9),
+          CalendarDate(year: 2026, month: 12, day: 9),
         );
         expect(rescheduled?.recurrenceConfig?.frequency, 'weekly');
 
@@ -262,7 +262,7 @@ void main() {
         expect(stopped?.recurrenceRule, isNull);
         expect(
           stopped?.dueDate,
-          const CalendarDate(year: 2026, month: 12, day: 10),
+          CalendarDate(year: 2026, month: 12, day: 10),
         );
 
         // Undo completion deletes generated occurrence and restores previous snapshot
@@ -306,7 +306,7 @@ void main() {
           id: 'proj-rec-task-1',
           title: 'Reconcile ledger',
           projectId: project.id,
-          dueDate: const CalendarDate(year: 2026, month: 11, day: 25),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 25),
           recurrenceConfig: const TaskRecurrenceConfig(
             frequency: 'monthly',
             interval: 1,

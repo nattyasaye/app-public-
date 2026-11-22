@@ -11,7 +11,6 @@ import 'package:personal_management_app/data/repositories/calendar_repository.da
 import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
 import 'package:personal_management_app/domain/tasks/task_calendar_engine.dart';
-import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/domain/tasks/task_recurrence_engine.dart';
 import 'package:personal_management_app/ui/screens/calendar_view.dart';
 import 'package:personal_management_app/ui/screens/tasks_view.dart';
@@ -68,27 +67,27 @@ void main() {
         final splitTask = TaskEntity(
           id: 'split-1',
           title: 'Draft quarterly report',
-          scheduledDate: const CalendarDate(year: 2026, month: 11, day: 23),
+          scheduledDate: CalendarDate(year: 2026, month: 11, day: 23),
           scheduledTime: '09:00',
           estimatedDurationMinutes: 60,
-          dueDate: const CalendarDate(year: 2026, month: 11, day: 25),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 25),
           priority: 'high',
         );
         final archivedTask = TaskEntity(
           id: 'arch-1',
           title: 'Old item',
-          dueDate: const CalendarDate(year: 2026, month: 11, day: 24),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 24),
           isArchived: true,
         );
 
         expect(
           TaskCalendarEngine.getTaskPrimaryCalendarDate(splitTask),
-          const CalendarDate(year: 2026, month: 11, day: 23),
+          CalendarDate(year: 2026, month: 11, day: 23),
         );
 
         final range = DateRange(
-          start: const CalendarDate(year: 2026, month: 11, day: 20),
-          end: const CalendarDate(year: 2026, month: 12, day: 15),
+          start: CalendarDate(year: 2026, month: 11, day: 20),
+          end: CalendarDate(year: 2026, month: 12, day: 15),
         );
         final splitOccurrences = TaskCalendarEngine.projectTasksForDateRange(
           [splitTask, archivedTask],
@@ -98,24 +97,24 @@ void main() {
         expect(splitOccurrences[0].kind, TaskCalendarOccurrenceKind.scheduled);
         expect(
           splitOccurrences[0].companionDueDate,
-          const CalendarDate(year: 2026, month: 11, day: 25),
+          CalendarDate(year: 2026, month: 11, day: 25),
         );
         expect(splitOccurrences[1].kind, TaskCalendarOccurrenceKind.due);
         expect(
           splitOccurrences[1].companionScheduledDate,
-          const CalendarDate(year: 2026, month: 11, day: 23),
+          CalendarDate(year: 2026, month: 11, day: 23),
         );
 
         // Recurring task completion preserves historical completed row and spawns next occurrence without duplicate preview
         final recurring = TaskEntity(
           id: 'rec-cal-f1',
           title: 'Weekly ledger backup',
-          dueDate: const CalendarDate(year: 2026, month: 11, day: 22),
-          scheduledDate: const CalendarDate(year: 2026, month: 11, day: 22),
-          recurrenceConfig: const TaskRecurrenceConfig(
+          dueDate: CalendarDate(year: 2026, month: 11, day: 22),
+          scheduledDate: CalendarDate(year: 2026, month: 11, day: 22),
+          recurrenceConfig: TaskRecurrenceConfig(
             frequency: 'weekly',
             interval: 1,
-            weekdays: [7],
+            weekdays: const [7],
             endDate: CalendarDate(year: 2026, month: 12, day: 8),
             repeatFrom: 'due_date',
           ),
@@ -146,12 +145,12 @@ void main() {
         expect(after[0].isProjectedOccurrence, isFalse);
         expect(
           after[1].occurrenceDate,
-          const CalendarDate(year: 2026, month: 11, day: 29),
+          CalendarDate(year: 2026, month: 11, day: 29),
         );
         expect(after[1].isProjectedOccurrence, isFalse);
         expect(
           after[2].occurrenceDate,
-          const CalendarDate(year: 2026, month: 12, day: 6),
+          CalendarDate(year: 2026, month: 12, day: 6),
         );
         expect(after[2].isProjectedOccurrence, isTrue);
       },
@@ -256,8 +255,8 @@ void main() {
       '3. TasksView supports requestedTaskFocus into Task details and View in Calendar navigation using primary task date',
       (WidgetTester tester) async {
         final h = await createHarness();
-        const scheduledDate = CalendarDate(year: 2026, month: 11, day: 24);
-        const dueDate = CalendarDate(year: 2026, month: 11, day: 28);
+        final scheduledDate = CalendarDate(year: 2026, month: 11, day: 24);
+        final dueDate = CalendarDate(year: 2026, month: 11, day: 28);
 
         await h.tasksCtrl.createTask(
           id: 'focus-task-1',

@@ -742,7 +742,9 @@ class TaskReminderEntity {
       title: json['title']?.toString(),
       channelId: json['channelId']?.toString(),
       triggerTimeUtc:
-          EthiopiaClock.tryParseInstantUtc(json['triggerTimeUtc']?.toString()),
+          EthiopiaClock.tryParseInstantUtc(json['triggerTimeUtc']?.toString()) ??
+              EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()) ??
+              EthiopiaClock.nowUtc(),
       isActive: json['isActive'] != false,
       createdAt:
           EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),

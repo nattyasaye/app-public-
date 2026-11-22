@@ -1279,16 +1279,14 @@ class _CalendarViewState extends State<CalendarView> {
                 DaywellSectionHeader(
                   title:
                       'Schedule for ${SharedDateFormatter.formatDual(selectedDate)}',
-                  subtitle:
-                      '${dayEvents.length} events · ${dayTasks.length} tasks',
-                  trailing: widget.onOpenTasks != null
-                      ? DaywellButton(
-                          label: 'Open Tasks',
-                          variant: DaywellButtonVariant.text,
-                          size: DaywellButtonSize.compact,
-                          onPressed: widget.onOpenTasks,
-                        )
-                      : null,
+                  actionLabel: widget.onOpenTasks != null ? 'Open Tasks' : null,
+                  onActionPressed: widget.onOpenTasks,
+                ),
+                Text(
+                  '${dayEvents.length} events · ${dayTasks.length} tasks',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: semantic.textMuted,
+                  ),
                 ),
                 const SizedBox(height: SharedDesignTokens.spacingSm),
                 if (dayEvents.isEmpty && dayTasks.isEmpty)

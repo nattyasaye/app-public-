@@ -78,7 +78,7 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
       case 'high':
         return DaywellStatusTone.warning;
       default:
-        return DaywellStatusTone.neutral;
+        return DaywellStatusTone.info;
     }
   }
 
@@ -660,7 +660,7 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
                         if (task.dueDate != null)
                           DaywellStatusBadge(
                             label: 'Due ${task.dueDate!.toIsoString()}',
-                            tone: DaywellStatusTone.neutral,
+                            tone: DaywellStatusTone.info,
                             showIcon: false,
                           ),
                       ],

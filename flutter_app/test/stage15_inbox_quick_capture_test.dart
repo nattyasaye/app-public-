@@ -13,7 +13,6 @@ import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/inbox_repository.dart';
 import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
-import 'package:personal_management_app/domain/inbox/inbox_models.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 import 'package:personal_management_app/ui/screens/tasks_view.dart';
 import 'package:personal_management_app/ui/widgets/quick_capture_dialog.dart';
@@ -25,17 +24,19 @@ class _NoopNotificationService implements INotificationService {
   Future<void> initialize() async {}
 
   @override
-  Future<void> scheduleEthiopianReminder({
-    required int id,
+  Future<bool> requestPermissions() async => true;
+
+  @override
+  Future<void> scheduleReminder({
+    required String id,
     required String title,
     required String body,
-    required CalendarDate date,
-    int hour = 9,
-    int minute = 0,
+    required DateTime scheduledDateUtc,
+    String? payload,
   }) async {}
 
   @override
-  Future<void> cancelReminder(int id) async {}
+  Future<void> cancelReminder(String id) async {}
 
   @override
   Future<void> cancelAllReminders() async {}
@@ -183,7 +184,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: TasksView(
               controller: tasksCtrl,
               projectsController: projectsCtrl,
@@ -239,7 +240,7 @@ void main() {
         // Verify QuickCaptureDialog still captures directly into shared InboxController
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: Scaffold(
               body: Builder(
                 builder: (ctx) => TextButton(
