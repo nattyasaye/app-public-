@@ -78,13 +78,15 @@ import { FinanceComposerPrefill } from './components/finance/financeV7Types';
 import { DaywellFinanceModule } from './components/DaywellFinanceModule';
 import { DaywellCalendarModule } from './components/DaywellCalendarModule';
 import { DaywellTasksModule, DaywellTask, DEFAULT_SAMPLE_TASKS } from './components/DaywellTasksModule';
-import { DaywellNotesModule } from './components/DaywellNotesModule';
+import { DaywellNotesModule, DaywellNote } from './components/DaywellNotesModule';
 import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWizard';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { SharedStateBridge } from './services/sharedStateBridge';
 import { dailyPlanningService } from './services/dailyPlanningService';
 import { inboxService } from './services/inboxService';
+import { notesService } from './services/notesService';
 import { projectsService } from './services/projectsService';
+import { buildBoundedTaskNoteTitle } from './domain/taskNotes';
 import {
   taskRemindersService,
   WebNotificationSupportStatus,
@@ -216,6 +218,10 @@ export default function App() {
     dateStr: string;
     nonce: number;
   } | null>(null);
+  const [requestedNoteFocus, setRequestedNoteFocus] = useState<{
+    noteId: string;
+    nonce: number;
+  } | null>(null);
   const [dueReminderAlerts, setDueReminderAlerts] = useState<WebTaskReminderAlert[]>([]);
   const [isNotificationStatusModalOpen, setIsNotificationStatusModalOpen] = useState(false);
   const [notificationSupportStatus, setNotificationSupportStatus] =
@@ -304,6 +310,10 @@ export default function App() {
     SharedDailyPlanningEntry[]
   >(() => dailyPlanningService.loadDailyPlanningEntries());
 
+  const [notes, setNotes] = useState<DaywellNote[]>(() =>
+    notesService.loadNotes()
+  );
+
   const handleUpdateInboxItems = (next: SharedInboxItem[]) => {
     const saved = inboxService.saveInboxItems(next);
     setInboxItems(saved);
@@ -314,6 +324,15 @@ export default function App() {
   ) => {
     const saved = dailyPlanningService.saveDailyPlanningEntries(next);
     setDailyPlanningEntries(saved);
+  };
+
+  const handleUpdateNotes = (
+    updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
+  ) => {
+    setNotes((prev) => {
+      const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
+      return notesService.saveNotes(nextRaw, { emitSync: false });
+    });
   };
 
   const unprocessedInboxItems = useMemo(
@@ -331,6 +350,7 @@ export default function App() {
       SharedStateBridge.purgeKnownSeedData();
       setInboxItems(inboxService.loadInboxItems());
       setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
+      setNotes(notesService.loadNotes());
     } catch (e) {
       console.warn('Seed purge error:', e);
     }
@@ -382,8 +402,12 @@ export default function App() {
         detail !== null &&
         'inboxItems' in detail &&
         !('tasks' in detail);
+      const isNotesOnly =
+        detail !== null &&
+        'notes' in detail &&
+        !('tasks' in detail);
 
-      if (!isDailyPlanningOnly && !isInboxOnly) {
+      if (!isDailyPlanningOnly && !isInboxOnly && !isNotesOnly) {
         try {
           const saved = localStorage.getItem('daywell_tasks');
           if (saved) {
@@ -397,11 +421,14 @@ export default function App() {
         }
         setFinanceSyncTick((n) => n + 1);
       }
-      if (!isDailyPlanningOnly) {
+      if (!isDailyPlanningOnly && !isNotesOnly) {
         setInboxItems(inboxService.loadInboxItems());
       }
-      if (!isInboxOnly) {
+      if (!isInboxOnly && !isNotesOnly) {
         setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
+      }
+      if (!isDailyPlanningOnly && !isInboxOnly) {
+        setNotes(notesService.loadNotes());
       }
       setActiveTaskReminderCount(
         taskRemindersService.loadTaskReminders().filter((r) => r.isActive).length
@@ -833,24 +860,20 @@ export default function App() {
     }
 
     if (quickCaptureType === 'note') {
-      try {
-        const savedNotes = localStorage.getItem('daywell_notes');
-        const notesList = savedNotes ? JSON.parse(savedNotes) : [];
-        const newNote = {
-          id: `note-${Date.now()}`,
-          title: text.split('\n')[0].slice(0, 40) || 'Quick Note',
-          content: text,
-          notebook: 'Personal',
-          tags: ['quick_capture'],
-          isPinned: false,
-          isArchived: false,
-          createdAt: EthiopiaClock.nowUtc().toISOString(),
-          updatedAt: EthiopiaClock.nowUtc().toISOString(),
-        };
-        localStorage.setItem('daywell_notes', JSON.stringify([newNote, ...notesList]));
-      } catch (err) {
-        console.error(err);
-      }
+      const nowIso = EthiopiaClock.nowUtc().toISOString();
+      const firstLine = text.split('\n')[0] || 'Quick Note';
+      const newNote: DaywellNote = {
+        id: `note-${Date.now()}`,
+        title: buildBoundedTaskNoteTitle(firstLine.slice(0, 80)),
+        content: text,
+        notebook: 'Personal',
+        tags: ['quick_capture'],
+        isPinned: false,
+        isArchived: false,
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      handleUpdateNotes((prev) => [newNote, ...prev]);
       setIsSubmittingQuickCapture(false);
       setIsQuickCaptureOpen(false);
       setQuickCaptureInput('');
@@ -1935,6 +1958,8 @@ export default function App() {
                 <DaywellTasksModule
                   tasks={tasks}
                   onUpdateTasks={setTasks}
+                  notes={notes}
+                  onUpdateNotes={handleUpdateNotes}
                   inboxItems={inboxItems}
                   onUpdateInboxItems={handleUpdateInboxItems}
                   dailyPlanningEntries={dailyPlanningEntries}
@@ -1945,6 +1970,10 @@ export default function App() {
                   onNavigateToCalendar={(dateStr) => {
                     setRequestedCalendarFocus({ dateStr, nonce: Date.now() });
                     navigateTo('calendar');
+                  }}
+                  onNavigateToNote={(noteId) => {
+                    setRequestedNoteFocus({ noteId, nonce: Date.now() });
+                    navigateTo('notes');
                   }}
                   activeSubTab={tasksSubTab}
                   onSubTabChange={setTasksSubTab}
@@ -2064,6 +2093,19 @@ export default function App() {
               <div className={activeScreen === 'notes' ? 'block' : 'hidden'}>
                 <div className="space-y-4">
                   <DaywellNotesModule
+                    notes={notes}
+                    onUpdateNotes={handleUpdateNotes}
+                    tasks={tasks}
+                    requestedNoteFocus={requestedNoteFocus}
+                    onNavigateToTask={(taskId) => {
+                      setTasksSubTab('tasks');
+                      setRequestedTaskFocus({
+                        taskId,
+                        openMode: 'details',
+                        nonce: Date.now(),
+                      });
+                      navigateTo('tasks');
+                    }}
                     onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                     onNavigateToModule={(mod) => navigateTo(mod as ScreenId)}
                   />

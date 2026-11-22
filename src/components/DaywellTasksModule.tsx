@@ -23,6 +23,10 @@ import {
   Inbox as InboxIcon,
   ArrowRight,
   Sun,
+  FileText,
+  Link2,
+  Unlink,
+  ArrowUpRight,
 } from 'lucide-react';
 import {
   buildDailyPlanSnapshot,
@@ -113,11 +117,22 @@ import {
   utcIsoToEthiopiaWallDateTime,
 } from '../domain/taskReminders';
 import { getTaskPrimaryCalendarDate } from '../domain/taskCalendar';
+import {
+  countNotesLinkedToTask,
+  createNoteForTask,
+  getAvailableNotesToLink,
+  getNotesLinkedToTask,
+  linkNoteToTask,
+  unlinkNoteFromTask,
+  unlinkNotesForDeletedTask,
+} from '../domain/taskNotes';
 import { dailyPlanningService } from '../services/dailyPlanningService';
 import { inboxService } from '../services/inboxService';
+import { notesService } from '../services/notesService';
 import { projectsService } from '../services/projectsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { taskRemindersService } from '../services/taskRemindersService';
+import type { DaywellNote } from './DaywellNotesModule';
 import { ProjectsWorkspaceView } from './projects';
 import { MyDayPlanningView } from './tasks/MyDayPlanningView';
 import {
@@ -148,6 +163,10 @@ export type DaywellTask = DaywellTaskRecord;
 interface DaywellTasksModuleProps {
   tasks: DaywellTask[];
   onUpdateTasks: (updated: DaywellTask[]) => void;
+  notes?: DaywellNote[];
+  onUpdateNotes?: (
+    updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
+  ) => void;
   inboxItems?: SharedInboxItem[];
   onUpdateInboxItems?: (updated: SharedInboxItem[]) => void;
   dailyPlanningEntries?: SharedDailyPlanningEntry[];
@@ -165,6 +184,7 @@ interface DaywellTasksModuleProps {
   } | null;
   onRequestQuickCapture?: () => void;
   onNavigateToCalendar?: (dateStr: string) => void;
+  onNavigateToNote?: (noteId: string) => void;
   activeSubTab?: 'tasks' | 'projects';
   onSubTabChange?: (tab: 'tasks' | 'projects') => void;
   selectedProjectId?: string | null;
@@ -281,6 +301,8 @@ const DEFAULT_SAMPLE_TASKS: DaywellTask[] = [
 export function DaywellTasksModule({
   tasks,
   onUpdateTasks,
+  notes: controlledNotes,
+  onUpdateNotes,
   inboxItems: controlledInboxItems,
   onUpdateInboxItems,
   dailyPlanningEntries: controlledDailyPlanningEntries,
@@ -289,6 +311,7 @@ export function DaywellTasksModule({
   requestedTaskFocus,
   onRequestQuickCapture,
   onNavigateToCalendar,
+  onNavigateToNote,
   activeSubTab: controlledSubTab,
   onSubTabChange,
   selectedProjectId: controlledProjectId,
@@ -297,6 +320,9 @@ export function DaywellTasksModule({
   const [internalSubTab, setInternalSubTab] = useState<'tasks' | 'projects'>('tasks');
   const [internalProjectId, setInternalProjectId] = useState<string | null>(null);
   const [projectCreateTrigger, setProjectCreateTrigger] = useState(0);
+  const [internalNotes, setInternalNotes] = useState<DaywellNote[]>(() =>
+    notesService.loadNotes()
+  );
   const [internalInboxItems, setInternalInboxItems] = useState<SharedInboxItem[]>(() =>
     inboxService.loadInboxItems()
   );
@@ -313,6 +339,9 @@ export function DaywellTasksModule({
       return;
     }
     const handleSync = () => {
+      if (controlledNotes === undefined) {
+        setInternalNotes(notesService.loadNotes());
+      }
       if (controlledInboxItems === undefined) {
         setInternalInboxItems(inboxService.loadInboxItems());
       }
@@ -325,7 +354,23 @@ export function DaywellTasksModule({
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
-  }, [controlledInboxItems, controlledDailyPlanningEntries]);
+  }, [controlledNotes, controlledInboxItems, controlledDailyPlanningEntries]);
+
+  const effectiveNotes = controlledNotes ?? internalNotes;
+  const notesRef = useRef<DaywellNote[]>(effectiveNotes);
+  notesRef.current = effectiveNotes;
+  const applyNotesUpdate = (
+    updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
+  ) => {
+    if (onUpdateNotes) {
+      onUpdateNotes(updater);
+    } else {
+      setInternalNotes((prev) => {
+        const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
+        return notesService.saveNotes(nextRaw, { emitSync: true });
+      });
+    }
+  };
 
   const effectiveInboxItems = controlledInboxItems ?? internalInboxItems;
   const applyInboxUpdate = (next: SharedInboxItem[]) => {
@@ -459,7 +504,7 @@ export function DaywellTasksModule({
   const [editingFormSubtaskTitle, setEditingFormSubtaskTitle] = useState('');
   const [editingFormSubtaskError, setEditingFormSubtaskError] = useState('');
 
-  // Task Details inline subtask, recurrence & tag controls
+  // Task Details inline subtask, recurrence, notes & tag controls
   const [detailSubtaskInput, setDetailSubtaskInput] = useState('');
   const [detailSubtaskError, setDetailSubtaskError] = useState('');
   const [editingDetailSubtaskId, setEditingDetailSubtaskId] = useState<string | null>(null);
@@ -468,6 +513,9 @@ export function DaywellTasksModule({
   const [detailTagInput, setDetailTagInput] = useState('');
   const [detailTagError, setDetailTagError] = useState('');
   const [detailRecurrenceError, setDetailRecurrenceError] = useState('');
+  const [isDetailNotePickerOpen, setIsDetailNotePickerOpen] = useState(false);
+  const [detailNoteQuery, setDetailNoteQuery] = useState('');
+  const [detailNoteError, setDetailNoteError] = useState('');
 
   // Form Validation & Dirty State
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -486,6 +534,9 @@ export function DaywellTasksModule({
     setDetailTagInput('');
     setDetailTagError('');
     setDetailRecurrenceError('');
+    setIsDetailNotePickerOpen(false);
+    setDetailNoteQuery('');
+    setDetailNoteError('');
   };
 
   const allActiveProjects: SharedProject[] = useMemo(
@@ -1965,12 +2016,67 @@ export function DaywellTasksModule({
     }
   };
 
-  // Delete Task (confirmed safely, with Undo + Reminder & DailyPlanningEntries cleanup)
+  // Linked Notes Handlers (keep Notes module as single owner of note records)
+  const handleCreateLinkedNoteForTask = (task: DaywellTask) => {
+    const prevNotes = [...notesRef.current];
+    const res = createNoteForTask({ notes: notesRef.current, task });
+    if (!res.ok || !res.note) {
+      setDetailNoteError(res.error || 'Could not create linked note.');
+      return;
+    }
+    applyNotesUpdate(res.notes);
+    setIsDetailNotePickerOpen(false);
+    setDetailNoteQuery('');
+    setDetailNoteError('');
+    if (onNavigateToNote) {
+      setDetailTaskId(null);
+      onNavigateToNote(res.note.id);
+    } else {
+      triggerUndo(`Created note "${res.note.title}"`, () =>
+        applyNotesUpdate(prevNotes)
+      );
+    }
+  };
+
+  const handleLinkExistingNoteToTask = (task: DaywellTask, noteId: string) => {
+    const prevNotes = [...notesRef.current];
+    const res = linkNoteToTask(notesRef.current, noteId, task.id);
+    if (!res.ok || !res.updatedNote) {
+      setDetailNoteError(res.error || 'Could not link selected note.');
+      return;
+    }
+    applyNotesUpdate(res.notes);
+    setIsDetailNotePickerOpen(false);
+    setDetailNoteQuery('');
+    setDetailNoteError('');
+    triggerUndo(`Linked "${res.updatedNote.title}"`, () =>
+      applyNotesUpdate(prevNotes)
+    );
+  };
+
+  const handleUnlinkNoteFromDetailTask = (task: DaywellTask, noteId: string) => {
+    const prevNotes = [...notesRef.current];
+    const res = unlinkNoteFromTask(notesRef.current, noteId, task.id);
+    if (!res.ok || !res.updatedNote) {
+      setDetailNoteError(res.error || 'Could not unlink note.');
+      return;
+    }
+    applyNotesUpdate(res.notes);
+    setDetailNoteError('');
+    triggerUndo(
+      `Unlinked "${res.updatedNote.title}" (note preserved in Notes)`,
+      () => applyNotesUpdate(prevNotes)
+    );
+  };
+
+  // Delete Task (confirmed safely, with Undo + Reminder, DailyPlanningEntries, & non-destructive Note unlink)
   const executeDeleteTask = (taskId: string) => {
     const prev = [...tasks];
+    const prevNotes = [...notesRef.current];
     const prevEntries = [...effectiveDailyPlanningEntries];
     const prevReminders = taskRemindersService.loadAllReminders();
     const { remaining, deleted } = deleteTaskFromList(tasks, taskId);
+    const unlinkRes = unlinkNotesForDeletedTask(prevNotes, taskId);
     const nextEntries = prevEntries.filter((e) => e.taskId !== taskId);
     const reconciled = taskRemindersService.reconcileAndPersistForTasks({
       tasks: remaining,
@@ -1981,19 +2087,30 @@ export function DaywellTasksModule({
     });
     setReminders(reconciled.reminders);
     commitTasksAndDailyPlanning(reconciled.tasks, nextEntries);
+    if (unlinkRes.unlinkedCount > 0) {
+      applyNotesUpdate(unlinkRes.notes);
+    }
     SharedStateBridge.removeDailyPlanningForTask(taskId);
     projectsService.cleanupSectionLinksForTask(taskId);
     setPendingDeleteTask(null);
     setDetailTaskId(null);
     setIsModalOpen(false);
-    triggerUndo(`Deleted "${deleted?.title || 'task'}"`, () => {
-      taskRemindersService.restoreRemindersSnapshot(prevReminders, {
-        tasks: prev,
-        emitSync: false,
-      });
-      setReminders(prevReminders);
-      commitTasksAndDailyPlanning(prev, prevEntries);
-    });
+    triggerUndo(
+      unlinkRes.unlinkedCount > 0
+        ? `Deleted "${deleted?.title || 'task'}" (${unlinkRes.unlinkedCount} linked note preserved)`
+        : `Deleted "${deleted?.title || 'task'}"`,
+      () => {
+        taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+          tasks: prev,
+          emitSync: false,
+        });
+        setReminders(prevReminders);
+        commitTasksAndDailyPlanning(prev, prevEntries);
+        if (unlinkRes.unlinkedCount > 0) {
+          applyNotesUpdate(prevNotes);
+        }
+      }
+    );
   };
 
   // Subtask builder helpers (Create / Edit modal)
@@ -2858,6 +2975,26 @@ export function DaywellTasksModule({
                           >
                             <Bell className="w-3 h-3" />
                             <span>{remSummary}</span>
+                          </span>
+                        );
+                      })()}
+
+                      {(() => {
+                        const linkedNotesCount = countNotesLinkedToTask(
+                          effectiveNotes,
+                          task.id
+                        );
+                        if (linkedNotesCount === 0) return null;
+                        return (
+                          <span
+                            className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)] font-medium"
+                            title={`${linkedNotesCount} linked ${linkedNotesCount === 1 ? 'note' : 'notes'}`}
+                          >
+                            <FileText className="w-3 h-3 text-[var(--dw-primary)]" />
+                            <span>
+                              {linkedNotesCount}{' '}
+                              {linkedNotesCount === 1 ? 'note' : 'notes'}
+                            </span>
                           </span>
                         );
                       })()}
@@ -3955,6 +4092,223 @@ export function DaywellTasksModule({
                     </div>
                   )}
                 </div>
+
+                {/* Linked Notes Section inside Task Details */}
+                {(() => {
+                  const linkedNotes = getNotesLinkedToTask(
+                    effectiveNotes,
+                    detailTask.id
+                  );
+                  const availableNoteOptions = isDetailNotePickerOpen
+                    ? getAvailableNotesToLink(
+                        effectiveNotes,
+                        detailTask.id,
+                        detailNoteQuery
+                      )
+                    : [];
+
+                  return (
+                    <div className="space-y-2.5 p-3 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <FileText className="w-3.5 h-3.5 text-[var(--dw-primary)]" />
+                          <span className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-secondary)]">
+                            Linked Notes
+                          </span>
+                          {linkedNotes.length > 0 && (
+                            <span className="text-[11px] font-semibold text-[var(--dw-text-muted)]">
+                              ({linkedNotes.length})
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <DaywellButton
+                            label="+ New Note"
+                            variant="tonal"
+                            size="compact"
+                            onClick={() => handleCreateLinkedNoteForTask(detailTask)}
+                          />
+                          <DaywellButton
+                            label={isDetailNotePickerOpen ? 'Close Picker' : 'Link Existing'}
+                            variant="outlined"
+                            size="compact"
+                            leadingIcon={<Link2 className="w-3 h-3" />}
+                            onClick={() => {
+                              setIsDetailNotePickerOpen((prev) => !prev);
+                              setDetailNoteQuery('');
+                              setDetailNoteError('');
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {detailNoteError && (
+                        <p className="text-[11px] text-[var(--dw-error)]">
+                          {detailNoteError}
+                        </p>
+                      )}
+
+                      {linkedNotes.length > 0 ? (
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                          {linkedNotes.map((note) => {
+                            const snippet = note.content
+                              .replace(/[#*`>]/g, '')
+                              .trim();
+                            return (
+                              <div
+                                key={note.id}
+                                className="flex items-start justify-between gap-2 p-2.5 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)]"
+                              >
+                                <div className="min-w-0 flex-1 space-y-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    {onNavigateToNote ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setDetailTaskId(null);
+                                          onNavigateToNote(note.id);
+                                        }}
+                                        className="text-xs font-bold text-[var(--dw-primary)] hover:underline text-left truncate max-w-full cursor-pointer"
+                                      >
+                                        {note.title}
+                                      </button>
+                                    ) : (
+                                      <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                                        {note.title}
+                                      </span>
+                                    )}
+                                    <DaywellStatusBadge
+                                      label={note.notebook}
+                                      tone="neutral"
+                                      showIcon={false}
+                                    />
+                                    {note.isArchived && (
+                                      <DaywellStatusBadge
+                                        label="Archived"
+                                        tone="warning"
+                                        showIcon={false}
+                                      />
+                                    )}
+                                  </div>
+                                  {snippet && (
+                                    <p className="text-[11px] text-[var(--dw-text-secondary)] line-clamp-1">
+                                      {snippet}
+                                    </p>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {onNavigateToNote && (
+                                    <DaywellIconButton
+                                      label={`Open note ${note.title}`}
+                                      size="compact"
+                                      tone="primary"
+                                      onClick={() => {
+                                        setDetailTaskId(null);
+                                        onNavigateToNote(note.id);
+                                      }}
+                                      icon={<ArrowUpRight className="w-3.5 h-3.5" />}
+                                    />
+                                  )}
+                                  <DaywellIconButton
+                                    label={`Unlink note ${note.title}`}
+                                    size="compact"
+                                    tone="muted"
+                                    onClick={() =>
+                                      handleUnlinkNoteFromDetailTask(
+                                        detailTask,
+                                        note.id
+                                      )
+                                    }
+                                    icon={<Unlink className="w-3.5 h-3.5" />}
+                                  />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-[var(--dw-text-muted)] italic">
+                          No notes linked yet. Link an existing note or create one in Notes.
+                        </p>
+                      )}
+
+                      {isDetailNotePickerOpen && (
+                        <div className="space-y-2 pt-2 border-t border-[var(--dw-divider)]">
+                          <DaywellSearchField
+                            value={detailNoteQuery}
+                            onChange={setDetailNoteQuery}
+                            placeholder="Search existing notes to link..."
+                            ariaLabel="Search existing notes to link"
+                          />
+                          {availableNoteOptions.length === 0 ? (
+                            <p className="text-[11px] text-[var(--dw-text-muted)] italic px-1">
+                              {detailNoteQuery.trim()
+                                ? `No notes matching "${detailNoteQuery.trim()}".`
+                                : 'No unlinked notes available — create a new note instead.'}
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                              {availableNoteOptions.map((opt) => {
+                                const otherTaskTitle = opt.linkedTaskId
+                                  ? tasks.find((t) => t.id === opt.linkedTaskId)
+                                      ?.title
+                                  : undefined;
+                                return (
+                                  <div
+                                    key={opt.note.id}
+                                    className="flex items-center justify-between gap-2 p-2 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)]"
+                                  >
+                                    <div className="min-w-0 flex-1 space-y-0.5">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
+                                          {opt.note.title}
+                                        </span>
+                                        <DaywellStatusBadge
+                                          label={opt.note.notebook}
+                                          tone="neutral"
+                                          showIcon={false}
+                                        />
+                                        {opt.note.isArchived && (
+                                          <DaywellStatusBadge
+                                            label="Archived"
+                                            tone="warning"
+                                            showIcon={false}
+                                          />
+                                        )}
+                                      </div>
+                                      {opt.linkedTaskId && (
+                                        <p className="text-[10px] text-[var(--dw-warning)]">
+                                          Currently linked to:{' '}
+                                          {otherTaskTitle || 'another task'} (linking reassigns)
+                                        </p>
+                                      )}
+                                      {opt.isLinkedToOtherModule && (
+                                        <p className="text-[10px] text-[var(--dw-warning)]">
+                                          Currently linked to {opt.note.linkedModule}
+                                        </p>
+                                      )}
+                                    </div>
+                                    <DaywellButton
+                                      label="Link"
+                                      variant="tonal"
+                                      size="compact"
+                                      onClick={() =>
+                                        handleLinkExistingNoteToTask(
+                                          detailTask,
+                                          opt.note.id
+                                        )
+                                      }
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Interactive Subtasks & Progress Section inside Task Details */}
                 {(() => {

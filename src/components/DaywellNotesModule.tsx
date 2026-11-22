@@ -18,8 +18,19 @@ import {
   Quote,
   RotateCcw,
   AlertCircle,
+  Link2,
+  Unlink,
 } from 'lucide-react';
 import { EthiopiaClock, SharedDateFormatter } from '../domain/date';
+import { DaywellTaskRecord } from '../domain/taskOperations';
+import {
+  getLinkedTaskForNote,
+  linkNoteToTask,
+  MAX_NOTE_TITLE_LENGTH,
+  unlinkNoteFromTask,
+} from '../domain/taskNotes';
+import { notesService } from '../services/notesService';
+import { SharedStateBridge } from '../services/sharedStateBridge';
 import {
   DaywellButton,
   DaywellCard,
@@ -38,6 +49,10 @@ export interface DaywellNote {
   tags: string[];
   isPinned: boolean;
   isArchived: boolean;
+  isFavorite?: boolean;
+  isTrashed?: boolean;
+  projectId?: string;
+  goalId?: string;
   linkedModule?: 'tasks' | 'finance' | 'calendar';
   linkedId?: string;
   createdAt: string; // ISO 8601 UTC
@@ -45,6 +60,16 @@ export interface DaywellNote {
 }
 
 interface DaywellNotesModuleProps {
+  notes?: DaywellNote[];
+  onUpdateNotes?: (
+    updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
+  ) => void;
+  tasks?: DaywellTaskRecord[];
+  requestedNoteFocus?: {
+    noteId: string;
+    nonce: number;
+  } | null;
+  onNavigateToTask?: (taskId: string) => void;
   onRequestQuickCapture?: () => void;
   onNavigateToModule?: (module: string) => void;
 }
@@ -85,27 +110,51 @@ export const DEFAULT_SAMPLE_NOTES: DaywellNote[] = [
   },
 ];
 
-export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
-  const [notes, setNotes] = useState<DaywellNote[]>(() => {
-    try {
-      const saved = localStorage.getItem('daywell_notes');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {
-      // ignore
-    }
-    return [];
-  });
+export function DaywellNotesModule({
+  notes: controlledNotes,
+  onUpdateNotes,
+  tasks: controlledTasks,
+  requestedNoteFocus,
+  onNavigateToTask,
+}: DaywellNotesModuleProps) {
+  const [internalNotes, setInternalNotes] = useState<DaywellNote[]>(() =>
+    notesService.loadNotes()
+  );
 
   useEffect(() => {
-    try {
-      localStorage.setItem('daywell_notes', JSON.stringify(notes));
-    } catch (e) {
-      console.error(e);
+    if (typeof window === 'undefined' || controlledNotes !== undefined) return;
+    const handleSync = () => {
+      setInternalNotes(notesService.loadNotes());
+    };
+    window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
+    return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
+  }, [controlledNotes]);
+
+  const notes = controlledNotes ?? internalNotes;
+  const notesRef = useRef<DaywellNote[]>(notes);
+  notesRef.current = notes;
+
+  const effectiveTasks = controlledTasks ?? [];
+  const selectableTasks = useMemo(
+    () =>
+      effectiveTasks.filter(
+        (t) => !t.isArchived && t.status !== 'cancelled'
+      ),
+    [effectiveTasks]
+  );
+
+  const applyNotesUpdate = (
+    updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
+  ) => {
+    if (onUpdateNotes) {
+      onUpdateNotes(updater);
+    } else {
+      setInternalNotes((prev) => {
+        const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
+        return notesService.saveNotes(nextRaw, { emitSync: true });
+      });
     }
-  }, [notes]);
+  };
 
   const [activeTab, setActiveTab] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -172,6 +221,14 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
     return list;
   }, [notes, activeTab, searchQuery]);
 
+  const currentEditorNote = useMemo(
+    () =>
+      selectedNoteId
+        ? notes.find((n) => n.id === selectedNoteId) ?? null
+        : null,
+    [notes, selectedNoteId]
+  );
+
   const openEditor = (note: DaywellNote) => {
     setSelectedNoteId(note.id);
     setEditTitle(note.title);
@@ -183,105 +240,147 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
   };
 
   const handleCreateNote = () => {
+    const existingIds = new Set(notesRef.current.map((n) => n.id));
+    let nextId = `note-${Date.now()}`;
+    while (existingIds.has(nextId)) {
+      nextId = `${nextId}-2`;
+    }
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
     const newNote: DaywellNote = {
-      id: `note-${Date.now()}`,
+      id: nextId,
       title: 'Untitled Note',
       content: '',
       notebook: activeTab !== 'all' && activeTab !== 'pinned' && activeTab !== 'archived' ? activeTab : 'Personal',
       tags: [],
       isPinned: false,
       isArchived: false,
-      createdAt: EthiopiaClock.nowUtc().toISOString(),
-      updatedAt: EthiopiaClock.nowUtc().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
 
-    const prev = [...notes];
-    setNotes([newNote, ...notes]);
+    const prev = [...notesRef.current];
+    applyNotesUpdate([newNote, ...notesRef.current]);
     openEditor(newNote);
     triggerFeedback('Note created', () => {
-      setNotes(prev);
+      applyNotesUpdate(prev);
       setIsEditorOpen(false);
     });
   };
 
   const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const commitEditorDraftToNote = (noteId: string) => {
+    const target = notesRef.current.find((n) => n.id === noteId);
+    if (!target) return;
+    const nextTitle = (editTitle.trim() || 'Untitled Note').slice(
+      0,
+      MAX_NOTE_TITLE_LENGTH
+    );
+    const hasFieldChanges =
+      nextTitle !== target.title ||
+      editContent !== target.content ||
+      editNotebook !== target.notebook ||
+      JSON.stringify(editTags) !== JSON.stringify(target.tags);
+    if (!hasFieldChanges) {
+      setSaveStatus('saved');
+      return;
+    }
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
+    applyNotesUpdate((prevNotes) =>
+      prevNotes.map((n) =>
+        n.id === noteId
+          ? {
+              ...n,
+              title: nextTitle,
+              content: editContent,
+              notebook: editNotebook,
+              tags: editTags,
+              updatedAt: nowIso,
+            }
+          : n
+      )
+    );
+    setSaveStatus('saved');
+  };
+
   useEffect(() => {
     if (!selectedNoteId || !isEditorOpen) return;
+    const target = notesRef.current.find((n) => n.id === selectedNoteId);
+    if (!target) return;
+    const nextTitle = (editTitle.trim() || 'Untitled Note').slice(
+      0,
+      MAX_NOTE_TITLE_LENGTH
+    );
+    const hasFieldChanges =
+      nextTitle !== target.title ||
+      editContent !== target.content ||
+      editNotebook !== target.notebook ||
+      JSON.stringify(editTags) !== JSON.stringify(target.tags);
+    if (!hasFieldChanges) {
+      setSaveStatus('saved');
+      return;
+    }
 
     setSaveStatus('saving');
     if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
 
     autosaveTimeoutRef.current = setTimeout(() => {
-      setNotes((prevNotes) =>
-        prevNotes.map((n) =>
-          n.id === selectedNoteId
-            ? {
-                ...n,
-                title: editTitle.trim() || 'Untitled Note',
-                content: editContent,
-                notebook: editNotebook,
-                tags: editTags,
-                updatedAt: EthiopiaClock.nowUtc().toISOString(),
-              }
-            : n
-        )
-      );
-      setSaveStatus('saved');
+      commitEditorDraftToNote(selectedNoteId);
     }, 600);
 
     return () => {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editTitle, editContent, editNotebook, editTags, selectedNoteId, isEditorOpen]);
 
   const flushAutosaveAndClose = () => {
     if (selectedNoteId) {
       if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
-      setNotes((prevNotes) =>
-        prevNotes.map((n) =>
-          n.id === selectedNoteId
-            ? {
-                ...n,
-                title: editTitle.trim() || 'Untitled Note',
-                content: editContent,
-                notebook: editNotebook,
-                tags: editTags,
-                updatedAt: EthiopiaClock.nowUtc().toISOString(),
-              }
-            : n
-        )
-      );
-      setSaveStatus('saved');
+      commitEditorDraftToNote(selectedNoteId);
     }
     setIsEditorOpen(false);
   };
 
+  useEffect(() => {
+    if (!requestedNoteFocus?.noteId) return;
+    const target = notesRef.current.find((n) => n.id === requestedNoteFocus.noteId);
+    if (!target) return;
+    if (isEditorOpen && selectedNoteId && selectedNoteId !== target.id) {
+      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+      commitEditorDraftToNote(selectedNoteId);
+    }
+    setSearchQuery('');
+    setActiveTab(target.isArchived ? 'archived' : 'all');
+    openEditor(target);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedNoteFocus?.nonce]);
+
   const togglePin = (noteId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const target = notes.find((n) => n.id === noteId);
+    const target = notesRef.current.find((n) => n.id === noteId);
     if (!target) return;
     const nextPinned = !target.isPinned;
-    const prev = [...notes];
-    setNotes((prevNotes) =>
+    const prev = [...notesRef.current];
+    applyNotesUpdate((prevNotes) =>
       prevNotes.map((n) => (n.id === noteId ? { ...n, isPinned: nextPinned, updatedAt: EthiopiaClock.nowUtc().toISOString() } : n))
     );
-    triggerFeedback(nextPinned ? 'Note pinned' : 'Note unpinned', () => setNotes(prev));
+    triggerFeedback(nextPinned ? 'Note pinned' : 'Note unpinned', () => applyNotesUpdate(prev));
   };
 
   const toggleArchive = (noteId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const target = notes.find((n) => n.id === noteId);
+    const target = notesRef.current.find((n) => n.id === noteId);
     if (!target) return;
     const nextArchived = !target.isArchived;
-    const prev = [...notes];
+    const prev = [...notesRef.current];
 
-    setNotes((prevNotes) =>
+    applyNotesUpdate((prevNotes) =>
       prevNotes.map((n) => (n.id === noteId ? { ...n, isArchived: nextArchived, updatedAt: EthiopiaClock.nowUtc().toISOString() } : n))
     );
 
     triggerFeedback(nextArchived ? 'Note moved to archive' : 'Note restored from archive', () => {
-      setNotes(prev);
+      applyNotesUpdate(prev);
     });
 
     if (isEditorOpen && selectedNoteId === noteId) {
@@ -289,9 +388,41 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
     }
   };
 
+  const handleLinkTaskToNote = (noteId: string, taskId: string) => {
+    const cleanTaskId = taskId.trim();
+    if (!cleanTaskId) return;
+    if (isEditorOpen && selectedNoteId === noteId) {
+      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+      commitEditorDraftToNote(noteId);
+    }
+    const prev = [...notesRef.current];
+    const targetTask = effectiveTasks.find((t) => t.id === cleanTaskId);
+    applyNotesUpdate((prevNotes) => {
+      const res = linkNoteToTask(prevNotes, noteId, cleanTaskId);
+      return res.ok ? res.notes : prevNotes;
+    });
+    triggerFeedback(
+      targetTask ? `Linked note to "${targetTask.title}"` : 'Linked note to task',
+      () => applyNotesUpdate(prev)
+    );
+  };
+
+  const handleUnlinkTaskFromNote = (noteId: string) => {
+    if (isEditorOpen && selectedNoteId === noteId) {
+      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+      commitEditorDraftToNote(noteId);
+    }
+    const prev = [...notesRef.current];
+    applyNotesUpdate((prevNotes) => {
+      const res = unlinkNoteFromTask(prevNotes, noteId);
+      return res.ok ? res.notes : prevNotes;
+    });
+    triggerFeedback('Unlinked task from note', () => applyNotesUpdate(prev));
+  };
+
   const handleRequestDeleteNote = (noteId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
-    const target = notes.find((n) => n.id === noteId);
+    const target = notesRef.current.find((n) => n.id === noteId);
     if (target) {
       setConfirmDeleteNote(target);
     }
@@ -301,14 +432,14 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
     if (!confirmDeleteNote || isDeleting) return;
     setIsDeleting(true);
     const target = confirmDeleteNote;
-    const prev = [...notes];
-    setNotes(notes.filter((n) => n.id !== target.id));
+    const prev = [...notesRef.current];
+    applyNotesUpdate((prevNotes) => prevNotes.filter((n) => n.id !== target.id));
     if (isEditorOpen && selectedNoteId === target.id) {
       setIsEditorOpen(false);
     }
     setConfirmDeleteNote(null);
     setIsDeleting(false);
-    triggerFeedback(`Deleted "${target.title || 'note'}"`, () => setNotes(prev));
+    triggerFeedback(`Deleted "${target.title || 'note'}"`, () => applyNotesUpdate(prev));
   };
 
   const insertFormatting = (prefix: string, suffix: string = '') => {
@@ -545,6 +676,47 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
                     </p>
                   )}
 
+                  {note.linkedModule === 'tasks' && note.linkedId && (() => {
+                    const linkedTask = getLinkedTaskForNote(note, effectiveTasks);
+                    if (linkedTask) {
+                      return (
+                        <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
+                          {onNavigateToTask ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onNavigateToTask(linkedTask.id);
+                              }}
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] hover:opacity-90 cursor-pointer max-w-full"
+                              title={`Open linked task: ${linkedTask.title}`}
+                            >
+                              <CheckSquare className="w-3 h-3 shrink-0" />
+                              <span className="truncate">Task: {linkedTask.title}</span>
+                              <ArrowUpRight className="w-3 h-3 shrink-0" />
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-secondary)] max-w-full">
+                              <CheckSquare className="w-3 h-3 shrink-0 text-[var(--dw-primary)]" />
+                              <span className="truncate">Task: {linkedTask.title}</span>
+                            </span>
+                          )}
+                          {linkedTask.isArchived && (
+                            <DaywellStatusBadge label="Archived" tone="neutral" showIcon={false} />
+                          )}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-muted)]">
+                          <Link2 className="w-3 h-3 shrink-0" />
+                          <span>Linked task unavailable</span>
+                        </span>
+                      </div>
+                    );
+                  })()}
+
                   <div className="flex items-center justify-between text-[10px] text-[var(--dw-text-muted)] pt-1.5 border-t border-[var(--dw-divider)]">
                     <div className="flex items-center gap-2">
                       <DaywellStatusBadge label={note.notebook} tone="neutral" showIcon={false} />
@@ -571,13 +743,18 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
         <DaywellCard radius="xl" padding="lg" className="space-y-4">
           {/* Editor Top Navigation */}
           <div className="flex items-center justify-between border-b border-[var(--dw-divider)] pb-3">
-            <DaywellButton
-              label="Done"
-              variant="tonal"
-              size="compact"
-              onClick={flushAutosaveAndClose}
-              leadingIcon={<Check className="w-3.5 h-3.5 stroke-[2.5]" />}
-            />
+            <div className="flex items-center gap-2">
+              <DaywellButton
+                label="Done"
+                variant="tonal"
+                size="compact"
+                onClick={flushAutosaveAndClose}
+                leadingIcon={<Check className="w-3.5 h-3.5 stroke-[2.5]" />}
+              />
+              {currentEditorNote?.isArchived && (
+                <DaywellStatusBadge label="Archived" tone="neutral" showIcon={false} />
+              )}
+            </div>
 
             <div className="flex items-center gap-1.5">
               <span className="dw-type-caption text-[var(--dw-text-muted)] flex items-center gap-1 font-medium mr-1">
@@ -604,7 +781,7 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
                     icon={<Pin className="w-4 h-4" />}
                   />
                   <DaywellIconButton
-                    label="Archive Note"
+                    label={currentEditorNote?.isArchived ? 'Restore Note' : 'Archive Note'}
                     size="compact"
                     tone="muted"
                     onClick={() => toggleArchive(selectedNoteId)}
@@ -672,6 +849,84 @@ export function DaywellNotesModule(_props: DaywellNotesModuleProps) {
               className="w-20 px-2 py-1 text-[11px] bg-transparent border-b border-[var(--dw-border)] outline-none text-[var(--dw-text-secondary)] focus:border-[var(--dw-primary)]"
             />
           </div>
+
+          {/* Linked Task Bar */}
+          {currentEditorNote && (
+            currentEditorNote.linkedModule === 'tasks' && currentEditorNote.linkedId ? (() => {
+              const linkedTask = getLinkedTaskForNote(currentEditorNote, effectiveTasks);
+              return (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CheckSquare className="w-4 h-4 text-[var(--dw-primary)] shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--dw-text-muted)]">
+                        Linked Task
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
+                          {linkedTask ? linkedTask.title : 'Linked task unavailable'}
+                        </span>
+                        {linkedTask?.isArchived && (
+                          <DaywellStatusBadge label="Archived" tone="neutral" showIcon={false} />
+                        )}
+                        {linkedTask && (linkedTask.completed || linkedTask.status === 'completed') && (
+                          <DaywellStatusBadge label="Done" tone="success" showIcon={false} />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {linkedTask && onNavigateToTask && (
+                      <DaywellButton
+                        label="Open Task"
+                        variant="tonal"
+                        size="compact"
+                        trailingIcon={<ArrowUpRight className="w-3.5 h-3.5" />}
+                        onClick={() => {
+                          if (selectedNoteId) {
+                            if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+                            commitEditorDraftToNote(selectedNoteId);
+                          }
+                          onNavigateToTask(linkedTask.id);
+                        }}
+                      />
+                    )}
+                    <DaywellButton
+                      label="Unlink"
+                      variant="outlined"
+                      size="compact"
+                      leadingIcon={<Unlink className="w-3 h-3" />}
+                      onClick={() => handleUnlinkTaskFromNote(currentEditorNote.id)}
+                    />
+                  </div>
+                </div>
+              );
+            })() : selectableTasks.length > 0 ? (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs">
+                <div className="flex items-center gap-1.5 text-[var(--dw-text-secondary)] font-medium">
+                  <Link2 className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
+                  <span>Task link</span>
+                </div>
+                <select
+                  aria-label="Link note to task"
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleLinkTaskToNote(currentEditorNote.id, e.target.value);
+                    }
+                  }}
+                  className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none max-w-[230px] cursor-pointer"
+                >
+                  <option value="">Link to a task...</option>
+                  {selectableTasks.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null
+          )}
 
           {/* Formatting Toolbar */}
           <div className="flex items-center gap-1 p-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] overflow-x-auto">
