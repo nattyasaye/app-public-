@@ -253,6 +253,7 @@ describe('Stage 1.2 — Subtasks and Checklists', () => {
       {
         ...toggledTask,
         isPinned: true,
+        isMyDay: true,
         myDayDate: '2026-11-23',
         sortOrder: 4,
       },

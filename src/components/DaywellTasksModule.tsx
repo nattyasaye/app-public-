@@ -49,6 +49,9 @@ import {
   SharedInboxItem,
   SharedMilestone,
   SharedProject,
+  SharedTaskRecurrenceConfig,
+  SharedTaskRecurrenceFrequency,
+  SharedTaskRecurrenceRepeatFrom,
   SharedTaskStatus,
 } from '../domain/sharedFoundation';
 import {
@@ -85,18 +88,29 @@ import {
   TaskSubItemRecord,
   TaskViewFilter,
   toggleSubtaskInList,
-  toggleTaskCompletionRecord,
   toggleTaskSubtask,
   updateSubtaskTitleInList,
   updateTaskRecord,
   updateTaskSubtaskTitle,
 } from '../domain/taskOperations';
+import {
+  completeTaskWithRecurrence,
+  formatRecurrenceSummary,
+  rescheduleRecurrenceOccurrence,
+  resolveEffectiveRecurrenceConfig,
+  skipRecurrenceOccurrence,
+  stopTaskRecurrence,
+} from '../domain/taskRecurrence';
 import { dailyPlanningService } from '../services/dailyPlanningService';
 import { inboxService } from '../services/inboxService';
 import { projectsService } from '../services/projectsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { ProjectsWorkspaceView } from './projects';
 import { MyDayPlanningView } from './tasks/MyDayPlanningView';
+import {
+  TaskRecurrenceDetailsPanel,
+  TaskRecurrenceEditorSection,
+} from './tasks/TaskRecurrenceFields';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import {
   DaywellButton,
@@ -392,7 +406,14 @@ export function DaywellTasksModule({
   const [formLabelError, setFormLabelError] = useState('');
   const [formHasReminder, setFormHasReminder] = useState<boolean>(false);
   const [formIsRecurring, setFormIsRecurring] = useState<boolean>(false);
-  const [formRecurringRule, setFormRecurringRule] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+  const [formRecurrenceFrequency, setFormRecurrenceFrequency] =
+    useState<SharedTaskRecurrenceFrequency>('weekly');
+  const [formRecurrenceInterval, setFormRecurrenceInterval] = useState<number>(1);
+  const [formRecurrenceWeekdays, setFormRecurrenceWeekdays] = useState<number[]>([]);
+  const [formRecurrenceStartDate, setFormRecurrenceStartDate] = useState<string>('');
+  const [formRecurrenceEndDate, setFormRecurrenceEndDate] = useState<string>('');
+  const [formRecurrenceRepeatFrom, setFormRecurrenceRepeatFrom] =
+    useState<SharedTaskRecurrenceRepeatFrom>('due_date');
   const [formSubtasks, setFormSubtasks] = useState<TaskSubItem[]>([]);
   const [newSubtaskInput, setNewSubtaskInput] = useState('');
   const [formSubtaskError, setFormSubtaskError] = useState('');
@@ -400,7 +421,7 @@ export function DaywellTasksModule({
   const [editingFormSubtaskTitle, setEditingFormSubtaskTitle] = useState('');
   const [editingFormSubtaskError, setEditingFormSubtaskError] = useState('');
 
-  // Task Details inline subtask & tag controls
+  // Task Details inline subtask, recurrence & tag controls
   const [detailSubtaskInput, setDetailSubtaskInput] = useState('');
   const [detailSubtaskError, setDetailSubtaskError] = useState('');
   const [editingDetailSubtaskId, setEditingDetailSubtaskId] = useState<string | null>(null);
@@ -408,6 +429,7 @@ export function DaywellTasksModule({
   const [editingDetailSubtaskError, setEditingDetailSubtaskError] = useState('');
   const [detailTagInput, setDetailTagInput] = useState('');
   const [detailTagError, setDetailTagError] = useState('');
+  const [detailRecurrenceError, setDetailRecurrenceError] = useState('');
 
   // Form Validation & Dirty State
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -425,6 +447,7 @@ export function DaywellTasksModule({
     setEditingDetailSubtaskError('');
     setDetailTagInput('');
     setDetailTagError('');
+    setDetailRecurrenceError('');
   };
 
   const allActiveProjects: SharedProject[] = useMemo(
@@ -698,7 +721,7 @@ export function DaywellTasksModule({
     triggerUndo('Deleted Inbox item', () => applyInboxUpdate(prevInbox));
   };
 
-  // Toggle Task Completion (Complete / Reopen with Undo + DailyPlanningEntries sync)
+  // Toggle Task Completion (Complete / Reopen with Recurrence + Undo + DailyPlanningEntries sync)
   const toggleTask = (taskId: string) => {
     const prev = [...tasks];
     const prevEntries = [...effectiveDailyPlanningEntries];
@@ -706,12 +729,14 @@ export function DaywellTasksModule({
     if (!target) return;
 
     const wasCompleted = isTaskCompleted(target);
-    const nextCompleted = !wasCompleted;
-    const updated = tasks.map((t) =>
-      t.id === taskId ? toggleTaskCompletionRecord(t) : t
-    );
+    const result = completeTaskWithRecurrence(tasks, taskId, {
+      todayIso: todayStr,
+    });
+    if (!result.updatedTask) return;
+
+    const nextCompleted = isTaskCompleted(result.updatedTask);
     const nextEntries = syncTaskCompletionWithDailyPlanning(
-      updated,
+      result.tasks,
       effectiveDailyPlanningEntries,
       taskId,
       nextCompleted,
@@ -722,10 +747,84 @@ export function DaywellTasksModule({
       }
     );
 
-    commitTasksAndDailyPlanning(updated, nextEntries);
+    if (result.generatedNextTask?.projectId) {
+      projectsService.copyTaskSectionLink(
+        result.generatedNextTask.projectId,
+        taskId,
+        result.generatedNextTask
+      );
+    }
+
+    commitTasksAndDailyPlanning(result.tasks, nextEntries);
+    const nextDate =
+      result.generatedNextTask?.dueDate ??
+      result.generatedNextTask?.scheduledDate;
+    const message = wasCompleted
+      ? `Reopened "${target.title}"`
+      : result.generatedNextTask
+        ? `Completed "${target.title}" · Next: ${nextDate ?? 'scheduled'}`
+        : result.seriesEnded
+          ? `Completed "${target.title}" · Recurrence series ended`
+          : `Completed "${target.title}"`;
+    triggerUndo(message, () => {
+      if (result.generatedNextTask?.id) {
+        projectsService.cleanupSectionLinksForTask(result.generatedNextTask.id);
+      }
+      commitTasksAndDailyPlanning(prev, prevEntries);
+    });
+  };
+
+  // Skip Current Recurring Occurrence without losing the series
+  const handleSkipRecurrence = (taskId: string) => {
+    const prev = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
+    const res = skipRecurrenceOccurrence(tasks, taskId, { todayIso: todayStr });
+    if (!res.ok || !res.updatedTask) {
+      setDetailRecurrenceError(res.error ?? 'Unable to skip occurrence.');
+      return;
+    }
+    setDetailRecurrenceError('');
+    const nextEntries =
+      res.updatedTask.isMyDay === false && prevEntries.some((e) => e.taskId === taskId)
+        ? removeTaskFromPlannedDay(res.tasks, prevEntries, taskId, todayStr).entries
+        : prevEntries;
+    commitTasksAndDailyPlanning(res.tasks, nextEntries);
+    const nextDate = res.updatedTask.dueDate ?? res.updatedTask.scheduledDate;
     triggerUndo(
-      wasCompleted ? `Reopened "${target.title}"` : `Completed "${target.title}"`,
+      `Skipped to next occurrence${nextDate ? ` (${nextDate})` : ''}`,
       () => commitTasksAndDailyPlanning(prev, prevEntries)
+    );
+  };
+
+  // Reschedule Current Recurring Occurrence without losing the series
+  const handleRescheduleRecurrence = (taskId: string, newDateIso: string) => {
+    const prev = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
+    const res = rescheduleRecurrenceOccurrence(tasks, taskId, newDateIso);
+    if (!res.ok || !res.updatedTask) {
+      setDetailRecurrenceError(res.error ?? 'Unable to reschedule occurrence.');
+      return;
+    }
+    setDetailRecurrenceError('');
+    commitTasksAndDailyPlanning(res.tasks, prevEntries);
+    triggerUndo(`Rescheduled "${res.updatedTask.title}" to ${newDateIso}`, () =>
+      commitTasksAndDailyPlanning(prev, prevEntries)
+    );
+  };
+
+  // Stop Future Recurrence while preserving task history
+  const handleStopRecurrence = (taskId: string) => {
+    const prev = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
+    const res = stopTaskRecurrence(tasks, taskId);
+    if (!res.ok || !res.updatedTask) {
+      setDetailRecurrenceError(res.error ?? 'Unable to stop recurrence.');
+      return;
+    }
+    setDetailRecurrenceError('');
+    commitTasksAndDailyPlanning(res.tasks, prevEntries);
+    triggerUndo(`Stopped recurrence for "${res.updatedTask.title}"`, () =>
+      commitTasksAndDailyPlanning(prev, prevEntries)
     );
   };
 
@@ -1086,7 +1185,12 @@ export function DaywellTasksModule({
     labels: formLabels,
     hasReminder: formHasReminder,
     isRecurring: formIsRecurring,
-    recurringRule: formRecurringRule,
+    recurrenceFrequency: formRecurrenceFrequency,
+    recurrenceInterval: formRecurrenceInterval,
+    recurrenceWeekdays: formRecurrenceWeekdays,
+    recurrenceStartDate: formRecurrenceStartDate,
+    recurrenceEndDate: formRecurrenceEndDate,
+    recurrenceRepeatFrom: formRecurrenceRepeatFrom,
     subtasks: formSubtasks,
   });
 
@@ -1124,7 +1228,12 @@ export function DaywellTasksModule({
     setFormLabelError('');
     setFormHasReminder(false);
     setFormIsRecurring(false);
-    setFormRecurringRule('daily');
+    setFormRecurrenceFrequency('weekly');
+    setFormRecurrenceInterval(1);
+    setFormRecurrenceWeekdays([]);
+    setFormRecurrenceStartDate('');
+    setFormRecurrenceEndDate('');
+    setFormRecurrenceRepeatFrom('due_date');
     setFormSubtasks([]);
     setNewSubtaskInput('');
     setFormSubtaskError('');
@@ -1148,7 +1257,12 @@ export function DaywellTasksModule({
       labels: initLabels,
       hasReminder: false,
       isRecurring: false,
-      recurringRule: 'daily',
+      recurrenceFrequency: 'weekly',
+      recurrenceInterval: 1,
+      recurrenceWeekdays: [],
+      recurrenceStartDate: '',
+      recurrenceEndDate: '',
+      recurrenceRepeatFrom: 'due_date',
       subtasks: [],
     });
 
@@ -1183,7 +1297,12 @@ export function DaywellTasksModule({
     setFormLabelError('');
     setFormHasReminder(false);
     setFormIsRecurring(false);
-    setFormRecurringRule('daily');
+    setFormRecurrenceFrequency('weekly');
+    setFormRecurrenceInterval(1);
+    setFormRecurrenceWeekdays([]);
+    setFormRecurrenceStartDate('');
+    setFormRecurrenceEndDate('');
+    setFormRecurrenceRepeatFrom('due_date');
     setFormSubtasks([]);
     setNewSubtaskInput('');
     setFormSubtaskError('');
@@ -1207,7 +1326,12 @@ export function DaywellTasksModule({
       labels: initLabels,
       hasReminder: false,
       isRecurring: false,
-      recurringRule: 'daily',
+      recurrenceFrequency: 'weekly',
+      recurrenceInterval: 1,
+      recurrenceWeekdays: [],
+      recurrenceStartDate: '',
+      recurrenceEndDate: '',
+      recurrenceRepeatFrom: 'due_date',
       subtasks: [],
     });
 
@@ -1220,6 +1344,14 @@ export function DaywellTasksModule({
   // Open Edit Modal
   const handleOpenEdit = (task: DaywellTask) => {
     const effectiveStatus = resolveEffectiveTaskStatus(task);
+    const effectiveRec = resolveEffectiveRecurrenceConfig(task);
+    const initFreq = effectiveRec?.frequency ?? 'weekly';
+    const initInterval = effectiveRec?.interval ?? 1;
+    const initWeekdays = effectiveRec?.weekdays ? [...effectiveRec.weekdays] : [];
+    const initRecStart = effectiveRec?.startDate ?? '';
+    const initRecEnd = effectiveRec?.endDate ?? '';
+    const initRepeatFrom = effectiveRec?.repeatFrom ?? 'due_date';
+
     setDetailTaskId(null);
     setConvertingInboxItem(null);
     setEditingTaskId(task.id);
@@ -1238,8 +1370,13 @@ export function DaywellTasksModule({
     setNewFormLabelInput('');
     setFormLabelError('');
     setFormHasReminder(task.hasReminder);
-    setFormIsRecurring(task.isRecurring || false);
-    setFormRecurringRule(task.recurringRule || 'daily');
+    setFormIsRecurring(Boolean(effectiveRec));
+    setFormRecurrenceFrequency(initFreq);
+    setFormRecurrenceInterval(initInterval);
+    setFormRecurrenceWeekdays(initWeekdays);
+    setFormRecurrenceStartDate(initRecStart);
+    setFormRecurrenceEndDate(initRecEnd);
+    setFormRecurrenceRepeatFrom(initRepeatFrom);
     const subtasksCopy = [...task.subtasks];
     setFormSubtasks(subtasksCopy);
     setNewSubtaskInput('');
@@ -1263,8 +1400,13 @@ export function DaywellTasksModule({
       milestoneId: task.milestoneId || '',
       labels: labelsCopy,
       hasReminder: task.hasReminder,
-      isRecurring: task.isRecurring || false,
-      recurringRule: task.recurringRule || 'daily',
+      isRecurring: Boolean(effectiveRec),
+      recurrenceFrequency: initFreq,
+      recurrenceInterval: initInterval,
+      recurrenceWeekdays: initWeekdays,
+      recurrenceStartDate: initRecStart,
+      recurrenceEndDate: initRecEnd,
+      recurrenceRepeatFrom: initRepeatFrom,
       subtasks: subtasksCopy,
     });
 
@@ -1291,6 +1433,25 @@ export function DaywellTasksModule({
       ? formMilestoneId.trim() || undefined
       : undefined;
 
+    const recurrenceConfigPayload: SharedTaskRecurrenceConfig | undefined =
+      formIsRecurring
+        ? {
+            frequency: formRecurrenceFrequency,
+            interval: formRecurrenceInterval,
+            ...(formRecurrenceFrequency === 'weekly' &&
+            formRecurrenceWeekdays.length > 0
+              ? { weekdays: formRecurrenceWeekdays }
+              : {}),
+            ...(formRecurrenceStartDate.trim()
+              ? { startDate: formRecurrenceStartDate.trim() }
+              : {}),
+            ...(formRecurrenceEndDate.trim()
+              ? { endDate: formRecurrenceEndDate.trim() }
+              : {}),
+            repeatFrom: formRecurrenceRepeatFrom,
+          }
+        : undefined;
+
     if (editingTaskId) {
       const existing = tasks.find((t) => t.id === editingTaskId);
       if (!existing) return;
@@ -1308,8 +1469,9 @@ export function DaywellTasksModule({
         projectName: resolvedProjectName,
         hasReminder: formHasReminder,
         isRecurring: formIsRecurring,
-        recurringRule: formIsRecurring ? formRecurringRule : undefined,
-        recurrenceRule: formIsRecurring ? formRecurringRule : undefined,
+        ...(recurrenceConfigPayload
+          ? { recurrenceConfig: recurrenceConfigPayload }
+          : { clearRecurrenceConfig: true }),
         subtasks: formSubtasks,
         labels: formLabels,
       });
@@ -1322,9 +1484,36 @@ export function DaywellTasksModule({
 
       setIsSubmitting(true);
       const prevEntries = [...effectiveDailyPlanningEntries];
-      const updated = tasks.map((t) =>
+      let updated = tasks.map((t) =>
         t.id === editingTaskId ? result.task : t
       );
+      let spawnedTaskId: string | undefined;
+
+      const transitionedToCompleted =
+        !isTaskCompleted(existing) && isTaskCompleted(result.task);
+      if (transitionedToCompleted && resolveEffectiveRecurrenceConfig(result.task)) {
+        const tempOpen: DaywellTaskRecord = {
+          ...result.task,
+          status: 'not_started',
+          completed: false,
+          completedAt: undefined,
+        };
+        const recResult = completeTaskWithRecurrence(
+          tasks.map((t) => (t.id === editingTaskId ? tempOpen : t)),
+          editingTaskId,
+          { todayIso: todayStr }
+        );
+        updated = recResult.tasks;
+        spawnedTaskId = recResult.generatedNextTask?.id;
+        if (recResult.generatedNextTask?.projectId) {
+          projectsService.copyTaskSectionLink(
+            recResult.generatedNextTask.projectId,
+            editingTaskId,
+            recResult.generatedNextTask
+          );
+        }
+      }
+
       if (isTaskCompleted(existing) !== isTaskCompleted(result.task)) {
         const nextEntries = syncTaskCompletionWithDailyPlanning(
           updated,
@@ -1347,8 +1536,14 @@ export function DaywellTasksModule({
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
-      triggerUndo('Task updated', () =>
-        commitTasksAndDailyPlanning(prev, prevEntries)
+      triggerUndo(
+        spawnedTaskId ? 'Task completed · Next occurrence scheduled' : 'Task updated',
+        () => {
+          if (spawnedTaskId) {
+            projectsService.cleanupSectionLinksForTask(spawnedTaskId);
+          }
+          commitTasksAndDailyPlanning(prev, prevEntries);
+        }
       );
     } else {
       const result = createTaskRecord({
@@ -1365,8 +1560,7 @@ export function DaywellTasksModule({
         category: resolvedProjectName,
         hasReminder: formHasReminder,
         isRecurring: formIsRecurring,
-        recurringRule: formIsRecurring ? formRecurringRule : undefined,
-        recurrenceRule: formIsRecurring ? formRecurringRule : undefined,
+        recurrenceConfig: recurrenceConfigPayload,
         subtasks: formSubtasks,
         labels: formLabels,
         isMyDay: activeFilter === 'my_day',
@@ -2272,6 +2466,23 @@ export function DaywellTasksModule({
                         </span>
                       )}
 
+                      {(() => {
+                        const effectiveRec = resolveEffectiveRecurrenceConfig(task);
+                        if (!effectiveRec && !task.isRecurring) return null;
+                        const summary = effectiveRec
+                          ? formatRecurrenceSummary(effectiveRec)
+                          : 'Recurring';
+                        return (
+                          <span
+                            className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)] font-medium"
+                            title={summary}
+                          >
+                            <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                            <span>{summary}</span>
+                          </span>
+                        );
+                      })()}
+
                       {(task.labels ?? []).map((lbl) => (
                         <span
                           key={lbl}
@@ -2286,7 +2497,6 @@ export function DaywellTasksModule({
                   {/* Badges & Quick Actions */}
                   <div className="flex items-center gap-1 text-[var(--dw-text-muted)] shrink-0">
                     {task.hasReminder && <Bell className="w-3.5 h-3.5" aria-label="Has reminder" />}
-                    {task.isRecurring && <Repeat2 className="w-3.5 h-3.5" aria-label="Recurring task" />}
                     {task.isArchived ? (
                       <>
                         <DaywellIconButton
@@ -2925,9 +3135,9 @@ export function DaywellTasksModule({
                 )}
               </div>
 
-              {/* Options & Reminders */}
-              <div className="grid grid-cols-2 gap-2 pt-1">
-                <label className="flex items-center gap-2 p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] cursor-pointer">
+              {/* Options, Reminders & Recurrence */}
+              <div className="space-y-2.5 pt-1">
+                <label className="flex items-center gap-2 p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] cursor-pointer">
                   <input
                     type="checkbox"
                     checked={formHasReminder}
@@ -2936,15 +3146,26 @@ export function DaywellTasksModule({
                   />
                   <span className="text-xs font-semibold text-[var(--dw-text-secondary)]">Set Reminder</span>
                 </label>
-                <label className="flex items-center gap-2 p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formIsRecurring}
-                    onChange={(e) => setFormIsRecurring(e.target.checked)}
-                    className="w-4 h-4 accent-[var(--dw-primary)]"
-                  />
-                  <span className="text-xs font-semibold text-[var(--dw-text-secondary)]">Recurring Task</span>
-                </label>
+
+                <TaskRecurrenceEditorSection
+                  isRecurring={formIsRecurring}
+                  onToggleRecurring={setFormIsRecurring}
+                  frequency={formRecurrenceFrequency}
+                  onChangeFrequency={setFormRecurrenceFrequency}
+                  interval={formRecurrenceInterval}
+                  onChangeInterval={setFormRecurrenceInterval}
+                  weekdays={formRecurrenceWeekdays}
+                  onChangeWeekdays={setFormRecurrenceWeekdays}
+                  startDate={formRecurrenceStartDate}
+                  onChangeStartDate={setFormRecurrenceStartDate}
+                  endDate={formRecurrenceEndDate}
+                  onChangeEndDate={setFormRecurrenceEndDate}
+                  repeatFrom={formRecurrenceRepeatFrom}
+                  onChangeRepeatFrom={setFormRecurrenceRepeatFrom}
+                  dueDate={formDueDate}
+                  scheduledDate={formScheduledDate}
+                  errors={formErrors}
+                />
               </div>
 
               {/* Action Buttons */}
@@ -3177,6 +3398,18 @@ export function DaywellTasksModule({
                     </div>
                   )}
                 </div>
+
+                {/* Recurrence Series & Actions */}
+                <TaskRecurrenceDetailsPanel
+                  task={detailTask}
+                  actionError={detailRecurrenceError}
+                  onSkipOccurrence={() => handleSkipRecurrence(detailTask.id)}
+                  onRescheduleOccurrence={(newDateIso) =>
+                    handleRescheduleRecurrence(detailTask.id, newDateIso)
+                  }
+                  onEditRecurrence={() => handleOpenEdit(detailTask)}
+                  onStopRecurrence={() => handleStopRecurrence(detailTask.id)}
+                />
 
                 {/* Tags / Labels Section inside Task Details */}
                 <div className="space-y-2 p-3 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">

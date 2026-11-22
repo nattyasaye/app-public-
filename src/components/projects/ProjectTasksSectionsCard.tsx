@@ -2,6 +2,9 @@ import React, { useState } from 'react';
 import {
   SharedMilestone,
   SharedProjectTrackingRecord,
+  SharedTaskRecurrenceConfig,
+  SharedTaskRecurrenceFrequency,
+  SharedTaskRecurrenceRepeatFrom,
 } from '../../domain/sharedFoundation';
 import {
   CANONICAL_TASK_PRIORITIES,
@@ -14,7 +17,12 @@ import {
   TASK_STATUS_LABELS,
   TaskPriority,
   TaskStatus,
+  validateTaskRecurrenceConfig,
 } from '../../domain/taskOperations';
+import {
+  formatRecurrenceSummary,
+  resolveEffectiveRecurrenceConfig,
+} from '../../domain/taskRecurrence';
 import {
   ProjectSectionsViewModel,
   projectsService,
@@ -27,6 +35,7 @@ import {
   Flag,
   FolderPlus,
   Plus,
+  Repeat2,
   Trash2,
   X,
 } from 'lucide-react';
@@ -38,6 +47,7 @@ import {
   DaywellProgressBar,
   DaywellStatusBadge,
 } from '../ui';
+import { TaskRecurrenceEditorSection } from '../tasks/TaskRecurrenceFields';
 
 export interface ProjectTasksSectionsCardProps {
   projectId: string;
@@ -78,7 +88,19 @@ export function ProjectTasksSectionsCard({
   const [taskScheduledDate, setTaskScheduledDate] = useState('');
   const [taskSectionId, setTaskSectionId] = useState('');
   const [taskMilestoneId, setTaskMilestoneId] = useState('');
+  const [taskIsRecurring, setTaskIsRecurring] = useState(false);
+  const [taskRecFrequency, setTaskRecFrequency] =
+    useState<SharedTaskRecurrenceFrequency>('weekly');
+  const [taskRecInterval, setTaskRecInterval] = useState(1);
+  const [taskRecWeekdays, setTaskRecWeekdays] = useState<number[]>([]);
+  const [taskRecStartDate, setTaskRecStartDate] = useState('');
+  const [taskRecEndDate, setTaskRecEndDate] = useState('');
+  const [taskRecRepeatFrom, setTaskRecRepeatFrom] =
+    useState<SharedTaskRecurrenceRepeatFrom>('due_date');
   const [taskFormError, setTaskFormError] = useState<string | null>(null);
+  const [taskRecurrenceErrors, setTaskRecurrenceErrors] = useState<
+    Record<string, string>
+  >({});
 
   const [pendingDeleteTask, setPendingDeleteTask] =
     useState<DaywellTaskRecord | null>(null);
@@ -172,11 +194,20 @@ export function ProjectTasksSectionsCard({
     setTaskScheduledDate('');
     setTaskSectionId(defaultSectionId);
     setTaskMilestoneId('');
+    setTaskIsRecurring(false);
+    setTaskRecFrequency('weekly');
+    setTaskRecInterval(1);
+    setTaskRecWeekdays([]);
+    setTaskRecStartDate('');
+    setTaskRecEndDate('');
+    setTaskRecRepeatFrom('due_date');
+    setTaskRecurrenceErrors({});
     setTaskFormError(null);
     setIsTaskModalOpen(true);
   };
 
   const openEditTask = (task: DaywellTaskRecord) => {
+    const rec = resolveEffectiveRecurrenceConfig(task);
     setEditingTask(task);
     setTaskTitle(task.title);
     setTaskDescription(task.description ?? '');
@@ -186,6 +217,14 @@ export function ProjectTasksSectionsCard({
     setTaskScheduledDate(task.scheduledDate ?? '');
     setTaskSectionId(taskToSectionId.get(task.id) ?? '');
     setTaskMilestoneId(task.milestoneId ?? '');
+    setTaskIsRecurring(Boolean(rec));
+    setTaskRecFrequency(rec?.frequency ?? 'weekly');
+    setTaskRecInterval(rec?.interval ?? 1);
+    setTaskRecWeekdays(rec?.weekdays ? [...rec.weekdays] : []);
+    setTaskRecStartDate(rec?.startDate ?? '');
+    setTaskRecEndDate(rec?.endDate ?? '');
+    setTaskRecRepeatFrom(rec?.repeatFrom ?? 'due_date');
+    setTaskRecurrenceErrors({});
     setTaskFormError(null);
     setIsTaskModalOpen(true);
   };
@@ -197,6 +236,32 @@ export function ProjectTasksSectionsCard({
       setTaskFormError('Task title is required.');
       return;
     }
+    const recConfig: SharedTaskRecurrenceConfig | undefined = taskIsRecurring
+      ? {
+          frequency: taskRecFrequency,
+          interval: taskRecInterval,
+          ...(taskRecFrequency === 'weekly' && taskRecWeekdays.length > 0
+            ? { weekdays: taskRecWeekdays }
+            : {}),
+          ...(taskRecStartDate.trim()
+            ? { startDate: taskRecStartDate.trim() }
+            : {}),
+          ...(taskRecEndDate.trim() ? { endDate: taskRecEndDate.trim() } : {}),
+          repeatFrom: taskRecRepeatFrom,
+        }
+      : undefined;
+    if (recConfig) {
+      const recCheck = validateTaskRecurrenceConfig(recConfig);
+      if (!recCheck.isValid) {
+        setTaskRecurrenceErrors(recCheck.errors);
+        setTaskFormError(
+          Object.values(recCheck.errors)[0] ?? 'Invalid recurrence settings.'
+        );
+        return;
+      }
+    }
+    setTaskRecurrenceErrors({});
+
     try {
       if (editingTask) {
         projectsService.updateTaskInProject(editingTask.id, {
@@ -208,6 +273,9 @@ export function ProjectTasksSectionsCard({
           scheduledDate: taskScheduledDate,
           milestoneId: taskMilestoneId || '',
           sectionId: taskSectionId || null,
+          ...(recConfig
+            ? { recurrenceConfig: recConfig }
+            : { clearRecurrenceConfig: true }),
         });
       } else {
         projectsService.createTaskInProject({
@@ -220,6 +288,7 @@ export function ProjectTasksSectionsCard({
           scheduledDate: taskScheduledDate || undefined,
           milestoneId: taskMilestoneId || undefined,
           sectionId: taskSectionId || undefined,
+          recurrenceConfig: recConfig,
         });
       }
       setIsTaskModalOpen(false);
@@ -235,22 +304,25 @@ export function ProjectTasksSectionsCard({
   const handleToggleTask = (task: DaywellTaskRecord) => {
     const wasDone = isTaskCompleted(task);
     const prevSectionId = taskToSectionId.get(task.id);
-    const { previousTasks } = projectsService.toggleTaskCompletionInProject(
-      task.id
-    );
+    const { previousTasks, generatedNextTask } =
+      projectsService.toggleTaskCompletionInProject(task.id);
     onRefresh();
-    onNotifyUndo?.(
-      wasDone ? `Reopened "${task.title}"` : `Completed "${task.title}"`,
-      () => {
-        projectsService.restoreTasksSnapshot(
-          previousTasks,
-          prevSectionId
-            ? { projectId, taskId: task.id, sectionId: prevSectionId }
-            : undefined
-        );
-        onRefresh();
-      }
-    );
+    const nextDate = generatedNextTask?.dueDate ?? generatedNextTask?.scheduledDate;
+    const message = wasDone
+      ? `Reopened "${task.title}"`
+      : generatedNextTask
+        ? `Completed "${task.title}" · Next: ${nextDate ?? 'scheduled'}`
+        : `Completed "${task.title}"`;
+    onNotifyUndo?.(message, () => {
+      projectsService.restoreTasksSnapshot(
+        previousTasks,
+        prevSectionId
+          ? { projectId, taskId: task.id, sectionId: prevSectionId }
+          : undefined,
+        generatedNextTask?.id
+      );
+      onRefresh();
+    });
   };
 
   const handleMoveTaskSection = (task: DaywellTaskRecord, nextSectionId: string) => {
@@ -368,6 +440,16 @@ export function ProjectTasksSectionsCard({
                   Due {task.dueDate}
                 </span>
               )}
+              {(() => {
+                const rec = resolveEffectiveRecurrenceConfig(task);
+                if (!rec) return null;
+                return (
+                  <span className="flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                    <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                    {formatRecurrenceSummary(rec)}
+                  </span>
+                );
+              })()}
             </div>
           </div>
         </div>
@@ -767,6 +849,27 @@ export function ProjectTasksSectionsCard({
                   />
                 </div>
               </div>
+
+              <TaskRecurrenceEditorSection
+                compact
+                isRecurring={taskIsRecurring}
+                onToggleRecurring={setTaskIsRecurring}
+                frequency={taskRecFrequency}
+                onChangeFrequency={setTaskRecFrequency}
+                interval={taskRecInterval}
+                onChangeInterval={setTaskRecInterval}
+                weekdays={taskRecWeekdays}
+                onChangeWeekdays={setTaskRecWeekdays}
+                startDate={taskRecStartDate}
+                onChangeStartDate={setTaskRecStartDate}
+                endDate={taskRecEndDate}
+                onChangeEndDate={setTaskRecEndDate}
+                repeatFrom={taskRecRepeatFrom}
+                onChangeRepeatFrom={setTaskRecRepeatFrom}
+                dueDate={taskDueDate}
+                scheduledDate={taskScheduledDate}
+                errors={taskRecurrenceErrors}
+              />
 
               {taskFormError && (
                 <p className="text-[11px] text-[var(--dw-error)] font-medium">

@@ -902,6 +902,41 @@ class ProjectsController extends ChangeNotifier {
     }
   }
 
+  Future<void> copyTaskSectionLink(
+    String projectId,
+    String fromTaskId,
+    TaskEntity nextTask,
+  ) async {
+    if (projectId.trim().isEmpty || nextTask.projectId != projectId) return;
+    try {
+      final records = await _repository.getRecordsForProject(projectId);
+      String? sectionId;
+      var alreadyLinked = false;
+      for (final rec in records) {
+        if (rec.linkedTaskId == fromTaskId &&
+            rec.recordType == ProjectRecordType.groupedItem &&
+            rec.parentRecordId != null) {
+          sectionId ??= rec.parentRecordId;
+        }
+        if (rec.linkedTaskId == nextTask.id &&
+            rec.recordType == ProjectRecordType.groupedItem) {
+          alreadyLinked = true;
+        }
+      }
+      if (sectionId == null || alreadyLinked) return;
+      await assignTaskToProjectSection(
+        projectId: projectId,
+        taskId: nextTask.id,
+        taskTitle: nextTask.title,
+        taskCompleted: nextTask.isCompleted,
+        sectionRecordId: sectionId,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+    }
+  }
+
   void clearError() {
     if (_state.errorMessage != null) {
       _state = _state.copyWith(clearError: true);

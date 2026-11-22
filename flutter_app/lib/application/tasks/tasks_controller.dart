@@ -3,6 +3,7 @@ import '../../core/date/shared_date.dart';
 import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_contracts.dart';
+import '../../domain/tasks/task_recurrence_engine.dart';
 import 'tasks_state.dart';
 
 /// Module-scoped application controller for Daywell To-Do and Projects.
@@ -845,18 +846,21 @@ class TasksController extends ChangeNotifier {
         existing.copyWith(recurrenceRule: recurrenceRule));
   }
 
-  Future<void> _persistUpdatedTask(TaskEntity updated) async {
+  Future<TaskEntity?> _persistUpdatedTask(TaskEntity updated) async {
     try {
-      await _repository.updateTask(updated);
+      final persisted = await _repository.updateTask(updated);
       final updatedTasks = await _repository.getTasks();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         clearError: true,
       );
+      notifyListeners();
+      return persisted;
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
     }
-    notifyListeners();
   }
 
   // --- Task Workflow Orchestration ---
@@ -911,6 +915,26 @@ class TasksController extends ChangeNotifier {
         _validPriorities.contains(priority) ? priority : 'medium';
     final trimmedDescription = description?.trim();
 
+    final normalizedConfig =
+        TaskRecurrenceEngine.normalizeConfig(recurrenceConfig);
+    if (recurrenceConfig != null) {
+      final recValidation =
+          TaskRecurrenceEngine.validateConfig(recurrenceConfig);
+      if (!recValidation.isValid) {
+        _state = _state.copyWith(
+          errorMessage: recValidation.errors.values.first,
+        );
+        notifyListeners();
+        return null;
+      }
+    }
+    final rawRule = recurrenceRule?.trim().toLowerCase();
+    final effectiveRule = normalizedConfig?.frequency ??
+        (rawRule != null &&
+                TaskRecurrenceEngine.validFrequencies.contains(rawRule)
+            ? rawRule
+            : null);
+
     final now = EthiopiaClock.nowUtc();
     final resolvedTaskId = id ?? 'task-${now.millisecondsSinceEpoch}';
     final resolvedMyDayDate =
@@ -945,8 +969,8 @@ class TasksController extends ChangeNotifier {
       isPinned: isPinned,
       isMyDay: isMyDay,
       myDayDate: resolvedMyDayDate,
-      recurrenceRule: recurrenceRule,
-      recurrenceConfig: recurrenceConfig,
+      recurrenceRule: effectiveRule,
+      recurrenceConfig: normalizedConfig,
       isArchived: isArchived,
       sortOrder: effectiveSortOrder,
       createdAt: now,
@@ -1008,17 +1032,85 @@ class TasksController extends ChangeNotifier {
     bool clearMilestone = false,
     List<TaskSubtask>? subtasks,
     List<String>? labels,
+    String? recurrenceRule,
+    bool clearRecurrenceRule = false,
+    TaskRecurrenceConfig? recurrenceConfig,
+    bool clearRecurrenceConfig = false,
+  }) async {
+    final result = await updateTaskWithRecurrence(
+      id: id,
+      title: title,
+      description: description,
+      clearDescription: clearDescription,
+      priority: priority,
+      status: status,
+      dueDate: dueDate,
+      clearDueDate: clearDueDate,
+      scheduledDate: scheduledDate,
+      clearScheduledDate: clearScheduledDate,
+      scheduledTime: scheduledTime,
+      clearScheduledTime: clearScheduledTime,
+      projectId: projectId,
+      clearProject: clearProject,
+      milestoneId: milestoneId,
+      clearMilestone: clearMilestone,
+      subtasks: subtasks,
+      labels: labels,
+      recurrenceRule: recurrenceRule,
+      clearRecurrenceRule: clearRecurrenceRule,
+      recurrenceConfig: recurrenceConfig,
+      clearRecurrenceConfig: clearRecurrenceConfig,
+    );
+    return result.updatedTask;
+  }
+
+  Future<({TaskEntity? updatedTask, TaskEntity? generatedNextTask})>
+      updateTaskWithRecurrence({
+    required String id,
+    required String title,
+    String? description,
+    bool clearDescription = false,
+    String? priority,
+    String? status,
+    CalendarDate? dueDate,
+    bool clearDueDate = false,
+    CalendarDate? scheduledDate,
+    bool clearScheduledDate = false,
+    String? scheduledTime,
+    bool clearScheduledTime = false,
+    String? projectId,
+    bool clearProject = false,
+    String? milestoneId,
+    bool clearMilestone = false,
+    List<TaskSubtask>? subtasks,
+    List<String>? labels,
+    String? recurrenceRule,
+    bool clearRecurrenceRule = false,
+    TaskRecurrenceConfig? recurrenceConfig,
+    bool clearRecurrenceConfig = false,
   }) async {
     final trimmedTitle = title.trim();
     if (trimmedTitle.isEmpty) {
       _state = _state.copyWith(errorMessage: 'Task title is required');
       notifyListeners();
-      return null;
+      return (updatedTask: null, generatedNextTask: null);
     }
 
     final existing =
         _state.findTaskById(id) ?? await _repository.getTaskById(id);
-    if (existing == null) return null;
+    if (existing == null) return (updatedTask: null, generatedNextTask: null);
+
+    if (!clearRecurrenceConfig && recurrenceConfig != null) {
+      final recValidation =
+          TaskRecurrenceEngine.validateConfig(recurrenceConfig);
+      if (!recValidation.isValid) {
+        _state = _state.copyWith(
+          errorMessage: recValidation.errors.values.first,
+        );
+        notifyListeners();
+        return (updatedTask: null, generatedNextTask: null);
+      }
+    }
 
     final now = EthiopiaClock.nowUtc();
     final nextStatus = status != null && _validStatuses.contains(status)
@@ -1036,6 +1128,17 @@ class TasksController extends ChangeNotifier {
     final projectChanged = nextProjectId != existing.projectId;
     final shouldClearMilestone =
         clearProject || clearMilestone || (projectChanged && milestoneId == null);
+
+    final TaskRecurrenceConfig? nextRecurrenceConfig = clearRecurrenceConfig
+        ? null
+        : (recurrenceConfig != null
+            ? TaskRecurrenceEngine.normalizeConfig(recurrenceConfig)
+            : existing.recurrenceConfig);
+    final shouldClearRule = clearRecurrenceRule || clearRecurrenceConfig;
+    final String? nextRecurrenceRule = shouldClearRule
+        ? null
+        : (nextRecurrenceConfig?.frequency ??
+            (recurrenceRule?.trim().toLowerCase() ?? existing.recurrenceRule));
 
     final updated = existing.copyWith(
       title: trimmedTitle,
@@ -1060,11 +1163,40 @@ class TasksController extends ChangeNotifier {
           : null,
       labels:
           labels != null ? TasksModuleState.normalizeLabels(labels) : null,
+      recurrenceRule: nextRecurrenceRule,
+      clearRecurrenceRule: shouldClearRule,
+      recurrenceConfig: nextRecurrenceConfig,
+      clearRecurrenceConfig: clearRecurrenceConfig,
       updatedAt: now,
     );
 
     try {
       final persisted = await _repository.updateTask(updated);
+      TaskEntity? generatedNextTask;
+      final transitionedToCompleted =
+          !existing.isCompleted && updated.isCompleted;
+      if (transitionedToCompleted &&
+          TaskRecurrenceEngine.resolveEffectiveConfig(updated) != null) {
+        final currentTasks = _state.tasks.isNotEmpty
+            ? _state.tasks
+            : await _repository.getTasks();
+        final tempOpen = updated.copyWith(
+          status: 'not_started',
+          clearCompletedAt: true,
+        );
+        final simList = currentTasks
+            .map((t) => t.id == existing.id ? tempOpen : t)
+            .toList(growable: false);
+        final recResult = TaskRecurrenceEngine.completeTaskWithRecurrence(
+          simList,
+          existing.id,
+          nowUtc: now,
+        );
+        if (recResult.generatedNextTask != null) {
+          generatedNextTask =
+              await _repository.createTask(recResult.generatedNextTask!);
+        }
+      }
       if (existing.isCompleted != updated.isCompleted) {
         await _syncCompletionWithDailyPlanning(
           updated.id,
@@ -1080,11 +1212,11 @@ class TasksController extends ChangeNotifier {
         clearError: true,
       );
       notifyListeners();
-      return persisted;
+      return (updatedTask: persisted, generatedNextTask: generatedNextTask);
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
       notifyListeners();
-      return null;
+      return (updatedTask: null, generatedNextTask: null);
     }
   }
 
@@ -1135,17 +1267,186 @@ class TasksController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<
+      ({
+        TaskEntity? updatedTask,
+        TaskEntity? generatedNextTask,
+        bool seriesEnded,
+        bool duplicatePrevented,
+      })> toggleTaskWithRecurrence(
+    String id, {
+    DateTime? nowUtc,
+  }) async {
+    try {
+      final currentTasks = _state.tasks.isNotEmpty
+          ? _state.tasks
+          : await _repository.getTasks();
+      final result = TaskRecurrenceEngine.completeTaskWithRecurrence(
+        currentTasks,
+        id,
+        nowUtc: nowUtc,
+      );
+      if (result.updatedTask == null) {
+        return (
+          updatedTask: null,
+          generatedNextTask: null,
+          seriesEnded: false,
+          duplicatePrevented: false,
+        );
+      }
+      final persisted = await _repository.updateTask(result.updatedTask!);
+      TaskEntity? spawned;
+      if (result.generatedNextTask != null) {
+        spawned = await _repository.createTask(result.generatedNextTask!);
+      }
+      await _syncCompletionWithDailyPlanning(id, persisted.isCompleted);
+
+      final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
+        clearError: true,
+      );
+      notifyListeners();
+      return (
+        updatedTask: persisted,
+        generatedNextTask: spawned,
+        seriesEnded: result.seriesEnded,
+        duplicatePrevented: result.duplicatePrevented,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return (
+        updatedTask: null,
+        generatedNextTask: null,
+        seriesEnded: false,
+        duplicatePrevented: false,
+      );
+    }
+  }
+
   Future<void> toggleTaskStatus(String id) async {
-    final task = _state.findTaskById(id);
-    if (task == null) return;
-    final nextStatus = task.isCompleted ? 'not_started' : 'completed';
-    await updateTaskStatus(id, nextStatus);
+    await toggleTaskWithRecurrence(id);
   }
 
   Future<void> updateTaskStatus(String id, String newStatus) async {
     try {
+      final existing =
+          _state.findTaskById(id) ?? await _repository.getTaskById(id);
+      if (existing != null &&
+          newStatus == 'completed' &&
+          !existing.isCompleted &&
+          TaskRecurrenceEngine.resolveEffectiveConfig(existing) != null) {
+        await toggleTaskWithRecurrence(id);
+        return;
+      }
+
       await _repository.updateTaskStatus(id, newStatus);
       await _syncCompletionWithDailyPlanning(id, newStatus == 'completed');
+      final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
+        clearError: true,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<TaskEntity?> skipRecurrenceOccurrence(
+    String taskId, {
+    DateTime? nowUtc,
+  }) async {
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return null;
+
+    final skipped =
+        TaskRecurrenceEngine.skipOccurrence(existing, nowUtc: nowUtc);
+    if (!skipped.ok || skipped.updatedTask == null) {
+      _state = _state.copyWith(errorMessage: skipped.error);
+      notifyListeners();
+      return null;
+    }
+
+    try {
+      final persisted = await _repository.updateTask(skipped.updatedTask!);
+      if (existing.isMyDay && !persisted.isMyDay && existing.myDayDate != null) {
+        await removeTaskFromPlannedDay(taskId, date: existing.myDayDate!);
+      }
+      final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
+        clearError: true,
+      );
+      notifyListeners();
+      return persisted;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<TaskEntity?> rescheduleTaskOccurrence(
+    String taskId,
+    CalendarDate newDate, {
+    DateTime? nowUtc,
+  }) async {
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return null;
+
+    final updated = TaskRecurrenceEngine.rescheduleOccurrence(
+      existing,
+      newDate,
+      nowUtc: nowUtc,
+    );
+    return _persistUpdatedTask(updated);
+  }
+
+  Future<TaskEntity?> stopTaskRecurrence(
+    String taskId, {
+    DateTime? nowUtc,
+  }) async {
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return null;
+
+    final updated = TaskRecurrenceEngine.stopRecurrence(
+      existing,
+      nowUtc: nowUtc,
+    );
+    return _persistUpdatedTask(updated);
+  }
+
+  Future<void> restoreTaskSnapshot(TaskEntity snapshot) async {
+    await _persistUpdatedTask(snapshot);
+  }
+
+  Future<void> undoGeneratedRecurrenceCompletion({
+    required TaskEntity previousTask,
+    String? generatedNextTaskId,
+  }) async {
+    try {
+      await _repository.updateTask(previousTask);
+      if (generatedNextTaskId != null && generatedNextTaskId.trim().isNotEmpty) {
+        await _repository.deleteTask(generatedNextTaskId);
+      }
+      await _syncCompletionWithDailyPlanning(
+        previousTask.id,
+        previousTask.isCompleted,
+      );
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
       _state = _state.copyWith(
@@ -1212,12 +1513,24 @@ class TasksController extends ChangeNotifier {
     final ids = _state.selectedTaskIds.toList(growable: false);
     if (ids.isEmpty) return;
     try {
+      var runningTasks = List<TaskEntity>.from(_state.tasks);
       for (final id in ids) {
         final task = _state.findTaskById(id);
-        if (task != null) {
-          final nextStatus = task.isCompleted ? 'not_started' : 'completed';
-          await _repository.updateTaskStatus(id, nextStatus);
-          await _syncCompletionWithDailyPlanning(id, nextStatus == 'completed');
+        if (task == null) continue;
+        final result = TaskRecurrenceEngine.completeTaskWithRecurrence(
+          runningTasks,
+          id,
+        );
+        if (result.updatedTask != null) {
+          await _repository.updateTask(result.updatedTask!);
+          if (result.generatedNextTask != null) {
+            await _repository.createTask(result.generatedNextTask!);
+          }
+          await _syncCompletionWithDailyPlanning(
+            id,
+            result.updatedTask!.isCompleted,
+          );
+          runningTasks = List<TaskEntity>.from(result.tasks);
         }
       }
       final updatedTasks = await _repository.getTasks();

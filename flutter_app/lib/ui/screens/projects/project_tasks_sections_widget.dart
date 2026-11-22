@@ -9,7 +9,9 @@ import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
 import '../../../domain/projects/project_models.dart';
 import '../../../domain/tasks/task_models.dart';
+import '../../../domain/tasks/task_recurrence_engine.dart';
 import '../../widgets/shared_ui_widgets.dart';
+import '../tasks/task_recurrence_widgets.dart';
 import 'project_ui_helpers.dart';
 
 class ProjectTasksSectionsWidget extends StatelessWidget {
@@ -244,6 +246,18 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     String? selectedMilestoneId = existingTask?.milestoneId;
     CalendarDate? scheduledDate = existingTask?.scheduledDate;
     CalendarDate? dueDate = existingTask?.dueDate;
+    final existingRecurrence = existingTask != null
+        ? TaskRecurrenceEngine.resolveEffectiveConfig(existingTask)
+        : null;
+    bool isRecurring = existingRecurrence != null;
+    String recFrequency = existingRecurrence?.frequency ?? 'weekly';
+    int recInterval = existingRecurrence?.interval ?? 1;
+    List<int> recWeekdays =
+        List<int>.from(existingRecurrence?.weekdays ?? const <int>[]);
+    CalendarDate? recStartDate = existingRecurrence?.startDate;
+    CalendarDate? recEndDate = existingRecurrence?.endDate;
+    String recRepeatFrom = existingRecurrence?.repeatFrom ?? 'due_date';
+    String? recError;
     String? titleError;
 
     await showDialog<void>(
@@ -419,6 +433,54 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                         ),
                     ],
                   ),
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  TaskRecurrenceEditorSection(
+                    isRecurring: isRecurring,
+                    onToggleRecurring: (enabled) => setDialogState(() {
+                      isRecurring = enabled;
+                      recError = null;
+                      if (enabled && recStartDate == null) {
+                        recStartDate = scheduledDate ?? dueDate;
+                      }
+                    }),
+                    frequency: recFrequency,
+                    onFrequencyChanged: (freq) => setDialogState(() {
+                      recFrequency = freq;
+                      recError = null;
+                    }),
+                    interval: recInterval,
+                    onIntervalChanged: (next) => setDialogState(() {
+                      recInterval = next < 1 ? 1 : next;
+                      recError = null;
+                    }),
+                    weekdays: recWeekdays,
+                    onWeekdaysChanged: (days) => setDialogState(() {
+                      recWeekdays = days;
+                      recError = null;
+                    }),
+                    startDate: recStartDate,
+                    onStartDateChanged: (d) => setDialogState(() {
+                      recStartDate = d;
+                      recError = null;
+                    }),
+                    endDate: recEndDate,
+                    onEndDateChanged: (d) => setDialogState(() {
+                      recEndDate = d;
+                      recError = null;
+                    }),
+                    repeatFrom: recRepeatFrom,
+                    onRepeatFromChanged: (mode) => setDialogState(() {
+                      recRepeatFrom = mode;
+                    }),
+                    onPickDate: (current) => pickProjectCalendarDate(
+                      ctx,
+                      initialDate: current,
+                      helpText: 'Select Recurrence Date',
+                    ),
+                    dueDate: dueDate,
+                    scheduledDate: scheduledDate,
+                    errorText: recError,
+                  ),
                 ],
               ),
             ),
@@ -437,6 +499,29 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                     return;
                   }
                   final trimmedDesc = descCtrl.text.trim();
+                  final TaskRecurrenceConfig? recConfig = isRecurring
+                      ? TaskRecurrenceConfig(
+                          frequency: recFrequency,
+                          interval: recInterval,
+                          weekdays: recFrequency == 'weekly' &&
+                                  recWeekdays.isNotEmpty
+                              ? List<int>.unmodifiable(recWeekdays)
+                              : null,
+                          startDate: recStartDate,
+                          endDate: recEndDate,
+                          repeatFrom: recRepeatFrom,
+                        )
+                      : null;
+                  if (recConfig != null) {
+                    final validation =
+                        TaskRecurrenceEngine.validateConfig(recConfig);
+                    if (!validation.isValid) {
+                      setDialogState(
+                        () => recError = validation.errors.values.first,
+                      );
+                      return;
+                    }
+                  }
 
                   if (existingTask == null) {
                     final created = await ctrl.createTask(
@@ -448,6 +533,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       dueDate: dueDate,
                       projectId: project.id,
                       milestoneId: selectedMilestoneId,
+                      recurrenceRule: recConfig?.frequency,
+                      recurrenceConfig: recConfig,
                     );
                     if (created != null) {
                       await projectsController.assignTaskToProjectSection(
@@ -459,7 +546,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       );
                     }
                   } else {
-                    final updated = await ctrl.updateTask(
+                    final updateRes = await ctrl.updateTaskWithRecurrence(
                       id: existingTask.id,
                       title: trimmed,
                       description: trimmedDesc.isEmpty ? null : trimmedDesc,
@@ -473,7 +560,12 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       projectId: project.id,
                       milestoneId: selectedMilestoneId,
                       clearMilestone: selectedMilestoneId == null,
+                      recurrenceRule: recConfig?.frequency,
+                      clearRecurrenceRule: !isRecurring,
+                      recurrenceConfig: recConfig,
+                      clearRecurrenceConfig: !isRecurring,
                     );
+                    final updated = updateRes.updatedTask;
                     if (updated != null) {
                       await projectsController.assignTaskToProjectSection(
                         projectId: project.id,
@@ -481,6 +573,13 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                         taskTitle: updated.title,
                         taskCompleted: updated.isCompleted,
                         sectionRecordId: selectedSectionId,
+                      );
+                    }
+                    if (updateRes.generatedNextTask != null) {
+                      await projectsController.copyTaskSectionLink(
+                        project.id,
+                        existingTask.id,
+                        updateRes.generatedNextTask!,
                       );
                     }
                   }
@@ -499,30 +598,51 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     final ctrl = tasksController;
     if (ctrl == null) return;
     final wasCompleted = task.isCompleted;
-    await ctrl.toggleTaskStatus(task.id);
-    final updated = ctrl.state.findTaskById(task.id);
-    if (updated != null) {
-      await projectsController.syncTaskSectionLink(project.id, updated);
+    final previousSnapshot = task;
+    final res = await ctrl.toggleTaskWithRecurrence(task.id);
+    if (res.updatedTask != null) {
+      await projectsController.syncTaskSectionLink(
+        project.id,
+        res.updatedTask!,
+      );
+    }
+    if (res.generatedNextTask != null) {
+      await projectsController.copyTaskSectionLink(
+        project.id,
+        task.id,
+        res.generatedNextTask!,
+      );
     }
     if (!context.mounted) return;
+    final nextDate =
+        res.generatedNextTask?.dueDate ?? res.generatedNextTask?.scheduledDate;
+    final message = wasCompleted
+        ? 'Reopened "${task.title}"'
+        : res.generatedNextTask != null
+            ? 'Completed "${task.title}" · Next: ${nextDate?.toIsoString() ?? 'scheduled'}'
+            : 'Completed "${task.title}"';
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          wasCompleted ? 'Reopened "${task.title}"' : 'Completed "${task.title}"',
-        ),
+        content: Text(message),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
             unawaited(() async {
-              await ctrl.toggleTaskStatus(task.id);
-              final reverted = ctrl.state.findTaskById(task.id);
-              if (reverted != null) {
-                await projectsController.syncTaskSectionLink(
+              if (res.generatedNextTask != null) {
+                await projectsController.detachTaskFromProjectSections(
                   project.id,
-                  reverted,
+                  res.generatedNextTask!.id,
                 );
               }
+              await ctrl.undoGeneratedRecurrenceCompletion(
+                previousTask: previousSnapshot,
+                generatedNextTaskId: res.generatedNextTask?.id,
+              );
+              await projectsController.syncTaskSectionLink(
+                project.id,
+                previousSnapshot,
+              );
             }());
           },
         ),
@@ -649,6 +769,27 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                         style: textTheme.bodySmall?.copyWith(
                           color: semantic.textMuted,
                         ),
+                      ),
+                    if (TaskRecurrenceEngine.resolveEffectiveConfig(task) !=
+                        null)
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.repeat,
+                            size: 12,
+                            color: Theme.of(context).colorScheme.primary,
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            TaskRecurrenceEngine.formatSummary(
+                              TaskRecurrenceEngine.resolveEffectiveConfig(task),
+                            ),
+                            style: textTheme.bodySmall?.copyWith(
+                              color: semantic.textSecondary,
+                            ),
+                          ),
+                        ],
                       ),
                     if (task.subtasks.isNotEmpty)
                       Text(

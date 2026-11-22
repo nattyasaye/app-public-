@@ -12,11 +12,13 @@ import '../../domain/inbox/inbox_models.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_models.dart';
+import '../../domain/tasks/task_recurrence_engine.dart';
 import '../app_state.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'projects/project_form_sheet.dart';
 import 'projects/projects_workspace_tab.dart';
 import 'tasks/my_day_planning_view.dart';
+import 'tasks/task_recurrence_widgets.dart';
 
 class TasksView extends StatefulWidget {
   final AppStateManager? state;
@@ -156,38 +158,65 @@ class _TasksViewState extends State<TasksView>
     }
   }
 
-  void _toggleCompleteWithUndo(TaskEntity task, TasksController controller) {
+  Future<void> _toggleCompleteWithUndo(
+    TaskEntity task,
+    TasksController controller,
+  ) async {
     final wasCompleted = task.isCompleted;
+    final previousSnapshot = task;
     final projectsCtrl = widget.effectiveProjectsController;
-    unawaited(() async {
-      await controller.toggleTaskStatus(task.id);
-      final updated = controller.state.findTaskById(task.id);
-      if (projectsCtrl != null &&
-          updated != null &&
-          updated.projectId != null) {
-        await projectsCtrl.syncTaskSectionLink(updated.projectId!, updated);
-      }
-    }());
+    final res = await controller.toggleTaskWithRecurrence(task.id);
+    if (res.updatedTask != null &&
+        projectsCtrl != null &&
+        res.updatedTask!.projectId != null) {
+      await projectsCtrl.syncTaskSectionLink(
+        res.updatedTask!.projectId!,
+        res.updatedTask!,
+      );
+    }
+    if (res.generatedNextTask != null &&
+        projectsCtrl != null &&
+        res.generatedNextTask!.projectId != null) {
+      await projectsCtrl.copyTaskSectionLink(
+        res.generatedNextTask!.projectId!,
+        task.id,
+        res.generatedNextTask!,
+      );
+    }
+    if (!mounted) return;
+    final nextDate =
+        res.generatedNextTask?.dueDate ?? res.generatedNextTask?.scheduledDate;
+    final message = wasCompleted
+        ? 'Reopened "${task.title}"'
+        : res.generatedNextTask != null
+            ? 'Completed "${task.title}" · Next: ${nextDate?.toIsoString() ?? 'scheduled'}'
+            : res.seriesEnded
+                ? 'Completed "${task.title}" · Series ended'
+                : 'Completed "${task.title}"';
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          wasCompleted
-              ? 'Reopened "${task.title}"'
-              : 'Completed "${task.title}"',
-        ),
+        content: Text(message),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
             unawaited(() async {
-              await controller.toggleTaskStatus(task.id);
-              final reverted = controller.state.findTaskById(task.id);
-              if (projectsCtrl != null &&
-                  reverted != null &&
-                  reverted.projectId != null) {
+              if (res.generatedNextTask != null &&
+                  projectsCtrl != null &&
+                  res.generatedNextTask!.projectId != null) {
+                await projectsCtrl.detachTaskFromProjectSections(
+                  res.generatedNextTask!.projectId!,
+                  res.generatedNextTask!.id,
+                );
+              }
+              await controller.undoGeneratedRecurrenceCompletion(
+                previousTask: previousSnapshot,
+                generatedNextTaskId: res.generatedNextTask?.id,
+              );
+              if (projectsCtrl != null && previousSnapshot.projectId != null) {
                 await projectsCtrl.syncTaskSectionLink(
-                  reverted.projectId!,
-                  reverted,
+                  previousSnapshot.projectId!,
+                  previousSnapshot,
                 );
               }
             }());
@@ -385,6 +414,19 @@ class _TasksViewState extends State<TasksView>
     String? modalSubtaskAddError;
     String? editingModalSubtaskId;
     String? modalSubtaskEditError;
+    final existingRecurrence = existingTask != null
+        ? TaskRecurrenceEngine.resolveEffectiveConfig(existingTask)
+        : null;
+    bool modalIsRecurring = existingRecurrence != null;
+    String modalRecFrequency = existingRecurrence?.frequency ?? 'weekly';
+    int modalRecInterval = existingRecurrence?.interval ?? 1;
+    List<int> modalRecWeekdays =
+        List<int>.from(existingRecurrence?.weekdays ?? const <int>[]);
+    CalendarDate? modalRecStartDate = existingRecurrence?.startDate;
+    CalendarDate? modalRecEndDate = existingRecurrence?.endDate;
+    String modalRecRepeatFrom =
+        existingRecurrence?.repeatFrom ?? 'due_date';
+    String? modalRecError;
 
     unawaited(
       showModalBottomSheet<void>(
@@ -675,6 +717,48 @@ class _TasksViewState extends State<TasksView>
                         ),
                       ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    TaskRecurrenceEditorSection(
+                      isRecurring: modalIsRecurring,
+                      onToggleRecurring: (val) => setModalState(() {
+                        modalIsRecurring = val;
+                        modalRecError = null;
+                      }),
+                      frequency: modalRecFrequency,
+                      onFrequencyChanged: (val) => setModalState(() {
+                        modalRecFrequency = val;
+                        modalRecError = null;
+                      }),
+                      interval: modalRecInterval,
+                      onIntervalChanged: (val) => setModalState(() {
+                        modalRecInterval = val;
+                        modalRecError = null;
+                      }),
+                      weekdays: modalRecWeekdays,
+                      onWeekdaysChanged: (val) => setModalState(() {
+                        modalRecWeekdays = val;
+                        modalRecError = null;
+                      }),
+                      startDate: modalRecStartDate,
+                      onStartDateChanged: (val) => setModalState(() {
+                        modalRecStartDate = val;
+                        modalRecError = null;
+                      }),
+                      endDate: modalRecEndDate,
+                      onEndDateChanged: (val) => setModalState(() {
+                        modalRecEndDate = val;
+                        modalRecError = null;
+                      }),
+                      repeatFrom: modalRecRepeatFrom,
+                      onRepeatFromChanged: (val) => setModalState(() {
+                        modalRecRepeatFrom = val;
+                        modalRecError = null;
+                      }),
+                      onPickDate: _pickCalendarDate,
+                      dueDate: dueDate,
+                      scheduledDate: scheduledDate,
+                      errorText: modalRecError,
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
                     DaywellCard(
                       padding: const EdgeInsets.all(
                         SharedDesignTokens.spacingCompact,
@@ -951,11 +1035,36 @@ class _TasksViewState extends State<TasksView>
                           return;
                         }
                         final desc = descCtrl.text.trim();
+                        final TaskRecurrenceConfig? recConfig = modalIsRecurring
+                            ? TaskRecurrenceConfig(
+                                frequency: modalRecFrequency,
+                                interval: modalRecInterval,
+                                weekdays: modalRecFrequency == 'weekly' &&
+                                        modalRecWeekdays.isNotEmpty
+                                    ? List<int>.unmodifiable(modalRecWeekdays)
+                                    : null,
+                                startDate: modalRecStartDate,
+                                endDate: modalRecEndDate,
+                                repeatFrom: modalRecRepeatFrom,
+                              )
+                            : null;
+                        if (recConfig != null) {
+                          final recValidation =
+                              TaskRecurrenceEngine.validateConfig(recConfig);
+                          if (!recValidation.isValid) {
+                            setModalState(
+                              () => modalRecError =
+                                  recValidation.errors.values.first,
+                            );
+                            return;
+                          }
+                        }
                         final resolvedMilestoneId =
                             selectedProjectId != null ? selectedMilestoneId : null;
                         final projectsCtrl = widget.effectiveProjectsController;
                         if (isEditing) {
-                          final updated = await controller.updateTask(
+                          final updateRes =
+                              await controller.updateTaskWithRecurrence(
                             id: existingTask.id,
                             title: title,
                             description: desc.isEmpty ? null : desc,
@@ -972,7 +1081,12 @@ class _TasksViewState extends State<TasksView>
                             clearMilestone: resolvedMilestoneId == null,
                             subtasks: modalSubtasks,
                             labels: modalLabels,
+                            recurrenceRule: recConfig?.frequency,
+                            clearRecurrenceRule: !modalIsRecurring,
+                            recurrenceConfig: recConfig,
+                            clearRecurrenceConfig: !modalIsRecurring,
                           );
+                          final updated = updateRes.updatedTask;
                           if (projectsCtrl != null &&
                               existingTask.projectId != null &&
                               existingTask.projectId != selectedProjectId) {
@@ -988,6 +1102,15 @@ class _TasksViewState extends State<TasksView>
                               updated,
                             );
                           }
+                          if (updateRes.generatedNextTask != null &&
+                              projectsCtrl != null &&
+                              updateRes.generatedNextTask!.projectId != null) {
+                            await projectsCtrl.copyTaskSectionLink(
+                              updateRes.generatedNextTask!.projectId!,
+                              existingTask.id,
+                              updateRes.generatedNextTask!,
+                            );
+                          }
                         } else {
                           final createdTask = await controller.createTask(
                             title: title,
@@ -1000,6 +1123,8 @@ class _TasksViewState extends State<TasksView>
                             milestoneId: resolvedMilestoneId,
                             subtasks: modalSubtasks,
                             labels: modalLabels,
+                            recurrenceRule: recConfig?.frequency,
+                            recurrenceConfig: recConfig,
                             isMyDay: controller.state.viewFilter == 'my_day',
                             myDayDate: controller.state.viewFilter == 'my_day'
                                 ? controller.state.effectivePlanDate
@@ -1291,6 +1416,101 @@ class _TasksViewState extends State<TasksView>
                         ],
                       ),
                     ),
+                    if (TaskRecurrenceEngine.resolveEffectiveConfig(task) !=
+                        null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                      TaskRecurrenceDetailsSection(
+                        task: task,
+                        onSkipOccurrence: () {
+                          final prevSnapshot = task;
+                          unawaited(() async {
+                            final skipped = await controller
+                                .skipRecurrenceOccurrence(task.id);
+                            if (!mounted) return;
+                            if (skipped == null) {
+                              final err = controller.state.errorMessage;
+                              if (err != null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(err)),
+                                );
+                              }
+                              return;
+                            }
+                            final nextDate =
+                                skipped.dueDate ?? skipped.scheduledDate;
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Skipped to ${nextDate?.toIsoString() ?? 'next occurrence'}',
+                                ),
+                                action: SnackBarAction(
+                                  label: 'Undo',
+                                  onPressed: () => unawaited(
+                                    controller
+                                        .restoreTaskSnapshot(prevSnapshot),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }());
+                        },
+                        onRescheduleOccurrence: () {
+                          final prevSnapshot = task;
+                          unawaited(() async {
+                            final picked = await _pickCalendarDate(
+                              task.dueDate ?? task.scheduledDate,
+                            );
+                            if (picked == null) return;
+                            final updated = await controller
+                                .rescheduleTaskOccurrence(task.id, picked);
+                            if (!mounted || updated == null) return;
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Rescheduled "${updated.title}" to ${picked.toIsoString()}',
+                                ),
+                                action: SnackBarAction(
+                                  label: 'Undo',
+                                  onPressed: () => unawaited(
+                                    controller
+                                        .restoreTaskSnapshot(prevSnapshot),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }());
+                        },
+                        onEditRecurrence: () {
+                          Navigator.pop(ctx);
+                          _showTaskFormModal(existingTask: task);
+                        },
+                        onStopRecurrence: () {
+                          final prevSnapshot = task;
+                          unawaited(() async {
+                            final stopped =
+                                await controller.stopTaskRecurrence(task.id);
+                            if (!mounted || stopped == null) return;
+                            ScaffoldMessenger.of(context).clearSnackBars();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Stopped recurrence for "${stopped.title}"',
+                                ),
+                                action: SnackBarAction(
+                                  label: 'Undo',
+                                  onPressed: () => unawaited(
+                                    controller
+                                        .restoreTaskSnapshot(prevSnapshot),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }());
+                        },
+                      ),
+                    ],
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     _TaskDetailsTagsPanel(
                       task: task,
@@ -2579,7 +2799,7 @@ class _TasksViewState extends State<TasksView>
       ),
       confirmDismiss: (dir) async {
         if (dir == DismissDirection.startToEnd) {
-          _toggleCompleteWithUndo(task, controller);
+          unawaited(_toggleCompleteWithUndo(task, controller));
           return false;
         }
         return _confirmAndDeleteTask(task, controller);
@@ -2611,7 +2831,8 @@ class _TasksViewState extends State<TasksView>
                       : semantic.textMuted,
               width: 2,
             ),
-            onChanged: (_) => _toggleCompleteWithUndo(task, controller),
+            onChanged: (_) =>
+                unawaited(_toggleCompleteWithUndo(task, controller)),
           ),
           title: Row(
             children: [
@@ -2704,6 +2925,27 @@ class _TasksViewState extends State<TasksView>
                     Text(
                       'Due: ${SharedDateFormatter.formatEthiopian(task.dueDate!.toEthiopian(), useAmharic: false, includeEra: false)}',
                       style: TextStyle(fontSize: 11, color: colorScheme.primary),
+                    ),
+                  if (TaskRecurrenceEngine.resolveEffectiveConfig(task) != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.repeat,
+                          size: 12,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          TaskRecurrenceEngine.formatSummary(
+                            TaskRecurrenceEngine.resolveEffectiveConfig(task),
+                          ),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: semantic.textSecondary,
+                          ),
+                        ),
+                      ],
                     ),
                   if (subs.isNotEmpty)
                     Text(

@@ -126,6 +126,28 @@ class TaskRecurrenceConfig {
     this.repeatFrom,
   });
 
+  TaskRecurrenceConfig copyWith({
+    String? frequency,
+    int? interval,
+    List<int>? weekdays,
+    bool clearWeekdays = false,
+    CalendarDate? startDate,
+    bool clearStartDate = false,
+    CalendarDate? endDate,
+    bool clearEndDate = false,
+    String? repeatFrom,
+    bool clearRepeatFrom = false,
+  }) {
+    return TaskRecurrenceConfig(
+      frequency: frequency ?? this.frequency,
+      interval: interval ?? this.interval,
+      weekdays: clearWeekdays ? null : (weekdays ?? this.weekdays),
+      startDate: clearStartDate ? null : (startDate ?? this.startDate),
+      endDate: clearEndDate ? null : (endDate ?? this.endDate),
+      repeatFrom: clearRepeatFrom ? null : (repeatFrom ?? this.repeatFrom),
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'frequency': frequency,
         if (interval != null) 'interval': interval,
@@ -297,6 +319,7 @@ class TaskEntity {
     CalendarDate? myDayDate,
     bool clearMyDayDate = false,
     String? recurrenceRule,
+    bool clearRecurrenceRule = false,
     TaskRecurrenceConfig? recurrenceConfig,
     bool clearRecurrenceConfig = false,
     bool? isArchived,
@@ -326,7 +349,8 @@ class TaskEntity {
       isPinned: isPinned ?? this.isPinned,
       isMyDay: isMyDay ?? this.isMyDay,
       myDayDate: clearMyDayDate ? null : (myDayDate ?? this.myDayDate),
-      recurrenceRule: recurrenceRule ?? this.recurrenceRule,
+      recurrenceRule:
+          clearRecurrenceRule ? null : (recurrenceRule ?? this.recurrenceRule),
       recurrenceConfig: clearRecurrenceConfig
           ? null
           : (recurrenceConfig ?? this.recurrenceConfig),

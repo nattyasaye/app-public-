@@ -29,6 +29,7 @@ import {
   SharedProjectTrackingBlock,
   SharedProjectTrackingRecord,
   SharedTask,
+  SharedTaskRecurrenceConfig,
 } from '../domain/sharedFoundation';
 import {
   DaywellTaskRecord,
@@ -36,15 +37,18 @@ import {
   TaskStatus,
   createTaskRecord,
   deleteTaskFromList,
-  toggleTaskCompletionRecord,
+  isTaskCompleted,
   updateTaskRecord,
 } from '../domain/taskOperations';
+import { syncTaskCompletionWithDailyPlanning } from '../domain/dailyPlanningOperations';
+import { completeTaskWithRecurrence } from '../domain/taskRecurrence';
 import { WebProjectsRepository } from '../data/projectsRepository';
 import {
   buildProjectPackageFilename,
   PreparedProjectPackageImport,
   ProjectPackageError,
 } from '../domain/projectPackage';
+import { dailyPlanningService } from './dailyPlanningService';
 import { SharedStateBridge } from './sharedStateBridge';
 
 export interface InlineBlockDraft {
@@ -1456,6 +1460,32 @@ class ProjectsService {
     }
   }
 
+  public copyTaskSectionLink(
+    projectId: string,
+    fromTaskId: string,
+    nextTask: DaywellTaskRecord
+  ): void {
+    const cleanProjectId = projectId.trim();
+    if (!cleanProjectId || nextTask.projectId !== cleanProjectId) return;
+    const records = this.repo.getRecordsForProject(cleanProjectId);
+    const existingLink = records.find(
+      (r) =>
+        r.linkedTaskId === fromTaskId &&
+        r.recordType === 'grouped_item' &&
+        Boolean(r.parentRecordId)
+    );
+    if (!existingLink?.parentRecordId) return;
+    const alreadyLinked = records.some(
+      (r) => r.linkedTaskId === nextTask.id && r.recordType === 'grouped_item'
+    );
+    if (alreadyLinked) return;
+    this.assignTaskToProjectSection(
+      cleanProjectId,
+      nextTask.id,
+      existingLink.parentRecordId
+    );
+  }
+
   public createTaskInProject(input: {
     projectId: string;
     title: string;
@@ -1466,6 +1496,7 @@ class ProjectsService {
     scheduledDate?: string;
     milestoneId?: string;
     sectionId?: string;
+    recurrenceConfig?: SharedTaskRecurrenceConfig;
   }): DaywellTaskRecord {
     const project = this.repo.getProjectById(input.projectId);
     if (!project) {
@@ -1484,6 +1515,7 @@ class ProjectsService {
       milestoneId: input.milestoneId,
       projectName: project.title,
       category: project.title,
+      recurrenceConfig: input.recurrenceConfig,
     });
     if (!result.ok) {
       const firstErr = Object.values(result.errors)[0] ?? 'Invalid task fields.';
@@ -1516,6 +1548,8 @@ class ProjectsService {
       projectId?: string;
       milestoneId?: string;
       sectionId?: string | null;
+      recurrenceConfig?: SharedTaskRecurrenceConfig;
+      clearRecurrenceConfig?: boolean;
     }
   ): DaywellTaskRecord | undefined {
     const existingTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
@@ -1548,6 +1582,12 @@ class ProjectsService {
         : {}),
       ...(patch.milestoneId !== undefined
         ? { milestoneId: patch.milestoneId || undefined }
+        : {}),
+      ...(patch.recurrenceConfig !== undefined
+        ? { recurrenceConfig: patch.recurrenceConfig }
+        : {}),
+      ...(patch.clearRecurrenceConfig === true
+        ? { isRecurring: false, clearRecurrenceConfig: true }
         : {}),
     });
 
@@ -1585,17 +1625,45 @@ class ProjectsService {
   public toggleTaskCompletionInProject(taskId: string): {
     previousTasks: DaywellTaskRecord[];
     updated?: DaywellTaskRecord;
+    generatedNextTask?: DaywellTaskRecord;
+    seriesEnded: boolean;
+    duplicatePrevented: boolean;
   } {
     const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
-    const target = previousTasks.find((t) => t.id === taskId);
-    if (!target) return { previousTasks };
+    const result = completeTaskWithRecurrence(previousTasks, taskId);
+    if (!result.updatedTask) {
+      return {
+        previousTasks,
+        seriesEnded: false,
+        duplicatePrevented: false,
+      };
+    }
 
-    const updated = toggleTaskCompletionRecord(target);
-    const nextTasks = previousTasks.map((t) => (t.id === taskId ? updated : t));
-    writeLocalArray(TASKS_KEY, nextTasks);
-    this.syncLinkedSectionRecordForTask(updated);
+    writeLocalArray(TASKS_KEY, result.tasks);
+    const currentEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const nextEntries = syncTaskCompletionWithDailyPlanning(
+      result.tasks,
+      currentEntries,
+      taskId,
+      isTaskCompleted(result.updatedTask)
+    );
+    dailyPlanningService.saveDailyPlanningEntries(nextEntries);
+    this.syncLinkedSectionRecordForTask(result.updatedTask);
+    if (result.generatedNextTask?.projectId) {
+      this.copyTaskSectionLink(
+        result.generatedNextTask.projectId,
+        taskId,
+        result.generatedNextTask
+      );
+    }
     broadcastSync();
-    return { previousTasks, updated };
+    return {
+      previousTasks,
+      updated: result.updatedTask,
+      generatedNextTask: result.generatedNextTask,
+      seriesEnded: result.seriesEnded,
+      duplicatePrevented: result.duplicatePrevented,
+    };
   }
 
   public deleteTaskInProject(taskId: string): {
@@ -1624,8 +1692,12 @@ class ProjectsService {
 
   public restoreTasksSnapshot(
     tasksSnapshot: DaywellTaskRecord[],
-    sectionRestore?: { projectId: string; taskId: string; sectionId: string }
+    sectionRestore?: { projectId: string; taskId: string; sectionId: string },
+    removeLinksForTaskId?: string
   ): void {
+    if (removeLinksForTaskId) {
+      this.cleanupSectionLinksForTask(removeLinksForTaskId);
+    }
     writeLocalArray(TASKS_KEY, tasksSnapshot);
     if (sectionRestore) {
       const records = this.repo.getRecordsForProject(sectionRestore.projectId);

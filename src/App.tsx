@@ -90,7 +90,8 @@ import {
   INBOX_CATEGORY_LABELS,
 } from './domain/inboxOperations';
 import { syncTaskCompletionWithDailyPlanning } from './domain/dailyPlanningOperations';
-import { TaskViewFilter } from './domain/taskOperations';
+import { isTaskCompleted, TaskViewFilter } from './domain/taskOperations';
+import { completeTaskWithRecurrence } from './domain/taskRecurrence';
 import {
   SharedDailyPlanningEntry,
   SharedInboxItem,
@@ -598,37 +599,33 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [isQuickCaptureOpen, activeScreen, quickCaptureInput]);
 
-  // Toggle Task Completion (syncing active DailyPlanningEntries history)
+  // Toggle Task Completion (Recurrence-aware + syncs DailyPlanningEntries history)
   const toggleTask = (id: string) => {
-    const target = tasks.find((t) => t.id === id);
-    if (!target) return;
     const nowUtc = EthiopiaClock.nowUtc();
-    const nowIso = nowUtc.toISOString();
-    const nextCompleted = !target.completed;
-    const nextTasks = tasks.map((t) =>
-      t.id === id
-        ? {
-            ...t,
-            completed: nextCompleted,
-            status: nextCompleted ? ('completed' as const) : ('not_started' as const),
-            completedAt: nextCompleted ? nowIso : undefined,
-            updatedAt: nowIso,
-          }
-        : t
-    );
+    const result = completeTaskWithRecurrence(tasks, id, { nowUtc });
+    if (!result.updatedTask) return;
+
+    const nextCompleted = isTaskCompleted(result.updatedTask);
     const nextEntries = syncTaskCompletionWithDailyPlanning(
-      nextTasks,
+      result.tasks,
       dailyPlanningEntries,
       id,
       nextCompleted,
       { nowUtc }
     );
     try {
-      localStorage.setItem('daywell_tasks', JSON.stringify(nextTasks));
+      localStorage.setItem('daywell_tasks', JSON.stringify(result.tasks));
     } catch {
       // ignore storage quota errors; React state will still update
     }
-    setTasks(nextTasks);
+    if (result.generatedNextTask?.projectId) {
+      projectsService.copyTaskSectionLink(
+        result.generatedNextTask.projectId,
+        id,
+        result.generatedNextTask
+      );
+    }
+    setTasks(result.tasks);
     handleUpdateDailyPlanningEntries(nextEntries);
   };
 

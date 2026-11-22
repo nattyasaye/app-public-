@@ -1,7 +1,11 @@
 import { CalendarDate, EthiopiaClock } from './date';
 import { validateTaskForm } from './formValidationAndNavigation';
 import {
+  CANONICAL_TASK_RECURRENCE_FREQUENCIES,
+  CANONICAL_TASK_RECURRENCE_REPEAT_FROM,
   SharedTaskRecurrenceConfig,
+  SharedTaskRecurrenceFrequency,
+  SharedTaskRecurrenceRepeatFrom,
   SharedTaskStatus,
 } from './sharedFoundation';
 
@@ -112,6 +116,7 @@ export interface CreateTaskInput {
   isRecurring?: boolean;
   recurringRule?: 'daily' | 'weekly' | 'monthly';
   recurrenceRule?: string;
+  recurrenceConfig?: SharedTaskRecurrenceConfig;
   subtasks?: TaskSubItemRecord[];
   labels?: string[];
   isMyDay?: boolean;
@@ -135,6 +140,8 @@ export interface UpdateTaskPatch {
   isRecurring?: boolean;
   recurringRule?: 'daily' | 'weekly' | 'monthly';
   recurrenceRule?: string;
+  recurrenceConfig?: SharedTaskRecurrenceConfig;
+  clearRecurrenceConfig?: boolean;
   subtasks?: TaskSubItemRecord[];
   labels?: string[];
   isMyDay?: boolean;
@@ -595,6 +602,135 @@ export function removeLabelFromAllTasks(
   return { tasks: updated, changedCount };
 }
 
+export function normalizeTaskRecurrenceConfig(
+  config?: SharedTaskRecurrenceConfig | null
+): SharedTaskRecurrenceConfig | undefined {
+  if (!config || typeof config !== 'object') return undefined;
+  const rawFreq =
+    typeof config.frequency === 'string'
+      ? config.frequency.trim().toLowerCase()
+      : '';
+  if (
+    !(CANONICAL_TASK_RECURRENCE_FREQUENCIES as readonly string[]).includes(
+      rawFreq
+    )
+  ) {
+    return undefined;
+  }
+  const frequency = rawFreq as SharedTaskRecurrenceFrequency;
+  const interval =
+    typeof config.interval === 'number' &&
+    Number.isInteger(config.interval) &&
+    config.interval >= 1
+      ? config.interval
+      : 1;
+
+  let weekdays: number[] | undefined;
+  if (frequency === 'weekly' && Array.isArray(config.weekdays)) {
+    const unique = Array.from(
+      new Set(
+        config.weekdays.filter(
+          (d): d is number => typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 7
+        )
+      )
+    ).sort((a, b) => a - b);
+    if (unique.length > 0) {
+      weekdays = unique;
+    }
+  }
+
+  const parsedStart = config.startDate?.trim()
+    ? CalendarDate.tryParse(config.startDate.trim())
+    : null;
+  const parsedEnd = config.endDate?.trim()
+    ? CalendarDate.tryParse(config.endDate.trim())
+    : null;
+  const startDate = parsedStart ? parsedStart.toIsoString() : undefined;
+  const endDate = parsedEnd ? parsedEnd.toIsoString() : undefined;
+
+  const rawRepeat =
+    typeof config.repeatFrom === 'string'
+      ? config.repeatFrom.trim().toLowerCase()
+      : '';
+  const repeatFrom: SharedTaskRecurrenceRepeatFrom = (
+    CANONICAL_TASK_RECURRENCE_REPEAT_FROM as readonly string[]
+  ).includes(rawRepeat)
+    ? (rawRepeat as SharedTaskRecurrenceRepeatFrom)
+    : 'due_date';
+
+  return {
+    frequency,
+    interval,
+    ...(weekdays !== undefined ? { weekdays } : {}),
+    ...(startDate !== undefined ? { startDate } : {}),
+    ...(endDate !== undefined ? { endDate } : {}),
+    repeatFrom,
+  };
+}
+
+export function validateTaskRecurrenceConfig(
+  config?: SharedTaskRecurrenceConfig | null
+): { isValid: boolean; errors: Record<string, string> } {
+  const errors: Record<string, string> = {};
+  if (!config) return { isValid: true, errors };
+
+  const rawFreq =
+    typeof config.frequency === 'string'
+      ? config.frequency.trim().toLowerCase()
+      : '';
+  if (
+    !(CANONICAL_TASK_RECURRENCE_FREQUENCIES as readonly string[]).includes(
+      rawFreq
+    )
+  ) {
+    errors.recurrenceFrequency = 'Recurrence frequency must be daily, weekly, monthly, or yearly';
+  }
+
+  if (
+    config.interval !== undefined &&
+    (typeof config.interval !== 'number' ||
+      !Number.isInteger(config.interval) ||
+      config.interval < 1)
+  ) {
+    errors.recurrenceInterval = 'Repeat interval must be a whole number of at least 1';
+  }
+
+  if (config.weekdays !== undefined) {
+    if (!Array.isArray(config.weekdays)) {
+      errors.recurrenceWeekdays = 'Weekdays must be a valid list';
+    } else if (
+      config.weekdays.some(
+        (d) => typeof d !== 'number' || !Number.isInteger(d) || d < 1 || d > 7
+      )
+    ) {
+      errors.recurrenceWeekdays = 'Weekdays must use ISO days 1 (Mon) through 7 (Sun)';
+    }
+  }
+
+  const parsedStart = config.startDate?.trim()
+    ? CalendarDate.tryParse(config.startDate.trim())
+    : null;
+  if (config.startDate?.trim() && !parsedStart) {
+    errors.recurrenceStartDate = 'Recurrence start date must be a valid YYYY-MM-DD date';
+  }
+
+  const parsedEnd = config.endDate?.trim()
+    ? CalendarDate.tryParse(config.endDate.trim())
+    : null;
+  if (config.endDate?.trim() && !parsedEnd) {
+    errors.recurrenceEndDate = 'Recurrence end date must be a valid YYYY-MM-DD date';
+  }
+
+  if (parsedStart && parsedEnd && parsedEnd.isBefore(parsedStart)) {
+    errors.recurrenceEndDate = 'Recurrence end date cannot precede start date';
+  }
+
+  return {
+    isValid: Object.keys(errors).length === 0,
+    errors,
+  };
+}
+
 export function createTaskRecord(
   input: CreateTaskInput,
   nowUtc?: Date
@@ -612,6 +748,16 @@ export function createTaskRecord(
     scheduledTime,
   });
 
+  if (input.recurrenceConfig) {
+    const recValidation = validateTaskRecurrenceConfig(input.recurrenceConfig);
+    if (!recValidation.isValid) {
+      return {
+        ok: false,
+        errors: { ...validation.errors, ...recValidation.errors },
+      };
+    }
+  }
+
   if (!validation.isValid) {
     return { ok: false, errors: validation.errors };
   }
@@ -626,7 +772,26 @@ export function createTaskRecord(
   const projectId = input.projectId?.trim() || undefined;
   const milestoneId = projectId ? (input.milestoneId?.trim() || undefined) : undefined;
   const projectName = input.projectName?.trim() || undefined;
-  const isRecurring = Boolean(input.isRecurring);
+  const normalizedRecurrenceConfig = normalizeTaskRecurrenceConfig(
+    input.recurrenceConfig
+  );
+  const legacyFreq =
+    input.recurrenceRule?.trim().toLowerCase() ||
+    input.recurringRule?.trim().toLowerCase();
+  const hasRecurrence =
+    Boolean(normalizedRecurrenceConfig) ||
+    Boolean(input.isRecurring) ||
+    Boolean(legacyFreq);
+  const isRecurring = hasRecurrence;
+  const effectiveRule =
+    normalizedRecurrenceConfig?.frequency ??
+    (input.recurrenceRule?.trim() || input.recurringRule);
+  const legacyRecurringRule =
+    effectiveRule === 'daily' ||
+    effectiveRule === 'weekly' ||
+    effectiveRule === 'monthly'
+      ? effectiveRule
+      : undefined;
   const normalizedLabels = normalizeTaskLabels(input.labels);
 
   const isMyDay = Boolean(input.isMyDay);
@@ -657,9 +822,12 @@ export function createTaskRecord(
     projectName,
     hasReminder: Boolean(input.hasReminder),
     isRecurring,
-    recurringRule: isRecurring ? input.recurringRule : undefined,
-    ...(isRecurring && (input.recurrenceRule || input.recurringRule)
-      ? { recurrenceRule: input.recurrenceRule || input.recurringRule }
+    ...(legacyRecurringRule !== undefined
+      ? { recurringRule: legacyRecurringRule }
+      : {}),
+    ...(effectiveRule !== undefined ? { recurrenceRule: effectiveRule } : {}),
+    ...(normalizedRecurrenceConfig !== undefined
+      ? { recurrenceConfig: normalizedRecurrenceConfig }
       : {}),
     subtasks: normalizeSubtasksList(input.subtasks, id),
     ...(normalizedLabels.length > 0 ? { labels: normalizedLabels } : {}),
@@ -732,21 +900,59 @@ export function updateTaskRecord(
   const nextProjectName = hasOwn('projectName')
     ? patch.projectName?.trim() || undefined
     : existing.projectName;
-  const nextIsRecurring = hasOwn('isRecurring')
-    ? Boolean(patch.isRecurring)
-    : existing.isRecurring;
-  const nextRecurringRule = nextIsRecurring
-    ? hasOwn('recurringRule')
-      ? patch.recurringRule
-      : existing.recurringRule
-    : undefined;
-  const nextRecurrenceRule = nextIsRecurring
-    ? hasOwn('recurrenceRule')
-      ? patch.recurrenceRule
-      : existing.recurrenceRule ?? nextRecurringRule
-    : existing.recurringRule
+  const clearingRecurrence =
+    patch.clearRecurrenceConfig === true ||
+    (hasOwn('isRecurring') && patch.isRecurring === false && !hasOwn('recurrenceConfig'));
+
+  if (!clearingRecurrence && hasOwn('recurrenceConfig') && patch.recurrenceConfig) {
+    const recValidation = validateTaskRecurrenceConfig(patch.recurrenceConfig);
+    if (!recValidation.isValid) {
+      return { ok: false, errors: recValidation.errors };
+    }
+  }
+
+  let nextRecurrenceConfig: SharedTaskRecurrenceConfig | undefined =
+    existing.recurrenceConfig;
+  if (clearingRecurrence) {
+    nextRecurrenceConfig = undefined;
+  } else if (hasOwn('recurrenceConfig')) {
+    nextRecurrenceConfig = normalizeTaskRecurrenceConfig(patch.recurrenceConfig);
+  }
+
+  const nextIsRecurring = clearingRecurrence
+    ? false
+    : nextRecurrenceConfig !== undefined
+      ? true
+      : hasOwn('isRecurring')
+        ? Boolean(patch.isRecurring)
+        : existing.isRecurring;
+
+  const nextRecurrenceRule = clearingRecurrence
+    ? undefined
+    : nextRecurrenceConfig !== undefined
+      ? nextRecurrenceConfig.frequency
+      : nextIsRecurring
+        ? hasOwn('recurrenceRule')
+          ? patch.recurrenceRule
+          : existing.recurrenceRule ??
+            (hasOwn('recurringRule')
+              ? patch.recurringRule
+              : existing.recurringRule)
+        : existing.recurringRule
+          ? undefined
+          : existing.recurrenceRule;
+
+  const nextRecurringRule =
+    clearingRecurrence || !nextIsRecurring
       ? undefined
-      : existing.recurrenceRule;
+      : nextRecurrenceRule === 'daily' ||
+          nextRecurrenceRule === 'weekly' ||
+          nextRecurrenceRule === 'monthly'
+        ? nextRecurrenceRule
+        : hasOwn('recurringRule')
+          ? patch.recurringRule
+          : existing.recurringRule;
+
   const nextLabels = hasOwn('labels')
     ? normalizeTaskLabels(patch.labels)
     : existing.labels;
@@ -789,6 +995,7 @@ export function updateTaskRecord(
     isRecurring: nextIsRecurring,
     recurringRule: nextRecurringRule,
     recurrenceRule: nextRecurrenceRule,
+    recurrenceConfig: nextRecurrenceConfig,
     subtasks:
       hasOwn('subtasks') && patch.subtasks
         ? normalizeSubtasksList(patch.subtasks, existing.id)
