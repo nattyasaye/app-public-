@@ -9,6 +9,7 @@ export type TaskPriority = 'urgent' | 'high' | 'medium' | 'low';
 export type TaskStatus = SharedTaskStatus;
 export type TaskViewFilter =
   | 'today'
+  | 'my_day'
   | 'inbox'
   | 'upcoming'
   | 'active'
@@ -113,6 +114,9 @@ export interface CreateTaskInput {
   recurrenceRule?: string;
   subtasks?: TaskSubItemRecord[];
   labels?: string[];
+  isMyDay?: boolean;
+  myDayDate?: string;
+  sortOrder?: number;
 }
 
 export interface UpdateTaskPatch {
@@ -133,6 +137,9 @@ export interface UpdateTaskPatch {
   recurrenceRule?: string;
   subtasks?: TaskSubItemRecord[];
   labels?: string[];
+  isMyDay?: boolean;
+  myDayDate?: string;
+  sortOrder?: number;
 }
 
 export type TaskMutationResult =
@@ -622,6 +629,17 @@ export function createTaskRecord(
   const isRecurring = Boolean(input.isRecurring);
   const normalizedLabels = normalizeTaskLabels(input.labels);
 
+  const isMyDay = Boolean(input.isMyDay);
+  const parsedMyDayDate =
+    input.myDayDate?.trim() ? CalendarDate.tryParse(input.myDayDate.trim()) : null;
+  const myDayDate = isMyDay && parsedMyDayDate ? parsedMyDayDate.toIsoString() : undefined;
+  const sortOrder =
+    typeof input.sortOrder === 'number' &&
+    Number.isInteger(input.sortOrder) &&
+    input.sortOrder >= 0
+      ? input.sortOrder
+      : 0;
+
   const task: DaywellTaskRecord = {
     id,
     title: input.title.trim(),
@@ -645,8 +663,10 @@ export function createTaskRecord(
       : {}),
     subtasks: normalizeSubtasksList(input.subtasks, id),
     ...(normalizedLabels.length > 0 ? { labels: normalizedLabels } : {}),
+    isMyDay,
+    ...(myDayDate !== undefined ? { myDayDate } : {}),
     isArchived: false,
-    sortOrder: 0,
+    sortOrder,
     createdAt: nowIso,
     updatedAt: nowIso,
   };
@@ -730,6 +750,23 @@ export function updateTaskRecord(
   const nextLabels = hasOwn('labels')
     ? normalizeTaskLabels(patch.labels)
     : existing.labels;
+  const nextIsMyDay = hasOwn('isMyDay') ? Boolean(patch.isMyDay) : Boolean(existing.isMyDay);
+  const rawPatchMyDayDate = hasOwn('myDayDate') ? patch.myDayDate?.trim() || undefined : existing.myDayDate;
+  const parsedPatchMyDayDate = rawPatchMyDayDate
+    ? CalendarDate.tryParse(rawPatchMyDayDate)
+    : null;
+  const nextMyDayDate = nextIsMyDay
+    ? parsedPatchMyDayDate
+      ? parsedPatchMyDayDate.toIsoString()
+      : undefined
+    : undefined;
+  const nextSortOrder =
+    hasOwn('sortOrder') &&
+    typeof patch.sortOrder === 'number' &&
+    Number.isInteger(patch.sortOrder) &&
+    patch.sortOrder >= 0
+      ? patch.sortOrder
+      : existing.sortOrder ?? 0;
 
   const updated: DaywellTaskRecord = {
     ...existing,
@@ -757,6 +794,9 @@ export function updateTaskRecord(
         ? normalizeSubtasksList(patch.subtasks, existing.id)
         : existing.subtasks,
     labels: nextLabels,
+    isMyDay: nextIsMyDay,
+    myDayDate: nextMyDayDate,
+    sortOrder: nextSortOrder,
     updatedAt: nowIso,
   };
 
@@ -854,6 +894,7 @@ export function isTaskOverdueRecord(
 
 export interface TaskTabCounts {
   todayCount: number;
+  myDayCount: number;
   inboxCount: number;
   upcomingCount: number;
   allCount: number;
@@ -869,6 +910,7 @@ export function computeTaskTabCounts(
 ): TaskTabCounts {
   const today = todayIso ?? CalendarDate.today().toIsoString();
   let todayCount = 0;
+  let myDayCount = 0;
   let inboxCount = 0;
   let upcomingCount = 0;
   let allCount = 0;
@@ -892,6 +934,9 @@ export function computeTaskTabCounts(
       activePendingCount += 1;
     }
     if (isTaskInTodayView(t, today)) todayCount += 1;
+    if (isTaskInActiveView(t) && Boolean(t.isMyDay) && (!t.myDayDate || t.myDayDate === today)) {
+      myDayCount += 1;
+    }
     if (isTaskInInboxView(t)) inboxCount += 1;
     if (isTaskInUpcomingView(t, today)) upcomingCount += 1;
     if (isTaskOverdueRecord(t, today)) overdueCount += 1;
@@ -899,6 +944,7 @@ export function computeTaskTabCounts(
 
   return {
     todayCount,
+    myDayCount,
     inboxCount,
     upcomingCount,
     allCount,
@@ -967,6 +1013,12 @@ export function filterTasksForView(
     switch (options.viewFilter) {
       case 'today':
         return isTaskInTodayView(t, today);
+      case 'my_day':
+        return (
+          isTaskInActiveView(t) &&
+          Boolean(t.isMyDay) &&
+          (!t.myDayDate || t.myDayDate === today)
+        );
       case 'inbox':
         return isTaskInInboxView(t);
       case 'upcoming':

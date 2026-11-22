@@ -66,9 +66,16 @@ class _QuickCaptureDialogState extends State<QuickCaptureDialog> {
 
     if (!mounted) return;
     Navigator.pop(context);
+    final confirmation = (_category == 'task' || _category == 'idea')
+        ? 'Captured to Inbox — convert to Task anytime'
+        : _category == 'note'
+            ? 'Captured & saved to Notes'
+            : _category == 'expense'
+                ? 'Captured into Inbox & Expense'
+                : 'Captured to Inbox';
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Captured into Inbox & ${_category.toUpperCase()}!'),
+        content: Text(confirmation),
         duration: const Duration(seconds: 2),
       ),
     );

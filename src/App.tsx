@@ -81,8 +81,21 @@ import { DaywellNotesModule } from './components/DaywellNotesModule';
 import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWizard';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { SharedStateBridge } from './services/sharedStateBridge';
+import { dailyPlanningService } from './services/dailyPlanningService';
+import { inboxService } from './services/inboxService';
 import { projectsService } from './services/projectsService';
-import { SHARED_DESIGN_TOKENS } from './domain/sharedFoundation';
+import {
+  getProcessedInboxItems,
+  getUnprocessedInboxItems,
+  INBOX_CATEGORY_LABELS,
+} from './domain/inboxOperations';
+import { syncTaskCompletionWithDailyPlanning } from './domain/dailyPlanningOperations';
+import { TaskViewFilter } from './domain/taskOperations';
+import {
+  SharedDailyPlanningEntry,
+  SharedInboxItem,
+  SHARED_DESIGN_TOKENS,
+} from './domain/sharedFoundation';
 import {
   DaywellButton,
   DaywellCard,
@@ -158,7 +171,7 @@ export default function App() {
 
   // Quick Capture Modal State (Figma Screen 14)
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
-  const [quickCaptureType, setQuickCaptureType] = useState<'task' | 'note' | 'expense' | 'reminder'>('task');
+  const [quickCaptureType, setQuickCaptureType] = useState<'task' | 'idea' | 'note' | 'expense' | 'reminder'>('task');
   const [quickCaptureInput, setQuickCaptureInput] = useState('');
   const [quickCaptureExpenseAccount, setQuickCaptureExpenseAccount] = useState('CBE');
   const [quickCaptureToast, setQuickCaptureToast] = useState<string | null>(null);
@@ -169,6 +182,10 @@ export default function App() {
   const [financeComposerPrefill, setFinanceComposerPrefill] =
     useState<FinanceComposerPrefill | null>(null);
   const [financeSyncTick, setFinanceSyncTick] = useState(0);
+  const [requestedTasksFilter, setRequestedTasksFilter] = useState<{
+    filter: TaskViewFilter;
+    nonce: number;
+  } | null>(null);
 
   const handleExportSharedFoundation = () => {
     const json = SharedStateBridge.exportToAndroidJson();
@@ -240,10 +257,41 @@ export default function App() {
     return [];
   });
 
+  const [inboxItems, setInboxItems] = useState<SharedInboxItem[]>(() =>
+    inboxService.loadInboxItems()
+  );
+
+  const [dailyPlanningEntries, setDailyPlanningEntries] = useState<
+    SharedDailyPlanningEntry[]
+  >(() => dailyPlanningService.loadDailyPlanningEntries());
+
+  const handleUpdateInboxItems = (next: SharedInboxItem[]) => {
+    const saved = inboxService.saveInboxItems(next);
+    setInboxItems(saved);
+  };
+
+  const handleUpdateDailyPlanningEntries = (
+    next: SharedDailyPlanningEntry[]
+  ) => {
+    const saved = dailyPlanningService.saveDailyPlanningEntries(next);
+    setDailyPlanningEntries(saved);
+  };
+
+  const unprocessedInboxItems = useMemo(
+    () => getUnprocessedInboxItems(inboxItems),
+    [inboxItems]
+  );
+  const processedInboxCount = useMemo(
+    () => getProcessedInboxItems(inboxItems).length,
+    [inboxItems]
+  );
+
   // On initial mount, purge any legacy demonstration records while preserving user records
   useEffect(() => {
     try {
       SharedStateBridge.purgeKnownSeedData();
+      setInboxItems(inboxService.loadInboxItems());
+      setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
     } catch (e) {
       console.warn('Seed purge error:', e);
     }
@@ -270,6 +318,8 @@ export default function App() {
       } catch (e) {
         // ignore
       }
+      setInboxItems(inboxService.loadInboxItems());
+      setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
       setFinanceSyncTick((n) => n + 1);
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
@@ -527,24 +577,33 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [isQuickCaptureOpen, activeScreen, quickCaptureInput]);
 
-  // Toggle Task Completion
+  // Toggle Task Completion (syncing active DailyPlanningEntries history)
   const toggleTask = (id: string) => {
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id === id) {
-          const next = !t.completed;
-          return {
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return;
+    const nowUtc = EthiopiaClock.nowUtc();
+    const nowIso = nowUtc.toISOString();
+    const nextCompleted = !target.completed;
+    const nextTasks = tasks.map((t) =>
+      t.id === id
+        ? {
             ...t,
-            completed: next,
-            status: next ? 'completed' : 'not_started',
-            completedAt: next ? nowIso : undefined,
+            completed: nextCompleted,
+            status: nextCompleted ? ('completed' as const) : ('not_started' as const),
+            completedAt: nextCompleted ? nowIso : undefined,
             updatedAt: nowIso,
-          };
-        }
-        return t;
-      })
+          }
+        : t
     );
+    const nextEntries = syncTaskCompletionWithDailyPlanning(
+      nextTasks,
+      dailyPlanningEntries,
+      id,
+      nextCompleted,
+      { nowUtc }
+    );
+    setTasks(nextTasks);
+    handleUpdateDailyPlanningEntries(nextEntries);
   };
 
   // Save Quick Capture (Tasks, Notes, Expenses, Calendar Reminders)
@@ -652,29 +711,26 @@ export default function App() {
       return;
     }
 
-    // Default: Task
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
-    const newTask: DaywellTask = {
-      id: `task-${Date.now()}`,
-      title: text,
-      category: 'Personal',
-      status: 'not_started',
-      priority: 'medium',
-      completed: false,
-      dueDate: CalendarDate.today().toIsoString(),
-      hasReminder: false,
-      subtasks: [],
-      isArchived: false,
-      sortOrder: 0,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-
-    setTasks((prev) => [newTask, ...prev]);
+    // Default ('task' | 'idea'): Stage in Shared Inbox without auto-creating duplicate Task records
+    const captureCategory = quickCaptureType === 'idea' ? 'idea' : 'task';
+    const captured = inboxService.captureQuickThought({
+      rawText: text,
+      category: captureCategory,
+    });
+    if (!captured.ok) {
+      setIsSubmittingQuickCapture(false);
+      setQuickCaptureError(captured.error);
+      return;
+    }
+    if (captured.items) {
+      setInboxItems(captured.items);
+    }
     setIsSubmittingQuickCapture(false);
     setIsQuickCaptureOpen(false);
     setQuickCaptureInput('');
-    setQuickCaptureToast(`Saved "${text.slice(0, 28)}..." to Tasks`);
+    setQuickCaptureToast(
+      `Saved "${text.slice(0, 28)}..." to Inbox — organize in Tasks`
+    );
     setTimeout(() => setQuickCaptureToast(null), 3000);
   };
 
@@ -1130,6 +1186,65 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Shared Quick Capture Inbox Section (Live Store) */}
+                  <div className="space-y-2 pt-1">
+                    <DaywellSectionHeader
+                      title="Inbox Captures"
+                      count={unprocessedInboxItems.length > 0 ? unprocessedInboxItems.length : undefined}
+                      actionLabel="Review Inbox"
+                      onActionPressed={() => {
+                        setRequestedTasksFilter({ filter: 'inbox', nonce: Date.now() });
+                        setTasksSubTab('tasks');
+                        navigateTo('tasks');
+                      }}
+                    />
+                    <DaywellCard padding="compact" className="space-y-2">
+                      <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)]">
+                        <span>
+                          {unprocessedInboxItems.length} unorganized · {processedInboxCount} processed
+                        </span>
+                        <DaywellButton
+                          label="Quick capture"
+                          variant="text"
+                          size="compact"
+                          onClick={() => setIsQuickCaptureOpen(true)}
+                        />
+                      </div>
+                      {inboxItems.length === 0 ? (
+                        <p className="text-xs text-[var(--dw-text-muted)] text-center py-1.5">
+                          Inbox is clear. Use Quick Capture to save tasks, ideas, notes, or expenses fast.
+                        </p>
+                      ) : unprocessedInboxItems.length === 0 ? (
+                        <p className="text-xs font-semibold text-[var(--dw-primary)] py-1">
+                          All captured items have been processed.
+                        </p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {unprocessedInboxItems.slice(0, 3).map((item) => (
+                            <div
+                              key={item.id}
+                              onClick={() => {
+                                setRequestedTasksFilter({ filter: 'inbox', nonce: Date.now() });
+                                setTasksSubTab('tasks');
+                                navigateTo('tasks');
+                              }}
+                              className="flex items-start justify-between gap-2 py-1 border-t border-[var(--dw-divider)] first:border-t-0 first:pt-0 cursor-pointer"
+                            >
+                              <p className="text-xs font-medium text-[var(--dw-text-primary)] line-clamp-2 flex-1 min-w-0">
+                                {item.rawText}
+                              </p>
+                              <DaywellStatusBadge
+                                tone="info"
+                                showIcon={false}
+                                label={INBOX_CATEGORY_LABELS[item.category].toUpperCase()}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </DaywellCard>
+                  </div>
+
                   {/* A Little Later (Deprecated Sample Card) */}
                   <div className="space-y-2 pt-1">
                     <div className="flex items-center justify-between gap-2">
@@ -1340,6 +1455,11 @@ export default function App() {
                 <DaywellTasksModule
                   tasks={tasks}
                   onUpdateTasks={setTasks}
+                  inboxItems={inboxItems}
+                  onUpdateInboxItems={handleUpdateInboxItems}
+                  dailyPlanningEntries={dailyPlanningEntries}
+                  onUpdateDailyPlanningEntries={handleUpdateDailyPlanningEntries}
+                  requestedFilter={requestedTasksFilter}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                   onNavigateToCalendar={() => navigateTo('calendar')}
                   activeSubTab={tasksSubTab}
@@ -2144,6 +2264,18 @@ export default function App() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => setQuickCaptureType('idea')}
+                      className={`text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        quickCaptureType === 'idea'
+                          ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                          : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border border-transparent'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      Idea
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => {
                         setQuickCaptureType('expense');
                         setQuickCaptureInput('450 ETB groceries');
@@ -2196,18 +2328,23 @@ export default function App() {
                         quickCaptureError ? 'border-[var(--dw-error)]' : 'border-[var(--dw-primary)]'
                       } shadow-xs`}
                     >
-                      <input
+                      <textarea
                         id="quick-capture-input"
-                        type="text"
+                        rows={2}
                         autoFocus
                         value={quickCaptureInput}
                         onChange={(e) => {
                           setQuickCaptureInput(e.target.value);
                           if (quickCaptureError) setQuickCaptureError(null);
                         }}
-                        onKeyDown={(e) => e.key === 'Enter' && handleSaveQuickCapture()}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSaveQuickCapture();
+                          }
+                        }}
                         placeholder="e.g. Ask landlord about move-in time"
-                        className="w-full text-sm font-bold text-[var(--dw-text-primary)] bg-transparent outline-none"
+                        className="w-full text-sm font-bold text-[var(--dw-text-primary)] bg-transparent outline-none resize-none"
                       />
                     </div>
                     {quickCaptureError && (

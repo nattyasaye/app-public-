@@ -569,15 +569,7 @@ class AppStateManager extends ChangeNotifier {
   Future<void> _triageAsync(InboxItemEntity captured) async {
     if (_isDisposed) return;
     try {
-      if (captured.category == 'task') {
-        final nowUtc = EthiopiaClock.nowUtc();
-        await tasksController.createTask(
-          id: 'task-${nowUtc.millisecondsSinceEpoch}',
-          title: captured.rawText,
-          priority: 'medium',
-          dueDate: CalendarDate.fromUtcInstantInEthiopia(nowUtc).addDays(1),
-        );
-      } else if (captured.category == 'note') {
+      if (captured.category == 'note') {
         final title = captured.rawText.length > 40
             ? captured.rawText.substring(0, 40)
             : captured.rawText;
@@ -586,9 +578,13 @@ class AppStateManager extends ChangeNotifier {
           content: captured.rawText,
           category: 'general',
         );
+        await inboxController.markProcessed(captured.id);
       } else if (captured.category == 'expense') {
         await _triageExpenseCapture(captured);
       }
+      // 'task', 'idea', 'problem', 'decision', and 'general' captures remain in
+      // InboxItems (isProcessed: false) until the user edits, dismisses, or
+      // converts them into Task records.
     } catch (_) {
       // Safe no-op if database closes mid-triage during teardown.
     }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../application/inbox/inbox_controller.dart';
 import '../../application/projects/projects_controller.dart';
 import '../../application/projects/projects_state.dart';
 import '../../application/tasks/tasks_controller.dart';
@@ -7,6 +8,7 @@ import '../../application/tasks/tasks_state.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
+import '../../domain/inbox/inbox_models.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/task_models.dart';
 import '../app_state.dart';
@@ -18,12 +20,14 @@ class TasksView extends StatefulWidget {
   final AppStateManager? state;
   final TasksController? controller;
   final ProjectsController? projectsController;
+  final InboxController? inboxController;
 
   const TasksView({
     super.key,
     this.state,
     this.controller,
     this.projectsController,
+    this.inboxController,
   }) : assert(
           state != null || controller != null,
           'Either state or controller must be provided to TasksView',
@@ -34,6 +38,9 @@ class TasksView extends StatefulWidget {
 
   ProjectsController? get effectiveProjectsController =>
       projectsController ?? state?.projectsController;
+
+  InboxController? get effectiveInboxController =>
+      inboxController ?? state?.inboxController;
 
   @override
   State<TasksView> createState() => _TasksViewState();
@@ -52,13 +59,36 @@ class _TasksViewState extends State<TasksView>
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
+    final ctrl = widget.effectiveController;
     _searchController = TextEditingController(
-      text: widget.effectiveController.state.searchQuery,
+      text: ctrl.state.searchQuery,
     );
+    ctrl.addListener(_syncSearchControllerWithState);
+  }
+
+  @override
+  void didUpdateWidget(covariant TasksView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.effectiveController != widget.effectiveController) {
+      oldWidget.effectiveController.removeListener(_syncSearchControllerWithState);
+      widget.effectiveController.addListener(_syncSearchControllerWithState);
+      _syncSearchControllerWithState();
+    }
+  }
+
+  void _syncSearchControllerWithState() {
+    final nextQuery = widget.effectiveController.state.searchQuery;
+    if (_searchController.text != nextQuery) {
+      _searchController.value = TextEditingValue(
+        text: nextQuery,
+        selection: TextSelection.collapsed(offset: nextQuery.length),
+      );
+    }
   }
 
   @override
   void dispose() {
+    widget.effectiveController.removeListener(_syncSearchControllerWithState);
     _tabController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -266,32 +296,55 @@ class _TasksViewState extends State<TasksView>
 
   void _showQuickAddModal() => _showTaskFormModal();
 
-  void _showTaskFormModal({TaskEntity? existingTask}) {
+  void _showTaskFormModal({
+    TaskEntity? existingTask,
+    InboxItemEntity? sourceInboxItem,
+  }) {
     final controller = widget.effectiveController;
     final isEditing = existingTask != null;
-    final titleCtrl = TextEditingController(text: existingTask?.title ?? '');
-    final descCtrl =
-        TextEditingController(text: existingTask?.description ?? '');
+    final isConvertingInbox = sourceInboxItem != null && !isEditing;
+    final InboxTaskDraft? inboxDraft =
+        isConvertingInbox ? sourceInboxItem.toTaskDraft() : null;
+    final titleCtrl = TextEditingController(
+      text: existingTask?.title ?? inboxDraft?.title ?? '',
+    );
+    final descCtrl = TextEditingController(
+      text: existingTask?.description ?? inboxDraft?.description ?? '',
+    );
     String priority = existingTask?.priority ?? 'medium';
     String status = existingTask?.status ??
-        (controller.state.viewFilter == 'inbox' ? 'inbox' : 'not_started');
+        (isConvertingInbox
+            ? 'not_started'
+            : (controller.state.viewFilter == 'inbox'
+                ? 'inbox'
+                : 'not_started'));
     String? selectedProjectId = existingTask?.projectId;
     String? selectedMilestoneId = existingTask?.milestoneId;
     CalendarDate? scheduledDate = existingTask != null
         ? existingTask.scheduledDate
-        : (controller.state.viewFilter == 'today'
-            ? CalendarDate.today()
-            : null);
+        : (isConvertingInbox
+            ? null
+            : (controller.state.viewFilter == 'today'
+                ? CalendarDate.today()
+                : null));
     CalendarDate? dueDate = existingTask != null
         ? existingTask.dueDate
-        : (controller.state.viewFilter == 'today'
-            ? CalendarDate.today()
-            : null);
+        : (isConvertingInbox
+            ? null
+            : (controller.state.viewFilter == 'today'
+                ? CalendarDate.today()
+                : null));
     String? titleError;
-    final projects = controller.state.projects;
-    var modalLabels = TasksModuleState.normalizeLabels(
-      existingTask?.labels ?? controller.state.tagFilters,
-    ).toList();
+    final sourceProjects =
+        widget.effectiveProjectsController?.state.projects ??
+            controller.state.projects;
+    final projects = sourceProjects
+        .where((p) => !p.isArchived || p.id == selectedProjectId)
+        .toList(growable: false);
+    var modalLabels = TasksModuleState.normalizeLabels([
+      ...(existingTask?.labels ?? controller.state.tagFilters),
+      ...(inboxDraft?.initialLabels ?? const <String>[]),
+    ]).toList();
     final modalTagAddCtrl = TextEditingController();
     String? modalTagError;
     var modalSubtasks = List<TaskSubtask>.from(existingTask?.subtasks ?? const []);
@@ -327,9 +380,23 @@ class _TasksViewState extends State<TasksView>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      isEditing ? 'Edit Task' : 'New Task',
+                      isEditing
+                          ? 'Edit Task'
+                          : isConvertingInbox
+                              ? 'Convert Inbox Item to Task'
+                              : 'New Task',
                       style: Theme.of(modalContext).textTheme.titleLarge,
                     ),
+                    if (isConvertingInbox) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      DaywellStatusBanner(
+                        tone: DaywellStatusTone.info,
+                        title:
+                            'From Quick Capture (${sourceInboxItem.category.toUpperCase()})',
+                        message:
+                            'Adjust details, project, tags, or schedule below. Saving converts this item into a Task and marks it processed in Inbox.',
+                      ),
+                    ],
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     DaywellTextField(
                       controller: titleCtrl,
@@ -836,7 +903,11 @@ class _TasksViewState extends State<TasksView>
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingMd),
                     DaywellButton(
-                      label: isEditing ? 'Save Changes' : 'Save Task',
+                      label: isEditing
+                          ? 'Save Changes'
+                          : isConvertingInbox
+                              ? 'Convert to Task'
+                              : 'Save Task',
                       leadingIcon: Icons.check,
                       fullWidth: true,
                       onPressed: () async {
@@ -886,7 +957,7 @@ class _TasksViewState extends State<TasksView>
                             );
                           }
                         } else {
-                          await controller.createTask(
+                          final createdTask = await controller.createTask(
                             title: title,
                             description: desc.isEmpty ? null : desc,
                             priority: priority,
@@ -899,6 +970,30 @@ class _TasksViewState extends State<TasksView>
                             labels: modalLabels,
                             isMyDay: controller.state.viewFilter == 'my_day',
                           );
+                          if (createdTask != null) {
+                            if (projectsCtrl != null &&
+                                selectedProjectId != null) {
+                              await projectsCtrl.syncTaskSectionLink(
+                                selectedProjectId!,
+                                createdTask,
+                              );
+                            }
+                            if (sourceInboxItem != null) {
+                              await widget.effectiveInboxController
+                                  ?.markProcessed(sourceInboxItem.id);
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).clearSnackBars();
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Converted "${createdTask.title}" to Task',
+                                    ),
+                                    duration: const Duration(seconds: 3),
+                                  ),
+                                );
+                              }
+                            }
+                          }
                         }
                         if (ctx.mounted) Navigator.pop(ctx);
                       },
@@ -1403,6 +1498,14 @@ class _TasksViewState extends State<TasksView>
                                                   );
                                                   return;
                                                 }
+                                                if (nextName == lbl) {
+                                                  setDialogState(() {
+                                                    editingTag = null;
+                                                    editTagCtrl.clear();
+                                                    editError = null;
+                                                  });
+                                                  return;
+                                                }
                                                 final prevTasks =
                                                     List<TaskEntity>.from(
                                                         controller.state.tasks);
@@ -1417,7 +1520,18 @@ class _TasksViewState extends State<TasksView>
                                                   lbl,
                                                   nextName,
                                                 );
-                                                if (!ok || !dialogContext.mounted) {
+                                                if (!ok) {
+                                                  if (dialogContext.mounted) {
+                                                    setDialogState(
+                                                      () => editError =
+                                                          controller.state
+                                                                  .errorMessage ??
+                                                              'Unable to rename tag',
+                                                    );
+                                                  }
+                                                  return;
+                                                }
+                                                if (!dialogContext.mounted) {
                                                   return;
                                                 }
                                                 setDialogState(() {
@@ -1574,7 +1688,8 @@ class _TasksViewState extends State<TasksView>
     TasksModuleState moduleState,
     ProjectsModuleState? projectsState,
   ) {
-    final activeProjects = moduleState.projects
+    final sourceProjects = projectsState?.projects ?? moduleState.projects;
+    final activeProjects = sourceProjects
         .where((p) => !p.isArchived)
         .toList(growable: false);
     final selectedProjectId = moduleState.selectedProjectId;
@@ -1701,20 +1816,287 @@ class _TasksViewState extends State<TasksView>
     ];
   }
 
+  Future<void> _showEditInboxItemDialog(
+    InboxItemEntity item,
+    InboxController inboxCtrl,
+  ) async {
+    final textCtrl = TextEditingController(text: item.rawText);
+    String selectedCategory = item.category;
+    String? errorText;
+    const categoryChoices = [
+      ('task', 'Task'),
+      ('idea', 'Idea'),
+      ('note', 'Note'),
+      ('problem', 'Problem'),
+      ('decision', 'Decision'),
+      ('general', 'General'),
+    ];
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) => AlertDialog(
+          title: const Text('Edit Inbox Item'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DaywellTextField(
+                  controller: textCtrl,
+                  autofocus: true,
+                  isRequired: true,
+                  label: 'Captured Note / Thought',
+                  errorText: errorText,
+                  maxLines: 4,
+                  onChanged: (_) {
+                    if (errorText != null) {
+                      setDialogState(() => errorText = null);
+                    }
+                  },
+                ),
+                const SizedBox(height: SharedDesignTokens.spacingCompact),
+                DaywellDropdownField<String>(
+                  label: 'Category',
+                  value: categoryChoices.any((c) => c.$1 == selectedCategory)
+                      ? selectedCategory
+                      : 'general',
+                  items: [
+                    for (final c in categoryChoices)
+                      DropdownMenuItem(value: c.$1, child: Text(c.$2)),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      setDialogState(() => selectedCategory = v);
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                final trimmed = textCtrl.text.trim();
+                if (trimmed.isEmpty) {
+                  setDialogState(() => errorText = 'Inbox text is required');
+                  return;
+                }
+                await inboxCtrl.updateItemText(
+                  item.id,
+                  trimmed,
+                  category: selectedCategory,
+                );
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _dismissInboxItem(
+    InboxItemEntity item,
+    InboxController inboxCtrl,
+  ) async {
+    await inboxCtrl.markProcessed(item.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Marked Inbox item as processed'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Future<void> _confirmAndDeleteInboxItem(
+    InboxItemEntity item,
+    InboxController inboxCtrl,
+  ) async {
+    final confirmed = await DaywellConfirmationDialog.show(
+      context,
+      title: 'Delete Inbox item?',
+      message: 'Remove "${item.rawText}" from your Inbox?',
+      confirmLabel: 'Delete Item',
+      cancelLabel: 'Cancel',
+      isDestructive: true,
+      icon: Icons.delete_outline,
+    );
+    if (!confirmed || !mounted) return;
+    await inboxCtrl.deleteItem(item.id);
+  }
+
+  Widget _buildInboxCapturesSection(
+    BuildContext context,
+    InboxController inboxCtrl,
+    List<InboxItemEntity> unprocessed,
+  ) {
+    final semantic = context.daywellColors;
+    final textTheme = Theme.of(context).textTheme;
+    final sorted = List<InboxItemEntity>.from(unprocessed)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    return DaywellCard(
+      padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Captured Inbox Items (${sorted.length})',
+                      style: textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: semantic.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Unprocessed Quick Captures stay here until you convert them into Tasks or dismiss them.',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: semantic.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              DaywellStatusBadge(
+                label: '${sorted.length} Pending',
+                tone: sorted.isNotEmpty
+                    ? DaywellStatusTone.info
+                    : DaywellStatusTone.neutral,
+              ),
+            ],
+          ),
+          if (sorted.isEmpty) ...[
+            const SizedBox(height: SharedDesignTokens.spacingCompact),
+            Text(
+              'No unprocessed Quick Capture items right now.',
+              style: textTheme.bodySmall?.copyWith(
+                color: semantic.textSecondary,
+              ),
+            ),
+          ] else ...[
+            const SizedBox(height: SharedDesignTokens.spacingCompact),
+            for (final item in sorted)
+              Padding(
+                padding: const EdgeInsets.only(
+                  bottom: SharedDesignTokens.spacingSm,
+                ),
+                child: DaywellCard(
+                  padding: const EdgeInsets.all(
+                    SharedDesignTokens.spacingCompact,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.rawText,
+                              style: textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: semantic.textPrimary,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: SharedDesignTokens.spacingSm),
+                          DaywellStatusBadge(
+                            label: item.category.toUpperCase(),
+                            tone: DaywellStatusTone.info,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: SharedDesignTokens.spacingXs),
+                      Text(
+                        'Captured: ${SharedDateFormatter.formatDual(CalendarDate.fromUtcInstantInEthiopia(item.createdAt), useAmharic: false)}',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: semantic.textMuted,
+                        ),
+                      ),
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      Wrap(
+                        spacing: SharedDesignTokens.spacingSm,
+                        runSpacing: SharedDesignTokens.spacingXs,
+                        children: [
+                          DaywellButton(
+                            label: 'Convert to Task',
+                            size: DaywellButtonSize.compact,
+                            leadingIcon: Icons.task_alt,
+                            onPressed: () =>
+                                _showTaskFormModal(sourceInboxItem: item),
+                          ),
+                          DaywellButton(
+                            label: 'Edit',
+                            variant: DaywellButtonVariant.outlined,
+                            size: DaywellButtonSize.compact,
+                            leadingIcon: Icons.edit_outlined,
+                            onPressed: () =>
+                                _showEditInboxItemDialog(item, inboxCtrl),
+                          ),
+                          DaywellButton(
+                            label: 'Mark Processed',
+                            variant: DaywellButtonVariant.text,
+                            size: DaywellButtonSize.compact,
+                            onPressed: () =>
+                                _dismissInboxItem(item, inboxCtrl),
+                          ),
+                          IconButton(
+                            icon: Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                              color: semantic.error,
+                            ),
+                            tooltip: 'Delete Inbox item',
+                            onPressed: () =>
+                                _confirmAndDeleteInboxItem(item, inboxCtrl),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.effectiveController;
     final projectsCtrl = widget.effectiveProjectsController;
+    final inboxCtrl = widget.effectiveInboxController;
     final colorScheme = Theme.of(context).colorScheme;
-    final Listenable listenable = projectsCtrl != null
-        ? Listenable.merge([controller, projectsCtrl])
-        : controller;
+    final listenables = <Listenable>[
+      controller,
+      if (projectsCtrl != null) projectsCtrl,
+      if (inboxCtrl != null) inboxCtrl,
+    ];
+    final Listenable listenable =
+        listenables.length == 1 ? controller : Listenable.merge(listenables);
 
     return AnimatedBuilder(
       animation: listenable,
       builder: (context, _) {
         final moduleState = controller.state;
         final projectsState = projectsCtrl?.state;
+        final unprocessedInbox =
+            inboxCtrl?.state.unprocessedItems ?? const <InboxItemEntity>[];
         Set<String>? sectionTaskIds;
         if (moduleState.selectedProjectId != null &&
             moduleState.sectionFilter != null &&
@@ -1761,16 +2143,27 @@ class _TasksViewState extends State<TasksView>
                       icon: const Icon(Icons.sort_rounded),
                       tooltip: 'Sort tasks',
                       onSelected: controller.setSortBy,
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                            value: 'due', child: Text('Sort by Due Date')),
-                        PopupMenuItem(
-                            value: 'priority', child: Text('Sort by Priority')),
-                        PopupMenuItem(
-                            value: 'created',
-                            child: Text('Sort by Creation Date')),
-                        PopupMenuItem(
-                            value: 'alpha', child: Text('Sort Alphabetically')),
+                      itemBuilder: (_) => [
+                        CheckedPopupMenuItem<String>(
+                          value: 'due',
+                          checked: moduleState.sortBy == 'due',
+                          child: const Text('Sort by Due Date'),
+                        ),
+                        CheckedPopupMenuItem<String>(
+                          value: 'priority',
+                          checked: moduleState.sortBy == 'priority',
+                          child: const Text('Sort by Priority'),
+                        ),
+                        CheckedPopupMenuItem<String>(
+                          value: 'created',
+                          checked: moduleState.sortBy == 'created',
+                          child: const Text('Sort by Creation Date'),
+                        ),
+                        CheckedPopupMenuItem<String>(
+                          value: 'alpha',
+                          checked: moduleState.sortBy == 'alpha',
+                          child: const Text('Sort Alphabetically'),
+                        ),
                       ],
                     ),
                   ],
@@ -1869,7 +2262,12 @@ class _TasksViewState extends State<TasksView>
                       children: [
                         for (final f in [
                           ('today', 'Today'),
-                          ('inbox', 'Inbox'),
+                          (
+                            'inbox',
+                            unprocessedInbox.isNotEmpty
+                                ? 'Inbox (${unprocessedInbox.length})'
+                                : 'Inbox'
+                          ),
                           ('upcoming', 'Upcoming'),
                           ('active', 'Active'),
                           ('overdue', 'Overdue'),
@@ -1890,36 +2288,112 @@ class _TasksViewState extends State<TasksView>
                       ],
                     ),
                   ),
+                  if (inboxCtrl != null &&
+                      moduleState.viewFilter != 'inbox' &&
+                      unprocessedInbox.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        SharedDesignTokens.spacingMd,
+                        SharedDesignTokens.spacingSm,
+                        SharedDesignTokens.spacingMd,
+                        SharedDesignTokens.spacingXs,
+                      ),
+                      child: DaywellStatusBanner(
+                        tone: DaywellStatusTone.info,
+                        message:
+                            '${unprocessedInbox.length} Quick Capture item(s) waiting in Inbox',
+                        actionLabel: 'Review',
+                        onActionPressed: () =>
+                            controller.setViewFilter('inbox'),
+                      ),
+                    ),
                   const Divider(height: 1),
                   Expanded(
-                    child: tasks.isEmpty
-                        ? DaywellEmptyState(
-                            icon: Icons.check_circle_outline,
-                            message: moduleState.hasActiveFilters
-                                ? 'No tasks match active filters'
-                                : moduleState.viewFilter == 'archived'
-                                    ? 'No archived tasks'
-                                    : 'No tasks in ${moduleState.viewFilter}',
-                            actionLabel: moduleState.hasActiveFilters
-                                ? 'Clear filters'
-                                : moduleState.viewFilter == 'archived'
-                                    ? null
+                    child: moduleState.viewFilter == 'inbox' &&
+                            inboxCtrl != null
+                        ? (unprocessedInbox.isEmpty && tasks.isEmpty)
+                            ? DaywellEmptyState(
+                                icon: Icons.inbox_outlined,
+                                message: moduleState.hasActiveFilters
+                                    ? 'No tasks match active filters'
+                                    : 'Inbox is clear',
+                                actionLabel: moduleState.hasActiveFilters
+                                    ? 'Clear filters'
                                     : 'Add Task',
-                            onActionPressed: moduleState.hasActiveFilters
-                                ? () {
-                                    _searchController.clear();
-                                    controller.clearFilters(resetView: false);
-                                  }
-                                : moduleState.viewFilter == 'archived'
-                                    ? null
+                                onActionPressed: moduleState.hasActiveFilters
+                                    ? () {
+                                        _searchController.clear();
+                                        controller.clearFilters(
+                                          resetView: false,
+                                        );
+                                      }
                                     : () => _showQuickAddModal(),
-                          )
-                        : ListView.builder(
-                            padding: const EdgeInsets.all(12),
-                            itemCount: tasks.length,
-                            itemBuilder: (_, i) => _buildTaskTile(
-                                tasks[i], controller, moduleState),
-                          ),
+                              )
+                            : ListView(
+                                padding: const EdgeInsets.all(12),
+                                children: [
+                                  _buildInboxCapturesSection(
+                                    context,
+                                    inboxCtrl,
+                                    unprocessedInbox,
+                                  ),
+                                  const SizedBox(
+                                    height: SharedDesignTokens.spacingMd,
+                                  ),
+                                  if (tasks.isNotEmpty) ...[
+                                    Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom: SharedDesignTokens.spacingSm,
+                                      ),
+                                      child: Text(
+                                        'Unassigned Tasks (${tasks.length})',
+                                        style: Theme.of(context)
+                                            .textTheme
+                                            .titleSmall
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                      ),
+                                    ),
+                                    for (final t in tasks)
+                                      _buildTaskTile(
+                                        t,
+                                        controller,
+                                        moduleState,
+                                      ),
+                                  ],
+                                ],
+                              )
+                        : tasks.isEmpty
+                            ? DaywellEmptyState(
+                                icon: Icons.check_circle_outline,
+                                message: moduleState.hasActiveFilters
+                                    ? 'No tasks match active filters'
+                                    : moduleState.viewFilter == 'archived'
+                                        ? 'No archived tasks'
+                                        : 'No tasks in ${moduleState.viewFilter}',
+                                actionLabel: moduleState.hasActiveFilters
+                                    ? 'Clear filters'
+                                    : moduleState.viewFilter == 'archived'
+                                        ? null
+                                        : 'Add Task',
+                                onActionPressed: moduleState.hasActiveFilters
+                                    ? () {
+                                        _searchController.clear();
+                                        controller.clearFilters(
+                                          resetView: false,
+                                        );
+                                      }
+                                    : moduleState.viewFilter == 'archived'
+                                        ? null
+                                        : () => _showQuickAddModal(),
+                              )
+                            : ListView.builder(
+                                padding: const EdgeInsets.all(12),
+                                itemCount: tasks.length,
+                                itemBuilder: (_, i) => _buildTaskTile(
+                                    tasks[i], controller, moduleState),
+                              ),
                   ),
                 ],
               ),

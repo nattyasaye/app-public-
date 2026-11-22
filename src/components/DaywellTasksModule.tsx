@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { CalendarDate, EthiopiaClock, SharedDateFormatter } from '../domain/date';
 import {
   Check,
@@ -20,9 +20,22 @@ import {
   ArrowDown,
   Tag,
   SlidersHorizontal,
+  Inbox as InboxIcon,
+  ArrowRight,
 } from 'lucide-react';
 import { isFormDirty } from '../domain/formValidationAndNavigation';
 import {
+  CANONICAL_INBOX_CATEGORIES,
+  deleteInboxItemFromList,
+  getUnprocessedInboxItems,
+  INBOX_CATEGORY_LABELS,
+  InboxItemCategory,
+  markInboxItemProcessed,
+  prepareTaskDraftFromInboxItem,
+  updateInboxItemRecord,
+} from '../domain/inboxOperations';
+import {
+  SharedInboxItem,
   SharedMilestone,
   SharedProject,
   SharedTaskStatus,
@@ -67,6 +80,7 @@ import {
   updateTaskRecord,
   updateTaskSubtaskTitle,
 } from '../domain/taskOperations';
+import { inboxService } from '../services/inboxService';
 import { projectsService } from '../services/projectsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { ProjectsWorkspaceView } from './projects';
@@ -90,6 +104,9 @@ export type DaywellTask = DaywellTaskRecord;
 interface DaywellTasksModuleProps {
   tasks: DaywellTask[];
   onUpdateTasks: (updated: DaywellTask[]) => void;
+  inboxItems?: SharedInboxItem[];
+  onUpdateInboxItems?: (updated: SharedInboxItem[]) => void;
+  requestedFilter?: { filter: TaskViewFilter; nonce: number } | null;
   onRequestQuickCapture?: () => void;
   onNavigateToCalendar?: (dateStr: string) => void;
   activeSubTab?: 'tasks' | 'projects';
@@ -208,6 +225,10 @@ const DEFAULT_SAMPLE_TASKS: DaywellTask[] = [
 export function DaywellTasksModule({
   tasks,
   onUpdateTasks,
+  inboxItems: controlledInboxItems,
+  onUpdateInboxItems,
+  requestedFilter,
+  onRequestQuickCapture,
   activeSubTab: controlledSubTab,
   onSubTabChange,
   selectedProjectId: controlledProjectId,
@@ -216,6 +237,28 @@ export function DaywellTasksModule({
   const [internalSubTab, setInternalSubTab] = useState<'tasks' | 'projects'>('tasks');
   const [internalProjectId, setInternalProjectId] = useState<string | null>(null);
   const [projectCreateTrigger, setProjectCreateTrigger] = useState(0);
+  const [internalInboxItems, setInternalInboxItems] = useState<SharedInboxItem[]>(() =>
+    inboxService.loadInboxItems()
+  );
+
+  useEffect(() => {
+    if (controlledInboxItems !== undefined || typeof window === 'undefined') return;
+    const handleSync = () => {
+      setInternalInboxItems(inboxService.loadInboxItems());
+    };
+    window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
+    return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
+  }, [controlledInboxItems]);
+
+  const effectiveInboxItems = controlledInboxItems ?? internalInboxItems;
+  const applyInboxUpdate = (next: SharedInboxItem[]) => {
+    if (onUpdateInboxItems) {
+      onUpdateInboxItems(next);
+    } else {
+      const saved = inboxService.saveInboxItems(next);
+      setInternalInboxItems(saved);
+    }
+  };
 
   const subTab = controlledSubTab ?? internalSubTab;
   const setSubTab = (next: 'tasks' | 'projects') => {
@@ -232,6 +275,14 @@ export function DaywellTasksModule({
 
   // Filter tab: 'today' | 'inbox' | 'upcoming' | 'active' | 'overdue' | 'all' | 'completed' | 'archived'
   const [activeFilter, setActiveFilter] = useState<TaskViewFilter>('today');
+
+  useEffect(() => {
+    if (requestedFilter?.filter) {
+      setSubTab('tasks');
+      setActiveFilter(requestedFilter.filter);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedFilter?.nonce]);
 
   // Search, Multi-Criteria Filters & Sorting
   const [searchQuery, setSearchQuery] = useState('');
@@ -252,6 +303,14 @@ export function DaywellTasksModule({
   const [editingGlobalTag, setEditingGlobalTag] = useState<string | null>(null);
   const [editingGlobalTagTitle, setEditingGlobalTagTitle] = useState('');
   const [editingGlobalTagError, setEditingGlobalTagError] = useState('');
+
+  // Shared Inbox Triage State
+  const [convertingInboxItem, setConvertingInboxItem] = useState<SharedInboxItem | null>(null);
+  const [editingInboxId, setEditingInboxId] = useState<string | null>(null);
+  const [editingInboxText, setEditingInboxText] = useState('');
+  const [editingInboxCategory, setEditingInboxCategory] = useState<InboxItemCategory>('task');
+  const [editingInboxError, setEditingInboxError] = useState('');
+  const [pendingDeleteInboxItem, setPendingDeleteInboxItem] = useState<SharedInboxItem | null>(null);
 
   // Task Details & Form Modals (View Details, Create, Edit, Safe Delete Confirm)
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
@@ -327,15 +386,37 @@ export function DaywellTasksModule({
     return projectsService.listMilestones(formProjectId.trim());
   }, [isModalOpen, formProjectId]);
 
+  const effectiveProjectFilter = useMemo(
+    () =>
+      projectFilter && allActiveProjects.some((p) => p.id === projectFilter)
+        ? projectFilter
+        : '',
+    [projectFilter, allActiveProjects]
+  );
+
   const availableSectionsForFilter = useMemo(() => {
-    if (!projectFilter) return [];
-    return projectsService.getProjectSectionsViewModel(projectFilter).sections;
-  }, [projectFilter, tasks, subTab]);
+    if (!effectiveProjectFilter) return [];
+    return projectsService.getProjectSectionsViewModel(effectiveProjectFilter).sections;
+  }, [effectiveProjectFilter, tasks, subTab]);
+
+  const effectiveSectionFilter = useMemo(() => {
+    if (!effectiveProjectFilter || !sectionFilter) return '';
+    if (
+      sectionFilter === '__unsectioned__' ||
+      availableSectionsForFilter.some((s) => s.record.id === sectionFilter)
+    ) {
+      return sectionFilter;
+    }
+    return '';
+  }, [effectiveProjectFilter, sectionFilter, availableSectionsForFilter]);
 
   const sectionTaskIdsForFilter = useMemo(() => {
-    if (!projectFilter || !sectionFilter) return undefined;
-    return projectsService.getProjectSectionTaskIds(projectFilter, sectionFilter);
-  }, [projectFilter, sectionFilter, tasks]);
+    if (!effectiveProjectFilter || !effectiveSectionFilter) return undefined;
+    return projectsService.getProjectSectionTaskIds(
+      effectiveProjectFilter,
+      effectiveSectionFilter
+    );
+  }, [effectiveProjectFilter, effectiveSectionFilter, tasks]);
 
   const availableLabels = useMemo(
     () => extractAvailableTaskLabels(tasks, customTagCatalog),
@@ -375,8 +456,8 @@ export function DaywellTasksModule({
         statusFilter: statusFilter || undefined,
         priorityFilter: priorityFilter || undefined,
         dueDateFilter: dueDateFilter || undefined,
-        projectIdFilter: projectFilter || undefined,
-        sectionIdFilter: sectionFilter || undefined,
+        projectIdFilter: effectiveProjectFilter || undefined,
+        sectionIdFilter: effectiveSectionFilter || undefined,
         tagFilters,
       }),
     [
@@ -384,8 +465,8 @@ export function DaywellTasksModule({
       statusFilter,
       priorityFilter,
       dueDateFilter,
-      projectFilter,
-      sectionFilter,
+      effectiveProjectFilter,
+      effectiveSectionFilter,
       tagFilters,
     ]
   );
@@ -395,16 +476,16 @@ export function DaywellTasksModule({
     if (statusFilter) count += 1;
     if (priorityFilter) count += 1;
     if (dueDateFilter) count += 1;
-    if (projectFilter) count += 1;
-    if (sectionFilter) count += 1;
+    if (effectiveProjectFilter) count += 1;
+    if (effectiveSectionFilter) count += 1;
     count += tagFilters.length;
     return count;
   }, [
     statusFilter,
     priorityFilter,
     dueDateFilter,
-    projectFilter,
-    sectionFilter,
+    effectiveProjectFilter,
+    effectiveSectionFilter,
     tagFilters,
   ]);
 
@@ -416,6 +497,15 @@ export function DaywellTasksModule({
     setProjectFilter('');
     setSectionFilter('');
     setTagFilters([]);
+  };
+
+  const openTagManager = () => {
+    setNewGlobalTagInput('');
+    setGlobalTagError('');
+    setEditingGlobalTag(null);
+    setEditingGlobalTagTitle('');
+    setEditingGlobalTagError('');
+    setIsTagManagerOpen(true);
   };
 
   const toggleFilterTag = (label: string) => {
@@ -440,7 +530,7 @@ export function DaywellTasksModule({
         statusFilter: statusFilter || undefined,
         priorityFilter: priorityFilter || undefined,
         dueDateFilter: dueDateFilter || undefined,
-        projectIdFilter: projectFilter || undefined,
+        projectIdFilter: effectiveProjectFilter || undefined,
         sectionTaskIds: sectionTaskIdsForFilter,
         tagFilters,
       }),
@@ -453,7 +543,7 @@ export function DaywellTasksModule({
       statusFilter,
       priorityFilter,
       dueDateFilter,
-      projectFilter,
+      effectiveProjectFilter,
       sectionTaskIdsForFilter,
       tagFilters,
     ]
@@ -464,6 +554,66 @@ export function DaywellTasksModule({
     () => computeTaskTabCounts(tasks, todayStr),
     [tasks, todayStr]
   );
+
+  const unprocessedInboxItems = useMemo(
+    () => getUnprocessedInboxItems(effectiveInboxItems),
+    [effectiveInboxItems]
+  );
+
+  // Inbox Triage Handlers
+  const handleStartEditInbox = (item: SharedInboxItem) => {
+    setEditingInboxId(item.id);
+    setEditingInboxText(item.rawText);
+    setEditingInboxCategory(item.category);
+    setEditingInboxError('');
+  };
+
+  const handleSaveEditInbox = (item: SharedInboxItem) => {
+    const res = updateInboxItemRecord(item, {
+      rawText: editingInboxText,
+      category: editingInboxCategory,
+    });
+    if (!res.ok) {
+      setEditingInboxError(res.error);
+      return;
+    }
+    const next = effectiveInboxItems.map((entry) =>
+      entry.id === item.id ? res.item : entry
+    );
+    applyInboxUpdate(next);
+    setEditingInboxId(null);
+    setEditingInboxText('');
+    setEditingInboxError('');
+  };
+
+  const handleMarkInboxProcessed = (item: SharedInboxItem) => {
+    const prevInbox = [...effectiveInboxItems];
+    const { items: nextInbox } = markInboxItemProcessed(
+      effectiveInboxItems,
+      item.id,
+      true
+    );
+    applyInboxUpdate(nextInbox);
+    if (editingInboxId === item.id) {
+      setEditingInboxId(null);
+      setEditingInboxText('');
+      setEditingInboxError('');
+    }
+    triggerUndo('Marked Inbox item as processed', () => applyInboxUpdate(prevInbox));
+  };
+
+  const executeDeleteInboxItem = (inboxId: string) => {
+    const prevInbox = [...effectiveInboxItems];
+    const { remaining } = deleteInboxItemFromList(effectiveInboxItems, inboxId);
+    applyInboxUpdate(remaining);
+    setPendingDeleteInboxItem(null);
+    if (editingInboxId === inboxId) {
+      setEditingInboxId(null);
+      setEditingInboxText('');
+      setEditingInboxError('');
+    }
+    triggerUndo('Deleted Inbox item', () => applyInboxUpdate(prevInbox));
+  };
 
   // Toggle Task Completion (Complete / Reopen with Undo)
   const toggleTask = (taskId: string) => {
@@ -631,15 +781,25 @@ export function DaywellTasksModule({
   };
 
   const handleSaveGlobalTagRename = (oldLabel: string) => {
+    const nextLabel = normalizeTaskLabel(editingGlobalTagTitle);
+    if (!nextLabel) {
+      setEditingGlobalTagError('Tag name is required');
+      return;
+    }
+    if (nextLabel === normalizeTaskLabel(oldLabel)) {
+      setEditingGlobalTag(null);
+      setEditingGlobalTagTitle('');
+      setEditingGlobalTagError('');
+      return;
+    }
     const prevTasks = [...tasks];
     const prevCatalog = [...customTagCatalog];
     const prevFilters = [...tagFilters];
-    const res = renameLabelAcrossTasks(tasks, oldLabel, editingGlobalTagTitle);
+    const res = renameLabelAcrossTasks(tasks, oldLabel, nextLabel);
     if (!res.ok) {
       setEditingGlobalTagError(res.error);
       return;
     }
-    const nextLabel = normalizeTaskLabel(editingGlobalTagTitle);
     const oldKey = normalizeTaskLabel(oldLabel).toLowerCase();
     setCustomTagCatalog((cur) =>
       normalizeTaskLabels(
@@ -708,6 +868,7 @@ export function DaywellTasksModule({
       setShowUnsavedPrompt(true);
     } else {
       setIsModalOpen(false);
+      setConvertingInboxItem(null);
       setFormErrors({});
     }
   };
@@ -715,6 +876,7 @@ export function DaywellTasksModule({
   // Open Create Modal
   const handleOpenCreate = () => {
     setEditingTaskId(null);
+    setConvertingInboxItem(null);
     setFormTitle('');
     setFormDescription('');
     setFormPriority('medium');
@@ -769,10 +931,70 @@ export function DaywellTasksModule({
     }, 60);
   };
 
+  // Open Convert Inbox Item Modal (preserves full captured content)
+  const handleOpenConvertInboxItem = (item: SharedInboxItem) => {
+    const draft = prepareTaskDraftFromInboxItem(item);
+    const initLabels = normalizeTaskLabels([
+      ...tagFilters,
+      ...draft.initialLabels,
+    ]);
+    setDetailTaskId(null);
+    setEditingTaskId(null);
+    setConvertingInboxItem(item);
+    setFormTitle(draft.title);
+    setFormDescription(draft.description);
+    setFormPriority('medium');
+    setFormStatus('not_started');
+    setFormDueDate('');
+    setFormScheduledDate('');
+    setFormScheduledTime('');
+    setFormProject('Personal');
+    setFormProjectId('');
+    setFormMilestoneId('');
+    setFormLabels(initLabels);
+    setNewFormLabelInput('');
+    setFormLabelError('');
+    setFormHasReminder(false);
+    setFormIsRecurring(false);
+    setFormRecurringRule('daily');
+    setFormSubtasks([]);
+    setNewSubtaskInput('');
+    setFormSubtaskError('');
+    setEditingFormSubtaskId(null);
+    setEditingFormSubtaskTitle('');
+    setEditingFormSubtaskError('');
+    setFormErrors({});
+    setIsSubmitting(false);
+
+    setInitialTaskValues({
+      title: draft.title,
+      description: draft.description,
+      priority: 'medium',
+      status: 'not_started',
+      dueDate: '',
+      scheduledDate: '',
+      scheduledTime: '',
+      projectName: 'Personal',
+      projectId: '',
+      milestoneId: '',
+      labels: initLabels,
+      hasReminder: false,
+      isRecurring: false,
+      recurringRule: 'daily',
+      subtasks: [],
+    });
+
+    setIsModalOpen(true);
+    setTimeout(() => {
+      titleInputRef.current?.focus();
+    }, 60);
+  };
+
   // Open Edit Modal
   const handleOpenEdit = (task: DaywellTask) => {
     const effectiveStatus = resolveEffectiveTaskStatus(task);
     setDetailTaskId(null);
+    setConvertingInboxItem(null);
     setEditingTaskId(task.id);
     setFormTitle(task.title);
     setFormDescription(task.description || '');
@@ -912,6 +1134,25 @@ export function DaywellTasksModule({
 
       setIsSubmitting(true);
       onUpdateTasks([result.task, ...tasks]);
+      if (convertingInboxItem) {
+        const prevInbox = [...effectiveInboxItems];
+        const sourceId = convertingInboxItem.id;
+        const { items: nextInbox } = markInboxItemProcessed(
+          effectiveInboxItems,
+          sourceId,
+          true
+        );
+        applyInboxUpdate(nextInbox);
+        setConvertingInboxItem(null);
+        setIsSubmitting(false);
+        setIsModalOpen(false);
+        setFormErrors({});
+        triggerUndo(`Converted "${result.task.title}" to Task`, () => {
+          onUpdateTasks(prev);
+          applyInboxUpdate(prevInbox);
+        });
+        return;
+      }
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
@@ -1116,14 +1357,7 @@ export function DaywellTasksModule({
               label="Manage Tags"
               size="compact"
               tone="muted"
-              onClick={() => {
-                setNewGlobalTagInput('');
-                setGlobalTagError('');
-                setEditingGlobalTag(null);
-                setEditingGlobalTagTitle('');
-                setEditingGlobalTagError('');
-                setIsTagManagerOpen(true);
-              }}
+              onClick={openTagManager}
               icon={<Tag className="w-4 h-4" />}
             />
             <select
@@ -1222,7 +1456,7 @@ export function DaywellTasksModule({
                   </label>
                   <select
                     aria-label="Filter by project"
-                    value={projectFilter}
+                    value={effectiveProjectFilter}
                     onChange={(e) => {
                       setProjectFilter(e.target.value);
                       setSectionFilter('');
@@ -1238,14 +1472,14 @@ export function DaywellTasksModule({
                   </select>
                 </div>
 
-                {projectFilter && (
+                {effectiveProjectFilter && (
                   <div>
                     <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
                       Section
                     </label>
                     <select
                       aria-label="Filter by section"
-                      value={sectionFilter}
+                      value={effectiveSectionFilter}
                       onChange={(e) => setSectionFilter(e.target.value)}
                       className="w-full min-h-[36px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-2.5 py-1.5 text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
                     >
@@ -1269,7 +1503,7 @@ export function DaywellTasksModule({
                     </span>
                     <button
                       type="button"
-                      onClick={() => setIsTagManagerOpen(true)}
+                      onClick={openTagManager}
                       className="text-[11px] font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer"
                     >
                       Manage tags
@@ -1307,7 +1541,13 @@ export function DaywellTasksModule({
             {(
               [
                 { id: 'today', label: `Today (${tabCounts.todayCount})` },
-                { id: 'inbox', label: `Inbox (${tabCounts.inboxCount})` },
+                {
+                  id: 'inbox',
+                  label:
+                    unprocessedInboxItems.length > 0
+                      ? `Inbox (${unprocessedInboxItems.length} · ${tabCounts.inboxCount})`
+                      : `Inbox (${tabCounts.inboxCount})`,
+                },
                 { id: 'upcoming', label: `Upcoming (${tabCounts.upcomingCount})` },
                 { id: 'active', label: `Active (${tabCounts.activePendingCount})` },
                 { id: 'overdue', label: `Overdue (${tabCounts.overdueCount})` },
@@ -1335,6 +1575,15 @@ export function DaywellTasksModule({
               );
             })}
           </div>
+
+          {activeFilter !== 'inbox' && unprocessedInboxItems.length > 0 && (
+            <DaywellStatusBanner
+              tone="info"
+              message={`${unprocessedInboxItems.length} Quick Capture item(s) waiting in Inbox`}
+              actionLabel="Review Inbox"
+              onActionPressed={() => setActiveFilter('inbox')}
+            />
+          )}
 
           {/* Active Filters Summary + Clear Action */}
           {hasActiveFilters && (
@@ -1364,23 +1613,23 @@ export function DaywellTasksModule({
                     label={TASK_DUE_DATE_FILTER_LABELS[dueDateFilter]}
                   />
                 )}
-                {projectFilter && (
+                {effectiveProjectFilter && (
                   <DaywellStatusBadge
                     tone="neutral"
                     showIcon={false}
-                    label={`Project: ${allActiveProjects.find((p) => p.id === projectFilter)?.title ?? projectFilter}`}
+                    label={`Project: ${allActiveProjects.find((p) => p.id === effectiveProjectFilter)?.title ?? effectiveProjectFilter}`}
                   />
                 )}
-                {sectionFilter && (
+                {effectiveSectionFilter && (
                   <DaywellStatusBadge
                     tone="neutral"
                     showIcon={false}
                     label={`Section: ${
-                      sectionFilter === '__unsectioned__'
+                      effectiveSectionFilter === '__unsectioned__'
                         ? 'Unsectioned'
                         : availableSectionsForFilter.find(
-                            (s) => s.record.id === sectionFilter
-                          )?.record.title ?? sectionFilter
+                            (s) => s.record.id === effectiveSectionFilter
+                          )?.record.title ?? effectiveSectionFilter
                     }`}
                   />
                 )}
@@ -1417,42 +1666,207 @@ export function DaywellTasksModule({
             />
           </div>
 
+          {/* Shared Quick Capture Inbox Triage Section (Inbox view only) */}
+          {activeFilter === 'inbox' && (
+            <DaywellCard padding="sm" radius="lg" className="space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <InboxIcon className="w-4 h-4 text-[var(--dw-primary)] shrink-0" />
+                  <div className="min-w-0">
+                    <h2 className="text-xs font-bold text-[var(--dw-text-primary)]">
+                      Captured Inbox Items ({unprocessedInboxItems.length})
+                    </h2>
+                    <p className="text-[11px] text-[var(--dw-text-muted)]">
+                      Unprocessed Quick Captures stay separate from Tasks until converted or dismissed.
+                    </p>
+                  </div>
+                </div>
+                {onRequestQuickCapture && (
+                  <DaywellButton
+                    label="Quick capture"
+                    variant="tonal"
+                    size="compact"
+                    leadingIcon={<Plus className="w-3.5 h-3.5" />}
+                    onClick={onRequestQuickCapture}
+                  />
+                )}
+              </div>
+
+              {unprocessedInboxItems.length === 0 ? (
+                <p className="text-[11px] text-[var(--dw-text-muted)]">
+                  No unprocessed Quick Capture items waiting right now.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {unprocessedInboxItems.map((item) => {
+                    const isEditingItem = editingInboxId === item.id;
+                    const createdDate =
+                      CalendarDate.fromUtcInstantInEthiopia(
+                        new Date(item.createdAt || Date.now())
+                      );
+                    return (
+                      <div
+                        key={item.id}
+                        className="p-3 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] space-y-2"
+                      >
+                        {isEditingItem ? (
+                          <div className="space-y-2">
+                            <textarea
+                              aria-label="Edit captured text"
+                              rows={2}
+                              value={editingInboxText}
+                              onChange={(e) => {
+                                setEditingInboxText(e.target.value);
+                                if (editingInboxError) setEditingInboxError('');
+                              }}
+                              className="w-full px-3 py-2 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                            />
+                            {editingInboxError && (
+                              <p className="text-[11px] text-[var(--dw-error)]">
+                                {editingInboxError}
+                              </p>
+                            )}
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <select
+                                aria-label="Inbox item category"
+                                value={editingInboxCategory}
+                                onChange={(e) =>
+                                  setEditingInboxCategory(e.target.value as InboxItemCategory)
+                                }
+                                className="min-h-[34px] px-2.5 py-1 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                              >
+                                {CANONICAL_INBOX_CATEGORIES.filter((c) => c !== 'expense').map(
+                                  (cat) => (
+                                    <option key={cat} value={cat}>
+                                      {INBOX_CATEGORY_LABELS[cat]}
+                                    </option>
+                                  )
+                                )}
+                              </select>
+                              <div className="flex items-center gap-1.5">
+                                <DaywellButton
+                                  label="Cancel"
+                                  variant="text"
+                                  size="compact"
+                                  onClick={() => {
+                                    setEditingInboxId(null);
+                                    setEditingInboxError('');
+                                  }}
+                                />
+                                <DaywellButton
+                                  label="Save"
+                                  variant="primary"
+                                  size="compact"
+                                  onClick={() => handleSaveEditInbox(item)}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-start justify-between gap-2">
+                              <p className="text-xs font-semibold text-[var(--dw-text-primary)] whitespace-pre-wrap break-words flex-1 min-w-0">
+                                {item.rawText}
+                              </p>
+                              <DaywellStatusBadge
+                                tone="info"
+                                showIcon={false}
+                                label={INBOX_CATEGORY_LABELS[item.category].toUpperCase()}
+                              />
+                            </div>
+                            <p className="text-[10px] text-[var(--dw-text-muted)]">
+                              Captured: {SharedDateFormatter.formatDual(createdDate, false)}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                              <DaywellButton
+                                label="Convert to Task"
+                                variant="primary"
+                                size="compact"
+                                leadingIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                                onClick={() => handleOpenConvertInboxItem(item)}
+                              />
+                              <DaywellButton
+                                label="Edit"
+                                variant="outlined"
+                                size="compact"
+                                leadingIcon={<Edit3 className="w-3 h-3" />}
+                                onClick={() => handleStartEditInbox(item)}
+                              />
+                              <DaywellButton
+                                label="Mark Processed"
+                                variant="text"
+                                size="compact"
+                                onClick={() => handleMarkInboxProcessed(item)}
+                              />
+                              <DaywellIconButton
+                                label={`Delete inbox item ${item.rawText}`}
+                                size="compact"
+                                tone="danger"
+                                onClick={() => setPendingDeleteInboxItem(item)}
+                                icon={<Trash2 className="w-3.5 h-3.5" />}
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </DaywellCard>
+          )}
+
       {/* Task List */}
       <div className="space-y-2 pt-1">
+        {activeFilter === 'inbox' && (filteredTasks.length > 0 || unprocessedInboxItems.length > 0) && (
+          <div className="flex items-center justify-between px-0.5">
+            <h3 className="text-xs font-bold text-[var(--dw-text-secondary)]">
+              Unassigned Tasks ({filteredTasks.length})
+            </h3>
+          </div>
+        )}
         {filteredTasks.length === 0 ? (
-          <DaywellEmptyState
-            icon={<CheckCircle2 className="w-8 h-8" />}
-            message={
-              hasActiveFilters
-                ? 'No tasks match active filters'
-                : activeFilter === 'archived'
-                  ? 'No archived tasks'
-                  : 'No tasks in this view'
-            }
-            subtitle={
-              hasActiveFilters
-                ? 'Try clearing or adjusting your search query, tags, or task filters.'
-                : activeFilter === 'today'
-                  ? "You're all caught up for today! Plan tomorrow or capture a new task."
+          activeFilter === 'inbox' && unprocessedInboxItems.length > 0 ? (
+            <DaywellCard padding="compact" radius="lg">
+              <p className="text-[11px] text-[var(--dw-text-muted)] text-center py-2">
+                No unassigned Task records in Inbox yet. Convert a capture above or add a task anytime.
+              </p>
+            </DaywellCard>
+          ) : (
+            <DaywellEmptyState
+              icon={<CheckCircle2 className="w-8 h-8" />}
+              message={
+                hasActiveFilters
+                  ? 'No tasks match active filters'
                   : activeFilter === 'archived'
-                    ? 'Tasks you archive appear here so you can restore or remove them anytime.'
-                    : 'Nothing to display for this filter.'
-            }
-            actionLabel={
-              hasActiveFilters
-                ? 'Clear filters'
-                : activeFilter === 'archived'
-                  ? undefined
-                  : 'Add Task'
-            }
-            onActionPressed={
-              hasActiveFilters
-                ? handleClearFilters
-                : activeFilter === 'archived'
-                  ? undefined
-                  : handleOpenCreate
-            }
-          />
+                    ? 'No archived tasks'
+                    : 'No tasks in this view'
+              }
+              subtitle={
+                hasActiveFilters
+                  ? 'Try clearing or adjusting your search query, tags, or task filters.'
+                  : activeFilter === 'today'
+                    ? "You're all caught up for today! Plan tomorrow or capture a new task."
+                    : activeFilter === 'archived'
+                      ? 'Tasks you archive appear here so you can restore or remove them anytime.'
+                      : 'Nothing to display for this filter.'
+              }
+              actionLabel={
+                hasActiveFilters
+                  ? 'Clear filters'
+                  : activeFilter === 'archived'
+                    ? undefined
+                    : 'Add Task'
+              }
+              onActionPressed={
+                hasActiveFilters
+                  ? handleClearFilters
+                  : activeFilter === 'archived'
+                    ? undefined
+                    : handleOpenCreate
+              }
+            />
+          )
         ) : (
           filteredTasks.map((task) => {
             const subProgress = computeSubtaskProgress(task.subtasks);
@@ -1672,12 +2086,18 @@ export function DaywellTasksModule({
         </>
       )}
 
-      {/* TASK MODAL (Create & Edit) */}
+      {/* TASK MODAL (Create, Convert from Inbox, & Edit) */}
       {isModalOpen && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={editingTaskId ? 'Edit Task' : 'Create New Task'}
+          aria-label={
+            editingTaskId
+              ? 'Edit Task'
+              : convertingInboxItem
+                ? 'Convert Inbox Item to Task'
+                : 'Create New Task'
+          }
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
           onClick={(e) => {
             if (e.target === e.currentTarget) handleAttemptClose();
@@ -1686,7 +2106,11 @@ export function DaywellTasksModule({
           <div className="w-full max-w-md bg-[var(--dw-elevated)] rounded-[var(--dw-radius-xl)] p-5 shadow-2xl border border-[var(--dw-border)] space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between">
               <h2 className="dw-type-title text-[var(--dw-text-primary)]">
-                {editingTaskId ? 'Edit Task' : 'Create New Task'}
+                {editingTaskId
+                  ? 'Edit Task'
+                  : convertingInboxItem
+                    ? 'Convert Inbox Item to Task'
+                    : 'Create New Task'}
               </h2>
               <DaywellIconButton
                 label="Close task dialog"
@@ -1696,6 +2120,14 @@ export function DaywellTasksModule({
                 icon={<X className="w-4 h-4" />}
               />
             </div>
+
+            {convertingInboxItem && (
+              <DaywellStatusBanner
+                tone="info"
+                title={`From Quick Capture (${INBOX_CATEGORY_LABELS[convertingInboxItem.category]})`}
+                message="Assign a project, priority, tags, or schedule below. Saving converts this item into a Task and marks the Inbox capture processed."
+              />
+            )}
 
             <form onSubmit={handleSaveTask} className="space-y-3.5">
               <div>
@@ -2235,7 +2667,15 @@ export function DaywellTasksModule({
                     size="compact"
                     disabled={isSubmitting || !formTitle.trim()}
                     leadingIcon={isSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : undefined}
-                    label={isSubmitting ? 'Saving...' : editingTaskId ? 'Save Changes' : 'Create Task'}
+                    label={
+                      isSubmitting
+                        ? 'Saving...'
+                        : editingTaskId
+                          ? 'Save Changes'
+                          : convertingInboxItem
+                            ? 'Convert to Task'
+                            : 'Create Task'
+                    }
                   />
                 </div>
               </div>
@@ -2920,6 +3360,26 @@ export function DaywellTasksModule({
         }}
       />
 
+      {/* Safe Delete Inbox Item Confirmation Dialog */}
+      <DaywellConfirmationDialog
+        isOpen={Boolean(pendingDeleteInboxItem)}
+        title="Delete Inbox item?"
+        description={
+          pendingDeleteInboxItem
+            ? `Remove "${pendingDeleteInboxItem.rawText}" from your Inbox? You can undo immediately afterward.`
+            : ''
+        }
+        confirmLabel="Delete Item"
+        cancelLabel="Cancel"
+        destructive
+        onCancel={() => setPendingDeleteInboxItem(null)}
+        onConfirm={() => {
+          if (pendingDeleteInboxItem) {
+            executeDeleteInboxItem(pendingDeleteInboxItem.id);
+          }
+        }}
+      />
+
       {/* Unsaved Changes Dialog */}
       <UnsavedChangesDialog
         isOpen={showUnsavedPrompt}
@@ -2927,6 +3387,7 @@ export function DaywellTasksModule({
         onDiscardChanges={() => {
           setShowUnsavedPrompt(false);
           setIsModalOpen(false);
+          setConvertingInboxItem(null);
           setFormErrors({});
         }}
       />

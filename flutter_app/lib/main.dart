@@ -390,6 +390,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
         return TasksView(
           state: _state,
           controller: _state.tasksController,
+          inboxController: _state.inboxController,
         );
       case DaywellTabId.calendar:
         return CalendarPlaceholderView(

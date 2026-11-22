@@ -293,8 +293,8 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
         status: 'active',
         blocks: [],
       });
-      const secBackend = projectsService.createProjectSection(projA.project.id, 'Backend');
-      const secDesign = projectsService.createProjectSection(projA.project.id, 'Design');
+      const secBackend = projectsService.createProjectSection(projA.id, 'Backend');
+      const secDesign = projectsService.createProjectSection(projA.id, 'Design');
 
       const tasks: DaywellTaskRecord[] = [
         {
@@ -306,8 +306,8 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
           completed: false,
           dueDate: tomorrowIso,
           scheduledTime: '15:00',
-          projectId: projA.project.id,
-          projectName: projA.project.title,
+          projectId: projA.id,
+          projectName: projA.title,
           labels: ['Backend', 'Launch'],
           hasReminder: false,
           subtasks: [],
@@ -322,8 +322,8 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
           completed: false,
           dueDate: nextWeekIso,
           scheduledTime: '08:30',
-          projectId: projA.project.id,
-          projectName: projA.project.title,
+          projectId: projA.id,
+          projectName: projA.title,
           labels: ['Backend', 'Launch'],
           hasReminder: false,
           subtasks: [],
@@ -338,8 +338,8 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
           completed: false,
           dueDate: todayIso,
           scheduledTime: '11:00',
-          projectId: projA.project.id,
-          projectName: projA.project.title,
+          projectId: projA.id,
+          projectName: projA.title,
           labels: ['Design'],
           hasReminder: false,
           subtasks: [],
@@ -352,8 +352,8 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
           priority: 'medium',
           status: 'in_progress',
           completed: false,
-          projectId: projA.project.id,
-          projectName: projA.project.title,
+          projectId: projA.id,
+          projectName: projA.title,
           labels: ['Launch'],
           hasReminder: false,
           subtasks: [],
@@ -366,8 +366,8 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
           status: 'not_started',
           completed: false,
           dueDate: yesterdayIso,
-          projectId: projB.project.id,
-          projectName: projB.project.title,
+          projectId: projB.id,
+          projectName: projB.title,
           labels: ['Health'],
           hasReminder: false,
           subtasks: [],
@@ -375,28 +375,10 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
         },
       ];
 
-      localStorage.setItem(SharedStateBridge.TASKS_STORAGE_KEY, JSON.stringify(tasks));
-      projectsService.assignTaskToProjectSection({
-        projectId: projA.project.id,
-        taskId: 't-a',
-        taskTitle: 'Zebra migration',
-        taskCompleted: false,
-        sectionRecordId: secBackend.id,
-      });
-      projectsService.assignTaskToProjectSection({
-        projectId: projA.project.id,
-        taskId: 't-b',
-        taskTitle: 'Alpha endpoint',
-        taskCompleted: false,
-        sectionRecordId: secBackend.id,
-      });
-      projectsService.assignTaskToProjectSection({
-        projectId: projA.project.id,
-        taskId: 't-c',
-        taskTitle: 'Banner artwork',
-        taskCompleted: false,
-        sectionRecordId: secDesign.id,
-      });
+      localStorage.setItem('daywell_tasks', JSON.stringify(tasks));
+      projectsService.assignTaskToProjectSection(projA.id, 't-a', secBackend.id);
+      projectsService.assignTaskToProjectSection(projA.id, 't-b', secBackend.id);
+      projectsService.assignTaskToProjectSection(projA.id, 't-c', secDesign.id);
 
       // Verify sorting options independently on Active view
       assert.deepStrictEqual(
@@ -415,16 +397,20 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
         filterTasksForView(tasks, { viewFilter: 'active', sortBy: 'priority', todayIso }).map((t) => t.id),
         ['t-b', 't-c', 't-e', 't-d', 't-a']
       );
+      assert.deepStrictEqual(
+        filterTasksForView(tasks, { viewFilter: 'active', sortBy: 'time', todayIso }).map((t) => t.id),
+        ['t-b', 't-c', 't-a', 't-e', 't-d']
+      );
 
       // Section task lookup + Unsectioned lookup
       const backendSectionIds = projectsService.getProjectSectionTaskIds(
-        projA.project.id,
+        projA.id,
         secBackend.id
       );
       assert.deepStrictEqual([...backendSectionIds].sort(), ['t-a', 't-b']);
 
       const unsectionedIds = projectsService.getProjectSectionTaskIds(
-        projA.project.id,
+        projA.id,
         '__unsectioned__'
       );
       assert.deepStrictEqual([...unsectionedIds], ['t-d']);
@@ -434,7 +420,7 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
         viewFilter: 'active',
         statusFilter: 'in_progress',
         dueDateFilter: 'upcoming',
-        projectIdFilter: projA.project.id,
+        projectIdFilter: projA.id,
         sectionTaskIds: backendSectionIds,
         tagFilters: ['backend', 'launch'],
         searchQuery: 'schema',
@@ -449,7 +435,7 @@ describe('Stage 1.4 — Task Organization (Web Domain, Sections & UI Guardrails)
         statusFilter: 'in_progress',
         priorityFilter: 'urgent',
         dueDateFilter: 'upcoming',
-        projectIdFilter: projA.project.id,
+        projectIdFilter: projA.id,
         sectionTaskIds: backendSectionIds,
         tagFilters: ['backend', 'launch'],
         searchQuery: 'schema',

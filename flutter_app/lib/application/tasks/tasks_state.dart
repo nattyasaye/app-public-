@@ -1,4 +1,5 @@
 import '../../core/date/shared_date.dart';
+import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/projects/progress_engine.dart';
 
@@ -7,6 +8,8 @@ class TasksModuleState {
   final List<TaskEntity> tasks;
   final List<ProjectEntity> projects;
   final List<MilestoneEntity> milestones;
+  final List<DailyPlanningEntryEntity> dailyPlanningEntries;
+  final CalendarDate? selectedPlanDate;
 
   // Presentation / Filter State
   final String
@@ -30,6 +33,8 @@ class TasksModuleState {
     this.tasks = const [],
     this.projects = const [],
     this.milestones = const [],
+    this.dailyPlanningEntries = const [],
+    this.selectedPlanDate,
     this.viewFilter = 'today',
     this.searchQuery = '',
     this.sortBy = 'due',
@@ -115,11 +120,38 @@ class TasksModuleState {
     return count;
   }
 
+  CalendarDate get effectivePlanDate => selectedPlanDate ?? CalendarDate.today();
+
   Set<String> get pinnedTaskIds =>
       tasks.where((t) => !t.isArchived && t.isPinned).map((t) => t.id).toSet();
 
-  Set<String> get myDayTaskIds =>
-      tasks.where((t) => !t.isArchived && t.isMyDay).map((t) => t.id).toSet();
+  Set<String> get myDayTaskIds {
+    final planDate = effectivePlanDate;
+    return tasks
+        .where(
+          (t) => DailyPlanningEngine.isTaskPlannedForDate(
+            t,
+            dailyPlanningEntries,
+            planDate,
+          ),
+        )
+        .map((t) => t.id)
+        .toSet();
+  }
+
+  int get myDayCount => myDayTaskIds.length;
+
+  DailyPlanSnapshot buildDailyPlanSnapshot({
+    CalendarDate? date,
+    CalendarDate? today,
+  }) {
+    return DailyPlanningEngine.buildSnapshot(
+      tasks: tasks,
+      entries: dailyPlanningEntries,
+      selectedDate: date ?? effectivePlanDate,
+      today: today,
+    );
+  }
 
   TaskEntity? findTaskById(String id) {
     for (final t in tasks) {
@@ -132,6 +164,9 @@ class TasksModuleState {
     List<TaskEntity>? tasks,
     List<ProjectEntity>? projects,
     List<MilestoneEntity>? milestones,
+    List<DailyPlanningEntryEntity>? dailyPlanningEntries,
+    CalendarDate? selectedPlanDate,
+    bool clearSelectedPlanDate = false,
     String? viewFilter,
     String? searchQuery,
     String? sortBy,
@@ -157,6 +192,10 @@ class TasksModuleState {
       tasks: tasks ?? this.tasks,
       projects: projects ?? this.projects,
       milestones: milestones ?? this.milestones,
+      dailyPlanningEntries: dailyPlanningEntries ?? this.dailyPlanningEntries,
+      selectedPlanDate: clearSelectedPlanDate
+          ? null
+          : (selectedPlanDate ?? this.selectedPlanDate),
       viewFilter: viewFilter ?? this.viewFilter,
       searchQuery: searchQuery ?? this.searchQuery,
       sortBy: sortBy ?? this.sortBy,
@@ -248,7 +287,14 @@ class TasksModuleState {
           } else if (viewFilter == 'active') {
             // Non-archived and neither completed nor cancelled.
           } else if (viewFilter == 'my_day') {
-            if (!t.isMyDay) return false;
+            if (!DailyPlanningEngine.isTaskPlannedForDate(
+              t,
+              dailyPlanningEntries,
+              effectivePlanDate,
+              today: today,
+            )) {
+              return false;
+            }
           }
         }
       }
@@ -310,6 +356,11 @@ class TasksModuleState {
     final farFuture = CalendarDate(year: 2099, month: 12, day: 31);
 
     list.sort((a, b) {
+      if (viewFilter == 'my_day') {
+        final orderCmp = a.sortOrder.compareTo(b.sortOrder);
+        if (orderCmp != 0) return orderCmp;
+      }
+
       final aPin = a.isPinned ? 0 : 1;
       final bPin = b.isPinned ? 0 : 1;
       if (aPin != bPin) return aPin.compareTo(bPin);

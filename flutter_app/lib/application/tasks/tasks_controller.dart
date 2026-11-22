@@ -1,13 +1,14 @@
 import 'package:flutter/foundation.dart';
 import '../../core/date/shared_date.dart';
+import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_contracts.dart';
 import 'tasks_state.dart';
 
 /// Module-scoped application controller for Daywell To-Do and Projects.
 ///
-/// Sole owner of Tasks/Projects/Milestones module state, hydrated from and
-/// persisted directly to [ITasksRepository] (authoritative Drift SQLite).
+/// Sole owner of Tasks/Projects/Milestones/DailyPlanning module state, hydrated
+/// from and persisted directly to [ITasksRepository] (authoritative Drift SQLite).
 class TasksController extends ChangeNotifier {
   final ITasksRepository _repository;
   TasksModuleState _state;
@@ -30,11 +31,13 @@ class TasksController extends ChangeNotifier {
       final loadedTasks = await _repository.getTasks();
       final loadedProjects = await _repository.getProjects();
       final loadedMilestones = await _repository.getAllMilestones();
+      final loadedEntries = await _repository.getDailyPlanningEntries();
 
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(loadedTasks),
         projects: List<ProjectEntity>.unmodifiable(loadedProjects),
         milestones: List<MilestoneEntity>.unmodifiable(loadedMilestones),
+        dailyPlanningEntries: DailyPlanningEngine.normalizeEntries(loadedEntries),
         isLoading: false,
         clearError: true,
       );
@@ -186,10 +189,344 @@ class TasksController extends ChangeNotifier {
     await _persistUpdatedTask(existing.copyWith(isPinned: !existing.isPinned));
   }
 
-  Future<void> toggleMyDay(String taskId) async {
-    final existing = _state.findTaskById(taskId);
+  // --- Daily Planning & My Day Orchestration (Stage 2) ---
+
+  void setSelectedPlanDate(CalendarDate date) {
+    _state = _state.copyWith(selectedPlanDate: date);
+    notifyListeners();
+  }
+
+  void resetPlanDateToToday() {
+    _state = _state.copyWith(clearSelectedPlanDate: true);
+    notifyListeners();
+  }
+
+  Future<void> toggleMyDay(String taskId, {CalendarDate? date}) async {
+    final targetDate = date ?? _state.effectivePlanDate;
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
     if (existing == null) return;
-    await _persistUpdatedTask(existing.copyWith(isMyDay: !existing.isMyDay));
+    final entries = await _repository.getDailyPlanningEntries();
+    final isPlanned = DailyPlanningEngine.isTaskPlannedForDate(
+      existing,
+      entries,
+      targetDate,
+    );
+    if (isPlanned) {
+      await removeTaskFromPlannedDay(taskId, date: targetDate);
+    } else {
+      await planTaskForDate(taskId, date: targetDate);
+    }
+  }
+
+  Future<void> planTaskForDate(
+    String taskId, {
+    CalendarDate? date,
+    String action = DailyPlanningActions.planned,
+  }) async {
+    final targetDate = date ?? _state.effectivePlanDate;
+    final today = CalendarDate.today();
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null || existing.isArchived) return;
+
+    try {
+      final currentTasks = await _repository.getTasks();
+      final currentEntries = await _repository.getDailyPlanningEntries();
+      final alreadyActive = DailyPlanningEngine.isTaskPlannedForDate(
+        existing,
+        currentEntries,
+        targetDate,
+        today: today,
+      );
+      final nextSortOrder = alreadyActive
+          ? existing.sortOrder
+          : DailyPlanningEngine.nextSortOrderForPlannedDay(
+              currentTasks,
+              currentEntries,
+              targetDate,
+              excludeTaskId: taskId,
+              today: today,
+            );
+      final desiredAction = existing.isCompleted
+          ? DailyPlanningActions.completed
+          : DailyPlanningActions.normalize(action);
+      final existingEntry = DailyPlanningEngine.findEntry(
+        currentEntries,
+        taskId,
+        targetDate,
+      );
+      final now = EthiopiaClock.nowUtc();
+
+      await _repository.upsertDailyPlanningEntry(
+        DailyPlanningEntryEntity(
+          id: existingEntry?.id ??
+              DailyPlanningEngine.buildEntryId(taskId, targetDate),
+          planDate: targetDate,
+          taskId: taskId,
+          action: desiredAction,
+          createdAt: existingEntry?.createdAt ?? now,
+          updatedAt: now,
+        ),
+      );
+
+      final shouldPointMyDay = existing.myDayDate == null ||
+          !targetDate.isBefore(existing.myDayDate!) ||
+          targetDate == today;
+      await _repository.updateTask(
+        existing.copyWith(
+          isMyDay: shouldPointMyDay ? true : existing.isMyDay,
+          myDayDate: shouldPointMyDay ? targetDate : existing.myDayDate,
+          sortOrder: nextSortOrder,
+          updatedAt: now,
+        ),
+      );
+
+      final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
+        clearError: true,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<void> removeTaskFromPlannedDay(
+    String taskId, {
+    CalendarDate? date,
+  }) async {
+    final targetDate = date ?? _state.effectivePlanDate;
+    final today = CalendarDate.today();
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return;
+
+    try {
+      final currentEntries = await _repository.getDailyPlanningEntries();
+      final existingEntry = DailyPlanningEngine.findEntry(
+        currentEntries,
+        taskId,
+        targetDate,
+      );
+      final now = EthiopiaClock.nowUtc();
+
+      await _repository.upsertDailyPlanningEntry(
+        DailyPlanningEntryEntity(
+          id: existingEntry?.id ??
+              DailyPlanningEngine.buildEntryId(taskId, targetDate),
+          planDate: targetDate,
+          taskId: taskId,
+          action: DailyPlanningActions.dismissed,
+          createdAt: existingEntry?.createdAt ?? now,
+          updatedAt: now,
+        ),
+      );
+
+      final updatedEntriesAfter = await _repository.getDailyPlanningEntries();
+      final normalizedEntries =
+          DailyPlanningEngine.normalizeEntries(updatedEntriesAfter);
+
+      final touchesTaskMyDay = existing.isMyDay &&
+          (existing.myDayDate == targetDate ||
+              (existing.myDayDate == null && targetDate == today));
+      if (touchesTaskMyDay) {
+        final fallbackDates = normalizedEntries
+            .where(
+              (e) =>
+                  e.taskId == taskId &&
+                  e.action != DailyPlanningActions.dismissed &&
+                  !e.planDate.isBefore(today),
+            )
+            .map((e) => e.planDate)
+            .toList(growable: false)
+          ..sort();
+        final fallbackDate =
+            fallbackDates.isNotEmpty ? fallbackDates.last : null;
+        await _repository.updateTask(
+          existing.copyWith(
+            isMyDay: fallbackDate != null,
+            myDayDate: fallbackDate,
+            clearMyDayDate: fallbackDate == null,
+            updatedAt: now,
+          ),
+        );
+      }
+
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries: normalizedEntries,
+        clearError: true,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<void> reorderPlannedTasks(List<String> orderedTaskIds) async {
+    if (orderedTaskIds.isEmpty) return;
+    try {
+      final now = EthiopiaClock.nowUtc();
+      for (var i = 0; i < orderedTaskIds.length; i++) {
+        final taskId = orderedTaskIds[i];
+        final existing =
+            _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+        if (existing != null && existing.sortOrder != i) {
+          await _repository.updateTask(
+            existing.copyWith(sortOrder: i, updatedAt: now),
+          );
+        }
+      }
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        clearError: true,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<void> movePlannedTaskOrder(
+    String taskId, {
+    required int delta,
+    CalendarDate? date,
+  }) async {
+    final targetDate = date ?? _state.effectivePlanDate;
+    final snapshot = _state.buildDailyPlanSnapshot(date: targetDate);
+    final ids =
+        snapshot.remainingItems.map((item) => item.task.id).toList();
+    final idx = ids.indexOf(taskId);
+    if (idx == -1) return;
+    final targetIdx = idx + delta;
+    if (targetIdx < 0 || targetIdx >= ids.length) return;
+    final moved = ids.removeAt(idx);
+    ids.insert(targetIdx, moved);
+    await reorderPlannedTasks(ids);
+  }
+
+  Future<int> carryForwardUnfinishedTasks({
+    CalendarDate? fromDate,
+    CalendarDate? toDate,
+    List<String>? taskIds,
+  }) async {
+    final resolvedToDate = toDate ?? CalendarDate.today();
+    final today = CalendarDate.today();
+
+    try {
+      final currentTasks = await _repository.getTasks();
+      final currentEntries = DailyPlanningEngine.normalizeEntries(
+        await _repository.getDailyPlanningEntries(),
+      );
+
+      final candidateIds = <String>{};
+      if (taskIds != null && taskIds.isNotEmpty) {
+        candidateIds.addAll(taskIds.where((id) => id.trim().isNotEmpty));
+      } else if (fromDate != null) {
+        for (final t in currentTasks) {
+          if (DailyPlanningEngine.isTaskPlannedForDate(
+            t,
+            currentEntries,
+            fromDate,
+            today: today,
+          )) {
+            candidateIds.add(t.id);
+          }
+        }
+      } else {
+        for (final entry in currentEntries) {
+          if (entry.planDate.isBefore(resolvedToDate) &&
+              entry.action != DailyPlanningActions.dismissed) {
+            candidateIds.add(entry.taskId);
+          }
+        }
+        for (final t in currentTasks) {
+          if (t.isMyDay &&
+              t.myDayDate != null &&
+              t.myDayDate!.isBefore(resolvedToDate)) {
+            candidateIds.add(t.id);
+          }
+        }
+      }
+
+      var carriedCount = 0;
+      for (final id in candidateIds) {
+        final task = currentTasks.cast<TaskEntity?>().firstWhere(
+              (t) => t?.id == id,
+              orElse: () => null,
+            );
+        if (task == null ||
+            task.isArchived ||
+            task.isCompleted ||
+            task.status == 'cancelled') {
+          continue;
+        }
+        final latestEntries = DailyPlanningEngine.normalizeEntries(
+          await _repository.getDailyPlanningEntries(),
+        );
+        if (DailyPlanningEngine.isTaskPlannedForDate(
+          task,
+          latestEntries,
+          resolvedToDate,
+          today: today,
+        )) {
+          continue;
+        }
+        await planTaskForDate(
+          id,
+          date: resolvedToDate,
+          action: DailyPlanningActions.carriedForward,
+        );
+        carriedCount += 1;
+      }
+      return carriedCount;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return 0;
+    }
+  }
+
+  Future<void> _syncCompletionWithDailyPlanning(
+    String taskId,
+    bool isCompleted, {
+    CalendarDate? preferredPlanDate,
+  }) async {
+    final task = await _repository.getTaskById(taskId) ?? _state.findTaskById(taskId);
+    if (task == null) return;
+    final entries = DailyPlanningEngine.normalizeEntries(
+      await _repository.getDailyPlanningEntries(),
+    );
+    final targetDate = DailyPlanningEngine.findTargetPlanDateForCompletion(
+      task,
+      entries,
+      preferredPlanDate: preferredPlanDate ?? _state.effectivePlanDate,
+    );
+    if (targetDate == null) return;
+
+    final existing = DailyPlanningEngine.findEntry(entries, taskId, targetDate);
+    final nextAction = isCompleted
+        ? DailyPlanningActions.completed
+        : DailyPlanningEngine.nextActionOnReopen(entries, taskId, targetDate);
+    final now = EthiopiaClock.nowUtc();
+
+    await _repository.upsertDailyPlanningEntry(
+      DailyPlanningEntryEntity(
+        id: existing?.id ?? DailyPlanningEngine.buildEntryId(taskId, targetDate),
+        planDate: targetDate,
+        taskId: taskId,
+        action: nextAction,
+        createdAt: existing?.createdAt ?? now,
+        updatedAt: now,
+      ),
+    );
   }
 
   Future<void> updateLabels(String taskId, List<String> labels) async {
@@ -576,6 +913,17 @@ class TasksController extends ChangeNotifier {
 
     final now = EthiopiaClock.nowUtc();
     final resolvedTaskId = id ?? 'task-${now.millisecondsSinceEpoch}';
+    final resolvedMyDayDate =
+        isMyDay ? (myDayDate ?? CalendarDate.today()) : null;
+    final effectiveSortOrder = isMyDay && sortOrder == 0
+        ? DailyPlanningEngine.nextSortOrderForPlannedDay(
+            _state.tasks,
+            _state.dailyPlanningEntries,
+            resolvedMyDayDate!,
+            excludeTaskId: resolvedTaskId,
+          )
+        : sortOrder;
+
     final task = TaskEntity(
       id: resolvedTaskId,
       title: trimmedTitle,
@@ -596,20 +944,40 @@ class TasksController extends ChangeNotifier {
       labels: TasksModuleState.normalizeLabels(labels),
       isPinned: isPinned,
       isMyDay: isMyDay,
-      myDayDate: myDayDate,
+      myDayDate: resolvedMyDayDate,
       recurrenceRule: recurrenceRule,
       recurrenceConfig: recurrenceConfig,
       isArchived: isArchived,
-      sortOrder: sortOrder,
+      sortOrder: effectiveSortOrder,
       createdAt: now,
       updatedAt: now,
     );
 
     try {
       final created = await _repository.createTask(task);
+      if (isMyDay && resolvedMyDayDate != null) {
+        await _repository.upsertDailyPlanningEntry(
+          DailyPlanningEntryEntity(
+            id: DailyPlanningEngine.buildEntryId(
+              created.id,
+              resolvedMyDayDate,
+            ),
+            planDate: resolvedMyDayDate,
+            taskId: created.id,
+            action: created.isCompleted
+                ? DailyPlanningActions.completed
+                : DailyPlanningActions.planned,
+            createdAt: now,
+            updatedAt: now,
+          ),
+        );
+      }
       final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
         clearError: true,
       );
       notifyListeners();
@@ -697,9 +1065,18 @@ class TasksController extends ChangeNotifier {
 
     try {
       final persisted = await _repository.updateTask(updated);
+      if (existing.isCompleted != updated.isCompleted) {
+        await _syncCompletionWithDailyPlanning(
+          updated.id,
+          updated.isCompleted,
+        );
+      }
       final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
         clearError: true,
       );
       notifyListeners();
@@ -735,12 +1112,21 @@ class TasksController extends ChangeNotifier {
     );
   }
 
-  Future<void> restoreDeletedTask(TaskEntity snapshot) async {
+  Future<void> restoreDeletedTask(
+    TaskEntity snapshot, {
+    List<DailyPlanningEntryEntity> restorePlanningEntries = const [],
+  }) async {
     try {
       await _repository.createTask(snapshot);
+      for (final entry in restorePlanningEntries) {
+        await _repository.upsertDailyPlanningEntry(entry);
+      }
       final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
         clearError: true,
       );
     } catch (e) {
@@ -759,9 +1145,13 @@ class TasksController extends ChangeNotifier {
   Future<void> updateTaskStatus(String id, String newStatus) async {
     try {
       await _repository.updateTaskStatus(id, newStatus);
+      await _syncCompletionWithDailyPlanning(id, newStatus == 'completed');
       final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
         clearError: true,
       );
     } catch (e) {
@@ -802,10 +1192,13 @@ class TasksController extends ChangeNotifier {
     try {
       await _repository.deleteTask(id);
       final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
       final nextSelection = Set<String>.from(_state.selectedTaskIds)
         ..remove(id);
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
         selectedTaskIds: nextSelection,
         clearError: true,
       );
@@ -824,11 +1217,15 @@ class TasksController extends ChangeNotifier {
         if (task != null) {
           final nextStatus = task.isCompleted ? 'not_started' : 'completed';
           await _repository.updateTaskStatus(id, nextStatus);
+          await _syncCompletionWithDailyPlanning(id, nextStatus == 'completed');
         }
       }
       final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
         selectedTaskIds: const {},
         clearError: true,
       );
@@ -846,8 +1243,11 @@ class TasksController extends ChangeNotifier {
         await _repository.deleteTask(id);
       }
       final updatedTasks = await _repository.getTasks();
+      final updatedEntries = await _repository.getDailyPlanningEntries();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(updatedEntries),
         selectedTaskIds: const {},
         clearError: true,
       );

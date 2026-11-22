@@ -213,7 +213,11 @@ class _DashboardViewState extends State<DashboardView> {
                                 height: SharedDesignTokens.spacingLg),
                             DashboardInboxSection(
                               state: widget.state,
-                              onOpenTasks: () => _goToTab(DaywellTabId.tasks),
+                              onOpenTasks: () {
+                                widget.state.tasksController
+                                    .setViewFilter('inbox');
+                                _goToTab(DaywellTabId.tasks);
+                              },
                               onOpenQuickCapture: widget.onOpenQuickCapture,
                             ),
                           ],
@@ -244,7 +248,10 @@ class _DashboardViewState extends State<DashboardView> {
                   const SizedBox(height: SharedDesignTokens.spacingLg),
                   DashboardInboxSection(
                     state: widget.state,
-                    onOpenTasks: () => _goToTab(DaywellTabId.tasks),
+                    onOpenTasks: () {
+                      widget.state.tasksController.setViewFilter('inbox');
+                      _goToTab(DaywellTabId.tasks);
+                    },
                     onOpenQuickCapture: widget.onOpenQuickCapture,
                   ),
                 ],
