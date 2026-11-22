@@ -22,7 +22,17 @@ import {
   SlidersHorizontal,
   Inbox as InboxIcon,
   ArrowRight,
+  Sun,
 } from 'lucide-react';
+import {
+  buildDailyPlanSnapshot,
+  carryForwardUnfinishedTasks,
+  isTaskPlannedForDate,
+  movePlannedTaskOrder,
+  planTaskForDate,
+  removeTaskFromPlannedDay,
+  syncTaskCompletionWithDailyPlanning,
+} from '../domain/dailyPlanningOperations';
 import { isFormDirty } from '../domain/formValidationAndNavigation';
 import {
   CANONICAL_INBOX_CATEGORIES,
@@ -35,6 +45,7 @@ import {
   updateInboxItemRecord,
 } from '../domain/inboxOperations';
 import {
+  SharedDailyPlanningEntry,
   SharedInboxItem,
   SharedMilestone,
   SharedProject,
@@ -80,10 +91,12 @@ import {
   updateTaskRecord,
   updateTaskSubtaskTitle,
 } from '../domain/taskOperations';
+import { dailyPlanningService } from '../services/dailyPlanningService';
 import { inboxService } from '../services/inboxService';
 import { projectsService } from '../services/projectsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { ProjectsWorkspaceView } from './projects';
+import { MyDayPlanningView } from './tasks/MyDayPlanningView';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import {
   DaywellButton,
@@ -106,6 +119,8 @@ interface DaywellTasksModuleProps {
   onUpdateTasks: (updated: DaywellTask[]) => void;
   inboxItems?: SharedInboxItem[];
   onUpdateInboxItems?: (updated: SharedInboxItem[]) => void;
+  dailyPlanningEntries?: SharedDailyPlanningEntry[];
+  onUpdateDailyPlanningEntries?: (updated: SharedDailyPlanningEntry[]) => void;
   requestedFilter?: { filter: TaskViewFilter; nonce: number } | null;
   onRequestQuickCapture?: () => void;
   onNavigateToCalendar?: (dateStr: string) => void;
@@ -227,6 +242,8 @@ export function DaywellTasksModule({
   onUpdateTasks,
   inboxItems: controlledInboxItems,
   onUpdateInboxItems,
+  dailyPlanningEntries: controlledDailyPlanningEntries,
+  onUpdateDailyPlanningEntries,
   requestedFilter,
   onRequestQuickCapture,
   activeSubTab: controlledSubTab,
@@ -240,15 +257,32 @@ export function DaywellTasksModule({
   const [internalInboxItems, setInternalInboxItems] = useState<SharedInboxItem[]>(() =>
     inboxService.loadInboxItems()
   );
+  const [internalDailyPlanningEntries, setInternalDailyPlanningEntries] =
+    useState<SharedDailyPlanningEntry[]>(() =>
+      dailyPlanningService.loadDailyPlanningEntries()
+    );
 
   useEffect(() => {
-    if (controlledInboxItems !== undefined || typeof window === 'undefined') return;
+    if (
+      (controlledInboxItems !== undefined &&
+        controlledDailyPlanningEntries !== undefined) ||
+      typeof window === 'undefined'
+    ) {
+      return;
+    }
     const handleSync = () => {
-      setInternalInboxItems(inboxService.loadInboxItems());
+      if (controlledInboxItems === undefined) {
+        setInternalInboxItems(inboxService.loadInboxItems());
+      }
+      if (controlledDailyPlanningEntries === undefined) {
+        setInternalDailyPlanningEntries(
+          dailyPlanningService.loadDailyPlanningEntries()
+        );
+      }
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
-  }, [controlledInboxItems]);
+  }, [controlledInboxItems, controlledDailyPlanningEntries]);
 
   const effectiveInboxItems = controlledInboxItems ?? internalInboxItems;
   const applyInboxUpdate = (next: SharedInboxItem[]) => {
@@ -258,6 +292,30 @@ export function DaywellTasksModule({
       const saved = inboxService.saveInboxItems(next);
       setInternalInboxItems(saved);
     }
+  };
+
+  const effectiveDailyPlanningEntries =
+    controlledDailyPlanningEntries ?? internalDailyPlanningEntries;
+  const applyDailyPlanningUpdate = (next: SharedDailyPlanningEntry[]) => {
+    if (onUpdateDailyPlanningEntries) {
+      onUpdateDailyPlanningEntries(next);
+    } else {
+      const saved = dailyPlanningService.saveDailyPlanningEntries(next);
+      setInternalDailyPlanningEntries(saved);
+    }
+  };
+
+  const commitTasksAndDailyPlanning = (
+    nextTasks: DaywellTask[],
+    nextEntries: SharedDailyPlanningEntry[]
+  ) => {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('daywell_tasks', JSON.stringify(nextTasks));
+      } catch {}
+    }
+    onUpdateTasks(nextTasks);
+    applyDailyPlanningUpdate(nextEntries);
   };
 
   const subTab = controlledSubTab ?? internalSubTab;
@@ -273,7 +331,7 @@ export function DaywellTasksModule({
     else setInternalProjectId(next);
   };
 
-  // Filter tab: 'today' | 'inbox' | 'upcoming' | 'active' | 'overdue' | 'all' | 'completed' | 'archived'
+  // Filter tab: 'today' | 'my_day' | 'inbox' | 'upcoming' | 'active' | 'overdue' | 'all' | 'completed' | 'archived'
   const [activeFilter, setActiveFilter] = useState<TaskViewFilter>('today');
 
   useEffect(() => {
@@ -555,6 +613,31 @@ export function DaywellTasksModule({
     [tasks, todayStr]
   );
 
+  const [selectedPlanDate, setSelectedPlanDate] = useState<string>(todayStr);
+
+  const myDaySnapshot = useMemo(
+    () =>
+      buildDailyPlanSnapshot(
+        tasks,
+        effectiveDailyPlanningEntries,
+        selectedPlanDate,
+        todayStr
+      ),
+    [tasks, effectiveDailyPlanningEntries, selectedPlanDate, todayStr]
+  );
+
+  const myDayBadgeCount = useMemo(() => {
+    const activePlanDate = activeFilter === 'my_day' ? selectedPlanDate : todayStr;
+    return tasks.filter((t) =>
+      isTaskPlannedForDate(
+        t,
+        effectiveDailyPlanningEntries,
+        activePlanDate,
+        todayStr
+      )
+    ).length;
+  }, [tasks, effectiveDailyPlanningEntries, activeFilter, selectedPlanDate, todayStr]);
+
   const unprocessedInboxItems = useMemo(
     () => getUnprocessedInboxItems(effectiveInboxItems),
     [effectiveInboxItems]
@@ -615,21 +698,165 @@ export function DaywellTasksModule({
     triggerUndo('Deleted Inbox item', () => applyInboxUpdate(prevInbox));
   };
 
-  // Toggle Task Completion (Complete / Reopen with Undo)
+  // Toggle Task Completion (Complete / Reopen with Undo + DailyPlanningEntries sync)
   const toggleTask = (taskId: string) => {
     const prev = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
     const target = tasks.find((t) => t.id === taskId);
     if (!target) return;
 
     const wasCompleted = isTaskCompleted(target);
+    const nextCompleted = !wasCompleted;
     const updated = tasks.map((t) =>
       t.id === taskId ? toggleTaskCompletionRecord(t) : t
     );
+    const nextEntries = syncTaskCompletionWithDailyPlanning(
+      updated,
+      effectiveDailyPlanningEntries,
+      taskId,
+      nextCompleted,
+      {
+        preferredPlanDateIso:
+          activeFilter === 'my_day' ? selectedPlanDate : undefined,
+        todayIso: todayStr,
+      }
+    );
 
-    onUpdateTasks(updated);
+    commitTasksAndDailyPlanning(updated, nextEntries);
     triggerUndo(
       wasCompleted ? `Reopened "${target.title}"` : `Completed "${target.title}"`,
-      () => onUpdateTasks(prev)
+      () => commitTasksAndDailyPlanning(prev, prevEntries)
+    );
+  };
+
+  // My Day & Daily Planning Handlers
+  const handleSelectPlanDate = (isoDate: string) => {
+    const parsed = CalendarDate.tryParse(isoDate);
+    if (!parsed) return;
+    setSelectedPlanDate(parsed.toIsoString());
+  };
+
+  const handleStepPlanDate = (deltaDays: number) => {
+    const parsed = CalendarDate.tryParse(selectedPlanDate) ?? CalendarDate.today();
+    setSelectedPlanDate(parsed.addDays(deltaDays).toIsoString());
+  };
+
+  const handleAddTaskToDay = (
+    taskId: string,
+    action: 'planned' | 'carried_forward' = 'planned',
+    targetDateIso?: string
+  ) => {
+    const dateIso = targetDateIso ?? selectedPlanDate;
+    const prevTasks = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
+    const res = planTaskForDate(
+      tasks,
+      effectiveDailyPlanningEntries,
+      taskId,
+      dateIso,
+      { action, todayIso: todayStr }
+    );
+    commitTasksAndDailyPlanning(res.tasks, res.entries);
+    const target = tasks.find((t) => t.id === taskId);
+    if (target) {
+      triggerUndo(`Added "${target.title}" to ${dateIso === todayStr ? 'My Day' : dateIso}`, () =>
+        commitTasksAndDailyPlanning(prevTasks, prevEntries)
+      );
+    }
+  };
+
+  const handleRemoveTaskFromDay = (taskId: string, targetDateIso?: string) => {
+    const dateIso = targetDateIso ?? selectedPlanDate;
+    const prevTasks = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
+    const res = removeTaskFromPlannedDay(
+      tasks,
+      effectiveDailyPlanningEntries,
+      taskId,
+      dateIso,
+      { todayIso: todayStr }
+    );
+    commitTasksAndDailyPlanning(res.tasks, res.entries);
+    const target = tasks.find((t) => t.id === taskId);
+    if (target) {
+      triggerUndo(
+        `Removed "${target.title}" from My Day (task kept in Tasks)`,
+        () => commitTasksAndDailyPlanning(prevTasks, prevEntries)
+      );
+    }
+  };
+
+  const handleToggleMyDay = (taskId: string) => {
+    const targetDateIso =
+      activeFilter === 'my_day' ? selectedPlanDate : todayStr;
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const planned = isTaskPlannedForDate(
+      target,
+      effectiveDailyPlanningEntries,
+      targetDateIso,
+      todayStr
+    );
+    if (planned) {
+      handleRemoveTaskFromDay(taskId, targetDateIso);
+    } else {
+      handleAddTaskToDay(taskId, 'planned', targetDateIso);
+    }
+  };
+
+  const handleMovePlannedOrder = (taskId: string, direction: 'up' | 'down') => {
+    const nextTasks = movePlannedTaskOrder(
+      tasks,
+      effectiveDailyPlanningEntries,
+      selectedPlanDate,
+      taskId,
+      direction,
+      { todayIso: todayStr }
+    );
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('daywell_tasks', JSON.stringify(nextTasks));
+      } catch {}
+    }
+    onUpdateTasks(nextTasks);
+  };
+
+  const handleCarryForwardAll = () => {
+    const prevTasks = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
+    const res = carryForwardUnfinishedTasks(
+      tasks,
+      effectiveDailyPlanningEntries,
+      {
+        toDateIso: selectedPlanDate,
+        todayIso: todayStr,
+      }
+    );
+    if (res.carriedCount === 0) return;
+    commitTasksAndDailyPlanning(res.tasks, res.entries);
+    triggerUndo(
+      `Carried forward ${res.carriedCount} task(s) to ${selectedPlanDate === todayStr ? 'Today' : selectedPlanDate}`,
+      () => commitTasksAndDailyPlanning(prevTasks, prevEntries)
+    );
+  };
+
+  const handleCarryPastRemainingToToday = () => {
+    const prevTasks = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
+    const res = carryForwardUnfinishedTasks(
+      tasks,
+      effectiveDailyPlanningEntries,
+      {
+        fromDateIso: selectedPlanDate,
+        toDateIso: todayStr,
+        todayIso: todayStr,
+      }
+    );
+    if (res.carriedCount === 0) return;
+    commitTasksAndDailyPlanning(res.tasks, res.entries);
+    triggerUndo(
+      `Carried ${res.carriedCount} unfinished task(s) to Today`,
+      () => commitTasksAndDailyPlanning(prevTasks, prevEntries)
     );
   };
 
@@ -1094,17 +1321,35 @@ export function DaywellTasksModule({
       }
 
       setIsSubmitting(true);
+      const prevEntries = [...effectiveDailyPlanningEntries];
       const updated = tasks.map((t) =>
         t.id === editingTaskId ? result.task : t
       );
-      onUpdateTasks(updated);
+      if (isTaskCompleted(existing) !== isTaskCompleted(result.task)) {
+        const nextEntries = syncTaskCompletionWithDailyPlanning(
+          updated,
+          effectiveDailyPlanningEntries,
+          existing.id,
+          isTaskCompleted(result.task),
+          {
+            preferredPlanDateIso:
+              activeFilter === 'my_day' ? selectedPlanDate : undefined,
+            todayIso: todayStr,
+          }
+        );
+        commitTasksAndDailyPlanning(updated, nextEntries);
+      } else {
+        onUpdateTasks(updated);
+      }
       if (existing.projectId && existing.projectId !== cleanProjectId) {
         projectsService.cleanupSectionLinksForTask(existing.id);
       }
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
-      triggerUndo('Task updated', () => onUpdateTasks(prev));
+      triggerUndo('Task updated', () =>
+        commitTasksAndDailyPlanning(prev, prevEntries)
+      );
     } else {
       const result = createTaskRecord({
         title: formTitle,
@@ -1124,6 +1369,8 @@ export function DaywellTasksModule({
         recurrenceRule: formIsRecurring ? formRecurringRule : undefined,
         subtasks: formSubtasks,
         labels: formLabels,
+        isMyDay: activeFilter === 'my_day',
+        myDayDate: activeFilter === 'my_day' ? selectedPlanDate : undefined,
       });
 
       if (!result.ok) {
@@ -1133,7 +1380,23 @@ export function DaywellTasksModule({
       }
 
       setIsSubmitting(true);
-      onUpdateTasks([result.task, ...tasks]);
+      const prevEntries = [...effectiveDailyPlanningEntries];
+      let nextTasks = [result.task, ...tasks];
+      let nextEntries = effectiveDailyPlanningEntries;
+      if (activeFilter === 'my_day') {
+        const planned = planTaskForDate(
+          nextTasks,
+          effectiveDailyPlanningEntries,
+          result.task.id,
+          selectedPlanDate,
+          { todayIso: todayStr }
+        );
+        nextTasks = planned.tasks;
+        nextEntries = planned.entries;
+        commitTasksAndDailyPlanning(nextTasks, nextEntries);
+      } else {
+        onUpdateTasks(nextTasks);
+      }
       if (convertingInboxItem) {
         const prevInbox = [...effectiveInboxItems];
         const sourceId = convertingInboxItem.id;
@@ -1148,7 +1411,7 @@ export function DaywellTasksModule({
         setIsModalOpen(false);
         setFormErrors({});
         triggerUndo(`Converted "${result.task.title}" to Task`, () => {
-          onUpdateTasks(prev);
+          commitTasksAndDailyPlanning(prev, prevEntries);
           applyInboxUpdate(prevInbox);
         });
         return;
@@ -1156,35 +1419,27 @@ export function DaywellTasksModule({
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
-      triggerUndo(`Added "${result.task.title}"`, () => onUpdateTasks(prev));
+      triggerUndo(`Added "${result.task.title}"`, () =>
+        commitTasksAndDailyPlanning(prev, prevEntries)
+      );
     }
   };
 
   // Delete Task (confirmed safely, with Undo + DailyPlanningEntries cleanup)
   const executeDeleteTask = (taskId: string) => {
     const prev = [...tasks];
+    const prevEntries = [...effectiveDailyPlanningEntries];
     const { remaining, deleted } = deleteTaskFromList(tasks, taskId);
-    const prevDailyPlanningRaw =
-      typeof window !== 'undefined'
-        ? localStorage.getItem(SharedStateBridge.DAILY_PLANNING_STORAGE_KEY)
-        : null;
-    onUpdateTasks(remaining);
+    const nextEntries = prevEntries.filter((e) => e.taskId !== taskId);
+    commitTasksAndDailyPlanning(remaining, nextEntries);
     SharedStateBridge.removeDailyPlanningForTask(taskId);
     projectsService.cleanupSectionLinksForTask(taskId);
     setPendingDeleteTask(null);
     setDetailTaskId(null);
     setIsModalOpen(false);
-    triggerUndo(`Deleted "${deleted?.title || 'task'}"`, () => {
-      if (prevDailyPlanningRaw !== null && typeof window !== 'undefined') {
-        try {
-          localStorage.setItem(
-            SharedStateBridge.DAILY_PLANNING_STORAGE_KEY,
-            prevDailyPlanningRaw
-          );
-        } catch {}
-      }
-      onUpdateTasks(prev);
-    });
+    triggerUndo(`Deleted "${deleted?.title || 'task'}"`, () =>
+      commitTasksAndDailyPlanning(prev, prevEntries)
+    );
   };
 
   // Subtask builder helpers (Create / Edit modal)
@@ -1541,6 +1796,7 @@ export function DaywellTasksModule({
             {(
               [
                 { id: 'today', label: `Today (${tabCounts.todayCount})` },
+                { id: 'my_day', label: `My Day (${myDayBadgeCount})` },
                 {
                   id: 'inbox',
                   label:
@@ -1651,20 +1907,22 @@ export function DaywellTasksModule({
             </div>
           )}
 
-          {/* Status Progress Header */}
-          <div className="flex items-center justify-between pt-1">
-            <div>
-              <span className="dw-type-numeric-body text-xl font-bold text-[var(--dw-text-primary)]">
-                {tabCounts.completedCount} of {tabCounts.allCount}
-              </span>
-              <p className="dw-type-label text-[var(--dw-text-muted)]">active tasks completed</p>
+          {/* Status Progress Header (omitted in My Day, which shows per-day progress) */}
+          {activeFilter !== 'my_day' && (
+            <div className="flex items-center justify-between pt-1">
+              <div>
+                <span className="dw-type-numeric-body text-xl font-bold text-[var(--dw-text-primary)]">
+                  {tabCounts.completedCount} of {tabCounts.allCount}
+                </span>
+                <p className="dw-type-label text-[var(--dw-text-muted)]">active tasks completed</p>
+              </div>
+              <DaywellStatusBadge
+                tone="neutral"
+                showIcon={false}
+                label={`${activeFilter.toUpperCase()} · ${filteredTasks.length} ITEMS`}
+              />
             </div>
-            <DaywellStatusBadge
-              tone="neutral"
-              showIcon={false}
-              label={`${activeFilter.toUpperCase()} · ${filteredTasks.length} ITEMS`}
-            />
-          </div>
+          )}
 
           {/* Shared Quick Capture Inbox Triage Section (Inbox view only) */}
           {activeFilter === 'inbox' && (
@@ -1816,6 +2074,28 @@ export function DaywellTasksModule({
             </DaywellCard>
           )}
 
+      {activeFilter === 'my_day' ? (
+        <MyDayPlanningView
+          snapshot={myDaySnapshot}
+          tasks={tasks}
+          entries={effectiveDailyPlanningEntries}
+          selectedDate={selectedPlanDate}
+          todayDate={todayStr}
+          searchQuery={searchQuery}
+          onSelectDate={handleSelectPlanDate}
+          onStepDate={handleStepPlanDate}
+          onJumpToToday={() => setSelectedPlanDate(todayStr)}
+          onToggleTask={toggleTask}
+          onOpenTaskDetails={(id) => setDetailTaskId(id)}
+          onMoveTaskOrder={handleMovePlannedOrder}
+          onRemoveFromDay={(id) => handleRemoveTaskFromDay(id)}
+          onAddToDay={(id, action) => handleAddTaskToDay(id, action)}
+          onCarryForwardAll={handleCarryForwardAll}
+          onCarryPastRemainingToToday={handleCarryPastRemainingToToday}
+          onCreateTaskForDay={handleOpenCreate}
+        />
+      ) : (
+        <>
       {/* Task List */}
       <div className="space-y-2 pt-1">
         {activeFilter === 'inbox' && (filteredTasks.length > 0 || unprocessedInboxItems.length > 0) && (
@@ -2025,13 +2305,40 @@ export function DaywellTasksModule({
                         />
                       </>
                     ) : (
-                      <DaywellIconButton
-                        label={`Edit ${task.title}`}
-                        size="compact"
-                        tone="muted"
-                        onClick={() => handleOpenEdit(task)}
-                        icon={<Edit3 className="w-3.5 h-3.5" />}
-                      />
+                      <>
+                        <DaywellIconButton
+                          label={
+                            isTaskPlannedForDate(
+                              task,
+                              effectiveDailyPlanningEntries,
+                              todayStr,
+                              todayStr
+                            )
+                              ? `Remove ${task.title} from My Day`
+                              : `Add ${task.title} to My Day`
+                          }
+                          size="compact"
+                          tone={
+                            isTaskPlannedForDate(
+                              task,
+                              effectiveDailyPlanningEntries,
+                              todayStr,
+                              todayStr
+                            )
+                              ? 'primary'
+                              : 'muted'
+                          }
+                          onClick={() => handleToggleMyDay(task.id)}
+                          icon={<Sun className="w-3.5 h-3.5" />}
+                        />
+                        <DaywellIconButton
+                          label={`Edit ${task.title}`}
+                          size="compact"
+                          tone="muted"
+                          onClick={() => handleOpenEdit(task)}
+                          icon={<Edit3 className="w-3.5 h-3.5" />}
+                        />
+                      </>
                     )}
                   </div>
                 </div>
@@ -2083,6 +2390,8 @@ export function DaywellTasksModule({
         title="Capture first. Organize later."
         message="Your Inbox holds unorganized thoughts. Assign projects, due dates, and checklist items when you are ready to focus."
       />
+        </>
+      )}
         </>
       )}
 
@@ -2736,13 +3045,46 @@ export function DaywellTasksModule({
                       {detailTask.title}
                     </h2>
                   </div>
-                  <DaywellIconButton
-                    label="Close task details"
-                    size="compact"
-                    tone="muted"
-                    onClick={() => setDetailTaskId(null)}
-                    icon={<X className="w-4 h-4" />}
-                  />
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!detailTask.isArchived && (
+                      <DaywellIconButton
+                        label={
+                          isTaskPlannedForDate(
+                            detailTask,
+                            effectiveDailyPlanningEntries,
+                            activeFilter === 'my_day'
+                              ? selectedPlanDate
+                              : todayStr,
+                            todayStr
+                          )
+                            ? 'Remove from My Day'
+                            : 'Add to My Day'
+                        }
+                        size="compact"
+                        tone={
+                          isTaskPlannedForDate(
+                            detailTask,
+                            effectiveDailyPlanningEntries,
+                            activeFilter === 'my_day'
+                              ? selectedPlanDate
+                              : todayStr,
+                            todayStr
+                          )
+                            ? 'primary'
+                            : 'muted'
+                        }
+                        onClick={() => handleToggleMyDay(detailTask.id)}
+                        icon={<Sun className="w-4 h-4" />}
+                      />
+                    )}
+                    <DaywellIconButton
+                      label="Close task details"
+                      size="compact"
+                      tone="muted"
+                      onClick={() => setDetailTaskId(null)}
+                      icon={<X className="w-4 h-4" />}
+                    />
+                  </div>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -2755,6 +3097,22 @@ export function DaywellTasksModule({
                     icon={<Flag className="w-3 h-3" />}
                     label={`${TASK_PRIORITY_LABELS[detailTask.priority]} Priority`}
                   />
+                  {isTaskPlannedForDate(
+                    detailTask,
+                    effectiveDailyPlanningEntries,
+                    activeFilter === 'my_day' ? selectedPlanDate : todayStr,
+                    todayStr
+                  ) && (
+                    <DaywellStatusBadge
+                      tone="success"
+                      icon={<Sun className="w-3 h-3" />}
+                      label={
+                        activeFilter === 'my_day' && selectedPlanDate !== todayStr
+                          ? `Planned · ${selectedPlanDate}`
+                          : 'In My Day'
+                      }
+                    />
+                  )}
                   {detailTask.isArchived && (
                     <DaywellStatusBadge
                       tone="warning"

@@ -10,11 +10,13 @@ import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
 import '../../domain/inbox/inbox_models.dart';
 import '../../domain/projects/project_models.dart';
+import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../app_state.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'projects/project_form_sheet.dart';
 import 'projects/projects_workspace_tab.dart';
+import 'tasks/my_day_planning_view.dart';
 
 class TasksView extends StatefulWidget {
   final AppStateManager? state;
@@ -224,6 +226,30 @@ class _TasksViewState extends State<TasksView>
     );
   }
 
+  Future<void> _removeTaskFromDayWithUndo(
+    TaskEntity task,
+    TasksController controller,
+    CalendarDate planDate,
+  ) async {
+    await controller.removeTaskFromPlannedDay(task.id, date: planDate);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          'Removed "${task.title}" from My Day (${planDate.toIsoString()})',
+        ),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () => unawaited(
+            controller.planTaskForDate(task.id, date: planDate),
+          ),
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
   Future<bool> _confirmAndDeleteTask(
     TaskEntity task,
     TasksController controller,
@@ -239,6 +265,9 @@ class _TasksViewState extends State<TasksView>
       icon: Icons.delete_outline,
     );
     if (!confirmed || !mounted) return false;
+    final previousPlanningEntries = controller.state.dailyPlanningEntries
+        .where((e) => e.taskId == task.id)
+        .toList(growable: false);
     final projectsCtrl = widget.effectiveProjectsController;
     String? previousSectionId;
     if (projectsCtrl != null && task.projectId != null) {
@@ -257,7 +286,10 @@ class _TasksViewState extends State<TasksView>
           label: 'Undo',
           onPressed: () {
             unawaited(() async {
-              await controller.restoreDeletedTask(task);
+              await controller.restoreDeletedTask(
+                task,
+                restorePlanningEntries: previousPlanningEntries,
+              );
               if (projectsCtrl != null &&
                   task.projectId != null &&
                   previousSectionId != null) {
@@ -969,6 +1001,9 @@ class _TasksViewState extends State<TasksView>
                             subtasks: modalSubtasks,
                             labels: modalLabels,
                             isMyDay: controller.state.viewFilter == 'my_day',
+                            myDayDate: controller.state.viewFilter == 'my_day'
+                                ? controller.state.effectivePlanDate
+                                : null,
                           );
                           if (createdTask != null) {
                             if (projectsCtrl != null &&
@@ -1046,6 +1081,12 @@ class _TasksViewState extends State<TasksView>
                 controller.state.findTaskById(initialTask.id) ?? initialTask;
             final semantic = modalContext.daywellColors;
             final colorScheme = Theme.of(modalContext).colorScheme;
+            final activePlanDate = controller.state.effectivePlanDate;
+            final isInMyDay = DailyPlanningEngine.isTaskPlannedForDate(
+              task,
+              controller.state.dailyPlanningEntries,
+              activePlanDate,
+            );
 
             return Padding(
               padding: EdgeInsets.only(
@@ -1087,14 +1128,20 @@ class _TasksViewState extends State<TasksView>
                         ),
                         IconButton(
                           icon: Icon(
-                            task.isMyDay
+                            isInMyDay
                                 ? Icons.wb_sunny
                                 : Icons.wb_sunny_outlined,
-                            color: task.isMyDay ? semantic.warning : null,
+                            color: isInMyDay ? semantic.warning : null,
                           ),
-                          tooltip: 'Add to My Day',
-                          onPressed: () =>
-                              unawaited(controller.toggleMyDay(task.id)),
+                          tooltip: isInMyDay
+                              ? 'Remove from My Day'
+                              : 'Add to My Day',
+                          onPressed: () => unawaited(
+                            controller.toggleMyDay(
+                              task.id,
+                              date: activePlanDate,
+                            ),
+                          ),
                         ),
                       ],
                     ),
@@ -1112,6 +1159,12 @@ class _TasksViewState extends State<TasksView>
                           tone: _priorityTone(task.priority),
                           icon: Icons.flag,
                         ),
+                        if (isInMyDay)
+                          const DaywellStatusBadge(
+                            label: 'In My Day',
+                            tone: DaywellStatusTone.info,
+                            icon: Icons.wb_sunny_outlined,
+                          ),
                         if (task.isArchived)
                           const DaywellStatusBadge(
                             label: 'Archived',
@@ -2272,7 +2325,12 @@ class _TasksViewState extends State<TasksView>
                           ('active', 'Active'),
                           ('overdue', 'Overdue'),
                           ('all', 'All'),
-                          ('my_day', 'My Day'),
+                          (
+                            'my_day',
+                            moduleState.myDayCount > 0
+                                ? 'My Day (${moduleState.myDayCount})'
+                                : 'My Day'
+                          ),
                           ('completed', 'Completed'),
                           ('archived', 'Archived'),
                         ])
@@ -2309,91 +2367,180 @@ class _TasksViewState extends State<TasksView>
                     ),
                   const Divider(height: 1),
                   Expanded(
-                    child: moduleState.viewFilter == 'inbox' &&
-                            inboxCtrl != null
-                        ? (unprocessedInbox.isEmpty && tasks.isEmpty)
-                            ? DaywellEmptyState(
-                                icon: Icons.inbox_outlined,
-                                message: moduleState.hasActiveFilters
-                                    ? 'No tasks match active filters'
-                                    : 'Inbox is clear',
-                                actionLabel: moduleState.hasActiveFilters
-                                    ? 'Clear filters'
-                                    : 'Add Task',
-                                onActionPressed: moduleState.hasActiveFilters
-                                    ? () {
-                                        _searchController.clear();
-                                        controller.clearFilters(
-                                          resetView: false,
-                                        );
-                                      }
-                                    : () => _showQuickAddModal(),
-                              )
-                            : ListView(
-                                padding: const EdgeInsets.all(12),
-                                children: [
-                                  _buildInboxCapturesSection(
-                                    context,
-                                    inboxCtrl,
-                                    unprocessedInbox,
-                                  ),
-                                  const SizedBox(
-                                    height: SharedDesignTokens.spacingMd,
-                                  ),
-                                  if (tasks.isNotEmpty) ...[
-                                    Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: SharedDesignTokens.spacingSm,
-                                      ),
-                                      child: Text(
-                                        'Unassigned Tasks (${tasks.length})',
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleSmall
-                                            ?.copyWith(
-                                              fontWeight: FontWeight.w700,
-                                            ),
-                                      ),
-                                    ),
-                                    for (final t in tasks)
-                                      _buildTaskTile(
-                                        t,
-                                        controller,
-                                        moduleState,
-                                      ),
-                                  ],
-                                ],
-                              )
-                        : tasks.isEmpty
-                            ? DaywellEmptyState(
-                                icon: Icons.check_circle_outline,
-                                message: moduleState.hasActiveFilters
-                                    ? 'No tasks match active filters'
-                                    : moduleState.viewFilter == 'archived'
-                                        ? 'No archived tasks'
-                                        : 'No tasks in ${moduleState.viewFilter}',
-                                actionLabel: moduleState.hasActiveFilters
-                                    ? 'Clear filters'
-                                    : moduleState.viewFilter == 'archived'
-                                        ? null
-                                        : 'Add Task',
-                                onActionPressed: moduleState.hasActiveFilters
-                                    ? () {
-                                        _searchController.clear();
-                                        controller.clearFilters(
-                                          resetView: false,
-                                        );
-                                      }
-                                    : moduleState.viewFilter == 'archived'
-                                        ? null
-                                        : () => _showQuickAddModal(),
-                              )
-                            : ListView.builder(
-                                padding: const EdgeInsets.all(12),
-                                itemCount: tasks.length,
-                                itemBuilder: (_, i) => _buildTaskTile(
-                                    tasks[i], controller, moduleState),
+                    child: moduleState.viewFilter == 'my_day'
+                        ? MyDayPlanningView(
+                            moduleState: moduleState,
+                            snapshot: moduleState.buildDailyPlanSnapshot(),
+                            onSelectDate: controller.setSelectedPlanDate,
+                            onStepDate: (delta) =>
+                                controller.setSelectedPlanDate(
+                              moduleState.effectivePlanDate.addDays(delta),
+                            ),
+                            onPickDate: () async {
+                              final picked = await _pickCalendarDate(
+                                moduleState.effectivePlanDate,
+                              );
+                              if (picked != null && mounted) {
+                                controller.setSelectedPlanDate(picked);
+                              }
+                            },
+                            onJumpToToday: controller.resetPlanDateToToday,
+                            onToggleTask: (task) =>
+                                _toggleCompleteWithUndo(task, controller),
+                            onOpenTaskDetails: (task) =>
+                                _showTaskDetails(task, controller),
+                            onMoveTaskOrder: (taskId, delta) => unawaited(
+                              controller.movePlannedTaskOrder(
+                                taskId,
+                                delta: delta,
+                                date: moduleState.effectivePlanDate,
                               ),
+                            ),
+                            onRemoveFromDay: (task) => unawaited(
+                              _removeTaskFromDayWithUndo(
+                                task,
+                                controller,
+                                moduleState.effectivePlanDate,
+                              ),
+                            ),
+                            onAddToDay: (taskId, action) => unawaited(
+                              controller.planTaskForDate(
+                                taskId,
+                                date: moduleState.effectivePlanDate,
+                                action: action,
+                              ),
+                            ),
+                            onCarryForwardAll: () async {
+                              final targetDate = moduleState.effectivePlanDate;
+                              final carriedCount = await controller
+                                  .carryForwardUnfinishedTasks(
+                                toDate: targetDate,
+                              );
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    carriedCount > 0
+                                        ? 'Carried forward $carriedCount unfinished task(s) to ${targetDate.toIsoString()}'
+                                        : 'All unfinished tasks are already planned for ${targetDate.toIsoString()}',
+                                  ),
+                                  duration: const Duration(seconds: 3),
+                                ),
+                              );
+                            },
+                            onCarryPastRemainingToToday: () async {
+                              final fromDate = moduleState.effectivePlanDate;
+                              final today = CalendarDate.today();
+                              final carriedCount = await controller
+                                  .carryForwardUnfinishedTasks(
+                                fromDate: fromDate,
+                                toDate: today,
+                              );
+                              controller.setSelectedPlanDate(today);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    carriedCount > 0
+                                        ? 'Carried $carriedCount unfinished task(s) from ${fromDate.toIsoString()} to Today'
+                                        : 'Remaining tasks from ${fromDate.toIsoString()} are already in Today',
+                                  ),
+                                  duration: const Duration(seconds: 3),
+                                ),
+                              );
+                            },
+                            onCreateTaskForDay: _showQuickAddModal,
+                          )
+                        : moduleState.viewFilter == 'inbox' &&
+                                inboxCtrl != null
+                            ? (unprocessedInbox.isEmpty && tasks.isEmpty)
+                                ? DaywellEmptyState(
+                                    icon: Icons.inbox_outlined,
+                                    message: moduleState.hasActiveFilters
+                                        ? 'No tasks match active filters'
+                                        : 'Inbox is clear',
+                                    actionLabel: moduleState.hasActiveFilters
+                                        ? 'Clear filters'
+                                        : 'Add Task',
+                                    onActionPressed: moduleState.hasActiveFilters
+                                        ? () {
+                                            _searchController.clear();
+                                            controller.clearFilters(
+                                              resetView: false,
+                                            );
+                                          }
+                                        : () => _showQuickAddModal(),
+                                  )
+                                : ListView(
+                                    padding: const EdgeInsets.all(12),
+                                    children: [
+                                      _buildInboxCapturesSection(
+                                        context,
+                                        inboxCtrl,
+                                        unprocessedInbox,
+                                      ),
+                                      const SizedBox(
+                                        height: SharedDesignTokens.spacingMd,
+                                      ),
+                                      if (tasks.isNotEmpty) ...[
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom:
+                                                SharedDesignTokens.spacingSm,
+                                          ),
+                                          child: Text(
+                                            'Unassigned Tasks (${tasks.length})',
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleSmall
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                        ),
+                                        for (final t in tasks)
+                                          _buildTaskTile(
+                                            t,
+                                            controller,
+                                            moduleState,
+                                          ),
+                                      ],
+                                    ],
+                                  )
+                            : tasks.isEmpty
+                                ? DaywellEmptyState(
+                                    icon: Icons.check_circle_outline,
+                                    message: moduleState.hasActiveFilters
+                                        ? 'No tasks match active filters'
+                                        : moduleState.viewFilter == 'archived'
+                                            ? 'No archived tasks'
+                                            : 'No tasks in ${moduleState.viewFilter}',
+                                    actionLabel: moduleState.hasActiveFilters
+                                        ? 'Clear filters'
+                                        : moduleState.viewFilter == 'archived'
+                                            ? null
+                                            : 'Add Task',
+                                    onActionPressed:
+                                        moduleState.hasActiveFilters
+                                            ? () {
+                                                _searchController.clear();
+                                                controller.clearFilters(
+                                                  resetView: false,
+                                                );
+                                              }
+                                            : moduleState.viewFilter ==
+                                                    'archived'
+                                                ? null
+                                                : () => _showQuickAddModal(),
+                                  )
+                                : ListView.builder(
+                                    padding: const EdgeInsets.all(12),
+                                    itemCount: tasks.length,
+                                    itemBuilder: (_, i) => _buildTaskTile(
+                                        tasks[i], controller, moduleState),
+                                  ),
                   ),
                 ],
               ),
@@ -2492,7 +2639,30 @@ class _TasksViewState extends State<TasksView>
                   tooltip: 'Restore ${task.title}',
                   onPressed: () => _toggleArchiveWithUndo(task, controller),
                 )
-              : null,
+              : Builder(
+                  builder: (_) {
+                    final isPlanned = DailyPlanningEngine.isTaskPlannedForDate(
+                      task,
+                      moduleState.dailyPlanningEntries,
+                      moduleState.effectivePlanDate,
+                    );
+                    return DaywellIconButton(
+                      icon:
+                          isPlanned ? Icons.wb_sunny : Icons.wb_sunny_outlined,
+                      foregroundColor:
+                          isPlanned ? semantic.warning : semantic.textMuted,
+                      tooltip: isPlanned
+                          ? 'Remove ${task.title} from My Day'
+                          : 'Add ${task.title} to My Day',
+                      onPressed: () => unawaited(
+                        controller.toggleMyDay(
+                          task.id,
+                          date: moduleState.effectivePlanDate,
+                        ),
+                      ),
+                    );
+                  },
+                ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [

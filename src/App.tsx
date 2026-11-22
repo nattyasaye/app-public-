@@ -306,21 +306,42 @@ export default function App() {
   }, [tasks]);
 
   useEffect(() => {
-    const handleSync = () => {
-      try {
-        const saved = localStorage.getItem('daywell_tasks');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) {
-            setTasks(parsed);
+    const handleSync = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent &&
+        event.detail &&
+        typeof event.detail === 'object'
+          ? (event.detail as Record<string, unknown>)
+          : null;
+      const isDailyPlanningOnly =
+        detail !== null &&
+        'dailyPlanningEntries' in detail &&
+        !('tasks' in detail);
+      const isInboxOnly =
+        detail !== null &&
+        'inboxItems' in detail &&
+        !('tasks' in detail);
+
+      if (!isDailyPlanningOnly && !isInboxOnly) {
+        try {
+          const saved = localStorage.getItem('daywell_tasks');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+              setTasks(parsed);
+            }
           }
+        } catch (e) {
+          // ignore
         }
-      } catch (e) {
-        // ignore
+        setFinanceSyncTick((n) => n + 1);
       }
-      setInboxItems(inboxService.loadInboxItems());
-      setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
-      setFinanceSyncTick((n) => n + 1);
+      if (!isDailyPlanningOnly) {
+        setInboxItems(inboxService.loadInboxItems());
+      }
+      if (!isInboxOnly) {
+        setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
+      }
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
@@ -602,6 +623,11 @@ export default function App() {
       nextCompleted,
       { nowUtc }
     );
+    try {
+      localStorage.setItem('daywell_tasks', JSON.stringify(nextTasks));
+    } catch {
+      // ignore storage quota errors; React state will still update
+    }
     setTasks(nextTasks);
     handleUpdateDailyPlanningEntries(nextEntries);
   };
