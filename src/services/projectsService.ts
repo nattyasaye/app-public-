@@ -1145,6 +1145,60 @@ class ProjectsService {
     };
   }
 
+  public getProjectSectionTaskIds(
+    projectId: string,
+    sectionIdOrUnsectioned: string
+  ): Set<string> {
+    const blocks = this.repo
+      .getBlocksForProject(projectId, { includeArchived: false })
+      .filter((b) => b.blockType === 'grouped_list');
+    const activeBlockIds = new Set(blocks.map((b) => b.id));
+    const records = this.repo.getRecordsForProject(projectId);
+
+    if (sectionIdOrUnsectioned === '__unsectioned__') {
+      const validGroupIds = new Set(
+        records
+          .filter(
+            (r) => r.recordType === 'group' && activeBlockIds.has(r.blockId)
+          )
+          .map((g) => g.id)
+      );
+      const sectionedTaskIds = new Set<string>();
+      for (const rec of records) {
+        if (
+          rec.recordType === 'grouped_item' &&
+          activeBlockIds.has(rec.blockId) &&
+          rec.linkedTaskId &&
+          rec.parentRecordId &&
+          validGroupIds.has(rec.parentRecordId)
+        ) {
+          sectionedTaskIds.add(rec.linkedTaskId);
+        }
+      }
+      const linkedTasks = this.getLinkedTasks(projectId);
+      const unsectionedIds = new Set<string>();
+      for (const t of linkedTasks) {
+        if (!sectionedTaskIds.has(t.id)) {
+          unsectionedIds.add(t.id);
+        }
+      }
+      return unsectionedIds;
+    }
+
+    const ids = new Set<string>();
+    for (const rec of records) {
+      if (
+        rec.recordType === 'grouped_item' &&
+        activeBlockIds.has(rec.blockId) &&
+        rec.parentRecordId === sectionIdOrUnsectioned &&
+        rec.linkedTaskId
+      ) {
+        ids.add(rec.linkedTaskId);
+      }
+    }
+    return ids;
+  }
+
   public ensureProjectSectionsBlock(
     projectId: string
   ): SharedProjectTrackingBlock {

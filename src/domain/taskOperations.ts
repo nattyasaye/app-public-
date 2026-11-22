@@ -11,10 +11,13 @@ export type TaskViewFilter =
   | 'today'
   | 'inbox'
   | 'upcoming'
+  | 'active'
+  | 'overdue'
   | 'all'
   | 'completed'
   | 'archived';
-export type TaskSortBy = 'priority' | 'time' | 'title';
+export type TaskSortBy = 'due' | 'priority' | 'created' | 'time' | 'title';
+export type TaskDueDateFilter = 'overdue' | 'today' | 'upcoming' | 'no_due_date';
 
 export const CANONICAL_TASK_STATUSES: readonly TaskStatus[] = [
   'inbox',
@@ -44,6 +47,13 @@ export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
   high: 'High',
   medium: 'Medium',
   low: 'Low',
+};
+
+export const TASK_DUE_DATE_FILTER_LABELS: Record<TaskDueDateFilter, string> = {
+  overdue: 'Overdue',
+  today: 'Due Today',
+  upcoming: 'Upcoming Due Date',
+  no_due_date: 'No Due Date',
 };
 
 export interface TaskSubItemRecord {
@@ -102,6 +112,7 @@ export interface CreateTaskInput {
   recurringRule?: 'daily' | 'weekly' | 'monthly';
   recurrenceRule?: string;
   subtasks?: TaskSubItemRecord[];
+  labels?: string[];
 }
 
 export interface UpdateTaskPatch {
@@ -121,6 +132,7 @@ export interface UpdateTaskPatch {
   recurringRule?: 'daily' | 'weekly' | 'monthly';
   recurrenceRule?: string;
   subtasks?: TaskSubItemRecord[];
+  labels?: string[];
 }
 
 export type TaskMutationResult =
@@ -404,6 +416,178 @@ export function reorderTaskSubtasks(
   };
 }
 
+// --- Stage 1.4 Labels / Tags Helpers ---
+
+export function normalizeTaskLabel(raw: string): string {
+  const collapsed = raw.trim().replace(/\s+/g, ' ');
+  return collapsed.replace(/^[@#]+/, '').trim();
+}
+
+export function normalizeTaskLabels(
+  labels?: readonly string[] | null
+): string[] {
+  if (!Array.isArray(labels)) return [];
+  const result: string[] = [];
+  const seenLower = new Set<string>();
+  for (const raw of labels) {
+    if (typeof raw !== 'string') continue;
+    const normalized = normalizeTaskLabel(raw);
+    if (!normalized) continue;
+    const key = normalized.toLowerCase();
+    if (seenLower.has(key)) continue;
+    seenLower.add(key);
+    result.push(normalized);
+  }
+  return result;
+}
+
+export function extractAvailableTaskLabels(
+  tasks: readonly Pick<DaywellTaskRecord, 'labels'>[],
+  extraLabels: readonly string[] = []
+): string[] {
+  const byKey = new Map<string, string>();
+  const recordLabel = (raw: string) => {
+    const normalized = normalizeTaskLabel(raw);
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    if (!byKey.has(key)) {
+      byKey.set(key, normalized);
+    }
+  };
+  for (const extra of extraLabels) {
+    recordLabel(extra);
+  }
+  for (const task of tasks) {
+    for (const lbl of task.labels ?? []) {
+      recordLabel(lbl);
+    }
+  }
+  return Array.from(byKey.values()).sort((a, b) =>
+    a.toLowerCase().localeCompare(b.toLowerCase())
+  );
+}
+
+export function taskHasAllLabels(
+  task: Pick<DaywellTaskRecord, 'labels'>,
+  requiredLabels: readonly string[]
+): boolean {
+  if (requiredLabels.length === 0) return true;
+  const taskKeys = new Set(
+    normalizeTaskLabels(task.labels).map((l) => l.toLowerCase())
+  );
+  return requiredLabels.every((req) => {
+    const normalized = normalizeTaskLabel(req).toLowerCase();
+    return normalized.length > 0 && taskKeys.has(normalized);
+  });
+}
+
+export function assignLabelToTask(
+  task: DaywellTaskRecord,
+  rawLabel: string,
+  nowUtc?: Date
+): { ok: true; task: DaywellTaskRecord } | { ok: false; error: string } {
+  const normalized = normalizeTaskLabel(rawLabel);
+  if (!normalized) {
+    return { ok: false, error: 'Tag name is required' };
+  }
+  const current = normalizeTaskLabels(task.labels);
+  const targetKey = normalized.toLowerCase();
+  if (current.some((l) => l.toLowerCase() === targetKey)) {
+    return { ok: true, task };
+  }
+  return {
+    ok: true,
+    task: {
+      ...task,
+      labels: [...current, normalized],
+      updatedAt: (nowUtc ?? EthiopiaClock.nowUtc()).toISOString(),
+    },
+  };
+}
+
+export function removeLabelFromTask(
+  task: DaywellTaskRecord,
+  targetLabel: string,
+  nowUtc?: Date
+): DaywellTaskRecord {
+  const targetKey = normalizeTaskLabel(targetLabel).toLowerCase();
+  const current = normalizeTaskLabels(task.labels);
+  const next = current.filter((l) => l.toLowerCase() !== targetKey);
+  if (next.length === current.length) return task;
+  return {
+    ...task,
+    labels: next,
+    updatedAt: (nowUtc ?? EthiopiaClock.nowUtc()).toISOString(),
+  };
+}
+
+export function renameLabelAcrossTasks(
+  tasks: readonly DaywellTaskRecord[],
+  oldLabel: string,
+  newLabel: string,
+  nowUtc?: Date
+):
+  | { ok: true; tasks: DaywellTaskRecord[]; changedCount: number }
+  | { ok: false; error: string } {
+  const oldNormalized = normalizeTaskLabel(oldLabel);
+  const newNormalized = normalizeTaskLabel(newLabel);
+  if (!oldNormalized) {
+    return { ok: false, error: 'Existing tag name is required' };
+  }
+  if (!newNormalized) {
+    return { ok: false, error: 'Tag name is required' };
+  }
+  const oldKey = oldNormalized.toLowerCase();
+  const nowIso = (nowUtc ?? EthiopiaClock.nowUtc()).toISOString();
+  let changedCount = 0;
+
+  const updated = tasks.map((task) => {
+    const existingLabels = normalizeTaskLabels(task.labels);
+    const hasOld = existingLabels.some((l) => l.toLowerCase() === oldKey);
+    if (!hasOld) return task;
+    const replaced = normalizeTaskLabels(
+      existingLabels.map((l) => (l.toLowerCase() === oldKey ? newNormalized : l))
+    );
+    const changed =
+      replaced.length !== existingLabels.length ||
+      replaced.some((l, idx) => l !== existingLabels[idx]);
+    if (!changed) return task;
+    changedCount += 1;
+    return {
+      ...task,
+      labels: replaced,
+      updatedAt: nowIso,
+    };
+  });
+
+  return { ok: true, tasks: updated, changedCount };
+}
+
+export function removeLabelFromAllTasks(
+  tasks: readonly DaywellTaskRecord[],
+  targetLabel: string,
+  nowUtc?: Date
+): { tasks: DaywellTaskRecord[]; changedCount: number } {
+  const targetKey = normalizeTaskLabel(targetLabel).toLowerCase();
+  if (!targetKey) {
+    return { tasks: [...tasks], changedCount: 0 };
+  }
+  const nowIso = (nowUtc ?? EthiopiaClock.nowUtc()).toISOString();
+  let changedCount = 0;
+  const updated = tasks.map((task) => {
+    const existingLabels = normalizeTaskLabels(task.labels);
+    const filtered = existingLabels.filter((l) => l.toLowerCase() !== targetKey);
+    if (filtered.length === existingLabels.length) return task;
+    changedCount += 1;
+    return {
+      ...task,
+      labels: filtered,
+      updatedAt: nowIso,
+    };
+  });
+  return { tasks: updated, changedCount };
+}
+
 export function createTaskRecord(
   input: CreateTaskInput,
   nowUtc?: Date
@@ -436,6 +620,7 @@ export function createTaskRecord(
   const milestoneId = projectId ? (input.milestoneId?.trim() || undefined) : undefined;
   const projectName = input.projectName?.trim() || undefined;
   const isRecurring = Boolean(input.isRecurring);
+  const normalizedLabels = normalizeTaskLabels(input.labels);
 
   const task: DaywellTaskRecord = {
     id,
@@ -459,6 +644,7 @@ export function createTaskRecord(
       ? { recurrenceRule: input.recurrenceRule || input.recurringRule }
       : {}),
     subtasks: normalizeSubtasksList(input.subtasks, id),
+    ...(normalizedLabels.length > 0 ? { labels: normalizedLabels } : {}),
     isArchived: false,
     sortOrder: 0,
     createdAt: nowIso,
@@ -541,6 +727,9 @@ export function updateTaskRecord(
     : existing.recurringRule
       ? undefined
       : existing.recurrenceRule;
+  const nextLabels = hasOwn('labels')
+    ? normalizeTaskLabels(patch.labels)
+    : existing.labels;
 
   const updated: DaywellTaskRecord = {
     ...existing,
@@ -567,6 +756,7 @@ export function updateTaskRecord(
       hasOwn('subtasks') && patch.subtasks
         ? normalizeSubtasksList(patch.subtasks, existing.id)
         : existing.subtasks,
+    labels: nextLabels,
     updatedAt: nowIso,
   };
 
@@ -647,6 +837,21 @@ function isTaskInUpcomingView(
   return dueLater || scheduledLater;
 }
 
+function isTaskInActiveView(task: DaywellTaskRecord): boolean {
+  if (task.isArchived) return false;
+  const status = resolveEffectiveTaskStatus(task);
+  return status !== 'completed' && status !== 'cancelled';
+}
+
+export function isTaskOverdueRecord(
+  task: DaywellTaskRecord,
+  todayIso?: string
+): boolean {
+  if (!isTaskInActiveView(task)) return false;
+  const today = todayIso ?? CalendarDate.today().toIsoString();
+  return Boolean(task.dueDate && task.dueDate < today);
+}
+
 export interface TaskTabCounts {
   todayCount: number;
   inboxCount: number;
@@ -655,6 +860,7 @@ export interface TaskTabCounts {
   completedCount: number;
   archivedCount: number;
   activePendingCount: number;
+  overdueCount: number;
 }
 
 export function computeTaskTabCounts(
@@ -669,6 +875,7 @@ export function computeTaskTabCounts(
   let completedCount = 0;
   let archivedCount = 0;
   let activePendingCount = 0;
+  let overdueCount = 0;
 
   for (const t of tasks) {
     if (t.isArchived) {
@@ -687,6 +894,7 @@ export function computeTaskTabCounts(
     if (isTaskInTodayView(t, today)) todayCount += 1;
     if (isTaskInInboxView(t)) inboxCount += 1;
     if (isTaskInUpcomingView(t, today)) upcomingCount += 1;
+    if (isTaskOverdueRecord(t, today)) overdueCount += 1;
   }
 
   return {
@@ -697,21 +905,58 @@ export function computeTaskTabCounts(
     completedCount,
     archivedCount,
     activePendingCount,
+    overdueCount,
   };
+}
+
+export interface TaskFilterOptions {
+  viewFilter: TaskViewFilter;
+  searchQuery?: string;
+  sortBy?: TaskSortBy;
+  todayIso?: string;
+  statusFilter?: TaskStatus;
+  priorityFilter?: TaskPriority;
+  dueDateFilter?: TaskDueDateFilter;
+  projectIdFilter?: string;
+  sectionTaskIds?: ReadonlySet<string>;
+  tagFilters?: readonly string[];
+}
+
+export function hasActiveTaskOrganizationFilters(
+  options: Partial<
+    Pick<
+      TaskFilterOptions,
+      | 'searchQuery'
+      | 'statusFilter'
+      | 'priorityFilter'
+      | 'dueDateFilter'
+      | 'projectIdFilter'
+      | 'sectionTaskIds'
+      | 'tagFilters'
+    >
+  > & { sectionIdFilter?: string }
+): boolean {
+  return Boolean(
+    options.searchQuery?.trim() ||
+      options.statusFilter ||
+      options.priorityFilter ||
+      options.dueDateFilter ||
+      options.projectIdFilter?.trim() ||
+      options.sectionIdFilter?.trim() ||
+      options.sectionTaskIds !== undefined ||
+      (options.tagFilters && options.tagFilters.length > 0)
+  );
 }
 
 export function filterTasksForView(
   tasks: readonly DaywellTaskRecord[],
-  options: {
-    viewFilter: TaskViewFilter;
-    searchQuery?: string;
-    sortBy?: TaskSortBy;
-    todayIso?: string;
-  }
+  options: TaskFilterOptions
 ): DaywellTaskRecord[] {
   const today = options.todayIso ?? CalendarDate.today().toIsoString();
   const sortBy = options.sortBy ?? 'priority';
   const query = options.searchQuery?.trim().toLowerCase() ?? '';
+  const projectIdFilter = options.projectIdFilter?.trim() || undefined;
+  const tagFilters = normalizeTaskLabels(options.tagFilters);
 
   let list = tasks.filter((t) => {
     if (options.viewFilter === 'archived') {
@@ -726,6 +971,10 @@ export function filterTasksForView(
         return isTaskInInboxView(t);
       case 'upcoming':
         return isTaskInUpcomingView(t, today);
+      case 'active':
+        return isTaskInActiveView(t);
+      case 'overdue':
+        return isTaskOverdueRecord(t, today);
       case 'completed':
         return isTaskCompleted(t);
       case 'all':
@@ -733,6 +982,47 @@ export function filterTasksForView(
         return true;
     }
   });
+
+  if (options.statusFilter) {
+    list = list.filter(
+      (t) => resolveEffectiveTaskStatus(t) === options.statusFilter
+    );
+  }
+
+  if (options.priorityFilter) {
+    list = list.filter((t) => t.priority === options.priorityFilter);
+  }
+
+  if (options.dueDateFilter) {
+    list = list.filter((t) => {
+      switch (options.dueDateFilter) {
+        case 'overdue':
+          return (
+            !isTaskCompleted(t) &&
+            resolveEffectiveTaskStatus(t) !== 'cancelled' &&
+            Boolean(t.dueDate && t.dueDate < today)
+          );
+        case 'today':
+          return t.dueDate === today;
+        case 'upcoming':
+          return Boolean(t.dueDate && t.dueDate > today);
+        case 'no_due_date':
+          return !t.dueDate;
+      }
+    });
+  }
+
+  if (projectIdFilter) {
+    list = list.filter((t) => t.projectId === projectIdFilter);
+  }
+
+  if (options.sectionTaskIds !== undefined) {
+    list = list.filter((t) => options.sectionTaskIds!.has(t.id));
+  }
+
+  if (tagFilters.length > 0) {
+    list = list.filter((t) => taskHasAllLabels(t, tagFilters));
+  }
 
   if (query.length > 0) {
     list = list.filter((t) => {
@@ -761,6 +1051,29 @@ export function filterTasksForView(
       const pa = priorityOrder[a.priority] ?? 2;
       const pb = priorityOrder[b.priority] ?? 2;
       if (pa !== pb) return pa - pb;
+      return a.title.localeCompare(b.title);
+    }
+    if (sortBy === 'due') {
+      const dueA = a.dueDate ?? '9999-12-31';
+      const dueB = b.dueDate ?? '9999-12-31';
+      if (dueA !== dueB) return dueA.localeCompare(dueB);
+      const schedA = a.scheduledDate ?? '9999-12-31';
+      const schedB = b.scheduledDate ?? '9999-12-31';
+      if (schedA !== schedB) return schedA.localeCompare(schedB);
+      const pa = priorityOrder[a.priority] ?? 2;
+      const pb = priorityOrder[b.priority] ?? 2;
+      if (pa !== pb) return pa - pb;
+      return a.title.localeCompare(b.title);
+    }
+    if (sortBy === 'created') {
+      const timeA = Date.parse(a.createdAt || '');
+      const timeB = Date.parse(b.createdAt || '');
+      if (Number.isFinite(timeA) && Number.isFinite(timeB) && timeA !== timeB) {
+        return timeB - timeA;
+      }
+      if (a.createdAt !== b.createdAt) {
+        return b.createdAt.localeCompare(a.createdAt);
+      }
       return a.title.localeCompare(b.title);
     }
     if (sortBy === 'time') {

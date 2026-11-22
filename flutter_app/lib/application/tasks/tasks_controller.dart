@@ -64,6 +64,15 @@ class TasksController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setStatusFilter(String? status) {
+    if (status == null) {
+      _state = _state.copyWith(clearStatusFilter: true);
+    } else {
+      _state = _state.copyWith(statusFilter: status);
+    }
+    notifyListeners();
+  }
+
   void setPriorityFilter(String? priority) {
     if (priority == null) {
       _state = _state.copyWith(clearPriorityFilter: true);
@@ -73,12 +82,62 @@ class TasksController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setDueDateFilter(String? dueDateFilter) {
+    if (dueDateFilter == null) {
+      _state = _state.copyWith(clearDueDateFilter: true);
+    } else {
+      _state = _state.copyWith(dueDateFilter: dueDateFilter);
+    }
+    notifyListeners();
+  }
+
   void selectProject(String? projectId) {
     if (projectId == null) {
-      _state = _state.copyWith(clearSelectedProject: true);
+      _state = _state.copyWith(
+        clearSelectedProject: true,
+        clearSectionFilter: true,
+      );
     } else {
-      _state = _state.copyWith(selectedProjectId: projectId);
+      _state = _state.copyWith(
+        selectedProjectId: projectId,
+        clearSectionFilter: _state.selectedProjectId != projectId,
+      );
     }
+    notifyListeners();
+  }
+
+  void setSectionFilter(String? sectionId) {
+    if (sectionId == null || sectionId.trim().isEmpty) {
+      _state = _state.copyWith(clearSectionFilter: true);
+    } else {
+      _state = _state.copyWith(sectionFilter: sectionId.trim());
+    }
+    notifyListeners();
+  }
+
+  void toggleTagFilter(String rawTag) {
+    final normalized = TasksModuleState.normalizeLabel(rawTag);
+    if (normalized.isEmpty) return;
+    final key = normalized.toLowerCase();
+    final next = <String>{};
+    var removed = false;
+    for (final existing in _state.tagFilters) {
+      if (existing.toLowerCase() == key) {
+        removed = true;
+      } else {
+        next.add(existing);
+      }
+    }
+    if (!removed) {
+      next.add(normalized);
+    }
+    _state = _state.copyWith(tagFilters: Set<String>.unmodifiable(next));
+    notifyListeners();
+  }
+
+  void setTagFilters(Set<String> tags) {
+    final normalized = TasksModuleState.normalizeLabels(tags).toSet();
+    _state = _state.copyWith(tagFilters: Set<String>.unmodifiable(normalized));
     notifyListeners();
   }
 
@@ -103,13 +162,17 @@ class TasksController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void clearFilters() {
+  void clearFilters({bool resetView = true}) {
     _state = _state.copyWith(
-      viewFilter: 'today',
+      viewFilter: resetView ? 'today' : _state.viewFilter,
       searchQuery: '',
-      sortBy: 'due',
+      sortBy: resetView ? 'due' : _state.sortBy,
+      clearStatusFilter: true,
       clearPriorityFilter: true,
+      clearDueDateFilter: true,
       clearSelectedProject: true,
+      clearSectionFilter: true,
+      tagFilters: const {},
       selectedTaskIds: const {},
     );
     notifyListeners();
@@ -130,10 +193,173 @@ class TasksController extends ChangeNotifier {
   }
 
   Future<void> updateLabels(String taskId, List<String> labels) async {
-    final existing = _state.findTaskById(taskId);
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
     if (existing == null) return;
+    final normalized = TasksModuleState.normalizeLabels(labels);
+    final nextCustom =
+        TasksModuleState.normalizeLabels([..._state.customTags, ...normalized]);
+    _state = _state.copyWith(customTags: nextCustom);
     await _persistUpdatedTask(
-        existing.copyWith(labels: List<String>.from(labels)));
+      existing.copyWith(
+        labels: normalized,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  bool createTag(String rawLabel) {
+    final normalized = TasksModuleState.normalizeLabel(rawLabel);
+    if (normalized.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Tag name is required');
+      notifyListeners();
+      return false;
+    }
+    final alreadyExists = _state.availableTags.any(
+      (t) => t.toLowerCase() == normalized.toLowerCase(),
+    );
+    if (alreadyExists) {
+      _state = _state.copyWith(errorMessage: 'Tag "@$normalized" already exists');
+      notifyListeners();
+      return false;
+    }
+    final nextCustom =
+        TasksModuleState.normalizeLabels([..._state.customTags, normalized]);
+    _state = _state.copyWith(customTags: nextCustom, clearError: true);
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> renameTag(String oldLabel, String newLabel) async {
+    final oldNorm = TasksModuleState.normalizeLabel(oldLabel);
+    final newNorm = TasksModuleState.normalizeLabel(newLabel);
+    if (oldNorm.isEmpty || newNorm.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Tag name is required');
+      notifyListeners();
+      return false;
+    }
+    final oldKey = oldNorm.toLowerCase();
+    final now = EthiopiaClock.nowUtc();
+
+    try {
+      for (final task in _state.tasks) {
+        final hasTag = task.labels.any(
+          (l) => TasksModuleState.normalizeLabel(l).toLowerCase() == oldKey,
+        );
+        if (!hasTag) continue;
+        final replaced = TasksModuleState.normalizeLabels(
+          task.labels.map(
+            (l) => TasksModuleState.normalizeLabel(l).toLowerCase() == oldKey
+                ? newNorm
+                : l,
+          ),
+        );
+        await _repository.updateTask(
+          task.copyWith(labels: replaced, updatedAt: now),
+        );
+      }
+
+      final nextCustom = TasksModuleState.normalizeLabels(
+        _state.customTags.map(
+          (t) => t.toLowerCase() == oldKey ? newNorm : t,
+        ),
+      );
+      final nextTagFilters = TasksModuleState.normalizeLabels(
+        _state.tagFilters.map(
+          (t) => TasksModuleState.normalizeLabel(t).toLowerCase() == oldKey
+              ? newNorm
+              : t,
+        ),
+      ).toSet();
+
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        customTags: nextCustom,
+        tagFilters: Set<String>.unmodifiable(nextTagFilters),
+        clearError: true,
+      );
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<int> deleteTag(String targetLabel) async {
+    final targetNorm = TasksModuleState.normalizeLabel(targetLabel);
+    if (targetNorm.isEmpty) return 0;
+    final targetKey = targetNorm.toLowerCase();
+    final now = EthiopiaClock.nowUtc();
+    var affectedTasks = 0;
+
+    try {
+      for (final task in _state.tasks) {
+        final existing = TasksModuleState.normalizeLabels(task.labels);
+        final filtered = existing
+            .where((l) => l.toLowerCase() != targetKey)
+            .toList(growable: false);
+        if (filtered.length == existing.length) continue;
+        affectedTasks += 1;
+        await _repository.updateTask(
+          task.copyWith(labels: filtered, updatedAt: now),
+        );
+      }
+
+      final nextCustom = _state.customTags
+          .where((t) => t.toLowerCase() != targetKey)
+          .toList(growable: false);
+      final nextTagFilters = _state.tagFilters
+          .where((t) => TasksModuleState.normalizeLabel(t).toLowerCase() != targetKey)
+          .toSet();
+
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        customTags: List<String>.unmodifiable(nextCustom),
+        tagFilters: Set<String>.unmodifiable(nextTagFilters),
+        clearError: true,
+      );
+      notifyListeners();
+      return affectedTasks;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return 0;
+    }
+  }
+
+  Future<void> restoreTasksLabelsSnapshot(
+    List<TaskEntity> previousTasks, {
+    List<String>? previousCustomTags,
+    Set<String>? previousTagFilters,
+  }) async {
+    try {
+      for (final prevTask in previousTasks) {
+        final current = await _repository.getTaskById(prevTask.id);
+        if (current != null) {
+          await _repository.updateTask(
+            current.copyWith(
+              labels: prevTask.labels,
+              updatedAt: EthiopiaClock.nowUtc(),
+            ),
+          );
+        }
+      }
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        customTags: previousCustomTags ?? _state.customTags,
+        tagFilters: previousTagFilters ?? _state.tagFilters,
+        clearError: true,
+      );
+      notifyListeners();
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+    }
   }
 
   Future<void> addSubtask(String taskId, String title) async {
@@ -367,7 +593,7 @@ class TasksController extends ChangeNotifier {
       projectId: projectId,
       milestoneId: milestoneId,
       subtasks: TaskSubtask.normalizeList(subtasks, taskId: resolvedTaskId),
-      labels: labels,
+      labels: TasksModuleState.normalizeLabels(labels),
       isPinned: isPinned,
       isMyDay: isMyDay,
       myDayDate: myDayDate,
@@ -413,6 +639,7 @@ class TasksController extends ChangeNotifier {
     String? milestoneId,
     bool clearMilestone = false,
     List<TaskSubtask>? subtasks,
+    List<String>? labels,
   }) async {
     final trimmedTitle = title.trim();
     if (trimmedTitle.isEmpty) {
@@ -463,6 +690,8 @@ class TasksController extends ChangeNotifier {
       subtasks: subtasks != null
           ? TaskSubtask.normalizeList(subtasks, taskId: existing.id)
           : null,
+      labels:
+          labels != null ? TasksModuleState.normalizeLabels(labels) : null,
       updatedAt: now,
     );
 

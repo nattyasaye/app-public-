@@ -18,6 +18,8 @@ import {
   Trash2,
   ArrowUp,
   ArrowDown,
+  Tag,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { isFormDirty } from '../domain/formValidationAndNavigation';
 import {
@@ -28,6 +30,7 @@ import {
 import {
   addSubtaskToList,
   addSubtaskToTask,
+  assignLabelToTask,
   CANONICAL_TASK_PRIORITIES,
   CANONICAL_TASK_STATUSES,
   computeSubtaskProgress,
@@ -37,14 +40,23 @@ import {
   deleteSubtaskFromList,
   deleteSubtaskFromTask,
   deleteTaskFromList,
+  extractAvailableTaskLabels,
   filterTasksForView,
+  hasActiveTaskOrganizationFilters,
   isTaskCompleted,
+  normalizeTaskLabel,
+  normalizeTaskLabels,
+  removeLabelFromAllTasks,
+  removeLabelFromTask,
+  renameLabelAcrossTasks,
   reorderSubtasksInList,
   reorderTaskSubtasks,
   resolveEffectiveTaskStatus,
   setTaskArchivedRecord,
+  TASK_DUE_DATE_FILTER_LABELS,
   TASK_PRIORITY_LABELS,
   TASK_STATUS_LABELS,
+  TaskDueDateFilter,
   TaskSortBy,
   TaskSubItemRecord,
   TaskViewFilter,
@@ -218,12 +230,28 @@ export function DaywellTasksModule({
     else setInternalProjectId(next);
   };
 
-  // Filter tab: 'today' | 'inbox' | 'upcoming' | 'all' | 'completed' | 'archived'
+  // Filter tab: 'today' | 'inbox' | 'upcoming' | 'active' | 'overdue' | 'all' | 'completed' | 'archived'
   const [activeFilter, setActiveFilter] = useState<TaskViewFilter>('today');
 
-  // Search & Sorting
+  // Search, Multi-Criteria Filters & Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState<TaskSortBy>('priority');
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<SharedTaskStatus | ''>('');
+  const [priorityFilter, setPriorityFilter] = useState<DaywellTask['priority'] | ''>('');
+  const [dueDateFilter, setDueDateFilter] = useState<TaskDueDateFilter | ''>('');
+  const [projectFilter, setProjectFilter] = useState<string>('');
+  const [sectionFilter, setSectionFilter] = useState<string>('');
+  const [tagFilters, setTagFilters] = useState<string[]>([]);
+
+  // Tag Catalog & Tag Manager Modal
+  const [customTagCatalog, setCustomTagCatalog] = useState<string[]>([]);
+  const [isTagManagerOpen, setIsTagManagerOpen] = useState(false);
+  const [newGlobalTagInput, setNewGlobalTagInput] = useState('');
+  const [globalTagError, setGlobalTagError] = useState('');
+  const [editingGlobalTag, setEditingGlobalTag] = useState<string | null>(null);
+  const [editingGlobalTagTitle, setEditingGlobalTagTitle] = useState('');
+  const [editingGlobalTagError, setEditingGlobalTagError] = useState('');
 
   // Task Details & Form Modals (View Details, Create, Edit, Safe Delete Confirm)
   const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
@@ -242,6 +270,9 @@ export function DaywellTasksModule({
   const [formProject, setFormProject] = useState<string>('Personal');
   const [formProjectId, setFormProjectId] = useState<string>('');
   const [formMilestoneId, setFormMilestoneId] = useState<string>('');
+  const [formLabels, setFormLabels] = useState<string[]>([]);
+  const [newFormLabelInput, setNewFormLabelInput] = useState('');
+  const [formLabelError, setFormLabelError] = useState('');
   const [formHasReminder, setFormHasReminder] = useState<boolean>(false);
   const [formIsRecurring, setFormIsRecurring] = useState<boolean>(false);
   const [formRecurringRule, setFormRecurringRule] = useState<'daily' | 'weekly' | 'monthly'>('daily');
@@ -252,12 +283,14 @@ export function DaywellTasksModule({
   const [editingFormSubtaskTitle, setEditingFormSubtaskTitle] = useState('');
   const [editingFormSubtaskError, setEditingFormSubtaskError] = useState('');
 
-  // Task Details inline subtask controls
+  // Task Details inline subtask & tag controls
   const [detailSubtaskInput, setDetailSubtaskInput] = useState('');
   const [detailSubtaskError, setDetailSubtaskError] = useState('');
   const [editingDetailSubtaskId, setEditingDetailSubtaskId] = useState<string | null>(null);
   const [editingDetailSubtaskTitle, setEditingDetailSubtaskTitle] = useState('');
   const [editingDetailSubtaskError, setEditingDetailSubtaskError] = useState('');
+  const [detailTagInput, setDetailTagInput] = useState('');
+  const [detailTagError, setDetailTagError] = useState('');
 
   // Form Validation & Dirty State
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -273,17 +306,41 @@ export function DaywellTasksModule({
     setEditingDetailSubtaskId(null);
     setEditingDetailSubtaskTitle('');
     setEditingDetailSubtaskError('');
+    setDetailTagInput('');
+    setDetailTagError('');
   };
+
+  const allActiveProjects: SharedProject[] = useMemo(
+    () => projectsService.listProjects({ includeArchived: false }),
+    // Re-read whenever tasks/subtab/modals change so project filter stays in sync
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tasks, subTab, isModalOpen]
+  );
 
   const availableProjects: SharedProject[] = useMemo(() => {
     if (!isModalOpen) return [];
-    return projectsService.listProjects({ includeArchived: false });
-  }, [isModalOpen]);
+    return allActiveProjects;
+  }, [isModalOpen, allActiveProjects]);
 
   const availableMilestones: SharedMilestone[] = useMemo(() => {
     if (!isModalOpen || !formProjectId.trim()) return [];
     return projectsService.listMilestones(formProjectId.trim());
   }, [isModalOpen, formProjectId]);
+
+  const availableSectionsForFilter = useMemo(() => {
+    if (!projectFilter) return [];
+    return projectsService.getProjectSectionsViewModel(projectFilter).sections;
+  }, [projectFilter, tasks, subTab]);
+
+  const sectionTaskIdsForFilter = useMemo(() => {
+    if (!projectFilter || !sectionFilter) return undefined;
+    return projectsService.getProjectSectionTaskIds(projectFilter, sectionFilter);
+  }, [projectFilter, sectionFilter, tasks]);
+
+  const availableLabels = useMemo(
+    () => extractAvailableTaskLabels(tasks, customTagCatalog),
+    [tasks, customTagCatalog]
+  );
 
   const detailTask = useMemo(
     () => (detailTaskId ? tasks.find((t) => t.id === detailTaskId) ?? null : null),
@@ -311,6 +368,67 @@ export function DaywellTasksModule({
 
   const todayStr = useMemo(() => CalendarDate.today().toIsoString(), []);
 
+  const hasActiveFilters = useMemo(
+    () =>
+      hasActiveTaskOrganizationFilters({
+        searchQuery,
+        statusFilter: statusFilter || undefined,
+        priorityFilter: priorityFilter || undefined,
+        dueDateFilter: dueDateFilter || undefined,
+        projectIdFilter: projectFilter || undefined,
+        sectionIdFilter: sectionFilter || undefined,
+        tagFilters,
+      }),
+    [
+      searchQuery,
+      statusFilter,
+      priorityFilter,
+      dueDateFilter,
+      projectFilter,
+      sectionFilter,
+      tagFilters,
+    ]
+  );
+
+  const activeAttributeFilterCount = useMemo(() => {
+    let count = 0;
+    if (statusFilter) count += 1;
+    if (priorityFilter) count += 1;
+    if (dueDateFilter) count += 1;
+    if (projectFilter) count += 1;
+    if (sectionFilter) count += 1;
+    count += tagFilters.length;
+    return count;
+  }, [
+    statusFilter,
+    priorityFilter,
+    dueDateFilter,
+    projectFilter,
+    sectionFilter,
+    tagFilters,
+  ]);
+
+  const handleClearFilters = () => {
+    setSearchQuery('');
+    setStatusFilter('');
+    setPriorityFilter('');
+    setDueDateFilter('');
+    setProjectFilter('');
+    setSectionFilter('');
+    setTagFilters([]);
+  };
+
+  const toggleFilterTag = (label: string) => {
+    const normalized = normalizeTaskLabel(label);
+    if (!normalized) return;
+    const key = normalized.toLowerCase();
+    setTagFilters((prev) =>
+      prev.some((t) => t.toLowerCase() === key)
+        ? prev.filter((t) => t.toLowerCase() !== key)
+        : [...prev, normalized]
+    );
+  };
+
   // Filter tasks
   const filteredTasks = useMemo(
     () =>
@@ -319,8 +437,26 @@ export function DaywellTasksModule({
         searchQuery,
         sortBy,
         todayIso: todayStr,
+        statusFilter: statusFilter || undefined,
+        priorityFilter: priorityFilter || undefined,
+        dueDateFilter: dueDateFilter || undefined,
+        projectIdFilter: projectFilter || undefined,
+        sectionTaskIds: sectionTaskIdsForFilter,
+        tagFilters,
       }),
-    [tasks, activeFilter, searchQuery, sortBy, todayStr]
+    [
+      tasks,
+      activeFilter,
+      searchQuery,
+      sortBy,
+      todayStr,
+      statusFilter,
+      priorityFilter,
+      dueDateFilter,
+      projectFilter,
+      sectionTaskIdsForFilter,
+      tagFilters,
+    ]
   );
 
   // Counts for tabs
@@ -426,6 +562,129 @@ export function DaywellTasksModule({
     }
   };
 
+  // Tag Management Handlers
+  const handleAddFormLabel = (rawValue?: string) => {
+    const normalized = normalizeTaskLabel(rawValue ?? newFormLabelInput);
+    if (!normalized) {
+      setFormLabelError('Tag name is required');
+      return;
+    }
+    setFormLabels((prev) => normalizeTaskLabels([...prev, normalized]));
+    setCustomTagCatalog((prev) => normalizeTaskLabels([...prev, normalized]));
+    if (!rawValue) {
+      setNewFormLabelInput('');
+    }
+    setFormLabelError('');
+  };
+
+  const handleToggleFormLabel = (label: string) => {
+    const key = normalizeTaskLabel(label).toLowerCase();
+    setFormLabels((prev) =>
+      prev.some((l) => l.toLowerCase() === key)
+        ? prev.filter((l) => l.toLowerCase() !== key)
+        : normalizeTaskLabels([...prev, label])
+    );
+  };
+
+  const handleAddDetailTag = (taskId: string, rawLabel?: string) => {
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const res = assignLabelToTask(target, rawLabel ?? detailTagInput);
+    if (!res.ok) {
+      setDetailTagError(res.error);
+      return;
+    }
+    const normalized = normalizeTaskLabel(rawLabel ?? detailTagInput);
+    if (normalized) {
+      setCustomTagCatalog((prev) => normalizeTaskLabels([...prev, normalized]));
+    }
+    onUpdateTasks(tasks.map((t) => (t.id === taskId ? res.task : t)));
+    if (!rawLabel) setDetailTagInput('');
+    setDetailTagError('');
+  };
+
+  const handleRemoveDetailTag = (taskId: string, label: string) => {
+    const prev = [...tasks];
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const updatedTask = removeLabelFromTask(target, label);
+    onUpdateTasks(tasks.map((t) => (t.id === taskId ? updatedTask : t)));
+    triggerUndo(`Removed tag "@${label}"`, () => onUpdateTasks(prev));
+  };
+
+  const handleCreateGlobalTag = () => {
+    const normalized = normalizeTaskLabel(newGlobalTagInput);
+    if (!normalized) {
+      setGlobalTagError('Tag name is required');
+      return;
+    }
+    const alreadyExists = availableLabels.some(
+      (l) => l.toLowerCase() === normalized.toLowerCase()
+    );
+    if (alreadyExists) {
+      setGlobalTagError(`Tag "@${normalized}" already exists`);
+      return;
+    }
+    setCustomTagCatalog((prev) => normalizeTaskLabels([...prev, normalized]));
+    setNewGlobalTagInput('');
+    setGlobalTagError('');
+  };
+
+  const handleSaveGlobalTagRename = (oldLabel: string) => {
+    const prevTasks = [...tasks];
+    const prevCatalog = [...customTagCatalog];
+    const prevFilters = [...tagFilters];
+    const res = renameLabelAcrossTasks(tasks, oldLabel, editingGlobalTagTitle);
+    if (!res.ok) {
+      setEditingGlobalTagError(res.error);
+      return;
+    }
+    const nextLabel = normalizeTaskLabel(editingGlobalTagTitle);
+    const oldKey = normalizeTaskLabel(oldLabel).toLowerCase();
+    setCustomTagCatalog((cur) =>
+      normalizeTaskLabels(
+        cur.map((c) => (c.toLowerCase() === oldKey ? nextLabel : c))
+      )
+    );
+    setTagFilters((cur) =>
+      normalizeTaskLabels(
+        cur.map((c) => (c.toLowerCase() === oldKey ? nextLabel : c))
+      )
+    );
+    onUpdateTasks(res.tasks);
+    setEditingGlobalTag(null);
+    setEditingGlobalTagTitle('');
+    setEditingGlobalTagError('');
+    triggerUndo(`Renamed "@${oldLabel}" to "@${nextLabel}"`, () => {
+      onUpdateTasks(prevTasks);
+      setCustomTagCatalog(prevCatalog);
+      setTagFilters(prevFilters);
+    });
+  };
+
+  const handleDeleteGlobalTag = (label: string) => {
+    const prevTasks = [...tasks];
+    const prevCatalog = [...customTagCatalog];
+    const prevFilters = [...tagFilters];
+    const { tasks: nextTasks } = removeLabelFromAllTasks(tasks, label);
+    const targetKey = normalizeTaskLabel(label).toLowerCase();
+    setCustomTagCatalog((cur) =>
+      cur.filter((c) => c.toLowerCase() !== targetKey)
+    );
+    setTagFilters((cur) => cur.filter((c) => c.toLowerCase() !== targetKey));
+    onUpdateTasks(nextTasks);
+    if (editingGlobalTag === label) {
+      setEditingGlobalTag(null);
+      setEditingGlobalTagTitle('');
+      setEditingGlobalTagError('');
+    }
+    triggerUndo(`Removed tag "@${label}"`, () => {
+      onUpdateTasks(prevTasks);
+      setCustomTagCatalog(prevCatalog);
+      setTagFilters(prevFilters);
+    });
+  };
+
   const getCurrentTaskValues = () => ({
     title: formTitle,
     description: formDescription,
@@ -437,6 +696,7 @@ export function DaywellTasksModule({
     projectName: formProject,
     projectId: formProjectId,
     milestoneId: formMilestoneId,
+    labels: formLabels,
     hasReminder: formHasReminder,
     isRecurring: formIsRecurring,
     recurringRule: formRecurringRule,
@@ -469,6 +729,10 @@ export function DaywellTasksModule({
     setFormProject('Personal');
     setFormProjectId('');
     setFormMilestoneId('');
+    const initLabels = tagFilters.length > 0 ? [...tagFilters] : [];
+    setFormLabels(initLabels);
+    setNewFormLabelInput('');
+    setFormLabelError('');
     setFormHasReminder(false);
     setFormIsRecurring(false);
     setFormRecurringRule('daily');
@@ -492,6 +756,7 @@ export function DaywellTasksModule({
       projectName: 'Personal',
       projectId: '',
       milestoneId: '',
+      labels: initLabels,
       hasReminder: false,
       isRecurring: false,
       recurringRule: 'daily',
@@ -519,6 +784,10 @@ export function DaywellTasksModule({
     setFormProject(task.projectName || 'Personal');
     setFormProjectId(task.projectId || '');
     setFormMilestoneId(task.milestoneId || '');
+    const labelsCopy = normalizeTaskLabels(task.labels);
+    setFormLabels(labelsCopy);
+    setNewFormLabelInput('');
+    setFormLabelError('');
     setFormHasReminder(task.hasReminder);
     setFormIsRecurring(task.isRecurring || false);
     setFormRecurringRule(task.recurringRule || 'daily');
@@ -543,6 +812,7 @@ export function DaywellTasksModule({
       projectName: task.projectName || 'Personal',
       projectId: task.projectId || '',
       milestoneId: task.milestoneId || '',
+      labels: labelsCopy,
       hasReminder: task.hasReminder,
       isRecurring: task.isRecurring || false,
       recurringRule: task.recurringRule || 'daily',
@@ -592,6 +862,7 @@ export function DaywellTasksModule({
         recurringRule: formIsRecurring ? formRecurringRule : undefined,
         recurrenceRule: formIsRecurring ? formRecurringRule : undefined,
         subtasks: formSubtasks,
+        labels: formLabels,
       });
 
       if (!result.ok) {
@@ -630,6 +901,7 @@ export function DaywellTasksModule({
         recurringRule: formIsRecurring ? formRecurringRule : undefined,
         recurrenceRule: formIsRecurring ? formRecurringRule : undefined,
         subtasks: formSubtasks,
+        labels: formLabels,
       });
 
       if (!result.ok) {
@@ -820,26 +1092,215 @@ export function DaywellTasksModule({
         />
       ) : (
         <>
-          {/* Search Bar & Sorter */}
-          <div className="flex items-center gap-2">
+          {/* Search Bar, Filters Trigger, Tag Manager & Sorter */}
+          <div className="flex flex-wrap items-center gap-2">
             <DaywellSearchField
               value={searchQuery}
               onChange={setSearchQuery}
-              placeholder="Search your tasks and projects..."
+              placeholder="Search tasks by title, description, or @tags..."
               ariaLabel="Search tasks and projects"
-              className="flex-1"
+              className="flex-1 min-w-[180px]"
+            />
+            <DaywellButton
+              label={
+                activeAttributeFilterCount > 0
+                  ? `Filters (${activeAttributeFilterCount})`
+                  : 'Filters'
+              }
+              variant={showFilterPanel || activeAttributeFilterCount > 0 ? 'tonal' : 'outlined'}
+              size="compact"
+              leadingIcon={<SlidersHorizontal className="w-3.5 h-3.5" />}
+              onClick={() => setShowFilterPanel((cur) => !cur)}
+            />
+            <DaywellIconButton
+              label="Manage Tags"
+              size="compact"
+              tone="muted"
+              onClick={() => {
+                setNewGlobalTagInput('');
+                setGlobalTagError('');
+                setEditingGlobalTag(null);
+                setEditingGlobalTagTitle('');
+                setEditingGlobalTagError('');
+                setIsTagManagerOpen(true);
+              }}
+              icon={<Tag className="w-4 h-4" />}
             />
             <select
               aria-label="Sort tasks by"
               value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'priority' | 'time' | 'title')}
+              onChange={(e) => setSortBy(e.target.value as TaskSortBy)}
               className="min-h-[42px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-3 py-2 text-[var(--dw-text-secondary)] outline-none focus:border-[var(--dw-primary)]"
             >
-              <option value="priority">Priority</option>
-              <option value="time">Time</option>
-              <option value="title">Alphabetical</option>
+              <option value="priority">Sort: Priority</option>
+              <option value="due">Sort: Due Date</option>
+              <option value="created">Sort: Creation Date</option>
+              <option value="title">Sort: Title (A–Z)</option>
+              <option value="time">Sort: Scheduled Time</option>
             </select>
           </div>
+
+          {/* Collapsible Multi-Criteria Filter Panel */}
+          {showFilterPanel && (
+            <DaywellCard
+              padding="sm"
+              radius="lg"
+              aria-label="Task filters"
+              className="space-y-3 bg-[var(--dw-surface-subtle)]"
+            >
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
+                    Status
+                  </label>
+                  <select
+                    aria-label="Filter by status"
+                    value={statusFilter}
+                    onChange={(e) =>
+                      setStatusFilter(e.target.value as SharedTaskStatus | '')
+                    }
+                    className="w-full min-h-[36px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-2.5 py-1.5 text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  >
+                    <option value="">All Statuses</option>
+                    {CANONICAL_TASK_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {TASK_STATUS_LABELS[s]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
+                    Priority
+                  </label>
+                  <select
+                    aria-label="Filter by priority"
+                    value={priorityFilter}
+                    onChange={(e) =>
+                      setPriorityFilter(
+                        e.target.value as DaywellTask['priority'] | ''
+                      )
+                    }
+                    className="w-full min-h-[36px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-2.5 py-1.5 text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  >
+                    <option value="">All Priorities</option>
+                    {CANONICAL_TASK_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {TASK_PRIORITY_LABELS[p]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
+                    Due Date
+                  </label>
+                  <select
+                    aria-label="Filter by due date"
+                    value={dueDateFilter}
+                    onChange={(e) =>
+                      setDueDateFilter(e.target.value as TaskDueDateFilter | '')
+                    }
+                    className="w-full min-h-[36px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-2.5 py-1.5 text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  >
+                    <option value="">Any Due Date</option>
+                    {(
+                      Object.keys(TASK_DUE_DATE_FILTER_LABELS) as TaskDueDateFilter[]
+                    ).map((key) => (
+                      <option key={key} value={key}>
+                        {TASK_DUE_DATE_FILTER_LABELS[key]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
+                    Project
+                  </label>
+                  <select
+                    aria-label="Filter by project"
+                    value={projectFilter}
+                    onChange={(e) => {
+                      setProjectFilter(e.target.value);
+                      setSectionFilter('');
+                    }}
+                    className="w-full min-h-[36px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-2.5 py-1.5 text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  >
+                    <option value="">All Projects</option>
+                    {allActiveProjects.map((proj) => (
+                      <option key={proj.id} value={proj.id}>
+                        {proj.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {projectFilter && (
+                  <div>
+                    <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
+                      Section
+                    </label>
+                    <select
+                      aria-label="Filter by section"
+                      value={sectionFilter}
+                      onChange={(e) => setSectionFilter(e.target.value)}
+                      className="w-full min-h-[36px] text-xs bg-[var(--dw-card)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)] px-2.5 py-1.5 text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                    >
+                      <option value="">All Sections</option>
+                      {availableSectionsForFilter.map((sec) => (
+                        <option key={sec.record.id} value={sec.record.id}>
+                          {sec.record.title}
+                        </option>
+                      ))}
+                      <option value="__unsectioned__">Unsectioned</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {availableLabels.length > 0 && (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="dw-type-caption uppercase text-[var(--dw-text-muted)]">
+                      Filter by Tags
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsTagManagerOpen(true)}
+                      className="text-[11px] font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer"
+                    >
+                      Manage tags
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5" role="group" aria-label="Filter by tags">
+                    {availableLabels.map((lbl) => {
+                      const selected = tagFilters.some(
+                        (f) => f.toLowerCase() === lbl.toLowerCase()
+                      );
+                      return (
+                        <button
+                          key={lbl}
+                          type="button"
+                          onClick={() => toggleFilterTag(lbl)}
+                          aria-pressed={selected}
+                          className={`min-h-[30px] text-[11px] px-2.5 py-1 rounded-[var(--dw-radius-full)] font-semibold transition-colors cursor-pointer ${
+                            selected
+                              ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)]'
+                              : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)] hover:border-[var(--dw-primary)]'
+                          }`}
+                        >
+                          @{lbl}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </DaywellCard>
+          )}
 
           {/* Filter Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" role="tablist" aria-label="Task views">
@@ -848,6 +1309,8 @@ export function DaywellTasksModule({
                 { id: 'today', label: `Today (${tabCounts.todayCount})` },
                 { id: 'inbox', label: `Inbox (${tabCounts.inboxCount})` },
                 { id: 'upcoming', label: `Upcoming (${tabCounts.upcomingCount})` },
+                { id: 'active', label: `Active (${tabCounts.activePendingCount})` },
+                { id: 'overdue', label: `Overdue (${tabCounts.overdueCount})` },
                 { id: 'all', label: `All (${tabCounts.allCount})` },
                 { id: 'completed', label: `Completed (${tabCounts.completedCount})` },
                 { id: 'archived', label: `Archived (${tabCounts.archivedCount})` },
@@ -873,6 +1336,72 @@ export function DaywellTasksModule({
             })}
           </div>
 
+          {/* Active Filters Summary + Clear Action */}
+          {hasActiveFilters && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] rounded-[var(--dw-radius-md)]">
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--dw-text-secondary)]">
+                <span className="font-semibold text-[var(--dw-text-primary)]">
+                  Showing {filteredTasks.length} matching tasks
+                </span>
+                {statusFilter && (
+                  <DaywellStatusBadge
+                    tone="info"
+                    showIcon={false}
+                    label={`Status: ${TASK_STATUS_LABELS[statusFilter]}`}
+                  />
+                )}
+                {priorityFilter && (
+                  <DaywellStatusBadge
+                    tone="warning"
+                    showIcon={false}
+                    label={`Priority: ${TASK_PRIORITY_LABELS[priorityFilter]}`}
+                  />
+                )}
+                {dueDateFilter && (
+                  <DaywellStatusBadge
+                    tone="neutral"
+                    showIcon={false}
+                    label={TASK_DUE_DATE_FILTER_LABELS[dueDateFilter]}
+                  />
+                )}
+                {projectFilter && (
+                  <DaywellStatusBadge
+                    tone="neutral"
+                    showIcon={false}
+                    label={`Project: ${allActiveProjects.find((p) => p.id === projectFilter)?.title ?? projectFilter}`}
+                  />
+                )}
+                {sectionFilter && (
+                  <DaywellStatusBadge
+                    tone="neutral"
+                    showIcon={false}
+                    label={`Section: ${
+                      sectionFilter === '__unsectioned__'
+                        ? 'Unsectioned'
+                        : availableSectionsForFilter.find(
+                            (s) => s.record.id === sectionFilter
+                          )?.record.title ?? sectionFilter
+                    }`}
+                  />
+                )}
+                {tagFilters.map((lbl) => (
+                  <DaywellStatusBadge
+                    key={lbl}
+                    tone="info"
+                    showIcon={false}
+                    label={`@${lbl}`}
+                  />
+                ))}
+              </div>
+              <DaywellButton
+                label="Clear filters"
+                variant="text"
+                size="compact"
+                onClick={handleClearFilters}
+              />
+            </div>
+          )}
+
           {/* Status Progress Header */}
           <div className="flex items-center justify-between pt-1">
             <div>
@@ -893,16 +1422,36 @@ export function DaywellTasksModule({
         {filteredTasks.length === 0 ? (
           <DaywellEmptyState
             icon={<CheckCircle2 className="w-8 h-8" />}
-            message={activeFilter === 'archived' ? 'No archived tasks' : 'No tasks in this view'}
-            subtitle={
-              activeFilter === 'today'
-                ? "You're all caught up for today! Plan tomorrow or capture a new task."
+            message={
+              hasActiveFilters
+                ? 'No tasks match active filters'
                 : activeFilter === 'archived'
-                  ? 'Tasks you archive appear here so you can restore or remove them anytime.'
-                  : 'Nothing to display for this filter.'
+                  ? 'No archived tasks'
+                  : 'No tasks in this view'
             }
-            actionLabel={activeFilter === 'archived' ? undefined : 'Add Task'}
-            onActionPressed={activeFilter === 'archived' ? undefined : handleOpenCreate}
+            subtitle={
+              hasActiveFilters
+                ? 'Try clearing or adjusting your search query, tags, or task filters.'
+                : activeFilter === 'today'
+                  ? "You're all caught up for today! Plan tomorrow or capture a new task."
+                  : activeFilter === 'archived'
+                    ? 'Tasks you archive appear here so you can restore or remove them anytime.'
+                    : 'Nothing to display for this filter.'
+            }
+            actionLabel={
+              hasActiveFilters
+                ? 'Clear filters'
+                : activeFilter === 'archived'
+                  ? undefined
+                  : 'Add Task'
+            }
+            onActionPressed={
+              hasActiveFilters
+                ? handleClearFilters
+                : activeFilter === 'archived'
+                  ? undefined
+                  : handleOpenCreate
+            }
           />
         ) : (
           filteredTasks.map((task) => {
@@ -1028,6 +1577,15 @@ export function DaywellTasksModule({
                           Due: {task.dueDate}
                         </span>
                       )}
+
+                      {(task.labels ?? []).map((lbl) => (
+                        <span
+                          key={lbl}
+                          className="inline-flex items-center px-2 py-0.5 rounded-[var(--dw-radius-full)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[10px] font-semibold text-[var(--dw-text-secondary)]"
+                        >
+                          @{lbl}
+                        </span>
+                      ))}
                     </div>
                   </div>
 
@@ -1354,6 +1912,96 @@ export function DaywellTasksModule({
                   onChange={(e) => setFormScheduledTime(e.target.value)}
                   className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
                 />
+              </div>
+
+              {/* Tags / Labels editor */}
+              <div className="space-y-2 pt-2 border-t border-[var(--dw-divider)]">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                    Tags / Labels (Optional)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setIsTagManagerOpen(true)}
+                    className="text-[11px] font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer"
+                  >
+                    Manage all tags
+                  </button>
+                </div>
+
+                {formLabels.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {formLabels.map((lbl) => (
+                      <span
+                        key={lbl}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[var(--dw-radius-full)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] text-[11px] font-semibold"
+                      >
+                        <span>@{lbl}</span>
+                        <button
+                          type="button"
+                          aria-label={`Remove tag ${lbl}`}
+                          onClick={() => handleToggleFormLabel(lbl)}
+                          className="hover:opacity-75 cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <input
+                    aria-label="Add task tag"
+                    type="text"
+                    placeholder="Add tag (e.g. work, finance)..."
+                    value={newFormLabelInput}
+                    onChange={(e) => {
+                      setNewFormLabelInput(e.target.value);
+                      if (formLabelError) setFormLabelError('');
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleAddFormLabel();
+                      }
+                    }}
+                    className={`flex-1 min-h-[38px] px-3 py-1.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)] ${
+                      formLabelError ? 'border-[var(--dw-error)]' : 'border-[var(--dw-border)]'
+                    }`}
+                  />
+                  <DaywellButton
+                    label="Add"
+                    variant="tonal"
+                    size="compact"
+                    onClick={() => handleAddFormLabel()}
+                  />
+                </div>
+                {formLabelError && (
+                  <p className="text-[11px] text-[var(--dw-error)]">{formLabelError}</p>
+                )}
+
+                {availableLabels.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {availableLabels
+                      .filter(
+                        (lbl) =>
+                          !formLabels.some(
+                            (cur) => cur.toLowerCase() === lbl.toLowerCase()
+                          )
+                      )
+                      .map((lbl) => (
+                        <button
+                          key={lbl}
+                          type="button"
+                          onClick={() => handleAddFormLabel(lbl)}
+                          className="text-[11px] px-2 py-0.5 rounded-[var(--dw-radius-full)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-secondary)] hover:border-[var(--dw-primary)] cursor-pointer"
+                        >
+                          + @{lbl}
+                        </button>
+                      ))}
+                  </div>
+                )}
               </div>
 
               {/* Subtasks checklist builder */}
@@ -1732,6 +2380,105 @@ export function DaywellTasksModule({
                   )}
                 </div>
 
+                {/* Tags / Labels Section inside Task Details */}
+                <div className="space-y-2 p-3 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-secondary)]">
+                      Tags
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsTagManagerOpen(true)}
+                      className="text-[11px] font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer"
+                    >
+                      Manage tags
+                    </button>
+                  </div>
+                  {(detailTask.labels ?? []).length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {(detailTask.labels ?? []).map((lbl) => (
+                        <span
+                          key={lbl}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-[var(--dw-radius-full)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[11px] font-semibold text-[var(--dw-text-primary)]"
+                        >
+                          <span>@{lbl}</span>
+                          <button
+                            type="button"
+                            aria-label={`Remove tag ${lbl} from task`}
+                            onClick={() => handleRemoveDetailTag(detailTask.id, lbl)}
+                            className="text-[var(--dw-text-muted)] hover:text-[var(--dw-error)] cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[var(--dw-text-muted)] italic">
+                      No tags assigned yet.
+                    </p>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <input
+                      aria-label="Assign tag to task"
+                      type="text"
+                      placeholder="Add tag..."
+                      value={detailTagInput}
+                      onChange={(e) => {
+                        setDetailTagInput(e.target.value);
+                        if (detailTagError) setDetailTagError('');
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleAddDetailTag(detailTask.id);
+                        }
+                      }}
+                      className={`flex-1 min-h-[36px] px-3 py-1 bg-[var(--dw-card)] rounded-[var(--dw-radius-md)] border text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)] ${
+                        detailTagError ? 'border-[var(--dw-error)]' : 'border-[var(--dw-border)]'
+                      }`}
+                    />
+                    <DaywellButton
+                      label="Add"
+                      variant="tonal"
+                      size="compact"
+                      onClick={() => handleAddDetailTag(detailTask.id)}
+                    />
+                  </div>
+                  {detailTagError && (
+                    <p className="text-[11px] text-[var(--dw-error)]">{detailTagError}</p>
+                  )}
+
+                  {availableLabels.some(
+                    (lbl) =>
+                      !(detailTask.labels ?? []).some(
+                        (assigned) => assigned.toLowerCase() === lbl.toLowerCase()
+                      )
+                  ) && (
+                    <div className="flex flex-wrap gap-1">
+                      {availableLabels
+                        .filter(
+                          (lbl) =>
+                            !(detailTask.labels ?? []).some(
+                              (assigned) =>
+                                assigned.toLowerCase() === lbl.toLowerCase()
+                            )
+                        )
+                        .map((lbl) => (
+                          <button
+                            key={lbl}
+                            type="button"
+                            onClick={() => handleAddDetailTag(detailTask.id, lbl)}
+                            className="text-[11px] px-2 py-0.5 rounded-[var(--dw-radius-full)] bg-[var(--dw-card)] border border-[var(--dw-border)] text-[var(--dw-text-secondary)] hover:border-[var(--dw-primary)] cursor-pointer"
+                          >
+                            + @{lbl}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+
                 {/* Interactive Subtasks & Progress Section inside Task Details */}
                 {(() => {
                   const detailProgress = computeSubtaskProgress(detailTask.subtasks);
@@ -1980,6 +2727,176 @@ export function DaywellTasksModule({
               </div>
             );
           })()}
+        </div>
+      )}
+
+      {/* Manage Tags Modal */}
+      {isTagManagerOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Manage Tags"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsTagManagerOpen(false);
+          }}
+        >
+          <div className="w-full max-w-md bg-[var(--dw-elevated)] rounded-[var(--dw-radius-xl)] p-5 shadow-2xl border border-[var(--dw-border)] space-y-4 max-h-[85vh] overflow-y-auto">
+            <div className="flex items-center justify-between">
+              <div>
+                <span className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                  Task Organization
+                </span>
+                <h2 className="dw-type-title text-[var(--dw-text-primary)]">
+                  Manage Tags
+                </h2>
+              </div>
+              <DaywellIconButton
+                label="Close manage tags"
+                size="compact"
+                tone="muted"
+                onClick={() => setIsTagManagerOpen(false)}
+                icon={<X className="w-4 h-4" />}
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <input
+                  aria-label="New tag name"
+                  type="text"
+                  placeholder="Create new tag (e.g. urgent-ops)..."
+                  value={newGlobalTagInput}
+                  onChange={(e) => {
+                    setNewGlobalTagInput(e.target.value);
+                    if (globalTagError) setGlobalTagError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleCreateGlobalTag();
+                    }
+                  }}
+                  className={`flex-1 min-h-[38px] px-3 py-1.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)] ${
+                    globalTagError ? 'border-[var(--dw-error)]' : 'border-[var(--dw-border)]'
+                  }`}
+                />
+                <DaywellButton
+                  label="Create"
+                  variant="primary"
+                  size="compact"
+                  onClick={handleCreateGlobalTag}
+                />
+              </div>
+              {globalTagError && (
+                <p className="text-[11px] text-[var(--dw-error)]">{globalTagError}</p>
+              )}
+            </div>
+
+            {availableLabels.length === 0 ? (
+              <p className="text-xs text-[var(--dw-text-muted)] italic py-2">
+                No tags created yet. Add one above or attach tags directly inside any task.
+              </p>
+            ) : (
+              <div className="space-y-1.5">
+                {availableLabels.map((lbl) => {
+                  const taskCount = tasks.filter((t) =>
+                    (t.labels ?? []).some(
+                      (item) => item.toLowerCase() === lbl.toLowerCase()
+                    )
+                  ).length;
+                  const isEditingThis = editingGlobalTag === lbl;
+                  return (
+                    <div
+                      key={lbl}
+                      className="p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] space-y-1.5"
+                    >
+                      {isEditingThis ? (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1.5">
+                            <input
+                              aria-label={`Rename tag ${lbl}`}
+                              type="text"
+                              value={editingGlobalTagTitle}
+                              onChange={(e) => {
+                                setEditingGlobalTagTitle(e.target.value);
+                                if (editingGlobalTagError) setEditingGlobalTagError('');
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  handleSaveGlobalTagRename(lbl);
+                                } else if (e.key === 'Escape') {
+                                  setEditingGlobalTag(null);
+                                  setEditingGlobalTagTitle('');
+                                  setEditingGlobalTagError('');
+                                }
+                              }}
+                              className="flex-1 min-h-[34px] px-2.5 py-1 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                            />
+                            <DaywellIconButton
+                              label={`Save tag ${lbl}`}
+                              size="compact"
+                              tone="primary"
+                              onClick={() => handleSaveGlobalTagRename(lbl)}
+                              icon={<Check className="w-3.5 h-3.5" />}
+                            />
+                            <DaywellIconButton
+                              label="Cancel rename tag"
+                              size="compact"
+                              tone="muted"
+                              onClick={() => {
+                                setEditingGlobalTag(null);
+                                setEditingGlobalTagTitle('');
+                                setEditingGlobalTagError('');
+                              }}
+                              icon={<X className="w-3.5 h-3.5" />}
+                            />
+                          </div>
+                          {editingGlobalTagError && (
+                            <p className="text-[11px] text-[var(--dw-error)]">
+                              {editingGlobalTagError}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <span className="text-xs font-semibold text-[var(--dw-text-primary)]">
+                              @{lbl}
+                            </span>
+                            <span className="ml-2 text-[11px] text-[var(--dw-text-muted)]">
+                              ({taskCount} {taskCount === 1 ? 'task' : 'tasks'})
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <DaywellIconButton
+                              label={`Rename tag ${lbl}`}
+                              size="compact"
+                              tone="muted"
+                              onClick={() => {
+                                setEditingGlobalTag(lbl);
+                                setEditingGlobalTagTitle(lbl);
+                                setEditingGlobalTagError('');
+                              }}
+                              icon={<Edit3 className="w-3.5 h-3.5" />}
+                            />
+                            <DaywellIconButton
+                              label={`Remove tag ${lbl}`}
+                              size="compact"
+                              tone="danger"
+                              onClick={() => handleDeleteGlobalTag(lbl)}
+                              icon={<Trash2 className="w-3.5 h-3.5" />}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

@@ -10,11 +10,17 @@ class TasksModuleState {
 
   // Presentation / Filter State
   final String
-      viewFilter; // 'today', 'inbox', 'upcoming', 'all', 'my_day', 'completed', 'archived'
+      viewFilter; // 'today', 'inbox', 'upcoming', 'active', 'overdue', 'all', 'my_day', 'completed', 'archived'
   final String searchQuery;
-  final String sortBy; // 'due', 'priority', 'alpha'
+  final String sortBy; // 'due', 'priority', 'created', 'alpha'
+  final String? statusFilter; // null = all
   final String? priorityFilter; // null = all, 'low', 'medium', 'high', 'urgent'
+  final String?
+      dueDateFilter; // null = all, 'overdue', 'today', 'upcoming', 'no_due_date'
   final String? selectedProjectId;
+  final String? sectionFilter; // null = all, sectionId or '__unsectioned__'
+  final Set<String> tagFilters;
+  final List<String> customTags;
   final Set<String> selectedTaskIds;
   final bool isBoardView;
   final bool isLoading;
@@ -27,15 +33,87 @@ class TasksModuleState {
     this.viewFilter = 'today',
     this.searchQuery = '',
     this.sortBy = 'due',
+    this.statusFilter,
     this.priorityFilter,
+    this.dueDateFilter,
     this.selectedProjectId,
+    this.sectionFilter,
+    this.tagFilters = const {},
+    this.customTags = const [],
     this.selectedTaskIds = const {},
     this.isBoardView = false,
     this.isLoading = false,
     this.errorMessage,
   });
 
+  static String normalizeLabel(String raw) {
+    final collapsed = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+    return collapsed.replaceFirst(RegExp(r'^[@#]+'), '').trim();
+  }
+
+  static List<String> normalizeLabels(Iterable<String> rawLabels) {
+    final result = <String>[];
+    final seenLower = <String>{};
+    for (final raw in rawLabels) {
+      final normalized = normalizeLabel(raw);
+      if (normalized.isEmpty) continue;
+      final key = normalized.toLowerCase();
+      if (seenLower.add(key)) {
+        result.add(normalized);
+      }
+    }
+    return List<String>.unmodifiable(result);
+  }
+
+  static List<String> extractAvailableLabels(
+    List<TaskEntity> tasks, {
+    Iterable<String> extraLabels = const [],
+  }) {
+    final byKey = <String, String>{};
+    void record(String raw) {
+      final normalized = normalizeLabel(raw);
+      if (normalized.isEmpty) return;
+      final key = normalized.toLowerCase();
+      byKey.putIfAbsent(key, () => normalized);
+    }
+
+    for (final extra in extraLabels) {
+      record(extra);
+    }
+    for (final task in tasks) {
+      for (final lbl in task.labels) {
+        record(lbl);
+      }
+    }
+    final list = byKey.values.toList(growable: false);
+    list.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return List<String>.unmodifiable(list);
+  }
+
   bool get isSelectionMode => selectedTaskIds.isNotEmpty;
+
+  List<String> get availableTags =>
+      extractAvailableLabels(tasks, extraLabels: customTags);
+
+  bool get hasActiveFilters =>
+      searchQuery.trim().isNotEmpty ||
+      statusFilter != null ||
+      priorityFilter != null ||
+      dueDateFilter != null ||
+      selectedProjectId != null ||
+      sectionFilter != null ||
+      tagFilters.isNotEmpty;
+
+  int get activeFilterCount {
+    var count = 0;
+    if (statusFilter != null) count += 1;
+    if (priorityFilter != null) count += 1;
+    if (dueDateFilter != null) count += 1;
+    if (selectedProjectId != null) count += 1;
+    if (sectionFilter != null) count += 1;
+    count += tagFilters.length;
+    return count;
+  }
 
   Set<String> get pinnedTaskIds =>
       tasks.where((t) => !t.isArchived && t.isPinned).map((t) => t.id).toSet();
@@ -57,10 +135,18 @@ class TasksModuleState {
     String? viewFilter,
     String? searchQuery,
     String? sortBy,
+    String? statusFilter,
+    bool clearStatusFilter = false,
     String? priorityFilter,
     bool clearPriorityFilter = false,
+    String? dueDateFilter,
+    bool clearDueDateFilter = false,
     String? selectedProjectId,
     bool clearSelectedProject = false,
+    String? sectionFilter,
+    bool clearSectionFilter = false,
+    Set<String>? tagFilters,
+    List<String>? customTags,
     Set<String>? selectedTaskIds,
     bool? isBoardView,
     bool? isLoading,
@@ -74,11 +160,19 @@ class TasksModuleState {
       viewFilter: viewFilter ?? this.viewFilter,
       searchQuery: searchQuery ?? this.searchQuery,
       sortBy: sortBy ?? this.sortBy,
+      statusFilter:
+          clearStatusFilter ? null : (statusFilter ?? this.statusFilter),
       priorityFilter:
           clearPriorityFilter ? null : (priorityFilter ?? this.priorityFilter),
+      dueDateFilter:
+          clearDueDateFilter ? null : (dueDateFilter ?? this.dueDateFilter),
       selectedProjectId: clearSelectedProject
           ? null
           : (selectedProjectId ?? this.selectedProjectId),
+      sectionFilter:
+          clearSectionFilter ? null : (sectionFilter ?? this.sectionFilter),
+      tagFilters: tagFilters ?? this.tagFilters,
+      customTags: customTags ?? this.customTags,
       selectedTaskIds: selectedTaskIds ?? this.selectedTaskIds,
       isBoardView: isBoardView ?? this.isBoardView,
       isLoading: isLoading ?? this.isLoading,
@@ -107,9 +201,29 @@ class TasksModuleState {
         (t.projectId == null || t.projectId!.isEmpty);
   }
 
-  List<TaskEntity> get filteredTasks {
+  bool _matchesTagFilters(TaskEntity t) {
+    if (tagFilters.isEmpty) return true;
+    final taskKeys = t.labels
+        .map((l) => normalizeLabel(l).toLowerCase())
+        .where((l) => l.isNotEmpty)
+        .toSet();
+    for (final requiredTag in tagFilters) {
+      final key = normalizeLabel(requiredTag).toLowerCase();
+      if (key.isEmpty || !taskKeys.contains(key)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  List<TaskEntity> get filteredTasks => filterTasks();
+
+  List<TaskEntity> filterTasks({Set<String>? sectionTaskIds}) {
     final today = CalendarDate.today();
     final query = searchQuery.trim().toLowerCase();
+    final projectTitlesById = <String, String>{
+      for (final p in projects) p.id: p.title.toLowerCase(),
+    };
 
     final list = tasks.where((t) {
       if (viewFilter == 'archived') {
@@ -121,6 +235,8 @@ class TasksModuleState {
           if (!t.isCompleted) return false;
         } else if (viewFilter == 'all') {
           // Includes all non-archived tasks across statuses.
+        } else if (viewFilter == 'overdue') {
+          if (!t.isOverdue) return false;
         } else {
           if (t.isCompleted || t.status == 'cancelled') return false;
           if (viewFilter == 'today') {
@@ -129,30 +245,69 @@ class TasksModuleState {
             if (!_isInInbox(t)) return false;
           } else if (viewFilter == 'upcoming') {
             if (!_isInUpcoming(t, today)) return false;
+          } else if (viewFilter == 'active') {
+            // Non-archived and neither completed nor cancelled.
           } else if (viewFilter == 'my_day') {
             if (!t.isMyDay) return false;
           }
         }
       }
 
+      if (statusFilter != null && t.status != statusFilter) {
+        return false;
+      }
+
       if (priorityFilter != null && t.priority != priorityFilter) {
         return false;
+      }
+
+      if (dueDateFilter != null) {
+        switch (dueDateFilter) {
+          case 'overdue':
+            if (!t.isOverdue) return false;
+            break;
+          case 'today':
+            if (t.dueDate == null || t.dueDate != today) return false;
+            break;
+          case 'upcoming':
+            if (t.dueDate == null || !t.dueDate!.isAfter(today)) return false;
+            break;
+          case 'no_due_date':
+            if (t.dueDate != null) return false;
+            break;
+        }
       }
 
       if (selectedProjectId != null && t.projectId != selectedProjectId) {
         return false;
       }
 
+      if (sectionFilter != null &&
+          sectionTaskIds != null &&
+          !sectionTaskIds.contains(t.id)) {
+        return false;
+      }
+
+      if (!_matchesTagFilters(t)) {
+        return false;
+      }
+
       if (query.isNotEmpty) {
         final labelsStr = t.labels.join(' ').toLowerCase();
+        final projectTitle =
+            t.projectId != null ? (projectTitlesById[t.projectId!] ?? '') : '';
         final match = t.title.toLowerCase().contains(query) ||
             (t.description ?? '').toLowerCase().contains(query) ||
-            labelsStr.contains(query);
+            labelsStr.contains(query) ||
+            projectTitle.contains(query);
         if (!match) return false;
       }
 
       return true;
     }).toList();
+
+    const priorityOrder = {'urgent': 0, 'high': 1, 'medium': 2, 'low': 3};
+    final farFuture = CalendarDate(year: 2099, month: 12, day: 31);
 
     list.sort((a, b) {
       final aPin = a.isPinned ? 0 : 1;
@@ -160,18 +315,33 @@ class TasksModuleState {
       if (aPin != bPin) return aPin.compareTo(bPin);
 
       if (sortBy == 'priority') {
-        const priorityOrder = {'urgent': 0, 'high': 1, 'medium': 2, 'low': 3};
         final pA = priorityOrder[a.priority] ?? 2;
         final pB = priorityOrder[b.priority] ?? 2;
-        return pA.compareTo(pB);
+        if (pA != pB) return pA.compareTo(pB);
+        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+      } else if (sortBy == 'created') {
+        final createdCmp = b.createdAt.compareTo(a.createdAt);
+        if (createdCmp != 0) return createdCmp;
+        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       } else if (sortBy == 'alpha') {
         return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       }
-      final aDue =
-          a.dueDate ?? a.scheduledDate ?? CalendarDate(year: 2099, month: 12, day: 31);
-      final bDue =
-          b.dueDate ?? b.scheduledDate ?? CalendarDate(year: 2099, month: 12, day: 31);
-      return aDue.compareTo(bDue);
+
+      final aDue = a.dueDate ?? farFuture;
+      final bDue = b.dueDate ?? farFuture;
+      final dueCmp = aDue.compareTo(bDue);
+      if (dueCmp != 0) return dueCmp;
+
+      final aSched = a.scheduledDate ?? farFuture;
+      final bSched = b.scheduledDate ?? farFuture;
+      final schedCmp = aSched.compareTo(bSched);
+      if (schedCmp != 0) return schedCmp;
+
+      final pA = priorityOrder[a.priority] ?? 2;
+      final pB = priorityOrder[b.priority] ?? 2;
+      if (pA != pB) return pA.compareTo(pB);
+
+      return a.title.toLowerCase().compareTo(b.title.toLowerCase());
     });
 
     return list;
@@ -214,6 +384,11 @@ class TasksModuleState {
       return _isInUpcoming(t, today);
     }).length;
   }
+
+  int get activeCount => pendingTasks.length;
+
+  int get overdueCount =>
+      tasks.where((t) => !t.isArchived && t.isOverdue).length;
 
   int get allCount => tasks.where((t) => !t.isArchived).length;
 

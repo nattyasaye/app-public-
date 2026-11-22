@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../application/projects/projects_controller.dart';
+import '../../application/projects/projects_state.dart';
 import '../../application/tasks/tasks_controller.dart';
 import '../../application/tasks/tasks_state.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
+import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/task_models.dart';
 import '../app_state.dart';
 import '../widgets/shared_ui_widgets.dart';
@@ -41,6 +43,7 @@ class _TasksViewState extends State<TasksView>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   late TextEditingController _searchController;
+  bool _showFilters = false;
 
   @override
   void initState() {
@@ -74,6 +77,13 @@ class _TasksViewState extends State<TasksView>
     ('high', 'High'),
     ('medium', 'Medium'),
     ('low', 'Low'),
+  ];
+
+  static const List<(String, String)> _dueDateFilterOptions = [
+    ('overdue', 'Overdue'),
+    ('today', 'Due Today'),
+    ('upcoming', 'Upcoming Due'),
+    ('no_due_date', 'No Due Date'),
   ];
 
   String _statusLabel(String status) {
@@ -279,6 +289,11 @@ class _TasksViewState extends State<TasksView>
             : null);
     String? titleError;
     final projects = controller.state.projects;
+    var modalLabels = TasksModuleState.normalizeLabels(
+      existingTask?.labels ?? controller.state.tagFilters,
+    ).toList();
+    final modalTagAddCtrl = TextEditingController();
+    String? modalTagError;
     var modalSubtasks = List<TaskSubtask>.from(existingTask?.subtasks ?? const []);
     final modalSubtaskAddCtrl = TextEditingController();
     final modalSubtaskEditCtrl = TextEditingController();
@@ -561,6 +576,153 @@ class _TasksViewState extends State<TasksView>
                         ),
                       ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellCard(
+                      padding: const EdgeInsets.all(
+                        SharedDesignTokens.spacingCompact,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Tags / Labels',
+                                style: Theme.of(modalContext)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: semantic.textPrimary,
+                                    ),
+                              ),
+                              TextButton(
+                                onPressed: () =>
+                                    _showManageTagsDialog(controller),
+                                child: const Text('Manage tags'),
+                              ),
+                            ],
+                          ),
+                          if (modalLabels.isNotEmpty) ...[
+                            const SizedBox(height: SharedDesignTokens.spacingXs),
+                            Wrap(
+                              spacing: SharedDesignTokens.spacingXs,
+                              runSpacing: SharedDesignTokens.spacingXs,
+                              children: [
+                                for (final lbl in modalLabels)
+                                  InputChip(
+                                    label: Text('@$lbl'),
+                                    onDeleted: () => setModalState(() {
+                                      modalLabels = modalLabels
+                                          .where(
+                                            (l) =>
+                                                l.toLowerCase() !=
+                                                lbl.toLowerCase(),
+                                          )
+                                          .toList();
+                                    }),
+                                  ),
+                              ],
+                            ),
+                          ],
+                          const SizedBox(height: SharedDesignTokens.spacingSm),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: modalTagAddCtrl,
+                                  decoration: InputDecoration(
+                                    hintText: 'Add a tag (e.g. work)...',
+                                    errorText: modalTagError,
+                                    isDense: true,
+                                  ),
+                                  onChanged: (_) {
+                                    if (modalTagError != null) {
+                                      setModalState(() => modalTagError = null);
+                                    }
+                                  },
+                                  onSubmitted: (raw) {
+                                    final normalized =
+                                        TasksModuleState.normalizeLabel(raw);
+                                    if (normalized.isEmpty) {
+                                      setModalState(
+                                        () => modalTagError =
+                                            'Tag name is required',
+                                      );
+                                      return;
+                                    }
+                                    setModalState(() {
+                                      modalLabels =
+                                          TasksModuleState.normalizeLabels([
+                                        ...modalLabels,
+                                        normalized,
+                                      ]).toList();
+                                      modalTagAddCtrl.clear();
+                                      modalTagError = null;
+                                    });
+                                  },
+                                ),
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.add),
+                                tooltip: 'Add tag',
+                                onPressed: () {
+                                  final normalized =
+                                      TasksModuleState.normalizeLabel(
+                                    modalTagAddCtrl.text,
+                                  );
+                                  if (normalized.isEmpty) {
+                                    setModalState(
+                                      () => modalTagError =
+                                          'Tag name is required',
+                                    );
+                                    return;
+                                  }
+                                  setModalState(() {
+                                    modalLabels =
+                                        TasksModuleState.normalizeLabels([
+                                      ...modalLabels,
+                                      normalized,
+                                    ]).toList();
+                                    modalTagAddCtrl.clear();
+                                    modalTagError = null;
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          if (controller.state.availableTags.any(
+                            (tag) => !modalLabels.any(
+                              (cur) => cur.toLowerCase() == tag.toLowerCase(),
+                            ),
+                          )) ...[
+                            const SizedBox(height: SharedDesignTokens.spacingXs),
+                            Wrap(
+                              spacing: SharedDesignTokens.spacingXs,
+                              runSpacing: SharedDesignTokens.spacingXs,
+                              children: [
+                                for (final tag in controller.state.availableTags)
+                                  if (!modalLabels.any(
+                                    (cur) =>
+                                        cur.toLowerCase() == tag.toLowerCase(),
+                                  ))
+                                    ActionChip(
+                                      label: Text('+ @$tag'),
+                                      onPressed: () => setModalState(() {
+                                        modalLabels =
+                                            TasksModuleState.normalizeLabels([
+                                          ...modalLabels,
+                                          tag,
+                                        ]).toList();
+                                      }),
+                                    ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
                     _SubtasksChecklistSection(
                       subtasks: modalSubtasks,
                       progress: modalSubtasks.isEmpty
@@ -706,6 +868,7 @@ class _TasksViewState extends State<TasksView>
                             milestoneId: resolvedMilestoneId,
                             clearMilestone: resolvedMilestoneId == null,
                             subtasks: modalSubtasks,
+                            labels: modalLabels,
                           );
                           if (projectsCtrl != null &&
                               existingTask.projectId != null &&
@@ -733,6 +896,7 @@ class _TasksViewState extends State<TasksView>
                             projectId: selectedProjectId,
                             milestoneId: resolvedMilestoneId,
                             subtasks: modalSubtasks,
+                            labels: modalLabels,
                             isMyDay: controller.state.viewFilter == 'my_day',
                           );
                         }
@@ -980,6 +1144,12 @@ class _TasksViewState extends State<TasksView>
                       ),
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    _TaskDetailsTagsPanel(
+                      task: task,
+                      controller: controller,
+                      onOpenManageTags: () => _showManageTagsDialog(controller),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
                     _TaskDetailsSubtasksPanel(
                       task: task,
                       controller: controller,
@@ -1090,19 +1260,472 @@ class _TasksViewState extends State<TasksView>
     );
   }
 
+  void _showManageTagsDialog(TasksController controller) {
+    final newTagCtrl = TextEditingController();
+    final editTagCtrl = TextEditingController();
+    String? createError;
+    String? editingTag;
+    String? editError;
+
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (dialogContext, setDialogState) => AnimatedBuilder(
+            animation: controller,
+            builder: (_, __) {
+              final semantic = dialogContext.daywellColors;
+              final allTags = controller.state.availableTags;
+              final allTasks = controller.state.tasks;
+
+              return AlertDialog(
+                title: const Text('Manage Tags'),
+                content: SizedBox(
+                  width: 360,
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                controller: newTagCtrl,
+                                decoration: InputDecoration(
+                                  hintText: 'Create new tag...',
+                                  errorText: createError,
+                                  isDense: true,
+                                ),
+                                onChanged: (_) {
+                                  if (createError != null) {
+                                    setDialogState(() => createError = null);
+                                  }
+                                },
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.add),
+                              tooltip: 'Create Tag',
+                              onPressed: () {
+                                final normalized =
+                                    TasksModuleState.normalizeLabel(
+                                  newTagCtrl.text,
+                                );
+                                if (normalized.isEmpty) {
+                                  setDialogState(
+                                    () => createError = 'Tag name is required',
+                                  );
+                                  return;
+                                }
+                                final ok = controller.createTag(normalized);
+                                if (ok) {
+                                  newTagCtrl.clear();
+                                  setDialogState(() => createError = null);
+                                } else {
+                                  setDialogState(
+                                    () => createError =
+                                        controller.state.errorMessage,
+                                  );
+                                }
+                              },
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: SharedDesignTokens.spacingMd),
+                        if (allTags.isEmpty)
+                          Text(
+                            'No tags created yet.',
+                            style: Theme.of(dialogContext)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  color: semantic.textMuted,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                          )
+                        else
+                          for (final lbl in allTags) ...[
+                            Container(
+                              margin: const EdgeInsets.only(
+                                bottom: SharedDesignTokens.spacingXs,
+                              ),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: SharedDesignTokens.spacingSm,
+                                vertical: SharedDesignTokens.spacingXs,
+                              ),
+                              decoration: BoxDecoration(
+                                color: semantic.surfaceSubtle,
+                                borderRadius: BorderRadius.circular(
+                                  SharedDesignTokens.radiusSm,
+                                ),
+                                border: Border.all(color: semantic.border),
+                              ),
+                              child: editingTag == lbl
+                                  ? Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Expanded(
+                                              child: TextField(
+                                                controller: editTagCtrl,
+                                                autofocus: true,
+                                                decoration:
+                                                    const InputDecoration(
+                                                  isDense: true,
+                                                  hintText: 'Rename tag...',
+                                                ),
+                                                onChanged: (_) {
+                                                  if (editError != null) {
+                                                    setDialogState(
+                                                      () => editError = null,
+                                                    );
+                                                  }
+                                                },
+                                              ),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.check,
+                                                  size: 18),
+                                              tooltip: 'Save tag name',
+                                              onPressed: () async {
+                                                final nextName =
+                                                    TasksModuleState
+                                                        .normalizeLabel(
+                                                  editTagCtrl.text,
+                                                );
+                                                if (nextName.isEmpty) {
+                                                  setDialogState(
+                                                    () => editError =
+                                                        'Tag name is required',
+                                                  );
+                                                  return;
+                                                }
+                                                final prevTasks =
+                                                    List<TaskEntity>.from(
+                                                        controller.state.tasks);
+                                                final prevCustom =
+                                                    List<String>.from(controller
+                                                        .state.customTags);
+                                                final prevFilters =
+                                                    Set<String>.from(controller
+                                                        .state.tagFilters);
+                                                final ok =
+                                                    await controller.renameTag(
+                                                  lbl,
+                                                  nextName,
+                                                );
+                                                if (!ok || !dialogContext.mounted) {
+                                                  return;
+                                                }
+                                                setDialogState(() {
+                                                  editingTag = null;
+                                                  editTagCtrl.clear();
+                                                  editError = null;
+                                                });
+                                                if (mounted) {
+                                                  ScaffoldMessenger.of(context)
+                                                      .clearSnackBars();
+                                                  ScaffoldMessenger.of(context)
+                                                      .showSnackBar(
+                                                    SnackBar(
+                                                      content: Text(
+                                                        'Renamed "@$lbl" to "@$nextName"',
+                                                      ),
+                                                      action: SnackBarAction(
+                                                        label: 'Undo',
+                                                        onPressed: () =>
+                                                            unawaited(
+                                                          controller
+                                                              .restoreTasksLabelsSnapshot(
+                                                            prevTasks,
+                                                            previousCustomTags:
+                                                                prevCustom,
+                                                            previousTagFilters:
+                                                                prevFilters,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                }
+                                              },
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.close,
+                                                  size: 18),
+                                              tooltip: 'Cancel tag rename',
+                                              onPressed: () {
+                                                setDialogState(() {
+                                                  editingTag = null;
+                                                  editTagCtrl.clear();
+                                                  editError = null;
+                                                });
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                        if (editError != null)
+                                          Text(
+                                            editError!,
+                                            style: DaywellTypography.caption(
+                                              color: semantic.error,
+                                            ),
+                                          ),
+                                      ],
+                                    )
+                                  : Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            '@$lbl (${allTasks.where((t) => t.labels.any((x) => TasksModuleState.normalizeLabel(x).toLowerCase() == lbl.toLowerCase())).length})',
+                                            style: Theme.of(dialogContext)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w600,
+                                                  color: semantic.textPrimary,
+                                                ),
+                                          ),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined,
+                                              size: 18),
+                                          tooltip: 'Rename tag $lbl',
+                                          onPressed: () {
+                                            setDialogState(() {
+                                              editingTag = lbl;
+                                              editTagCtrl.text = lbl;
+                                              editError = null;
+                                            });
+                                          },
+                                        ),
+                                        IconButton(
+                                          icon: Icon(
+                                            Icons.delete_outline,
+                                            size: 18,
+                                            color: semantic.error,
+                                          ),
+                                          tooltip: 'Delete tag $lbl',
+                                          onPressed: () async {
+                                            final prevTasks =
+                                                List<TaskEntity>.from(
+                                                    controller.state.tasks);
+                                            final prevCustom =
+                                                List<String>.from(
+                                                    controller.state.customTags);
+                                            final prevFilters =
+                                                Set<String>.from(
+                                                    controller.state.tagFilters);
+                                            await controller.deleteTag(lbl);
+                                            if (!mounted) return;
+                                            ScaffoldMessenger.of(context)
+                                                .clearSnackBars();
+                                            ScaffoldMessenger.of(context)
+                                                .showSnackBar(
+                                              SnackBar(
+                                                content: Text(
+                                                  'Removed tag "@$lbl"',
+                                                ),
+                                                action: SnackBarAction(
+                                                  label: 'Undo',
+                                                  onPressed: () => unawaited(
+                                                    controller
+                                                        .restoreTasksLabelsSnapshot(
+                                                      prevTasks,
+                                                      previousCustomTags:
+                                                          prevCustom,
+                                                      previousTagFilters:
+                                                          prevFilters,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ],
+                                    ),
+                            ),
+                          ],
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Done'),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _buildFilterControls(
+    BuildContext context,
+    TasksController controller,
+    TasksModuleState moduleState,
+    ProjectsModuleState? projectsState,
+  ) {
+    final activeProjects = moduleState.projects
+        .where((p) => !p.isArchived)
+        .toList(growable: false);
+    final selectedProjectId = moduleState.selectedProjectId;
+    final List<ProjectTrackingRecordEntity> sections =
+        (selectedProjectId != null && projectsState != null)
+            ? projectsState.sectionsForProject(selectedProjectId)
+            : const [];
+    final availableTags = moduleState.availableTags;
+
+    return [
+      SizedBox(
+        width: 156,
+        child: DaywellDropdownField<String?>(
+          label: 'Status',
+          value: moduleState.statusFilter,
+          items: [
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Text('All Statuses'),
+            ),
+            for (final s in _statusOptions)
+              DropdownMenuItem<String?>(
+                value: s.$1,
+                child: Text(s.$2),
+              ),
+          ],
+          onChanged: controller.setStatusFilter,
+        ),
+      ),
+      SizedBox(
+        width: 148,
+        child: DaywellDropdownField<String?>(
+          label: 'Priority',
+          value: moduleState.priorityFilter,
+          items: [
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Text('All Priorities'),
+            ),
+            for (final p in _priorityOptions)
+              DropdownMenuItem<String?>(
+                value: p.$1,
+                child: Text(p.$2),
+              ),
+          ],
+          onChanged: controller.setPriorityFilter,
+        ),
+      ),
+      SizedBox(
+        width: 162,
+        child: DaywellDropdownField<String?>(
+          label: 'Due Date',
+          value: moduleState.dueDateFilter,
+          items: [
+            const DropdownMenuItem<String?>(
+              value: null,
+              child: Text('Any Due Date'),
+            ),
+            for (final d in _dueDateFilterOptions)
+              DropdownMenuItem<String?>(
+                value: d.$1,
+                child: Text(d.$2),
+              ),
+          ],
+          onChanged: controller.setDueDateFilter,
+        ),
+      ),
+      if (activeProjects.isNotEmpty)
+        SizedBox(
+          width: 170,
+          child: DaywellDropdownField<String?>(
+            label: 'Project',
+            value: activeProjects.any((p) => p.id == selectedProjectId)
+                ? selectedProjectId
+                : null,
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('All Projects'),
+              ),
+              for (final p in activeProjects)
+                DropdownMenuItem<String?>(
+                  value: p.id,
+                  child: Text(p.title),
+                ),
+            ],
+            onChanged: controller.selectProject,
+          ),
+        ),
+      if (selectedProjectId != null && projectsState != null)
+        SizedBox(
+          width: 170,
+          child: DaywellDropdownField<String?>(
+            label: 'Section',
+            value: (moduleState.sectionFilter == '__unsectioned__' ||
+                    sections.any((s) => s.id == moduleState.sectionFilter))
+                ? moduleState.sectionFilter
+                : null,
+            items: [
+              const DropdownMenuItem<String?>(
+                value: null,
+                child: Text('All Sections'),
+              ),
+              for (final sec in sections)
+                DropdownMenuItem<String?>(
+                  value: sec.id,
+                  child: Text(sec.title),
+                ),
+              const DropdownMenuItem<String?>(
+                value: '__unsectioned__',
+                child: Text('Unsectioned'),
+              ),
+            ],
+            onChanged: controller.setSectionFilter,
+          ),
+        ),
+      for (final tag in availableTags)
+        FilterChip(
+          label: Text('@$tag'),
+          selected: moduleState.tagFilters
+              .any((selected) => selected.toLowerCase() == tag.toLowerCase()),
+          onSelected: (_) => controller.toggleTagFilter(tag),
+        ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.effectiveController;
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primary = isDark
-        ? SharedDesignTokens.primaryDarkMode
-        : SharedDesignTokens.primaryEmerald;
+    final projectsCtrl = widget.effectiveProjectsController;
+    final colorScheme = Theme.of(context).colorScheme;
+    final Listenable listenable = projectsCtrl != null
+        ? Listenable.merge([controller, projectsCtrl])
+        : controller;
 
     return AnimatedBuilder(
-      animation: controller,
+      animation: listenable,
       builder: (context, _) {
         final moduleState = controller.state;
-        final tasks = moduleState.filteredTasks;
+        final projectsState = projectsCtrl?.state;
+        Set<String>? sectionTaskIds;
+        if (moduleState.selectedProjectId != null &&
+            moduleState.sectionFilter != null &&
+            projectsState != null) {
+          sectionTaskIds = projectsState.taskIdsForSection(
+            moduleState.selectedProjectId!,
+            moduleState.sectionFilter!,
+            allTasks: moduleState.tasks,
+          );
+        }
+        final tasks = moduleState.filterTasks(sectionTaskIds: sectionTaskIds);
 
         return Scaffold(
           appBar: AppBar(
@@ -1136,12 +1759,16 @@ class _TasksViewState extends State<TasksView>
                     ),
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.sort_rounded),
+                      tooltip: 'Sort tasks',
                       onSelected: controller.setSortBy,
                       itemBuilder: (_) => const [
                         PopupMenuItem(
                             value: 'due', child: Text('Sort by Due Date')),
                         PopupMenuItem(
                             value: 'priority', child: Text('Sort by Priority')),
+                        PopupMenuItem(
+                            value: 'created',
+                            child: Text('Sort by Creation Date')),
                         PopupMenuItem(
                             value: 'alpha', child: Text('Sort Alphabetically')),
                       ],
@@ -1158,7 +1785,6 @@ class _TasksViewState extends State<TasksView>
           floatingActionButton: FloatingActionButton.extended(
             onPressed: _tabController.index == 1
                 ? () {
-                    final projectsCtrl = widget.effectiveProjectsController;
                     if (projectsCtrl != null) {
                       unawaited(
                         ProjectFormSheet.show(
@@ -1172,8 +1798,8 @@ class _TasksViewState extends State<TasksView>
                     }
                   }
                 : _showQuickAddModal,
-            backgroundColor: primary,
-            foregroundColor: Theme.of(context).colorScheme.onPrimary,
+            backgroundColor: colorScheme.primary,
+            foregroundColor: colorScheme.onPrimary,
             icon: const Icon(Icons.add),
             label: Text(_tabController.index == 1 ? 'New Project' : 'Add Task'),
           ),
@@ -1182,30 +1808,57 @@ class _TasksViewState extends State<TasksView>
             children: [
               Column(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Search tasks or @labels...',
-                        prefixIcon: const Icon(Icons.search),
-                        suffixIcon: moduleState.searchQuery.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear),
-                                onPressed: () {
-                                  _searchController.clear();
-                                  controller.setSearchQuery('');
-                                },
-                              )
-                            : null,
-                        filled: true,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(14),
-                          borderSide: BorderSide.none,
+                  DaywellSearchFilterBar(
+                    searchController: _searchController,
+                    searchHintText:
+                        'Search tasks by title, description, or @tags...',
+                    onSearchChanged: controller.setSearchQuery,
+                    onSearchCleared: () {
+                      _searchController.clear();
+                      controller.setSearchQuery('');
+                    },
+                    trailingAction: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: Icon(
+                            _showFilters || moduleState.activeFilterCount > 0
+                                ? Icons.filter_alt
+                                : Icons.filter_alt_outlined,
+                          ),
+                          tooltip: 'Toggle Filters',
+                          onPressed: () =>
+                              setState(() => _showFilters = !_showFilters),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                      ),
-                      onChanged: controller.setSearchQuery,
+                        IconButton(
+                          icon: const Icon(Icons.label_outline),
+                          tooltip: 'Manage Tags',
+                          onPressed: () => _showManageTagsDialog(controller),
+                        ),
+                      ],
+                    ),
+                    filterControls: _showFilters
+                        ? _buildFilterControls(
+                            context,
+                            controller,
+                            moduleState,
+                            projectsState,
+                          )
+                        : const [],
+                    hasActiveFilters: moduleState.hasActiveFilters,
+                    activeSummary: moduleState.hasActiveFilters
+                        ? '${tasks.length} matching tasks'
+                        : null,
+                    onClearFilters: () {
+                      _searchController.clear();
+                      controller.clearFilters(resetView: false);
+                    },
+                    showBottomDivider: false,
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingSm,
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
                     ),
                   ),
                   SizedBox(
@@ -1218,6 +1871,8 @@ class _TasksViewState extends State<TasksView>
                           ('today', 'Today'),
                           ('inbox', 'Inbox'),
                           ('upcoming', 'Upcoming'),
+                          ('active', 'Active'),
+                          ('overdue', 'Overdue'),
                           ('all', 'All'),
                           ('my_day', 'My Day'),
                           ('completed', 'Completed'),
@@ -1240,17 +1895,24 @@ class _TasksViewState extends State<TasksView>
                     child: tasks.isEmpty
                         ? DaywellEmptyState(
                             icon: Icons.check_circle_outline,
-                            message: moduleState.searchQuery.isNotEmpty
-                                ? 'No tasks match "${moduleState.searchQuery}"'
+                            message: moduleState.hasActiveFilters
+                                ? 'No tasks match active filters'
                                 : moduleState.viewFilter == 'archived'
                                     ? 'No archived tasks'
                                     : 'No tasks in ${moduleState.viewFilter}',
-                            actionLabel: moduleState.viewFilter == 'archived'
-                                ? null
-                                : 'Add Task',
-                            onActionPressed: moduleState.viewFilter == 'archived'
-                                ? null
-                                : () => _showQuickAddModal(),
+                            actionLabel: moduleState.hasActiveFilters
+                                ? 'Clear filters'
+                                : moduleState.viewFilter == 'archived'
+                                    ? null
+                                    : 'Add Task',
+                            onActionPressed: moduleState.hasActiveFilters
+                                ? () {
+                                    _searchController.clear();
+                                    controller.clearFilters(resetView: false);
+                                  }
+                                : moduleState.viewFilter == 'archived'
+                                    ? null
+                                    : () => _showQuickAddModal(),
                           )
                         : ListView.builder(
                             padding: const EdgeInsets.all(12),
@@ -1262,7 +1924,7 @@ class _TasksViewState extends State<TasksView>
                 ],
               ),
               ProjectsWorkspaceTab(
-                projectsController: widget.effectiveProjectsController,
+                projectsController: projectsCtrl,
                 tasksController: controller,
               ),
             ],
@@ -1788,6 +2450,164 @@ class _SubtasksChecklistSection extends StatelessWidget {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TaskDetailsTagsPanel extends StatefulWidget {
+  final TaskEntity task;
+  final TasksController controller;
+  final VoidCallback onOpenManageTags;
+
+  const _TaskDetailsTagsPanel({
+    required this.task,
+    required this.controller,
+    required this.onOpenManageTags,
+  });
+
+  @override
+  State<_TaskDetailsTagsPanel> createState() => _TaskDetailsTagsPanelState();
+}
+
+class _TaskDetailsTagsPanelState extends State<_TaskDetailsTagsPanel> {
+  final TextEditingController _tagCtrl = TextEditingController();
+  String? _tagError;
+
+  @override
+  void dispose() {
+    _tagCtrl.dispose();
+    super.dispose();
+  }
+
+  void _addTag([String? rawOverride]) {
+    final normalized =
+        TasksModuleState.normalizeLabel(rawOverride ?? _tagCtrl.text);
+    if (normalized.isEmpty) {
+      setState(() => _tagError = 'Tag name is required');
+      return;
+    }
+    final nextLabels = TasksModuleState.normalizeLabels([
+      ...widget.task.labels,
+      normalized,
+    ]);
+    unawaited(widget.controller.updateLabels(widget.task.id, nextLabels));
+    if (rawOverride == null) {
+      _tagCtrl.clear();
+    }
+    setState(() => _tagError = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final assigned = widget.task.labels;
+    final suggestions = widget.controller.state.availableTags
+        .where(
+          (tag) => !assigned.any(
+            (cur) =>
+                TasksModuleState.normalizeLabel(cur).toLowerCase() ==
+                tag.toLowerCase(),
+          ),
+        )
+        .toList(growable: false);
+
+    return DaywellCard(
+      padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Tags',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: semantic.textPrimary,
+                    ),
+              ),
+              TextButton(
+                onPressed: widget.onOpenManageTags,
+                child: const Text('Manage tags'),
+              ),
+            ],
+          ),
+          if (assigned.isNotEmpty) ...[
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            Wrap(
+              spacing: SharedDesignTokens.spacingXs,
+              runSpacing: SharedDesignTokens.spacingXs,
+              children: [
+                for (final lbl in assigned)
+                  InputChip(
+                    label: Text('@$lbl'),
+                    onDeleted: () {
+                      final next = assigned
+                          .where(
+                            (x) =>
+                                TasksModuleState.normalizeLabel(x)
+                                    .toLowerCase() !=
+                                TasksModuleState.normalizeLabel(lbl)
+                                    .toLowerCase(),
+                          )
+                          .toList(growable: false);
+                      unawaited(
+                        widget.controller.updateLabels(widget.task.id, next),
+                      );
+                    },
+                  ),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            Text(
+              'No tags assigned yet.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: semantic.textMuted,
+                    fontStyle: FontStyle.italic,
+                  ),
+            ),
+          ],
+          const SizedBox(height: SharedDesignTokens.spacingSm),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _tagCtrl,
+                  decoration: InputDecoration(
+                    hintText: 'Add tag...',
+                    errorText: _tagError,
+                    isDense: true,
+                  ),
+                  onChanged: (_) {
+                    if (_tagError != null) setState(() => _tagError = null);
+                  },
+                  onSubmitted: (_) => _addTag(),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add),
+                tooltip: 'Add tag',
+                onPressed: () => _addTag(),
+              ),
+            ],
+          ),
+          if (suggestions.isNotEmpty) ...[
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            Wrap(
+              spacing: SharedDesignTokens.spacingXs,
+              runSpacing: SharedDesignTokens.spacingXs,
+              children: [
+                for (final tag in suggestions)
+                  ActionChip(
+                    label: Text('+ @$tag'),
+                    onPressed: () => _addTag(tag),
+                  ),
+              ],
+            ),
+          ],
         ],
       ),
     );

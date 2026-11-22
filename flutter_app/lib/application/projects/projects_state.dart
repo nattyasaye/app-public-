@@ -63,6 +63,71 @@ class ProjectsModuleState {
     return list.where((r) => r.blockId == blockId).toList(growable: false);
   }
 
+  List<ProjectTrackingRecordEntity> sectionsForProject(String projectId) {
+    final blocks = blocksForProject(projectId, includeArchived: false)
+        .where((b) => b.blockType == ProjectBlockType.groupedList)
+        .toList(growable: false);
+    if (blocks.isEmpty) return const [];
+    final blockIds = blocks.map((b) => b.id).toSet();
+    final sections = recordsForProject(projectId)
+        .where(
+          (r) =>
+              r.recordType == ProjectRecordType.group &&
+              blockIds.contains(r.blockId),
+        )
+        .toList(growable: false);
+    sections.sort((a, b) => a.sortOrder.compareTo(b.sortOrder));
+    return List<ProjectTrackingRecordEntity>.unmodifiable(sections);
+  }
+
+  Set<String> taskIdsForSection(
+    String projectId,
+    String sectionIdOrUnsectioned, {
+    Iterable<TaskEntity> allTasks = const [],
+  }) {
+    final blocks = blocksForProject(projectId, includeArchived: false)
+        .where((b) => b.blockType == ProjectBlockType.groupedList)
+        .toList(growable: false);
+    final blockIds = blocks.map((b) => b.id).toSet();
+    final records = recordsForProject(projectId);
+
+    if (sectionIdOrUnsectioned == '__unsectioned__') {
+      final validGroupIds = records
+          .where(
+            (r) =>
+                r.recordType == ProjectRecordType.group &&
+                blockIds.contains(r.blockId),
+          )
+          .map((g) => g.id)
+          .toSet();
+      final sectionedIds = <String>{};
+      for (final rec in records) {
+        if (rec.recordType == ProjectRecordType.groupedItem &&
+            blockIds.contains(rec.blockId) &&
+            rec.linkedTaskId != null &&
+            rec.parentRecordId != null &&
+            validGroupIds.contains(rec.parentRecordId)) {
+          sectionedIds.add(rec.linkedTaskId!);
+        }
+      }
+      return allTasks
+          .where((t) => t.projectId == projectId && !sectionedIds.contains(t.id))
+          .map((t) => t.id)
+          .toSet();
+    }
+
+    final result = <String>{};
+    for (final rec in records) {
+      if (rec.recordType == ProjectRecordType.groupedItem &&
+          blockIds.contains(rec.blockId) &&
+          rec.parentRecordId == sectionIdOrUnsectioned &&
+          rec.linkedTaskId != null) {
+        result.add(rec.linkedTaskId!);
+      }
+    }
+    return result;
+  }
+
   ProjectProgressSummary? summaryForProject(String projectId) {
     return summariesByProject[projectId];
   }
