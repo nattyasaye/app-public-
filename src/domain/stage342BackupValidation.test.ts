@@ -195,22 +195,28 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
     });
   });
 
-  it('1b. SharedStateBridge validates separated snapshotFormatVersion (1..2, omitted->1) and optional databaseSchemaVersion (1..9) fail-closed before mutating localStorage', () => {
+  it('1b. SharedStateBridge validates separated snapshotFormatVersion (1..2, omitted->1) and optional databaseSchemaVersion (1..10) fail-closed before mutating localStorage', () => {
     withMockBrowserStorage((store) => {
       for (const fmtVersion of [1, 2]) {
-        const res = SharedStateBridge.importFromAndroidJson(
-          JSON.stringify({
-            schemaVersion: 5,
-            snapshotFormatVersion: fmtVersion,
-            databaseSchemaVersion: 9,
-            financeSchemaVersion: 7,
-            accounts: [],
-            transactions: [],
-          })
-        );
-        assert.strictEqual(res.success, true, `snapshotFormatVersion ${fmtVersion} rejected: ${res.error}`);
-        assert.strictEqual(res.state?.snapshotFormatVersion, fmtVersion);
-        assert.strictEqual(res.state?.databaseSchemaVersion, 9);
+        for (const dbVersion of [9, 10]) {
+          const res = SharedStateBridge.importFromAndroidJson(
+            JSON.stringify({
+              schemaVersion: 5,
+              snapshotFormatVersion: fmtVersion,
+              databaseSchemaVersion: dbVersion,
+              financeSchemaVersion: 7,
+              accounts: [],
+              transactions: [],
+            })
+          );
+          assert.strictEqual(
+            res.success,
+            true,
+            `snapshotFormatVersion ${fmtVersion} dbVersion ${dbVersion} rejected: ${res.error}`
+          );
+          assert.strictEqual(res.state?.snapshotFormatVersion, fmtVersion);
+          assert.strictEqual(res.state?.databaseSchemaVersion, dbVersion);
+        }
       }
 
       const rejectedMetadataCases: Array<{
@@ -249,18 +255,13 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
           expectedKind: 'invalid_snapshot_version',
         },
         {
-          name: 'unserialized v10 databaseSchemaVersion 10 (format-2)',
-          overrides: { snapshotFormatVersion: 2, databaseSchemaVersion: 10 },
-          expectedKind: 'unsupported_future_schema',
-        },
-        {
-          name: 'unserialized v10 databaseSchemaVersion 10 (format-1)',
-          overrides: { snapshotFormatVersion: 1, databaseSchemaVersion: 10 },
-          expectedKind: 'unsupported_future_schema',
-        },
-        {
-          name: 'future databaseSchemaVersion 11',
+          name: 'future databaseSchemaVersion 11 (format-2)',
           overrides: { snapshotFormatVersion: 2, databaseSchemaVersion: 11 },
+          expectedKind: 'unsupported_future_schema',
+        },
+        {
+          name: 'future databaseSchemaVersion 11 (format-1)',
+          overrides: { snapshotFormatVersion: 1, databaseSchemaVersion: 11 },
           expectedKind: 'unsupported_future_schema',
         },
         {

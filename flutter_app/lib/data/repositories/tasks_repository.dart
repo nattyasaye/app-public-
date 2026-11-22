@@ -11,35 +11,61 @@ export '../../domain/tasks/task_contracts.dart';
 
 /// Drift SQLite implementation of [ITasksRepository].
 ///
-/// Unifies Task, Project, and Milestone persistence into a single atomic
-/// relational persistence unit under Drift SQLite schema v9.
+/// Unifies Task, DailyPlanningEntry, Project, and Milestone persistence into a
+/// single atomic relational persistence unit under Drift SQLite schema v10.
 class DriftTasksRepository implements ITasksRepository {
   final AppDatabase _db;
 
   DriftTasksRepository(this._db);
 
-  static List<({String title, bool done})> _decodeSubtasks(String raw) {
+  static List<TaskSubtask> _decodeSubtasks(String raw, String taskId) {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! List) return const [];
-      return decoded
-          .whereType<Map>()
-          .map((m) => (
-                title: (m['title'] ?? '').toString(),
-                done: m['done'] == true,
-              ))
-          .toList(growable: false);
+      final result = <TaskSubtask>[];
+      for (var i = 0; i < decoded.length; i++) {
+        final item = decoded[i];
+        if (item is Map) {
+          result.add(
+            TaskSubtask.fromJson(
+              item.map((k, v) => MapEntry(k.toString(), v)),
+              fallbackId: '$taskId-sub-${i + 1}',
+            ),
+          );
+        }
+      }
+      return List<TaskSubtask>.unmodifiable(result);
     } catch (_) {
       return const [];
     }
   }
 
-  static String _encodeSubtasks(List<({String title, bool done})> subtasks) {
-    return jsonEncode(
-      subtasks
-          .map((s) => {'title': s.title, 'done': s.done})
-          .toList(growable: false),
-    );
+  static String _encodeSubtasks(List<TaskSubtask> subtasks, String taskId) {
+    return jsonEncode([
+      for (var i = 0; i < subtasks.length; i++)
+        {
+          'id': subtasks[i].id.trim().isNotEmpty
+              ? subtasks[i].id.trim()
+              : '$taskId-sub-${i + 1}',
+          'title': subtasks[i].title,
+          'done': subtasks[i].done,
+        }
+    ]);
+  }
+
+  static TaskRecurrenceConfig? _decodeRecurrenceConfig(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      return TaskRecurrenceConfig.tryFromJson(decoded);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static String? _encodeRecurrenceConfig(TaskRecurrenceConfig? config) {
+    if (config == null) return null;
+    return jsonEncode(config.toJson());
   }
 
   static List<String> _decodeLabels(String raw) {
@@ -59,18 +85,38 @@ class DriftTasksRepository implements ITasksRepository {
       description: r.description,
       status: r.status,
       priority: r.priority,
+      completedAt: r.completedAt,
       dueDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.dueDate),
       scheduledDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
         r.scheduledDate,
       ),
+      scheduledTime: r.scheduledTime,
       estimatedDurationMinutes: r.estimatedDurationMinutes,
       projectId: r.projectId,
       milestoneId: r.milestoneId,
-      subtasks: _decodeSubtasks(r.subtasksJson),
+      subtasks: _decodeSubtasks(r.subtasksJson, r.id),
       labels: _decodeLabels(r.labelsJson),
       isPinned: r.isPinned,
       isMyDay: r.isMyDay,
+      myDayDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.myDayDate),
       recurrenceRule: r.recurrenceRule,
+      recurrenceConfig: _decodeRecurrenceConfig(r.recurrenceConfigJson),
+      isArchived: r.isArchived,
+      sortOrder: r.sortOrder,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    );
+  }
+
+  DailyPlanningEntryEntity _mapRowToDailyPlanningEntity(
+    DailyPlanningEntry r,
+  ) {
+    return DailyPlanningEntryEntity(
+      id: r.id,
+      planDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.planDate) ??
+          CalendarDate.today(),
+      taskId: r.taskId,
+      action: r.action,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,
     );
@@ -127,6 +173,8 @@ class DriftTasksRepository implements ITasksRepository {
   Future<TaskEntity> createTask(TaskEntity task) async {
     final now = EthiopiaClock.nowUtc();
     final trimmedTitle = task.title.trim();
+    final effectiveCompletedAt =
+        task.completedAt ?? (task.isCompleted ? now : null);
     await _db.into(_db.tasks).insert(
           TasksCompanion.insert(
             id: task.id,
@@ -134,16 +182,23 @@ class DriftTasksRepository implements ITasksRepository {
             description: Value(task.description?.trim()),
             status: Value(task.status),
             priority: Value(task.priority),
+            completedAt: Value(effectiveCompletedAt),
             dueDate: Value(task.dueDate?.toIsoString()),
             scheduledDate: Value(task.scheduledDate?.toIsoString()),
+            scheduledTime: Value(task.scheduledTime),
             estimatedDurationMinutes: Value(task.estimatedDurationMinutes),
             projectId: Value(task.projectId),
             milestoneId: Value(task.milestoneId),
-            subtasksJson: Value(_encodeSubtasks(task.subtasks)),
+            subtasksJson: Value(_encodeSubtasks(task.subtasks, task.id)),
             labelsJson: Value(jsonEncode(task.labels)),
             isPinned: Value(task.isPinned),
             isMyDay: Value(task.isMyDay),
+            myDayDate: Value(task.myDayDate?.toIsoString()),
             recurrenceRule: Value(task.recurrenceRule),
+            recurrenceConfigJson:
+                Value(_encodeRecurrenceConfig(task.recurrenceConfig)),
+            isArchived: Value(task.isArchived),
+            sortOrder: Value(task.sortOrder),
             createdAt: task.createdAt,
             updatedAt: now,
           ),
@@ -151,6 +206,8 @@ class DriftTasksRepository implements ITasksRepository {
 
     return task.copyWith(
       title: trimmedTitle.isEmpty ? 'Untitled Task' : trimmedTitle,
+      completedAt: effectiveCompletedAt,
+      clearCompletedAt: effectiveCompletedAt == null,
       updatedAt: now,
     );
   }
@@ -159,38 +216,56 @@ class DriftTasksRepository implements ITasksRepository {
   Future<TaskEntity> updateTask(TaskEntity task) async {
     final now = EthiopiaClock.nowUtc();
     final trimmedTitle = task.title.trim();
+    final effectiveCompletedAt =
+        task.isCompleted ? (task.completedAt ?? now) : null;
     await (_db.update(_db.tasks)..where((tbl) => tbl.id.equals(task.id))).write(
       TasksCompanion(
         title: Value(trimmedTitle.isEmpty ? 'Untitled Task' : trimmedTitle),
         description: Value(task.description?.trim()),
         status: Value(task.status),
         priority: Value(task.priority),
+        completedAt: Value(effectiveCompletedAt),
         dueDate: Value(task.dueDate?.toIsoString()),
         scheduledDate: Value(task.scheduledDate?.toIsoString()),
+        scheduledTime: Value(task.scheduledTime),
         estimatedDurationMinutes: Value(task.estimatedDurationMinutes),
         projectId: Value(task.projectId),
         milestoneId: Value(task.milestoneId),
-        subtasksJson: Value(_encodeSubtasks(task.subtasks)),
+        subtasksJson: Value(_encodeSubtasks(task.subtasks, task.id)),
         labelsJson: Value(jsonEncode(task.labels)),
         isPinned: Value(task.isPinned),
         isMyDay: Value(task.isMyDay),
+        myDayDate: Value(task.myDayDate?.toIsoString()),
         recurrenceRule: Value(task.recurrenceRule),
+        recurrenceConfigJson:
+            Value(_encodeRecurrenceConfig(task.recurrenceConfig)),
+        isArchived: Value(task.isArchived),
+        sortOrder: Value(task.sortOrder),
         updatedAt: Value(now),
       ),
     );
 
     return task.copyWith(
       title: trimmedTitle.isEmpty ? 'Untitled Task' : trimmedTitle,
+      completedAt: effectiveCompletedAt,
+      clearCompletedAt: effectiveCompletedAt == null,
       updatedAt: now,
     );
   }
 
   @override
   Future<void> updateTaskStatus(String id, String newStatus) async {
+    final now = EthiopiaClock.nowUtc();
+    final existing = await (_db.select(_db.tasks)
+          ..where((tbl) => tbl.id.equals(id)))
+        .getSingleOrNull();
+    final nextCompletedAt =
+        newStatus == 'completed' ? (existing?.completedAt ?? now) : null;
     await (_db.update(_db.tasks)..where((tbl) => tbl.id.equals(id))).write(
       TasksCompanion(
         status: Value(newStatus),
-        updatedAt: Value(EthiopiaClock.nowUtc()),
+        completedAt: Value(nextCompletedAt),
+        updatedAt: Value(now),
       ),
     );
   }
@@ -221,7 +296,12 @@ class DriftTasksRepository implements ITasksRepository {
 
   @override
   Future<void> deleteTask(String id) async {
-    await (_db.delete(_db.tasks)..where((tbl) => tbl.id.equals(id))).go();
+    await _db.transaction(() async {
+      await (_db.delete(_db.dailyPlanningEntries)
+            ..where((tbl) => tbl.taskId.equals(id)))
+          .go();
+      await (_db.delete(_db.tasks)..where((tbl) => tbl.id.equals(id))).go();
+    });
   }
 
   @override
@@ -230,6 +310,94 @@ class DriftTasksRepository implements ITasksRepository {
           ..where((tbl) => tbl.projectId.equals(projectId)))
         .get();
     return rows.map(_mapRowToTaskEntity).toList();
+  }
+
+  @override
+  Future<List<DailyPlanningEntryEntity>> getDailyPlanningEntries({
+    CalendarDate? planDate,
+    String? taskId,
+  }) async {
+    final query = _db.select(_db.dailyPlanningEntries);
+    if (planDate != null) {
+      final dateIso = planDate.toIsoString();
+      query.where((tbl) => tbl.planDate.equals(dateIso));
+    }
+    if (taskId != null) {
+      query.where((tbl) => tbl.taskId.equals(taskId));
+    }
+    query.orderBy([
+      (tbl) => OrderingTerm.asc(tbl.planDate),
+      (tbl) => OrderingTerm.asc(tbl.createdAt),
+    ]);
+    final rows = await query.get();
+    return rows.map(_mapRowToDailyPlanningEntity).toList();
+  }
+
+  @override
+  Future<DailyPlanningEntryEntity> upsertDailyPlanningEntry(
+    DailyPlanningEntryEntity entry,
+  ) async {
+    final now = EthiopiaClock.nowUtc();
+    final dateIso = entry.planDate.toIsoString();
+    return _db.transaction(() async {
+      final existingByComposite = await (_db.select(_db.dailyPlanningEntries)
+            ..where(
+              (tbl) => tbl.taskId.equals(entry.taskId) & tbl.planDate.equals(dateIso),
+            ))
+          .getSingleOrNull();
+      final existingById = existingByComposite ??
+          await (_db.select(_db.dailyPlanningEntries)
+                ..where((tbl) => tbl.id.equals(entry.id)))
+              .getSingleOrNull();
+
+      if (existingById != null) {
+        final effectiveUpdatedAt = entry.updatedAt ?? now;
+        await (_db.update(_db.dailyPlanningEntries)
+              ..where((tbl) => tbl.id.equals(existingById.id)))
+            .write(
+          DailyPlanningEntriesCompanion(
+            planDate: Value(dateIso),
+            taskId: Value(entry.taskId),
+            action: Value(entry.action),
+            updatedAt: Value(effectiveUpdatedAt),
+          ),
+        );
+        return DailyPlanningEntryEntity(
+          id: existingById.id,
+          planDate: entry.planDate,
+          taskId: entry.taskId,
+          action: entry.action,
+          createdAt: existingById.createdAt,
+          updatedAt: effectiveUpdatedAt,
+        );
+      }
+
+      await _db.into(_db.dailyPlanningEntries).insert(
+            DailyPlanningEntriesCompanion.insert(
+              id: entry.id,
+              planDate: dateIso,
+              taskId: entry.taskId,
+              action: Value(entry.action),
+              createdAt: entry.createdAt,
+              updatedAt: Value(entry.updatedAt ?? now),
+            ),
+          );
+      return entry.copyWith(updatedAt: entry.updatedAt ?? now);
+    });
+  }
+
+  @override
+  Future<void> deleteDailyPlanningEntry(String id) async {
+    await (_db.delete(_db.dailyPlanningEntries)
+          ..where((tbl) => tbl.id.equals(id)))
+        .go();
+  }
+
+  @override
+  Future<void> deleteDailyPlanningEntriesForTask(String taskId) async {
+    await (_db.delete(_db.dailyPlanningEntries)
+          ..where((tbl) => tbl.taskId.equals(taskId)))
+        .go();
   }
 
   // ==========================================================================

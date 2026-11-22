@@ -1755,7 +1755,7 @@ void main() {
             await DatabasePersistenceCoordinator(reopened).exportSnapshot();
         expect(exported['schemaVersion'], 5);
         expect(exported['snapshotFormatVersion'], 2);
-        expect(exported['databaseSchemaVersion'], 9);
+        expect(exported['databaseSchemaVersion'], 10);
         final exportedRems = (exported['reminders'] as List).cast<Map>();
         expect(exportedRems.single['title'], 'Water Plants');
         expect(exportedRems.single['channelId'], 'daily_habits');
@@ -2097,7 +2097,7 @@ void main() {
             await DatabasePersistenceCoordinator(sourceDb).exportSnapshot();
         expect(exported['schemaVersion'], 5);
         expect(exported['snapshotFormatVersion'], 2);
-        expect(exported['databaseSchemaVersion'], 9);
+        expect(exported['databaseSchemaVersion'], 10);
         expect(
           (exported['projectTrackingBlocks'] as List).length,
           1,

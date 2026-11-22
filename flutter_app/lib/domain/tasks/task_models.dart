@@ -6,6 +6,156 @@ import '../../core/date/shared_date.dart';
 /// - Zero dependencies on Flutter widgets or Drift SQLite implementation.
 /// - Immutable value objects with copyWith and JSON serialization.
 
+class TaskSubtask {
+  final String id;
+  final String title;
+  final bool done;
+
+  const TaskSubtask({
+    required this.id,
+    required this.title,
+    this.done = false,
+  });
+
+  TaskSubtask copyWith({
+    String? id,
+    String? title,
+    bool? done,
+  }) {
+    return TaskSubtask(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      done: done ?? this.done,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'done': done,
+      };
+
+  factory TaskSubtask.fromJson(
+    Map<String, dynamic> json, {
+    required String fallbackId,
+  }) {
+    final rawId = json['id']?.toString().trim();
+    return TaskSubtask(
+      id: (rawId != null && rawId.isNotEmpty) ? rawId : fallbackId,
+      title: (json['title'] ?? '').toString(),
+      done: json['done'] == true || json['completed'] == true,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TaskSubtask &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          title == other.title &&
+          done == other.done;
+
+  @override
+  int get hashCode => Object.hash(id, title, done);
+}
+
+class TaskRecurrenceConfig {
+  final String frequency; // 'daily', 'weekly', 'monthly', 'yearly'
+  final int? interval;
+  final List<int>? weekdays; // 1..7 (ISO Monday..Sunday)
+  final CalendarDate? startDate;
+  final CalendarDate? endDate;
+  final String? repeatFrom; // 'due_date', 'completion_date'
+
+  const TaskRecurrenceConfig({
+    required this.frequency,
+    this.interval,
+    this.weekdays,
+    this.startDate,
+    this.endDate,
+    this.repeatFrom,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'frequency': frequency,
+        if (interval != null) 'interval': interval,
+        if (weekdays != null) 'weekdays': weekdays,
+        if (startDate != null) 'startDate': startDate!.toIsoString(),
+        if (endDate != null) 'endDate': endDate!.toIsoString(),
+        if (repeatFrom != null) 'repeatFrom': repeatFrom,
+      };
+
+  static TaskRecurrenceConfig? tryFromJson(dynamic raw) {
+    if (raw is! Map) return null;
+    final freq = raw['frequency']?.toString().trim() ?? '';
+    if (!const {'daily', 'weekly', 'monthly', 'yearly'}.contains(freq)) {
+      return null;
+    }
+    final rawInterval = raw['interval'];
+    final interval = rawInterval is int && rawInterval >= 1 ? rawInterval : null;
+    final rawWeekdays = raw['weekdays'];
+    List<int>? weekdays;
+    if (rawWeekdays is List) {
+      weekdays = rawWeekdays
+          .whereType<int>()
+          .where((d) => d >= 1 && d <= 7)
+          .toList(growable: false);
+    }
+    final startDate = SharedDateFormatter.tryParseFlexibleToCalendarDate(
+      raw['startDate']?.toString(),
+    );
+    final endDate = SharedDateFormatter.tryParseFlexibleToCalendarDate(
+      raw['endDate']?.toString(),
+    );
+    final rawRepeatFrom = raw['repeatFrom']?.toString().trim();
+    final repeatFrom =
+        const {'due_date', 'completion_date'}.contains(rawRepeatFrom)
+            ? rawRepeatFrom
+            : null;
+
+    return TaskRecurrenceConfig(
+      frequency: freq,
+      interval: interval,
+      weekdays: weekdays,
+      startDate: startDate,
+      endDate: endDate,
+      repeatFrom: repeatFrom,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    if (other is! TaskRecurrenceConfig) return false;
+    if (frequency != other.frequency ||
+        interval != other.interval ||
+        startDate != other.startDate ||
+        endDate != other.endDate ||
+        repeatFrom != other.repeatFrom) {
+      return false;
+    }
+    final a = weekdays;
+    final b = other.weekdays;
+    if (a == null && b == null) return true;
+    if (a == null || b == null || a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+        frequency,
+        interval,
+        weekdays == null ? null : Object.hashAll(weekdays!),
+        startDate,
+        endDate,
+        repeatFrom,
+      );
+}
+
 class TaskEntity {
   final String id;
   final String title;
@@ -13,16 +163,22 @@ class TaskEntity {
   final String
       status; // 'inbox', 'not_started', 'in_progress', 'completed', 'cancelled'
   final String priority; // 'low', 'medium', 'high', 'urgent'
+  final DateTime? completedAt;
   final CalendarDate? dueDate;
   final CalendarDate? scheduledDate;
+  final String? scheduledTime; // 24h HH:MM
   final int? estimatedDurationMinutes;
   final String? projectId;
   final String? milestoneId;
-  final List<({String title, bool done})> subtasks;
+  final List<TaskSubtask> subtasks;
   final List<String> labels;
   final bool isPinned;
   final bool isMyDay;
+  final CalendarDate? myDayDate;
   final String? recurrenceRule; // 'none', 'daily', 'weekly', 'monthly'
+  final TaskRecurrenceConfig? recurrenceConfig;
+  final bool isArchived;
+  final int sortOrder;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -32,8 +188,10 @@ class TaskEntity {
     this.description,
     this.status = 'not_started',
     this.priority = 'medium',
+    DateTime? completedAt,
     this.dueDate,
     this.scheduledDate,
+    this.scheduledTime,
     this.estimatedDurationMinutes,
     this.projectId,
     this.milestoneId,
@@ -41,10 +199,15 @@ class TaskEntity {
     this.labels = const [],
     this.isPinned = false,
     this.isMyDay = false,
+    this.myDayDate,
     this.recurrenceRule,
+    this.recurrenceConfig,
+    this.isArchived = false,
+    this.sortOrder = 0,
     DateTime? createdAt,
     DateTime? updatedAt,
-  })  : createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc(),
+  })  : completedAt = completedAt?.toUtc(),
+        createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc(),
         updatedAt = (updatedAt ?? EthiopiaClock.nowUtc()).toUtc();
 
   bool get isCompleted => status == 'completed';
@@ -58,20 +221,30 @@ class TaskEntity {
     String? description,
     String? status,
     String? priority,
+    DateTime? completedAt,
+    bool clearCompletedAt = false,
     CalendarDate? dueDate,
     bool clearDueDate = false,
     CalendarDate? scheduledDate,
     bool clearScheduledDate = false,
+    String? scheduledTime,
+    bool clearScheduledTime = false,
     int? estimatedDurationMinutes,
     String? projectId,
     bool clearProject = false,
     String? milestoneId,
     bool clearMilestone = false,
-    List<({String title, bool done})>? subtasks,
+    List<TaskSubtask>? subtasks,
     List<String>? labels,
     bool? isPinned,
     bool? isMyDay,
+    CalendarDate? myDayDate,
+    bool clearMyDayDate = false,
     String? recurrenceRule,
+    TaskRecurrenceConfig? recurrenceConfig,
+    bool clearRecurrenceConfig = false,
+    bool? isArchived,
+    int? sortOrder,
     DateTime? updatedAt,
   }) {
     return TaskEntity(
@@ -80,9 +253,13 @@ class TaskEntity {
       description: description ?? this.description,
       status: status ?? this.status,
       priority: priority ?? this.priority,
+      completedAt:
+          clearCompletedAt ? null : (completedAt ?? this.completedAt),
       dueDate: clearDueDate ? null : (dueDate ?? this.dueDate),
       scheduledDate:
           clearScheduledDate ? null : (scheduledDate ?? this.scheduledDate),
+      scheduledTime:
+          clearScheduledTime ? null : (scheduledTime ?? this.scheduledTime),
       estimatedDurationMinutes:
           estimatedDurationMinutes ?? this.estimatedDurationMinutes,
       projectId: clearProject ? null : (projectId ?? this.projectId),
@@ -91,7 +268,13 @@ class TaskEntity {
       labels: labels ?? this.labels,
       isPinned: isPinned ?? this.isPinned,
       isMyDay: isMyDay ?? this.isMyDay,
+      myDayDate: clearMyDayDate ? null : (myDayDate ?? this.myDayDate),
       recurrenceRule: recurrenceRule ?? this.recurrenceRule,
+      recurrenceConfig: clearRecurrenceConfig
+          ? null
+          : (recurrenceConfig ?? this.recurrenceConfig),
+      isArchived: isArchived ?? this.isArchived,
+      sortOrder: sortOrder ?? this.sortOrder,
       createdAt: createdAt,
       updatedAt: updatedAt ?? EthiopiaClock.nowUtc(),
     );
@@ -104,49 +287,72 @@ class TaskEntity {
         'status': status,
         'completed': isCompleted,
         'priority': priority,
+        if (completedAt != null)
+          'completedAt': EthiopiaClock.toUtcIsoString(completedAt!),
         'dueDate': dueDate?.toIsoString(),
         'scheduledDate': scheduledDate?.toIsoString(),
+        if (scheduledTime != null) 'scheduledTime': scheduledTime,
         'estimatedDurationMinutes': estimatedDurationMinutes,
         'projectId': projectId,
         'milestoneId': milestoneId,
-        'subtasks': subtasks
-            .map((s) => {'title': s.title, 'done': s.done})
-            .toList(growable: false),
+        'subtasks': subtasks.map((s) => s.toJson()).toList(growable: false),
         'labels': labels,
         'isPinned': isPinned,
         'isMyDay': isMyDay,
+        if (myDayDate != null) 'myDayDate': myDayDate!.toIsoString(),
         'recurrenceRule': recurrenceRule,
+        if (recurrenceConfig != null)
+          'recurrenceConfig': recurrenceConfig!.toJson(),
+        'isArchived': isArchived,
+        'sortOrder': sortOrder,
         'createdAt': EthiopiaClock.toUtcIsoString(createdAt),
         'updatedAt': EthiopiaClock.toUtcIsoString(updatedAt),
       };
 
   factory TaskEntity.fromJson(Map<String, dynamic> json) {
+    final taskId = (json['id'] ?? '').toString();
     final rawSubtasks = json['subtasks'];
-    final parsedSubtasks = <({String title, bool done})>[];
+    final parsedSubtasks = <TaskSubtask>[];
     if (rawSubtasks is List) {
-      for (final item in rawSubtasks) {
+      for (var i = 0; i < rawSubtasks.length; i++) {
+        final item = rawSubtasks[i];
         if (item is Map) {
-          parsedSubtasks.add((
-            title: (item['title'] ?? '').toString(),
-            done: item['done'] == true,
-          ));
+          parsedSubtasks.add(
+            TaskSubtask.fromJson(
+              item.map((k, v) => MapEntry(k.toString(), v)),
+              fallbackId: '$taskId-sub-${i + 1}',
+            ),
+          );
         }
       }
     }
 
+    final rawScheduledTime = json['scheduledTime']?.toString().trim();
+    final scheduledTime = rawScheduledTime != null &&
+            RegExp(r'^(?:[01]\d|2[0-3]):[0-5]\d$').hasMatch(rawScheduledTime)
+        ? rawScheduledTime
+        : null;
+
+    final rawSortOrder = json['sortOrder'];
+    final sortOrder =
+        rawSortOrder is int && rawSortOrder >= 0 ? rawSortOrder : 0;
+
     return TaskEntity(
-      id: json['id'],
+      id: taskId,
       title: json['title'] ?? '',
       description: json['description'],
       status: json['status'] ??
           (json['completed'] == true ? 'completed' : 'not_started'),
       priority: json['priority'] ?? 'medium',
+      completedAt:
+          EthiopiaClock.tryParseInstantUtc(json['completedAt']?.toString()),
       dueDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
         json['dueDate']?.toString(),
       ),
       scheduledDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
         json['scheduledDate']?.toString(),
       ),
+      scheduledTime: scheduledTime,
       estimatedDurationMinutes: json['estimatedDurationMinutes'],
       projectId: json['projectId'],
       milestoneId: json['milestoneId'],
@@ -156,7 +362,76 @@ class TaskEntity {
           : const [],
       isPinned: json['isPinned'] ?? false,
       isMyDay: json['isMyDay'] ?? false,
+      myDayDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(
+        json['myDayDate']?.toString(),
+      ),
       recurrenceRule: json['recurrenceRule'],
+      recurrenceConfig:
+          TaskRecurrenceConfig.tryFromJson(json['recurrenceConfig']),
+      isArchived: json['isArchived'] == true,
+      sortOrder: sortOrder,
+      createdAt:
+          EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
+      updatedAt:
+          EthiopiaClock.tryParseInstantUtc(json['updatedAt']?.toString()),
+    );
+  }
+}
+
+class DailyPlanningEntryEntity {
+  final String id;
+  final CalendarDate planDate;
+  final String taskId;
+  final String action; // 'planned', 'carried_forward', 'completed', 'dismissed'
+  final DateTime createdAt;
+  final DateTime? updatedAt;
+
+  DailyPlanningEntryEntity({
+    required this.id,
+    required this.planDate,
+    required this.taskId,
+    this.action = 'planned',
+    DateTime? createdAt,
+    DateTime? updatedAt,
+  })  : createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc(),
+        updatedAt = updatedAt?.toUtc();
+
+  DailyPlanningEntryEntity copyWith({
+    CalendarDate? planDate,
+    String? taskId,
+    String? action,
+    DateTime? updatedAt,
+  }) {
+    return DailyPlanningEntryEntity(
+      id: id,
+      planDate: planDate ?? this.planDate,
+      taskId: taskId ?? this.taskId,
+      action: action ?? this.action,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'planDate': planDate.toIsoString(),
+        'taskId': taskId,
+        'action': action,
+        'createdAt': EthiopiaClock.toUtcIsoString(createdAt),
+        if (updatedAt != null)
+          'updatedAt': EthiopiaClock.toUtcIsoString(updatedAt!),
+      };
+
+  factory DailyPlanningEntryEntity.fromJson(Map<String, dynamic> json) {
+    final parsedDate = SharedDateFormatter.tryParseFlexibleToCalendarDate(
+          json['planDate']?.toString(),
+        ) ??
+        CalendarDate.today();
+    return DailyPlanningEntryEntity(
+      id: (json['id'] ?? '').toString(),
+      planDate: parsedDate,
+      taskId: (json['taskId'] ?? '').toString(),
+      action: (json['action'] ?? 'planned').toString(),
       createdAt:
           EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
       updatedAt:

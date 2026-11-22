@@ -1625,6 +1625,8 @@ describe('Governance Stage 3.4.5: SharedStateBridge Compatibility & Round-Trip F
         labels: ['ops', 'q4'],
         isPinned: true,
         isMyDay: false,
+        isArchived: false,
+        sortOrder: 0,
         recurrenceRule: 'FREQ=MONTHLY;BYMONTHDAY=1',
         createdAt: '2026-11-10T08:00:00.000Z',
         updatedAt: '2026-11-15T12:00:00.000Z',

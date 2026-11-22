@@ -57,6 +57,7 @@ class _InMemoryCalendarRepository implements ICalendarRepository {
 
 class _InMemoryTasksRepository implements ITasksRepository {
   final Map<String, TaskEntity> _tasks = {};
+  final Map<String, DailyPlanningEntryEntity> _dailyPlanningEntries = {};
   final Map<String, ProjectEntity> _projects = {};
   final Map<String, MilestoneEntity> _milestones = {};
 
@@ -175,6 +176,41 @@ class _InMemoryTasksRepository implements ITasksRepository {
   @override
   Future<List<TaskEntity>> getTasksForProject(String projectId) async =>
       _tasks.values.where((t) => t.projectId == projectId).toList();
+
+  @override
+  Future<List<DailyPlanningEntryEntity>> getDailyPlanningEntries({
+    CalendarDate? planDate,
+    String? taskId,
+  }) async {
+    return _dailyPlanningEntries.values.where((entry) {
+      if (planDate != null &&
+          entry.planDate.toIsoString() != planDate.toIsoString()) {
+        return false;
+      }
+      if (taskId != null && entry.taskId != taskId) {
+        return false;
+      }
+      return true;
+    }).toList();
+  }
+
+  @override
+  Future<DailyPlanningEntryEntity> upsertDailyPlanningEntry(
+    DailyPlanningEntryEntity entry,
+  ) async {
+    _dailyPlanningEntries[entry.id] = entry;
+    return entry;
+  }
+
+  @override
+  Future<void> deleteDailyPlanningEntry(String id) async {
+    _dailyPlanningEntries.remove(id);
+  }
+
+  @override
+  Future<void> deleteDailyPlanningEntriesForTask(String taskId) async {
+    _dailyPlanningEntries.removeWhere((_, entry) => entry.taskId == taskId);
+  }
 
   @override
   Future<
@@ -382,7 +418,9 @@ void main() {
           labels: ['stage2', 'sqlite'],
           isMyDay: true,
           recurrenceRule: 'weekly',
-          subtasks: const [(title: 'Inspect tables', done: true)],
+          subtasks: const [
+            TaskSubtask(id: 'sub-1', title: 'Inspect tables', done: true),
+          ],
         );
         expect(createdTask, isNotNull);
         await state1.tasksController.togglePin(createdTask!.id);

@@ -4,6 +4,11 @@ import {
   SharedCategory,
   SharedTransaction,
   SharedTask,
+  SharedTaskRecurrenceConfig,
+  SharedTaskRecurrenceFrequency,
+  SharedTaskRecurrenceRepeatFrom,
+  SharedDailyPlanningEntry,
+  SharedDailyPlanningAction,
   SharedNote,
   SharedCalendarEvent,
   SharedProject,
@@ -101,6 +106,7 @@ export interface FinanceOnlySnapshotV7 {
   exportScope: 'finance_only';
   schemaVersion: number;
   snapshotFormatVersion: number;
+  databaseSchemaVersion?: number;
   financeSchemaVersion: number;
   appVersion: string;
   exportedAt: string;
@@ -125,6 +131,8 @@ export interface FinanceOnlySnapshotV7 {
 export class SharedStateBridge {
   public static readonly STORAGE_KEY = 'daywell_canonical_database_v3';
   public static readonly SYNC_EVENT_NAME = 'daywell:canonical-synced';
+  public static readonly DAILY_PLANNING_STORAGE_KEY =
+    'daywell_daily_planning_entries';
   public static readonly PROJECTS_STORAGE_KEY = 'daywell_projects';
   public static readonly PROJECT_TRACKING_BLOCKS_STORAGE_KEY =
     'daywell_project_tracking_blocks';
@@ -172,6 +180,31 @@ export class SharedStateBridge {
     'high',
     'urgent',
   ]);
+
+  private static readonly VALID_TASK_RECURRENCE_FREQUENCIES =
+    new Set<SharedTaskRecurrenceFrequency>([
+      'daily',
+      'weekly',
+      'monthly',
+      'yearly',
+    ]);
+
+  private static readonly VALID_TASK_RECURRENCE_REPEAT_FROM =
+    new Set<SharedTaskRecurrenceRepeatFrom>([
+      'due_date',
+      'completion_date',
+    ]);
+
+  private static readonly VALID_DAILY_PLANNING_ACTIONS =
+    new Set<SharedDailyPlanningAction>([
+      'planned',
+      'carried_forward',
+      'completed',
+      'dismissed',
+    ]);
+
+  private static readonly SCHEDULED_TIME_HHMM_REGEX =
+    /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 
   private static readonly VALID_ACCOUNT_TYPES = new Set<SharedAccount['type']>([
     'asset',
@@ -426,6 +459,76 @@ export class SharedStateBridge {
     return this.dedupeById(mapped);
   }
 
+  private static normalizeOptionalTaskRecurrenceConfig(
+    raw: unknown
+  ): SharedTaskRecurrenceConfig | undefined {
+    const obj = this.tryParseOptionalJsonObject(raw);
+    if (!obj) return undefined;
+    const freqRaw = typeof obj.frequency === 'string' ? obj.frequency.trim() : '';
+    if (
+      !this.VALID_TASK_RECURRENCE_FREQUENCIES.has(
+        freqRaw as SharedTaskRecurrenceFrequency
+      )
+    ) {
+      return undefined;
+    }
+    const frequency = freqRaw as SharedTaskRecurrenceFrequency;
+    const interval =
+      typeof obj.interval === 'number' &&
+      Number.isInteger(obj.interval) &&
+      obj.interval >= 1
+        ? obj.interval
+        : undefined;
+    const weekdays = Array.isArray(obj.weekdays)
+      ? Array.from(
+          new Set(
+            obj.weekdays.filter(
+              (d): d is number =>
+                typeof d === 'number' && Number.isInteger(d) && d >= 1 && d <= 7
+            )
+          )
+        )
+      : undefined;
+    const parsedStart =
+      typeof obj.startDate === 'string' && obj.startDate.trim()
+        ? SharedDateFormatter.tryParseFlexibleToCalendarDate(obj.startDate.trim())
+        : null;
+    const parsedEnd =
+      typeof obj.endDate === 'string' && obj.endDate.trim()
+        ? SharedDateFormatter.tryParseFlexibleToCalendarDate(obj.endDate.trim())
+        : null;
+    const startDate = parsedStart ? parsedStart.toIsoString() : undefined;
+    const endDate =
+      parsedEnd && (!startDate || parsedEnd.toIsoString() >= startDate)
+        ? parsedEnd.toIsoString()
+        : undefined;
+    const repeatFromRaw =
+      typeof obj.repeatFrom === 'string' ? obj.repeatFrom.trim() : '';
+    const repeatFrom = this.VALID_TASK_RECURRENCE_REPEAT_FROM.has(
+      repeatFromRaw as SharedTaskRecurrenceRepeatFrom
+    )
+      ? (repeatFromRaw as SharedTaskRecurrenceRepeatFrom)
+      : undefined;
+
+    return {
+      frequency,
+      ...(interval !== undefined ? { interval } : {}),
+      ...(weekdays !== undefined && weekdays.length > 0 ? { weekdays } : {}),
+      ...(startDate !== undefined ? { startDate } : {}),
+      ...(endDate !== undefined ? { endDate } : {}),
+      ...(repeatFrom !== undefined ? { repeatFrom } : {}),
+    };
+  }
+
+  private static normalizeOptionalIsoInstantString(raw: unknown): string | undefined {
+    if (typeof raw !== 'string') return undefined;
+    const trimmed = raw.trim();
+    if (!trimmed || !/^\d{4}-\d{2}-\d{2}/.test(trimmed)) return undefined;
+    const ms = Date.parse(trimmed);
+    if (Number.isNaN(ms)) return undefined;
+    return new Date(ms).toISOString();
+  }
+
   private static normalizeTaskRecord(raw: unknown): SharedTask | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
     const t = raw as Record<string, any>;
@@ -452,12 +555,28 @@ export class SharedStateBridge {
       typeof t.description === 'string' && t.description.length > 0
         ? t.description
         : undefined;
-    const dueDate =
+    const completedAt = this.normalizeOptionalIsoInstantString(t.completedAt);
+    const dueDateRaw =
       typeof t.dueDate === 'string' && t.dueDate.trim() ? t.dueDate.trim() : undefined;
-    const scheduledDate =
+    const dueDateParsed = dueDateRaw
+      ? SharedDateFormatter.tryParseFlexibleToCalendarDate(dueDateRaw)
+      : null;
+    const dueDate = dueDateParsed ? dueDateParsed.toIsoString() : dueDateRaw;
+    const scheduledDateRaw =
       typeof t.scheduledDate === 'string' && t.scheduledDate.trim()
         ? t.scheduledDate.trim()
         : undefined;
+    const scheduledDateParsed = scheduledDateRaw
+      ? SharedDateFormatter.tryParseFlexibleToCalendarDate(scheduledDateRaw)
+      : null;
+    const scheduledDate = scheduledDateParsed
+      ? scheduledDateParsed.toIsoString()
+      : scheduledDateRaw;
+    const scheduledTimeRaw =
+      typeof t.scheduledTime === 'string' ? t.scheduledTime.trim() : '';
+    const scheduledTime = this.SCHEDULED_TIME_HHMM_REGEX.test(scheduledTimeRaw)
+      ? scheduledTimeRaw
+      : undefined;
     const projectId =
       typeof t.projectId === 'string' && t.projectId.trim()
         ? t.projectId.trim()
@@ -476,12 +595,15 @@ export class SharedStateBridge {
     const subtasks: SharedTask['subtasks'] = Array.isArray(t.subtasks)
       ? t.subtasks
           .filter((st: unknown): st is Record<string, any> => Boolean(st && typeof st === 'object' && !Array.isArray(st)))
-          .map((st: Record<string, any>) => {
+          .map((st: Record<string, any>, idx: number) => {
             const subTitle = typeof st.title === 'string' ? st.title.trim() : '';
-            const subId = typeof st.id === 'string' && st.id.trim() ? st.id.trim() : undefined;
+            const subId =
+              typeof st.id === 'string' && st.id.trim()
+                ? st.id.trim()
+                : `${id}-sub-${idx + 1}`;
             if (!subTitle) return null;
             return {
-              ...(subId ? { id: subId } : {}),
+              id: subId,
               title: subTitle,
               done: Boolean(st.done ?? st.completed),
             };
@@ -495,21 +617,42 @@ export class SharedStateBridge {
           .map((l) => l.trim())
       : [];
 
+    const myDayDateRaw =
+      typeof t.myDayDate === 'string' && t.myDayDate.trim()
+        ? t.myDayDate.trim()
+        : undefined;
+    const myDayDateParsed = myDayDateRaw
+      ? SharedDateFormatter.tryParseFlexibleToCalendarDate(myDayDateRaw)
+      : null;
+    const myDayDate = myDayDateParsed ? myDayDateParsed.toIsoString() : undefined;
+
     const recurrenceRaw =
       typeof t.recurrenceRule === 'string' && t.recurrenceRule.trim()
         ? t.recurrenceRule.trim()
         : typeof t.recurringRule === 'string' && t.recurringRule.trim()
           ? t.recurringRule.trim()
           : undefined;
+    const recurrenceConfig = this.normalizeOptionalTaskRecurrenceConfig(
+      t.recurrenceConfig ?? t.recurrenceConfigJson
+    );
+    const isArchived = Boolean(t.isArchived);
+    const sortOrder =
+      typeof t.sortOrder === 'number' &&
+      Number.isInteger(t.sortOrder) &&
+      t.sortOrder >= 0
+        ? t.sortOrder
+        : 0;
 
     const createdAt =
-      typeof t.createdAt === 'string' && t.createdAt.trim()
+      this.normalizeOptionalIsoInstantString(t.createdAt) ??
+      (typeof t.createdAt === 'string' && t.createdAt.trim()
         ? t.createdAt.trim()
-        : EthiopiaClock.nowUtc().toISOString();
+        : EthiopiaClock.nowUtc().toISOString());
     const updatedAt =
-      typeof t.updatedAt === 'string' && t.updatedAt.trim()
+      this.normalizeOptionalIsoInstantString(t.updatedAt) ??
+      (typeof t.updatedAt === 'string' && t.updatedAt.trim()
         ? t.updatedAt.trim()
-        : undefined;
+        : undefined);
 
     return {
       id,
@@ -517,8 +660,10 @@ export class SharedStateBridge {
       ...(description !== undefined ? { description } : {}),
       status,
       priority,
+      ...(completedAt !== undefined ? { completedAt } : {}),
       ...(dueDate !== undefined ? { dueDate } : {}),
       ...(scheduledDate !== undefined ? { scheduledDate } : {}),
+      ...(scheduledTime !== undefined ? { scheduledTime } : {}),
       ...(projectId !== undefined ? { projectId } : {}),
       ...(milestoneId !== undefined ? { milestoneId } : {}),
       ...(estimatedDurationMinutes !== undefined ? { estimatedDurationMinutes } : {}),
@@ -526,7 +671,11 @@ export class SharedStateBridge {
       labels,
       isPinned: Boolean(t.isPinned),
       isMyDay: Boolean(t.isMyDay),
+      ...(myDayDate !== undefined ? { myDayDate } : {}),
       ...(recurrenceRaw !== undefined ? { recurrenceRule: recurrenceRaw } : {}),
+      ...(recurrenceConfig !== undefined ? { recurrenceConfig } : {}),
+      isArchived,
+      sortOrder,
       createdAt,
       ...(updatedAt !== undefined ? { updatedAt } : {}),
     };
@@ -539,6 +688,95 @@ export class SharedStateBridge {
       if (normalized) mapped.push(normalized);
     }
     return this.dedupeById(mapped);
+  }
+
+  private static normalizeDailyPlanningEntryRecord(
+    raw: unknown
+  ): SharedDailyPlanningEntry | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const e = raw as Record<string, any>;
+    const id = typeof e.id === 'string' ? e.id.trim() : '';
+    const taskId = typeof e.taskId === 'string' ? e.taskId.trim() : '';
+    const rawPlanDate =
+      typeof e.planDate === 'string' ? e.planDate.trim() : '';
+    const parsedPlanDate = rawPlanDate
+      ? SharedDateFormatter.tryParseFlexibleToCalendarDate(rawPlanDate)
+      : null;
+    if (!id || !taskId || !parsedPlanDate) return null;
+    const actionRaw = typeof e.action === 'string' ? e.action.trim() : '';
+    const action: SharedDailyPlanningAction = this.VALID_DAILY_PLANNING_ACTIONS.has(
+      actionRaw as SharedDailyPlanningAction
+    )
+      ? (actionRaw as SharedDailyPlanningAction)
+      : 'planned';
+    const createdAt =
+      this.normalizeOptionalIsoInstantString(e.createdAt) ??
+      EthiopiaClock.nowUtc().toISOString();
+    const updatedAt = this.normalizeOptionalIsoInstantString(e.updatedAt);
+
+    return {
+      id,
+      planDate: parsedPlanDate.toIsoString(),
+      taskId,
+      action,
+      createdAt,
+      ...(updatedAt !== undefined ? { updatedAt } : {}),
+    };
+  }
+
+  private static normalizeDailyPlanningEntries(
+    raw: unknown[]
+  ): SharedDailyPlanningEntry[] {
+    const dedupedById: SharedDailyPlanningEntry[] = [];
+    const seenIds = new Set<string>();
+    const seenTaskDates = new Set<string>();
+    for (const entry of raw) {
+      const normalized = this.normalizeDailyPlanningEntryRecord(entry);
+      if (!normalized) continue;
+      if (seenIds.has(normalized.id)) continue;
+      const compositeKey = `${normalized.taskId}::${normalized.planDate}`;
+      if (seenTaskDates.has(compositeKey)) continue;
+      seenIds.add(normalized.id);
+      seenTaskDates.add(compositeKey);
+      dedupedById.push(normalized);
+    }
+    return dedupedById;
+  }
+
+  public static removeDailyPlanningForTask(taskId: string): void {
+    if (typeof window === 'undefined' || !taskId.trim()) return;
+    try {
+      const rawList = localStorage.getItem(this.DAILY_PLANNING_STORAGE_KEY);
+      if (rawList !== null) {
+        try {
+          const parsed = JSON.parse(rawList);
+          if (Array.isArray(parsed)) {
+            const filtered = parsed.filter((e: any) => e?.taskId !== taskId);
+            localStorage.setItem(
+              this.DAILY_PLANNING_STORAGE_KEY,
+              JSON.stringify(filtered)
+            );
+          }
+        } catch {}
+      }
+      const rawCanonical = localStorage.getItem(this.STORAGE_KEY);
+      if (rawCanonical !== null) {
+        try {
+          const canonical = JSON.parse(rawCanonical);
+          if (
+            canonical &&
+            typeof canonical === 'object' &&
+            Array.isArray(canonical.dailyPlanningEntries)
+          ) {
+            canonical.dailyPlanningEntries =
+              canonical.dailyPlanningEntries.filter(
+                (e: any) => e?.taskId !== taskId
+              );
+            localStorage.setItem(this.STORAGE_KEY, JSON.stringify(canonical));
+          }
+        } catch {}
+      }
+    } catch {}
   }
 
   private static normalizeNoteRecord(raw: unknown): SharedBridgeNote | null {
@@ -1128,6 +1366,19 @@ export class SharedStateBridge {
           ? this.normalizeMilestones(canonicalStored.milestones)
           : [];
 
+      // 7b. Daily Planning Entries (explicit [] stays [])
+      const explicitDailyPlanning = this.readExplicitJsonArray(
+        this.DAILY_PLANNING_STORAGE_KEY
+      );
+      const dailyPlanningEntries: SharedDailyPlanningEntry[] =
+        explicitDailyPlanning.exists
+          ? this.normalizeDailyPlanningEntries(explicitDailyPlanning.items)
+          : Array.isArray(canonicalStored?.dailyPlanningEntries)
+            ? this.normalizeDailyPlanningEntries(
+                canonicalStored.dailyPlanningEntries
+              )
+            : [];
+
       // 8. v7 Finance collections (live store overrides canonical if present)
       const readCollectionWithCanonicalFallback = <T>(
         key: string,
@@ -1285,6 +1536,7 @@ export class SharedStateBridge {
       return {
         schemaVersion: this.SUPPORTED_EXCHANGE_SCHEMA_VERSION,
         snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
+        databaseSchemaVersion: this.SUPPORTED_DATABASE_SCHEMA_VERSION,
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         appVersion:
           typeof canonicalStored?.appVersion === 'string' && canonicalStored.appVersion.trim()
@@ -1309,6 +1561,7 @@ export class SharedStateBridge {
         settlementAllocations,
         milestones,
         tasks,
+        dailyPlanningEntries,
         notes,
         projects,
         projectTrackingBlocks,
@@ -1324,8 +1577,10 @@ export class SharedStateBridge {
       return {
         ...(JSON.parse(JSON.stringify(CANONICAL_SEED_DATABASE)) as SharedDatabaseStateV7),
         snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
+        databaseSchemaVersion: this.SUPPORTED_DATABASE_SCHEMA_VERSION,
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         milestones: [],
+        dailyPlanningEntries: [],
         projectTrackingBlocks: [],
         projectTrackingRecords: [],
       };
@@ -1370,6 +1625,9 @@ export class SharedStateBridge {
       const milestones = this.normalizeMilestones(
         Array.isArray(state.milestones) ? state.milestones : []
       );
+      const dailyPlanningEntries = this.normalizeDailyPlanningEntries(
+        Array.isArray(state.dailyPlanningEntries) ? state.dailyPlanningEntries : []
+      );
       const inboxItems = this.normalizeInboxItems(
         Array.isArray(state.inboxItems) ? state.inboxItems : []
       );
@@ -1395,6 +1653,7 @@ export class SharedStateBridge {
         categories,
         transactions,
         tasks,
+        dailyPlanningEntries,
         notes,
         projects,
         projectTrackingBlocks,
@@ -1454,8 +1713,10 @@ export class SharedStateBridge {
         status: t.status,
         priority: t.priority,
         completed: t.status === 'completed',
+        ...(t.completedAt !== undefined ? { completedAt: t.completedAt } : {}),
         ...(t.dueDate !== undefined ? { dueDate: t.dueDate } : {}),
         ...(t.scheduledDate !== undefined ? { scheduledDate: t.scheduledDate } : {}),
+        ...(t.scheduledTime !== undefined ? { scheduledTime: t.scheduledTime } : {}),
         ...(t.projectId !== undefined ? { projectId: t.projectId } : {}),
         ...(t.milestoneId !== undefined ? { milestoneId: t.milestoneId } : {}),
         ...(t.estimatedDurationMinutes !== undefined
@@ -1472,17 +1733,32 @@ export class SharedStateBridge {
         labels: t.labels || [],
         isPinned: Boolean(t.isPinned),
         isMyDay: Boolean(t.isMyDay),
+        ...(t.myDayDate !== undefined ? { myDayDate: t.myDayDate } : {}),
         ...(t.recurrenceRule !== undefined ? { recurrenceRule: t.recurrenceRule } : {}),
+        ...(t.recurrenceConfig !== undefined
+          ? { recurrenceConfig: t.recurrenceConfig }
+          : {}),
         ...(t.recurrenceRule === 'daily' ||
         t.recurrenceRule === 'weekly' ||
         t.recurrenceRule === 'monthly'
           ? { isRecurring: true, recurringRule: t.recurrenceRule }
           : {}),
+        isArchived: Boolean(t.isArchived),
+        sortOrder:
+          typeof t.sortOrder === 'number' &&
+          Number.isInteger(t.sortOrder) &&
+          t.sortOrder >= 0
+            ? t.sortOrder
+            : 0,
         hasReminder: false,
         createdAt: t.createdAt,
         ...(t.updatedAt !== undefined ? { updatedAt: t.updatedAt } : {}),
       }));
       localStorage.setItem('daywell_tasks', JSON.stringify(daywellTasks));
+      localStorage.setItem(
+        this.DAILY_PLANNING_STORAGE_KEY,
+        JSON.stringify(dailyPlanningEntries)
+      );
 
       // Synchronize notes with BOTH UI (DaywellNote) and canonical/Flutter metadata preserved
       const daywellNotes = normalizedState.notes.map((n) => ({
@@ -1665,6 +1941,7 @@ export class SharedStateBridge {
       exportScope: 'finance_only',
       schemaVersion: this.SUPPORTED_EXCHANGE_SCHEMA_VERSION,
       snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
+      databaseSchemaVersion: this.SUPPORTED_DATABASE_SCHEMA_VERSION,
       financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
       appVersion: active.appVersion || '1.0.2+3',
       exportedAt: LocalDateTime.now().toEthiopiaIsoString(),
@@ -1903,7 +2180,8 @@ export class SharedStateBridge {
   public static readonly LEGACY_OMITTED_SNAPSHOT_FORMAT_VERSION = 1;
   public static readonly MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 1;
   public static readonly MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 2;
-  public static readonly MAX_SUPPORTED_DATABASE_SCHEMA_VERSION = 9;
+  public static readonly SUPPORTED_DATABASE_SCHEMA_VERSION = 10;
+  public static readonly MAX_SUPPORTED_DATABASE_SCHEMA_VERSION = 10;
   public static readonly MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION = 4;
   public static readonly MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION = 9;
   public static readonly SUPPORTED_FINANCE_SCHEMA_VERSION = 7;
@@ -1922,6 +2200,7 @@ export class SharedStateBridge {
     'debts',
     'settlementAllocations',
     'tasks',
+    'dailyPlanningEntries',
     'notes',
     'projects',
     'projectTrackingBlocks',
@@ -1949,6 +2228,7 @@ export class SharedStateBridge {
 
   private static readonly NON_FINANCE_MODULE_KEYS = [
     'tasks',
+    'dailyPlanningEntries',
     'notes',
     'projects',
     'projectTrackingBlocks',
@@ -2469,7 +2749,7 @@ export class SharedStateBridge {
         };
       });
 
-      // 7. Tasks (preserve full canonical metadata; clear dangling Tier-2 projectId/milestoneId)
+      // 7. Tasks (preserve full canonical metadata + v10 fields; clear dangling Tier-2 projectId/milestoneId)
       const taskSeenIds = new Set<string>();
       const validatedTasks: SharedTask[] = ((parsed.tasks || []) as Record<string, any>[]).map(
         (t, idx) => {
@@ -2483,8 +2763,30 @@ export class SharedStateBridge {
             (completedBool === true ? 'completed' : 'not_started');
           const priority =
             this.optionalEnum(t, 'priority', this.VALID_TASK_PRIORITIES, ctx) ?? 'medium';
+          const completedAt = normalizeOptionalInstant(t.completedAt, `${ctx}.completedAt`);
           const dueDate = normalizeOptionalDate(t.dueDate, `${ctx}.dueDate`);
           const scheduledDate = normalizeOptionalDate(t.scheduledDate, `${ctx}.scheduledDate`);
+          let scheduledTime: string | undefined;
+          if (
+            Object.prototype.hasOwnProperty.call(t, 'scheduledTime') &&
+            t.scheduledTime !== undefined &&
+            t.scheduledTime !== null
+          ) {
+            if (typeof t.scheduledTime !== 'string') {
+              throw new BackupValidationError(
+                'invalid_payload',
+                `Invalid field "${ctx}.scheduledTime": expected a string.`
+              );
+            }
+            const trimmedTime = t.scheduledTime.trim();
+            if (!this.SCHEDULED_TIME_HHMM_REGEX.test(trimmedTime)) {
+              throw new BackupValidationError(
+                'invalid_payload',
+                `Invalid field "${ctx}.scheduledTime": expected 24h HH:MM format.`
+              );
+            }
+            scheduledTime = trimmedTime;
+          }
           const rawProjectId = this.optionalString(t, 'projectId', ctx);
           const safeProjectId =
             rawProjectId && targetProjectIds.has(rawProjectId) ? rawProjectId : undefined;
@@ -2522,13 +2824,15 @@ export class SharedStateBridge {
                 `${ctx}.subtasks[${sIdx}]`,
                 300
               );
-              const subId = this.optionalString(subObj, 'id', `${ctx}.subtasks[${sIdx}]`);
+              const subId =
+                this.optionalString(subObj, 'id', `${ctx}.subtasks[${sIdx}]`) ??
+                `${id}-sub-${sIdx + 1}`;
               const doneBool =
                 subObj.done !== undefined
                   ? this.optionalBool(subObj, 'done', `${ctx}.subtasks[${sIdx}]`)
                   : this.optionalBool(subObj, 'completed', `${ctx}.subtasks[${sIdx}]`);
               return {
-                ...(subId !== undefined ? { id: subId } : {}),
+                id: subId,
                 title: subTitle,
                 done: Boolean(doneBool),
               };
@@ -2538,9 +2842,103 @@ export class SharedStateBridge {
           const labels = this.optionalStringArray(t, 'labels', ctx) ?? [];
           const isPinned = this.optionalBool(t, 'isPinned', ctx) ?? false;
           const isMyDay = this.optionalBool(t, 'isMyDay', ctx) ?? false;
+          const myDayDate = normalizeOptionalDate(t.myDayDate, `${ctx}.myDayDate`);
           const recurrenceRule =
             this.optionalString(t, 'recurrenceRule', ctx) ??
             this.optionalString(t, 'recurringRule', ctx);
+
+          let recurrenceConfig: SharedTaskRecurrenceConfig | undefined;
+          const hasNonEmptyRecurrenceJson =
+            typeof t.recurrenceConfigJson === 'string' &&
+            t.recurrenceConfigJson.trim().length > 0;
+          const hasRecurrenceObj =
+            t.recurrenceConfig !== undefined && t.recurrenceConfig !== null;
+          if (hasRecurrenceObj || hasNonEmptyRecurrenceJson) {
+            const rawRc = this.parseStrictJsonObject(
+              t,
+              ['recurrenceConfig', 'recurrenceConfigJson'],
+              ctx
+            );
+            if (rawRc !== undefined) {
+              const rcCtx = `${ctx}.recurrenceConfig`;
+              const freq = this.optionalEnum(
+                rawRc,
+                'frequency',
+                this.VALID_TASK_RECURRENCE_FREQUENCIES,
+                rcCtx
+              );
+              if (!freq) {
+                throw new BackupValidationError(
+                  'invalid_payload',
+                  `Missing or invalid field "${rcCtx}.frequency".`
+                );
+              }
+              const interval = this.optionalIntMin(rawRc, 'interval', rcCtx, 1);
+              let weekdays: number[] | undefined;
+              if (rawRc.weekdays !== undefined && rawRc.weekdays !== null) {
+                if (!Array.isArray(rawRc.weekdays)) {
+                  throw new BackupValidationError(
+                    'invalid_payload',
+                    `Invalid field "${rcCtx}.weekdays": expected an array.`
+                  );
+                }
+                weekdays = rawRc.weekdays.map((wd: unknown, wIdx: number) => {
+                  if (
+                    typeof wd !== 'number' ||
+                    !Number.isInteger(wd) ||
+                    wd < 1 ||
+                    wd > 7
+                  ) {
+                    throw new BackupValidationError(
+                      'invalid_payload',
+                      `Invalid weekday "${rcCtx}.weekdays[${wIdx}]": expected integer 1..7.`
+                    );
+                  }
+                  return wd;
+                });
+              }
+              const startDate = normalizeOptionalDate(
+                rawRc.startDate,
+                `${rcCtx}.startDate`
+              );
+              const endDate = normalizeOptionalDate(
+                rawRc.endDate,
+                `${rcCtx}.endDate`
+              );
+              if (startDate !== undefined && endDate !== undefined && endDate < startDate) {
+                throw new BackupValidationError(
+                  'invalid_payload',
+                  `Invalid recurrence range on "${rcCtx}": endDate "${endDate}" precedes startDate "${startDate}".`
+                );
+              }
+              const repeatFrom = this.optionalEnum(
+                rawRc,
+                'repeatFrom',
+                this.VALID_TASK_RECURRENCE_REPEAT_FROM,
+                rcCtx
+              );
+              recurrenceConfig = {
+                frequency: freq,
+                ...(interval !== undefined ? { interval } : {}),
+                ...(weekdays !== undefined ? { weekdays } : {}),
+                ...(startDate !== undefined ? { startDate } : {}),
+                ...(endDate !== undefined ? { endDate } : {}),
+                ...(repeatFrom !== undefined ? { repeatFrom } : {}),
+              };
+            }
+          } else if (
+            t.recurrenceConfigJson !== undefined &&
+            t.recurrenceConfigJson !== null &&
+            typeof t.recurrenceConfigJson !== 'string'
+          ) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Invalid field "${ctx}.recurrenceConfigJson": expected a JSON string.`
+            );
+          }
+
+          const isArchived = this.optionalBool(t, 'isArchived', ctx) ?? false;
+          const sortOrder = this.optionalIntMin(t, 'sortOrder', ctx, 0) ?? 0;
           const createdAt =
             normalizeOptionalInstant(t.createdAt, `${ctx}.createdAt`) ?? nowIso;
           const updatedAt = normalizeOptionalInstant(t.updatedAt, `${ctx}.updatedAt`);
@@ -2551,8 +2949,10 @@ export class SharedStateBridge {
             ...(description !== undefined ? { description } : {}),
             status,
             priority,
+            ...(completedAt !== undefined ? { completedAt } : {}),
             ...(dueDate !== undefined ? { dueDate } : {}),
             ...(scheduledDate !== undefined ? { scheduledDate } : {}),
+            ...(scheduledTime !== undefined ? { scheduledTime } : {}),
             ...(safeProjectId !== undefined ? { projectId: safeProjectId } : {}),
             ...(safeMilestoneId !== undefined ? { milestoneId: safeMilestoneId } : {}),
             ...(estimatedDurationMinutes !== undefined ? { estimatedDurationMinutes } : {}),
@@ -2560,12 +2960,68 @@ export class SharedStateBridge {
             labels,
             isPinned,
             isMyDay,
+            ...(myDayDate !== undefined ? { myDayDate } : {}),
             ...(recurrenceRule !== undefined ? { recurrenceRule } : {}),
+            ...(recurrenceConfig !== undefined ? { recurrenceConfig } : {}),
+            isArchived,
+            sortOrder,
             createdAt,
             ...(updatedAt !== undefined ? { updatedAt } : {}),
           };
         }
       );
+
+      // 7a. DailyPlanningEntries (Tier-1 required FK taskId -> tasks + unique (taskId, planDate))
+      const dailyPlanningSeenIds = new Set<string>();
+      const dailyPlanningSeenTaskDates = new Set<string>();
+      const validatedDailyPlanningEntries: SharedDailyPlanningEntry[] = (
+        (parsed.dailyPlanningEntries || []) as Record<string, any>[]
+      ).map((entry, idx) => {
+        const ctx = `dailyPlanningEntries[${idx}]`;
+        const id = this.requireUniqueId(
+          entry,
+          'dailyPlanningEntries',
+          idx,
+          dailyPlanningSeenIds
+        );
+        const planDate = normalizeRequiredDate(entry.planDate, `${ctx}.planDate`);
+        const taskId = this.requireBoundedString(entry, 'taskId', ctx, 200);
+        if (!taskSeenIds.has(taskId)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Invalid foreign key "${ctx}.taskId": task "${taskId}" does not exist.`
+          );
+        }
+        const compositeKey = `${taskId}::${planDate}`;
+        if (dailyPlanningSeenTaskDates.has(compositeKey)) {
+          throw new BackupValidationError(
+            'invalid_payload',
+            `Duplicate dailyPlanningEntries key (${taskId}, ${planDate}) at ${ctx}.`
+          );
+        }
+        dailyPlanningSeenTaskDates.add(compositeKey);
+        const action =
+          this.optionalEnum(
+            entry,
+            'action',
+            this.VALID_DAILY_PLANNING_ACTIONS,
+            ctx
+          ) ?? 'planned';
+        const createdAt =
+          normalizeOptionalInstant(entry.createdAt, `${ctx}.createdAt`) ?? nowIso;
+        const updatedAt = normalizeOptionalInstant(
+          entry.updatedAt,
+          `${ctx}.updatedAt`
+        );
+        return {
+          id,
+          planDate,
+          taskId,
+          action,
+          createdAt,
+          ...(updatedAt !== undefined ? { updatedAt } : {}),
+        };
+      });
 
       // 7b. Project Tracking Blocks (two-pass validation: non-rollup first, then rollup counters)
       const optionalNumberMin = (
@@ -3822,6 +4278,7 @@ export class SharedStateBridge {
         settlementAllocations: validatedSettlementAllocations,
         milestones: validatedMilestones,
         tasks: validatedTasks,
+        dailyPlanningEntries: validatedDailyPlanningEntries,
         notes: validatedNotes,
         projects: validatedProjects,
         projectTrackingBlocks: validatedProjectTrackingBlocks,
@@ -4772,11 +5229,32 @@ export class SharedStateBridge {
       let accounts = accRes.cleaned;
       purgedCount += accRes.removed;
 
-      // 3. Tasks
+      // 3. Tasks & DailyPlanningEntries
       const savedTasks = localStorage.getItem('daywell_tasks');
       const taskRes = filterSeedArray<any>(savedTasks, KNOWN_SEED_IDS.tasks);
       let tasks = taskRes.cleaned;
       purgedCount += taskRes.removed;
+
+      const seedTaskIds = KNOWN_SEED_IDS.tasks as readonly string[];
+      const savedDailyPlanning = localStorage.getItem(this.DAILY_PLANNING_STORAGE_KEY);
+      let dailyPlanningExists = false;
+      let cleanedDailyPlanning: any[] = [];
+      if (savedDailyPlanning !== null) {
+        try {
+          const parsedDaily = JSON.parse(savedDailyPlanning);
+          if (Array.isArray(parsedDaily)) {
+            dailyPlanningExists = true;
+            cleanedDailyPlanning = parsedDaily.filter(
+              (d: any) => !seedTaskIds.includes(d?.taskId)
+            );
+            purgedCount += parsedDaily.length - cleanedDailyPlanning.length;
+            localStorage.setItem(
+              this.DAILY_PLANNING_STORAGE_KEY,
+              JSON.stringify(cleanedDailyPlanning)
+            );
+          }
+        } catch {}
+      }
 
       // 4. Notes
       const savedNotes = localStorage.getItem('daywell_notes');
@@ -4974,6 +5452,17 @@ export class SharedStateBridge {
                 tasks = cTasks;
               }
               parsed.tasks = taskRes.exists ? tasks : cTasks;
+            }
+            if (Array.isArray(parsed.dailyPlanningEntries)) {
+              const cDaily = parsed.dailyPlanningEntries.filter(
+                (d: any) => !seedTaskIds.includes(d?.taskId)
+              );
+              if (!dailyPlanningExists) {
+                purgedCount += parsed.dailyPlanningEntries.length - cDaily.length;
+              }
+              parsed.dailyPlanningEntries = dailyPlanningExists
+                ? cleanedDailyPlanning
+                : cDaily;
             }
             if (Array.isArray(parsed.notes)) {
               const cNotes = parsed.notes.filter(

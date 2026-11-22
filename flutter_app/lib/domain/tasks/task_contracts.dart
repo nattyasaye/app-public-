@@ -18,6 +18,15 @@ abstract class ITaskRepositoryContract {
   Future<void> postponeTaskDays(String id, int days);
   Future<void> deleteTask(String id);
   Future<List<TaskEntity>> getTasksForProject(String projectId);
+  Future<List<DailyPlanningEntryEntity>> getDailyPlanningEntries({
+    CalendarDate? planDate,
+    String? taskId,
+  });
+  Future<DailyPlanningEntryEntity> upsertDailyPlanningEntry(
+    DailyPlanningEntryEntity entry,
+  );
+  Future<void> deleteDailyPlanningEntry(String id);
+  Future<void> deleteDailyPlanningEntriesForTask(String taskId);
 }
 
 /// Domain contract for Project persistence and lifecycle management.

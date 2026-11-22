@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { CalendarDate, EthiopiaClock, LocalDateTime } from '../domain/date';
+import { CalendarDate, EthiopiaClock } from '../domain/date';
 import {
   Check,
   Plus,
@@ -15,8 +15,13 @@ import {
   Loader2,
 } from 'lucide-react';
 import { validateTaskForm, isFormDirty } from '../domain/formValidationAndNavigation';
-import { SharedProject } from '../domain/sharedFoundation';
+import {
+  SharedProject,
+  SharedTaskRecurrenceConfig,
+  SharedTaskStatus,
+} from '../domain/sharedFoundation';
 import { projectsService } from '../services/projectsService';
+import { SharedStateBridge } from '../services/sharedStateBridge';
 import { ProjectsWorkspaceView } from './projects';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import {
@@ -41,6 +46,7 @@ export interface DaywellTask {
   title: string;
   description?: string;
   category?: string;
+  status?: SharedTaskStatus;
   priority: 'urgent' | 'high' | 'medium' | 'low';
   completed: boolean;
   completedAt?: string;
@@ -50,10 +56,21 @@ export interface DaywellTask {
   hasReminder: boolean;
   isRecurring?: boolean;
   recurringRule?: 'daily' | 'weekly' | 'monthly';
+  recurrenceRule?: string;
+  recurrenceConfig?: SharedTaskRecurrenceConfig;
   subtasks: TaskSubItem[];
+  labels?: string[];
+  isPinned?: boolean;
+  isMyDay?: boolean;
+  myDayDate?: string;
+  isArchived?: boolean;
+  sortOrder?: number;
   projectId?: string;
+  milestoneId?: string;
+  estimatedDurationMinutes?: number;
   projectName?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 interface DaywellTasksModuleProps {
@@ -136,9 +153,10 @@ const DEFAULT_SAMPLE_TASKS: DaywellTask[] = [
     id: 't-5',
     title: 'Clear weekend communication inbox',
     category: 'Personal',
+    status: 'completed',
     priority: 'medium',
     completed: true,
-    completedAt: '08:50',
+    completedAt: EthiopiaClock.nowUtc().toISOString(),
     dueDate: CalendarDate.today().toIsoString(),
     hasReminder: false,
     projectName: 'Personal',
@@ -309,14 +327,16 @@ export function DaywellTasksModule({
     if (!target) return;
 
     const nextCompleted = !target.completed;
-    const timeFormatted = LocalDateTime.now().timeOfDay.toIsoString();
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
 
     const updated = tasks.map((t) =>
       t.id === taskId
         ? {
             ...t,
             completed: nextCompleted,
-            completedAt: nextCompleted ? timeFormatted : undefined,
+            status: (nextCompleted ? 'completed' : 'not_started') as SharedTaskStatus,
+            completedAt: nextCompleted ? nowIso : undefined,
+            updatedAt: nowIso,
           }
         : t
     );
@@ -330,11 +350,13 @@ export function DaywellTasksModule({
 
   // Toggle Subtask
   const toggleSubtask = (taskId: string, subtaskId: string) => {
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
     const updated = tasks.map((t) => {
       if (t.id === taskId) {
         return {
           ...t,
           subtasks: t.subtasks.map((st) => (st.id === subtaskId ? { ...st, completed: !st.completed } : st)),
+          updatedAt: nowIso,
         };
       }
       return t;
@@ -480,6 +502,7 @@ export function DaywellTasksModule({
     const resolvedProjectName =
       matchedProject?.title ?? (formProject.trim() || 'Personal');
 
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
     if (editingTaskId) {
       const updated = tasks.map((t) =>
         t.id === editingTaskId
@@ -487,6 +510,11 @@ export function DaywellTasksModule({
               ...t,
               title: formTitle.trim(),
               description: formDescription.trim() || undefined,
+              status: (t.completed
+                ? 'completed'
+                : t.status && t.status !== 'completed'
+                  ? t.status
+                  : 'not_started') as SharedTaskStatus,
               priority: formPriority,
               dueDate: formDueDate || undefined,
               scheduledDate: formScheduledDate || undefined,
@@ -496,7 +524,13 @@ export function DaywellTasksModule({
               hasReminder: formHasReminder,
               isRecurring: formIsRecurring,
               recurringRule: formIsRecurring ? formRecurringRule : undefined,
+              recurrenceRule: formIsRecurring
+                ? formRecurringRule
+                : t.recurringRule
+                  ? undefined
+                  : t.recurrenceRule,
               subtasks: formSubtasks,
+              updatedAt: nowIso,
             }
           : t
       );
@@ -511,6 +545,7 @@ export function DaywellTasksModule({
         title: formTitle.trim(),
         description: formDescription.trim() || undefined,
         category: resolvedProjectName,
+        status: 'not_started',
         priority: formPriority,
         completed: false,
         dueDate: formDueDate || undefined,
@@ -521,8 +556,12 @@ export function DaywellTasksModule({
         hasReminder: formHasReminder,
         isRecurring: formIsRecurring,
         recurringRule: formIsRecurring ? formRecurringRule : undefined,
+        ...(formIsRecurring ? { recurrenceRule: formRecurringRule } : {}),
         subtasks: formSubtasks,
-        createdAt: EthiopiaClock.nowUtc().toISOString(),
+        isArchived: false,
+        sortOrder: 0,
+        createdAt: nowIso,
+        updatedAt: nowIso,
       };
       onUpdateTasks([newTask, ...tasks]);
       setIsSubmitting(false);
@@ -536,9 +575,24 @@ export function DaywellTasksModule({
   const handleDeleteTask = (taskId: string) => {
     const prev = [...tasks];
     const target = tasks.find((t) => t.id === taskId);
+    const prevDailyPlanningRaw =
+      typeof window !== 'undefined'
+        ? localStorage.getItem(SharedStateBridge.DAILY_PLANNING_STORAGE_KEY)
+        : null;
     onUpdateTasks(tasks.filter((t) => t.id !== taskId));
+    SharedStateBridge.removeDailyPlanningForTask(taskId);
     setIsModalOpen(false);
-    triggerUndo(`Deleted "${target?.title || 'task'}"`, () => onUpdateTasks(prev));
+    triggerUndo(`Deleted "${target?.title || 'task'}"`, () => {
+      if (prevDailyPlanningRaw !== null && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(
+            SharedStateBridge.DAILY_PLANNING_STORAGE_KEY,
+            prevDailyPlanningRaw
+          );
+        } catch {}
+      }
+      onUpdateTasks(prev);
+    });
   };
 
   // Subtask helper

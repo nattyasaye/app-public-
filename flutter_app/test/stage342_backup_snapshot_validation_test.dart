@@ -676,18 +676,24 @@ void main() {
     });
 
     test(
-        'Stage 1.1 / 0.2B separates snapshotFormatVersion (1..2) & databaseSchemaVersion (1..9) from exchange schemaVersion (4..9) across coordinator and encryption service',
+        'Stage 1.1 / 0.2C separates snapshotFormatVersion (1..2) & databaseSchemaVersion (1..10) from exchange schemaVersion (4..9) across coordinator and encryption service',
         () async {
       final service = EncryptionBackupService();
 
-      // Accepted canonical combinations (with exchange schemaVersion 5, snapshotFormatVersion 1|2|omitted, databaseSchemaVersion 9|omitted)
+      // Accepted canonical combinations (with exchange schemaVersion 5, snapshotFormatVersion 1|2|omitted, databaseSchemaVersion 9|10|omitted)
       final acceptedSnapshots = <Map<String, dynamic>>[
+        _minimalValidSnapshot(schemaVersion: 5)
+          ..['snapshotFormatVersion'] = 2
+          ..['databaseSchemaVersion'] = 10,
         _minimalValidSnapshot(schemaVersion: 5)
           ..['snapshotFormatVersion'] = 2
           ..['databaseSchemaVersion'] = 9,
         _minimalValidSnapshot(schemaVersion: 5)
           ..['snapshotFormatVersion'] = 2
           ..['financeSchemaVersion'] = 7,
+        _minimalValidSnapshot(schemaVersion: 5)
+          ..['snapshotFormatVersion'] = 1
+          ..['databaseSchemaVersion'] = 10,
         _minimalValidSnapshot(schemaVersion: 5)
           ..['snapshotFormatVersion'] = 1
           ..['databaseSchemaVersion'] = 9,
@@ -753,23 +759,16 @@ void main() {
           kind: BackupFailureKind.invalidSnapshotVersion,
         ),
         (
-          name: 'unserialized v10 databaseSchemaVersion 10 (format-2)',
+          name: 'future databaseSchemaVersion 11 (format-2)',
           snap: _minimalValidSnapshot(schemaVersion: 5)
             ..['snapshotFormatVersion'] = 2
-            ..['databaseSchemaVersion'] = 10,
+            ..['databaseSchemaVersion'] = 11,
           kind: BackupFailureKind.unsupportedFutureSchema,
         ),
         (
-          name: 'unserialized v10 databaseSchemaVersion 10 (format-1)',
+          name: 'future databaseSchemaVersion 11 (format-1)',
           snap: _minimalValidSnapshot(schemaVersion: 5)
             ..['snapshotFormatVersion'] = 1
-            ..['databaseSchemaVersion'] = 10,
-          kind: BackupFailureKind.unsupportedFutureSchema,
-        ),
-        (
-          name: 'future databaseSchemaVersion 11',
-          snap: _minimalValidSnapshot(schemaVersion: 5)
-            ..['snapshotFormatVersion'] = 2
             ..['databaseSchemaVersion'] = 11,
           kind: BackupFailureKind.unsupportedFutureSchema,
         ),
@@ -1161,7 +1160,7 @@ void main() {
       ) as Map<String, dynamic>;
       expect(decryptedPayload['schemaVersion'], 5);
       expect(decryptedPayload['snapshotFormatVersion'], 2);
-      expect(decryptedPayload['databaseSchemaVersion'], 9);
+      expect(decryptedPayload['databaseSchemaVersion'], 10);
       final quarantineDir =
           Directory(p.join(docsDir.path, 'recovery_quarantine'));
 

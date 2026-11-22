@@ -141,7 +141,14 @@ class TasksController extends ChangeNotifier {
     if (trimmed.isEmpty) return;
     final existing = _state.findTaskById(taskId);
     if (existing == null) return;
-    final nextSubtasks = [...existing.subtasks, (title: trimmed, done: false)];
+    final nextSubtasks = [
+      ...existing.subtasks,
+      TaskSubtask(
+        id: '$taskId-sub-${existing.subtasks.length + 1}',
+        title: trimmed,
+        done: false,
+      ),
+    ];
     await _persistUpdatedTask(existing.copyWith(subtasks: nextSubtasks));
   }
 
@@ -150,9 +157,8 @@ class TasksController extends ChangeNotifier {
     if (existing == null || index < 0 || index >= existing.subtasks.length) {
       return;
     }
-    final nextSubtasks =
-        List<({String title, bool done})>.from(existing.subtasks);
-    nextSubtasks[index] = (title: nextSubtasks[index].title, done: done);
+    final nextSubtasks = List<TaskSubtask>.from(existing.subtasks);
+    nextSubtasks[index] = nextSubtasks[index].copyWith(done: done);
     await _persistUpdatedTask(existing.copyWith(subtasks: nextSubtasks));
   }
 
@@ -186,14 +192,19 @@ class TasksController extends ChangeNotifier {
     String priority = 'medium',
     CalendarDate? dueDate,
     CalendarDate? scheduledDate,
+    String? scheduledTime,
     int? estimatedDurationMinutes,
     String? projectId,
     String? milestoneId,
-    List<({String title, bool done})> subtasks = const [],
+    List<TaskSubtask> subtasks = const [],
     List<String> labels = const [],
     bool isPinned = false,
     bool isMyDay = false,
+    CalendarDate? myDayDate,
     String? recurrenceRule,
+    TaskRecurrenceConfig? recurrenceConfig,
+    bool isArchived = false,
+    int sortOrder = 0,
   }) async {
     final now = EthiopiaClock.nowUtc();
     final task = TaskEntity(
@@ -203,6 +214,7 @@ class TasksController extends ChangeNotifier {
       priority: priority,
       dueDate: dueDate,
       scheduledDate: scheduledDate,
+      scheduledTime: scheduledTime,
       estimatedDurationMinutes: estimatedDurationMinutes,
       projectId: projectId,
       milestoneId: milestoneId,
@@ -210,7 +222,11 @@ class TasksController extends ChangeNotifier {
       labels: labels,
       isPinned: isPinned,
       isMyDay: isMyDay,
+      myDayDate: myDayDate,
       recurrenceRule: recurrenceRule,
+      recurrenceConfig: recurrenceConfig,
+      isArchived: isArchived,
+      sortOrder: sortOrder,
       status: 'not_started',
       createdAt: now,
       updatedAt: now,

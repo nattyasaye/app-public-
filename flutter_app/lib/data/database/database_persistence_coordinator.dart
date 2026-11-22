@@ -30,6 +30,7 @@ class PreparedSnapshotImport {
   final List<ProjectTrackingRecordsCompanion> projectTrackingRecords;
   final List<MilestonesCompanion> milestones;
   final List<TasksCompanion> tasks;
+  final List<DailyPlanningEntriesCompanion> dailyPlanningEntries;
   final List<NotesCompanion> notes;
   final List<InboxItemsCompanion> inboxItems;
   final List<CalendarEventsCompanion> calendarEvents;
@@ -69,6 +70,7 @@ class PreparedSnapshotImport {
     this.projectTrackingRecords = const <ProjectTrackingRecordsCompanion>[],
     required this.milestones,
     required this.tasks,
+    this.dailyPlanningEntries = const <DailyPlanningEntriesCompanion>[],
     required this.notes,
     required this.inboxItems,
     required this.calendarEvents,
@@ -140,6 +142,8 @@ class DatabasePersistenceCoordinator {
         await _db.select(_db.projectTrackingRecords).get();
     final milestones = await _db.select(_db.milestones).get();
     final tasks = await _db.select(_db.tasks).get();
+    final dailyPlanningEntries =
+        await _db.select(_db.dailyPlanningEntries).get();
     final notes = await _db.select(_db.notes).get();
     final inboxItems = await _db.select(_db.inboxItems).get();
     final calendarEvents = await _db.select(_db.calendarEvents).get();
@@ -424,18 +428,39 @@ class DatabasePersistenceCoordinator {
                 'status': t.status,
                 'completed': t.status == 'completed',
                 'priority': t.priority,
+                'completedAt': t.completedAt != null
+                    ? EthiopiaClock.toUtcIsoString(t.completedAt!)
+                    : null,
                 'dueDate': t.dueDate,
                 'scheduledDate': t.scheduledDate,
+                'scheduledTime': t.scheduledTime,
                 'estimatedDurationMinutes': t.estimatedDurationMinutes,
                 'projectId': t.projectId,
                 'milestoneId': t.milestoneId,
-                'subtasks': _decodeJsonList(t.subtasksJson),
+                'subtasks': _normalizeExportSubtasks(t.subtasksJson, t.id),
                 'labels': _decodeStringList(t.labelsJson),
                 'isPinned': t.isPinned,
                 'isMyDay': t.isMyDay,
+                'myDayDate': t.myDayDate,
                 'recurrenceRule': t.recurrenceRule,
+                'recurrenceConfig':
+                    _decodeNullableJsonMap(t.recurrenceConfigJson),
+                'isArchived': t.isArchived,
+                'sortOrder': t.sortOrder,
                 'createdAt': EthiopiaClock.toUtcIsoString(t.createdAt),
                 'updatedAt': EthiopiaClock.toUtcIsoString(t.updatedAt),
+              })
+          .toList(),
+      'dailyPlanningEntries': dailyPlanningEntries
+          .map((d) => {
+                'id': d.id,
+                'planDate': d.planDate,
+                'taskId': d.taskId,
+                'action': d.action,
+                'createdAt': EthiopiaClock.toUtcIsoString(d.createdAt),
+                'updatedAt': d.updatedAt != null
+                    ? EthiopiaClock.toUtcIsoString(d.updatedAt!)
+                    : null,
               })
           .toList(),
       'notes': notes
@@ -508,6 +533,7 @@ class DatabasePersistenceCoordinator {
 
   static const List<String> _nonFinanceSnapshotKeys = <String>[
     'tasks',
+    'dailyPlanningEntries',
     'notes',
     'projects',
     'projectTrackingBlocks',
@@ -750,7 +776,7 @@ class DatabasePersistenceCoordinator {
   static const int legacyOmittedSnapshotFormatVersion = 1;
   static const int minSupportedSnapshotFormatVersion = 1;
   static const int maxSupportedSnapshotFormatVersion = 2;
-  static const int maxSupportedDatabaseSchemaVersion = 9;
+  static const int maxSupportedDatabaseSchemaVersion = 10;
   static const int minSupportedCanonicalSnapshotVersion = 4;
   static const int maxSupportedCanonicalSnapshotVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
@@ -775,6 +801,7 @@ class DatabasePersistenceCoordinator {
     'projectTrackingRecords',
     'milestones',
     'tasks',
+    'dailyPlanningEntries',
     'notes',
     'inboxItems',
     'calendarEvents',
@@ -843,6 +870,24 @@ class DatabasePersistenceCoordinator {
     'high',
     'urgent',
   };
+  static const Set<String> _taskRecurrenceFrequencies = <String>{
+    'daily',
+    'weekly',
+    'monthly',
+    'yearly',
+  };
+  static const Set<String> _taskRecurrenceRepeatFrom = <String>{
+    'due_date',
+    'completion_date',
+  };
+  static const Set<String> _dailyPlanningActions = <String>{
+    'planned',
+    'carried_forward',
+    'completed',
+    'dismissed',
+  };
+  static final RegExp _scheduledTimeHhmmPattern =
+      RegExp(r'^(?:[01]\d|2[0-3]):[0-5]\d$');
   static const Set<String> _inboxCategories = <String>{
     'task',
     'idea',
@@ -969,6 +1014,8 @@ class DatabasePersistenceCoordinator {
     Set<String> existingCommitmentIds = const <String>{},
     Set<String> existingRuleIds = const <String>{},
     Set<String> existingTaskIds = const <String>{},
+    Map<String, String> existingDailyPlanningIdByTaskDate =
+        const <String, String>{},
     Set<String> existingCalendarEventIds = const <String>{},
     Set<String> existingNoteIds = const <String>{},
     Map<String, String> existingBudgetIdsByMonthCategory =
@@ -1358,8 +1405,27 @@ class DatabasePersistenceCoordinator {
           (completed == true ? 'completed' : 'not_started');
       final priority =
           _optEnum(t, 'priority', _taskPriorities, ctx) ?? 'medium';
+      final completedAt = _optInstantUtc(t, 'completedAt', ctx);
       final dueDate = _optCanonicalDate(t, 'dueDate', ctx);
       final scheduledDate = _optCanonicalDate(t, 'scheduledDate', ctx);
+      String? scheduledTime;
+      if (t.containsKey('scheduledTime') && t['scheduledTime'] != null) {
+        final rawTime = t['scheduledTime'];
+        if (rawTime is! String) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid field "$ctx.scheduledTime": expected a string.',
+          );
+        }
+        final trimmedTime = rawTime.trim();
+        if (!_scheduledTimeHhmmPattern.hasMatch(trimmedTime)) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid field "$ctx.scheduledTime": expected 24h HH:MM format.',
+          );
+        }
+        scheduledTime = trimmedTime;
+      }
       final estimatedMinutes =
           _optInt(t, 'estimatedDurationMinutes', ctx, min: 0);
       final rawProjectId = _optString(t, 'projectId', ctx, allowEmpty: false);
@@ -1401,12 +1467,40 @@ class DatabasePersistenceCoordinator {
           );
         }
       }
-      final subtasks = _optJsonList(t, 'subtasks', ctx);
+      final rawSubtasks = _optJsonList(t, 'subtasks', ctx);
+      final normalizedSubtasks = <Map<String, dynamic>>[];
+      for (var sIdx = 0; sIdx < rawSubtasks.length; sIdx++) {
+        final rawItem = rawSubtasks[sIdx];
+        if (rawItem is! Map) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid element "$ctx.subtasks[$sIdx]": expected an object.',
+          );
+        }
+        final subMap = rawItem.map((k, v) => MapEntry(k.toString(), v));
+        final subCtx = '$ctx.subtasks[$sIdx]';
+        final subTitle = _reqString(subMap, 'title', subCtx, maxLength: 300).trim();
+        final subId =
+            _optString(subMap, 'id', subCtx, allowEmpty: false) ??
+                '$id-sub-${sIdx + 1}';
+        final subDone = subMap.containsKey('done')
+            ? (_optBool(subMap, 'done', subCtx) ?? false)
+            : (_optBool(subMap, 'completed', subCtx) ?? false);
+        normalizedSubtasks.add(<String, dynamic>{
+          'id': subId,
+          'title': subTitle,
+          'done': subDone,
+        });
+      }
       final labels = _optStringList(t, 'labels', ctx);
       final isPinned = _optBool(t, 'isPinned', ctx) ?? false;
       final isMyDay = _optBool(t, 'isMyDay', ctx) ?? false;
+      final myDayDate = _optCanonicalDate(t, 'myDayDate', ctx);
       final recurrenceRule =
           _optString(t, 'recurrenceRule', ctx, allowEmpty: true);
+      final recurrenceConfig = _parseStrictRecurrenceConfigMap(t, ctx);
+      final isArchived = _optBool(t, 'isArchived', ctx) ?? false;
+      final sortOrder = _optInt(t, 'sortOrder', ctx, min: 0) ?? 0;
       final createdAt = _optInstantUtc(t, 'createdAt', ctx) ?? now;
       final updatedAt = _optInstantUtc(t, 'updatedAt', ctx) ?? createdAt;
 
@@ -1417,22 +1511,74 @@ class DatabasePersistenceCoordinator {
           description: Value(description),
           status: Value(status),
           priority: Value(priority),
+          completedAt: Value(completedAt),
           dueDate: Value(dueDate),
           scheduledDate: Value(scheduledDate),
+          scheduledTime: Value(scheduledTime),
           estimatedDurationMinutes: Value(estimatedMinutes),
           projectId: Value(safeProjectId),
           milestoneId: Value(safeMilestoneId),
-          subtasksJson: Value(jsonEncode(subtasks)),
+          subtasksJson: Value(jsonEncode(normalizedSubtasks)),
           labelsJson: Value(jsonEncode(labels)),
           isPinned: Value(isPinned),
           isMyDay: Value(isMyDay),
+          myDayDate: Value(myDayDate),
           recurrenceRule: Value(recurrenceRule),
+          recurrenceConfigJson: Value(
+            recurrenceConfig == null ? null : jsonEncode(recurrenceConfig),
+          ),
+          isArchived: Value(isArchived),
+          sortOrder: Value(sortOrder),
           createdAt: createdAt,
           updatedAt: updatedAt,
         ),
       );
     }
     final targetTaskIds = <String>{...existingTaskIds, ...taskSeenIds};
+
+    // 7a. DailyPlanningEntries (Tier 1 required FK: taskId -> tasks + unique (taskId, planDate))
+    final rawDailyPlanning = listOf('dailyPlanningEntries');
+    final dailyPlanningSeenIds = <String>{};
+    final dailyPlanningCompositeSeen = <String, String>{
+      ...existingDailyPlanningIdByTaskDate,
+    };
+    final dailyPlanningCompanions = <DailyPlanningEntriesCompanion>[];
+    for (var i = 0; i < rawDailyPlanning.length; i++) {
+      final d = rawDailyPlanning[i];
+      final ctx = 'dailyPlanningEntries[$i]';
+      final id = _reqUniqueId(d, 'dailyPlanningEntries', i, dailyPlanningSeenIds);
+      final planDate = _reqCanonicalDate(d, 'planDate', ctx);
+      final taskId = _reqString(d, 'taskId', ctx).trim();
+      if (!targetTaskIds.contains(taskId)) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid foreign key "$ctx.taskId": task "$taskId" does not exist.',
+        );
+      }
+      final compositeKey = '$taskId\u0000$planDate';
+      final existingOwnerId = dailyPlanningCompositeSeen[compositeKey];
+      if (existingOwnerId != null && existingOwnerId != id) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Duplicate dailyPlanningEntries key (taskId="$taskId", planDate="$planDate") at "$ctx".',
+        );
+      }
+      dailyPlanningCompositeSeen[compositeKey] = id;
+      final action =
+          _optEnum(d, 'action', _dailyPlanningActions, ctx) ?? 'planned';
+      final createdAt = _optInstantUtc(d, 'createdAt', ctx) ?? now;
+      final updatedAt = _optInstantUtc(d, 'updatedAt', ctx);
+      dailyPlanningCompanions.add(
+        DailyPlanningEntriesCompanion.insert(
+          id: id,
+          planDate: planDate,
+          taskId: taskId,
+          action: Value(action),
+          createdAt: createdAt,
+          updatedAt: Value(updatedAt),
+        ),
+      );
+    }
 
     // 7b. ProjectTrackingBlocks (Tier 1 required FK: projectId, two-pass rollup check)
     final rawProjectBlocks = listOf('projectTrackingBlocks');
@@ -3152,6 +3298,7 @@ class DatabasePersistenceCoordinator {
       'projectTrackingRecords': recordCompanions.length,
       'milestones': milestoneCompanions.length,
       'tasks': taskCompanions.length,
+      'dailyPlanningEntries': dailyPlanningCompanions.length,
       'notes': noteCompanions.length,
       'inboxItems': inboxCompanions.length,
       'calendarEvents': eventCompanions.length,
@@ -3184,6 +3331,7 @@ class DatabasePersistenceCoordinator {
       projectTrackingRecords: recordCompanions,
       milestones: milestoneCompanions,
       tasks: taskCompanions,
+      dailyPlanningEntries: dailyPlanningCompanions,
       notes: noteCompanions,
       inboxItems: inboxCompanions,
       calendarEvents: eventCompanions,
@@ -3273,6 +3421,8 @@ class DatabasePersistenceCoordinator {
       final liveCommitments = await _db.select(_db.financialCommitments).get();
       final liveRules = await _db.select(_db.recurringRulesTable).get();
       final liveTasks = await _db.select(_db.tasks).get();
+      final liveDailyPlanning =
+          await _db.select(_db.dailyPlanningEntries).get();
       final liveEvents = await _db.select(_db.calendarEvents).get();
       final liveNotes = await _db.select(_db.notes).get();
       final liveBudgets = await _db.select(_db.budgetsTable).get();
@@ -3349,6 +3499,10 @@ class DatabasePersistenceCoordinator {
         existingCommitmentIds: {for (final c in liveCommitments) c.id},
         existingRuleIds: {for (final r in liveRules) r.id},
         existingTaskIds: {for (final t in liveTasks) t.id},
+        existingDailyPlanningIdByTaskDate: {
+          for (final d in liveDailyPlanning)
+            '${d.taskId}\u0000${d.planDate}': d.id,
+        },
         existingCalendarEventIds: {for (final e in liveEvents) e.id},
         existingNoteIds: {for (final n in liveNotes) n.id},
         existingBudgetIdsByMonthCategory: {
@@ -3404,6 +3558,7 @@ class DatabasePersistenceCoordinator {
         await _db.delete(_db.reminders).go();
         await _db.delete(_db.projectTrackingRecords).go();
         await _db.delete(_db.projectTrackingBlocks).go();
+        await _db.delete(_db.dailyPlanningEntries).go();
         await _db.delete(_db.tasks).go();
         await _db.delete(_db.milestones).go();
         await _db.delete(_db.notes).go();
@@ -3464,6 +3619,9 @@ class DatabasePersistenceCoordinator {
       }
       for (final row in plan.tasks) {
         await _db.into(_db.tasks).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.dailyPlanningEntries) {
+        await _db.into(_db.dailyPlanningEntries).insertOnConflictUpdate(row);
       }
       for (final row in plan.projectTrackingRecords) {
         await _db.into(_db.projectTrackingRecords).insertOnConflictUpdate(row);
@@ -3942,8 +4100,15 @@ class DatabasePersistenceCoordinator {
         }
       }
 
+      final seedTaskIds = KnownSeedIds.tasks.toList();
+      if (seedTaskIds.isNotEmpty) {
+        purgedCount += await (_db.delete(_db.dailyPlanningEntries)
+              ..where((tbl) => tbl.taskId.isIn(seedTaskIds)))
+            .go();
+      }
+
       purgedCount += await (_db.delete(_db.tasks)
-            ..where((tbl) => tbl.id.isIn(KnownSeedIds.tasks.toList())))
+            ..where((tbl) => tbl.id.isIn(seedTaskIds)))
           .go();
 
       purgedCount += await (_db.delete(_db.notes)
@@ -4517,5 +4682,117 @@ class DatabasePersistenceCoordinator {
     } catch (_) {
       return const <String, dynamic>{};
     }
+  }
+
+  static Map<String, dynamic>? _decodeNullableJsonMap(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return decoded.map((k, v) => MapEntry(k.toString(), v));
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static List<Map<String, dynamic>> _normalizeExportSubtasks(
+    String raw,
+    String taskId,
+  ) {
+    final decoded = _decodeJsonList(raw);
+    final normalized = <Map<String, dynamic>>[];
+    for (var i = 0; i < decoded.length; i++) {
+      final item = decoded[i];
+      if (item is Map) {
+        final rawId = item['id']?.toString().trim();
+        final id =
+            (rawId != null && rawId.isNotEmpty) ? rawId : '$taskId-sub-${i + 1}';
+        normalized.add(<String, dynamic>{
+          'id': id,
+          'title': (item['title'] ?? '').toString(),
+          'done': item['done'] == true || item['completed'] == true,
+        });
+      }
+    }
+    return normalized;
+  }
+
+  static Map<String, dynamic>? _parseStrictRecurrenceConfigMap(
+    Map<String, dynamic> t,
+    String ctx,
+  ) {
+    final hasObj =
+        t.containsKey('recurrenceConfig') && t['recurrenceConfig'] != null;
+    final hasJson = t.containsKey('recurrenceConfigJson') &&
+        t['recurrenceConfigJson'] != null;
+    if (!hasObj && !hasJson) return null;
+
+    if (hasJson && !hasObj) {
+      final rawStr = t['recurrenceConfigJson'];
+      if (rawStr is! String) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid field "$ctx.recurrenceConfigJson": expected a JSON string.',
+        );
+      }
+      if (rawStr.trim().isEmpty) return null;
+    }
+
+    final rawRc = _optJsonMapFromKeys(
+      t,
+      const ['recurrenceConfig', 'recurrenceConfigJson'],
+      ctx,
+      'recurrenceConfig',
+    );
+    final rcCtx = '$ctx.recurrenceConfig';
+    final frequency =
+        _reqEnum(rawRc, 'frequency', _taskRecurrenceFrequencies, rcCtx);
+    final interval = _optInt(rawRc, 'interval', rcCtx, min: 1);
+
+    List<int>? weekdays;
+    if (rawRc.containsKey('weekdays') && rawRc['weekdays'] != null) {
+      final rawWeekdays = rawRc['weekdays'];
+      if (rawWeekdays is! List) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Invalid field "$rcCtx.weekdays": expected a list.',
+        );
+      }
+      weekdays = <int>[];
+      for (var wIdx = 0; wIdx < rawWeekdays.length; wIdx++) {
+        final wd = rawWeekdays[wIdx];
+        if (wd is! int || wd < 1 || wd > 7) {
+          throw BackupValidationException(
+            BackupFailureKind.invalidPayload,
+            'Invalid weekday "$rcCtx.weekdays[$wIdx]": expected integer 1..7.',
+          );
+        }
+        weekdays.add(wd);
+      }
+    }
+
+    final startDate = _optCanonicalDate(rawRc, 'startDate', rcCtx);
+    final endDate = _optCanonicalDate(rawRc, 'endDate', rcCtx);
+    if (startDate != null &&
+        endDate != null &&
+        endDate.compareTo(startDate) < 0) {
+      throw BackupValidationException(
+        BackupFailureKind.invalidPayload,
+        'Invalid recurrence range on "$rcCtx": endDate "$endDate" precedes startDate "$startDate".',
+      );
+    }
+    final repeatFrom =
+        _optEnum(rawRc, 'repeatFrom', _taskRecurrenceRepeatFrom, rcCtx);
+
+    return <String, dynamic>{
+      'frequency': frequency,
+      if (interval != null) 'interval': interval,
+      if (weekdays != null) 'weekdays': weekdays,
+      if (startDate != null) 'startDate': startDate,
+      if (endDate != null) 'endDate': endDate,
+      if (repeatFrom != null) 'repeatFrom': repeatFrom,
+    };
   }
 }

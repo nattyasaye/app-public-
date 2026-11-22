@@ -432,7 +432,7 @@ void main() {
           final exportedBefore = await coordinator.exportSnapshot();
           expect(exportedBefore['schemaVersion'], 5);
           expect(exportedBefore['snapshotFormatVersion'], 2);
-          expect(exportedBefore['databaseSchemaVersion'], 9);
+          expect(exportedBefore['databaseSchemaVersion'], 10);
           final exportedKeys = (exportedBefore['appSettings'] as List)
               .cast<Map<String, dynamic>>()
               .map((e) => e['key'] as String)

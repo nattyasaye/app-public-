@@ -47,8 +47,8 @@ class SnapshotVersionPolicy {
   static const int minSupportedSnapshotFormatVersion = 1;
   static const int maxSupportedSnapshotFormatVersion = 2;
   static const int supportedFinanceSchemaVersion = 7;
-  static const int supportedDatabaseSchemaVersion = 9;
-  static const int maxSupportedDatabaseSchemaVersion = 9;
+  static const int supportedDatabaseSchemaVersion = 10;
+  static const int maxSupportedDatabaseSchemaVersion = 10;
   static const int minSupportedCanonicalSchemaVersion = 4;
   static const int maxSupportedCanonicalSchemaVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
@@ -58,13 +58,11 @@ class SnapshotVersionPolicy {
   /// Rules:
   /// - Legacy format-1 snapshots (`snapshotFormatVersion == 1` or omitted)
   ///   accept `schemaVersion` `4..9` (or omitted -> `5`), optional
-  ///   `databaseSchemaVersion` `1..9`, and optional `financeSchemaVersion == 7`.
+  ///   `databaseSchemaVersion` `1..10`, and optional `financeSchemaVersion == 7`.
   /// - Format-2 snapshots (`snapshotFormatVersion == 2`) require explicit
-  ///   canonical exchange `schemaVersion == 5`, optional `databaseSchemaVersion == 9`
-  ///   (when present), and optional `financeSchemaVersion == 7` (when present).
-  ///   Database schema v10 (`AppDatabase.schemaVersion => 10`) stays separate
-  ///   from snapshot compatibility until Stage 0.2C serializes v10 Task fields
-  ///   and DailyPlanningEntries.
+  ///   canonical exchange `schemaVersion == 5`, optional `databaseSchemaVersion`
+  ///   `9` or `10` (when present, per ADR-007 backward compatibility), and
+  ///   optional `financeSchemaVersion == 7` (when present).
   /// - When [expectedHeaderVersion] is provided (for `.daywell` envelopes), the
   ///   resolved exchange schemaVersion must match it exactly.
   static SnapshotVersionInterpretation parseAndValidate(
@@ -213,10 +211,11 @@ class SnapshotVersionPolicy {
         );
       }
       if (resolvedSnapshotFormatVersion >= supportedSnapshotFormatVersion &&
+          rawDbVersion != 9 &&
           rawDbVersion != supportedDatabaseSchemaVersion) {
         throw BackupValidationException(
           BackupFailureKind.invalidSnapshotVersion,
-          'Snapshot format v2 requires databaseSchemaVersion '
+          'Snapshot format v2 requires databaseSchemaVersion 9 or '
           '$supportedDatabaseSchemaVersion when specified (got $rawDbVersion).',
         );
       }

@@ -529,6 +529,7 @@ export default function App() {
 
   // Toggle Task Completion
   const toggleTask = (id: string) => {
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id === id) {
@@ -536,7 +537,9 @@ export default function App() {
           return {
             ...t,
             completed: next,
-            completedAt: next ? LocalDateTime.now().timeOfDay.toDisplay12Hour() : undefined,
+            status: next ? 'completed' : 'not_started',
+            completedAt: next ? nowIso : undefined,
+            updatedAt: nowIso,
           };
         }
         return t;
@@ -650,16 +653,21 @@ export default function App() {
     }
 
     // Default: Task
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
     const newTask: DaywellTask = {
       id: `task-${Date.now()}`,
       title: text,
       category: 'Personal',
+      status: 'not_started',
       priority: 'medium',
       completed: false,
       dueDate: CalendarDate.today().toIsoString(),
       hasReminder: false,
       subtasks: [],
-      createdAt: EthiopiaClock.nowUtc().toISOString(),
+      isArchived: false,
+      sortOrder: 0,
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
 
     setTasks((prev) => [newTask, ...prev]);
