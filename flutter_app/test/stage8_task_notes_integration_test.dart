@@ -56,7 +56,6 @@ void main() {
           title: 'Wiring notes',
           content: 'Diagram v2',
           tags: const ['electrical'],
-          isArchived: false,
         );
         final archivedNote = await notesRepo.createNote(
           NoteEntity(
@@ -152,7 +151,7 @@ void main() {
         await tasksCtrl.createTask(
           id: 'task-life-1',
           title: 'Archive then delete',
-          dueDate: CalendarDate(2026, 11, 25),
+          dueDate: CalendarDate(year: 2026, month: 11, day: 25),
         );
         await notesCtrl.createNote(
           id: 'note-life-1',
@@ -177,7 +176,7 @@ void main() {
         );
 
         // Deleting one note does not damage task
-        await notesCtrl.deleteNote('note-life-2', permanent: true);
+        await notesCtrl.permanentlyDeleteNote('note-life-2');
         expect(await tasksRepo.getTaskById('task-life-1'), isNotNull);
 
         // Deleting task safely clears note links without deleting note-life-1
@@ -341,7 +340,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: TasksView(
               controller: tasksCtrl,
               notesController: notesCtrl,
@@ -380,7 +379,7 @@ void main() {
         // Render NotesView with requestedNoteFocus -> opens Notes editor showing Linked Task bar & Open button
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: NotesView(
               controller: notesCtrl,
               tasksController: tasksCtrl,
