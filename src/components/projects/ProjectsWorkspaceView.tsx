@@ -352,6 +352,7 @@ export function ProjectsWorkspaceView({
             const taskTotal = derived?.totalTasks ?? summary?.linkedTasksTotal ?? 0;
             const taskCompleted =
               derived?.completedTasks ?? summary?.linkedTasksCompleted ?? 0;
+            const taskRemaining = Math.max(0, taskTotal - taskCompleted);
             const msTotal = derived?.totalMilestones ?? summary?.milestonesTotal ?? 0;
             const msCompleted =
               derived?.completedMilestones ?? summary?.milestonesCompleted ?? 0;
@@ -362,7 +363,11 @@ export function ProjectsWorkspaceView({
                     activeMetrics.length === 1 ? 'block' : 'blocks'
                   }`
                 : null,
-              taskTotal > 0 ? `${taskCompleted}/${taskTotal} tasks` : null,
+              taskTotal > 0
+                ? `${taskCompleted}/${taskTotal} ${
+                    taskTotal === 1 ? 'task' : 'tasks'
+                  } · ${taskRemaining} left`
+                : null,
               msTotal > 0
                 ? `${msCompleted}/${msTotal} ${msTotal === 1 ? 'milestone' : 'milestones'}`
                 : null,
@@ -493,8 +498,8 @@ export function ProjectsWorkspaceView({
                         <div className="space-y-1">
                           <div className="flex items-center justify-between text-[11px] dw-type-numeric-body">
                             <span className="text-[var(--dw-text-secondary)] truncate">
-                              Tasks & milestones: {derived.completedItems}/
-                              {derived.totalItems}
+                              {msTotal > 0 ? 'Tasks & milestones' : 'Tasks'}:{' '}
+                              {derived.completedItems}/{derived.totalItems}
                             </span>
                             <span className="font-bold text-[var(--dw-text-primary)] shrink-0 ml-2">
                               {derived.percentage}%

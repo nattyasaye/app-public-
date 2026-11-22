@@ -1,12 +1,8 @@
 import { CalendarDate, DayTimeOfDay, EthiopiaClock } from './date';
-import {
-  DEFAULT_SHARED_DATABASE_CONSTANTS,
-  SharedReminder,
-} from './sharedFoundation';
+import { SharedReminder } from './sharedFoundation';
 import { DaywellTaskRecord, isTaskCompleted } from './taskOperations';
 
-export const TASK_REMINDER_CHANNEL_ID =
-  DEFAULT_SHARED_DATABASE_CONSTANTS.taskReminderChannelId;
+export const TASK_REMINDER_CHANNEL_ID = 'task_reminders_channel';
 
 export const DEFAULT_TASK_REMINDER_HOUR = 9;
 export const DEFAULT_TASK_REMINDER_MINUTE = 0;

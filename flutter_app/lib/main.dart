@@ -160,6 +160,8 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
   String? _recoveryNotice;
   ({String taskId, int nonce})? _requestedTaskFocus;
   int _taskFocusNonce = 0;
+  ({int tabIndex, int nonce})? _requestedTasksSubTab;
+  int _tasksSubTabNonce = 0;
 
   @override
   void initState() {
@@ -386,6 +388,15 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           state: _state,
           onOpenQuickCapture: () => _openQuickCapture(),
           onSelectTab: _shellController.selectTab,
+          onOpenTasksSubTab: (int tabIndex) {
+            setState(() {
+              _requestedTasksSubTab = (
+                tabIndex: tabIndex,
+                nonce: ++_tasksSubTabNonce,
+              );
+            });
+            _shellController.selectTab(DaywellTabId.tasks);
+          },
           onOpenBackup: () =>
               _shellController.openSecondaryRoute(DaywellSecondaryRoute.backup),
         );
@@ -396,6 +407,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           projectsController: _state.projectsController,
           inboxController: _state.inboxController,
           requestedTaskFocus: _requestedTaskFocus,
+          requestedSubTab: _requestedTasksSubTab,
           onOpenCalendarDate: (CalendarDate date) {
             _state.calendarController.setSelectedCalendarDate(date);
             _shellController.selectTab(DaywellTabId.calendar);

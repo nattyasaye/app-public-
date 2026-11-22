@@ -78,12 +78,18 @@ class ProgressEngine {
     List<TaskEntity> linkedTasks = const [],
     List<MilestoneEntity> milestones = const [],
     CalendarDate? asOfDate,
+    bool includeArchivedTasks = false,
   }) {
     final referenceDate = asOfDate ?? CalendarDate.today();
     final todayIso = referenceDate.toIsoString();
 
     final projectTasks = linkedTasks
-        .where((t) => t.projectId == project.id && t.status != 'cancelled')
+        .where(
+          (t) =>
+              t.projectId == project.id &&
+              (includeArchivedTasks || !t.isArchived) &&
+              t.status != 'cancelled',
+        )
         .toList();
     final linkedTasksTotal = projectTasks.length;
     final linkedTasksCompleted = projectTasks

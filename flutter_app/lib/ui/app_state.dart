@@ -906,6 +906,10 @@ class AppStateManager extends ChangeNotifier {
         verifiedDb,
       );
 
+      try {
+        await _notificationService.cancelAllReminders();
+      } catch (_) {}
+
       await _rebindDatabase(verifiedDb);
       verifiedDb = null;
       await _rehydrateAllControllersStrict();

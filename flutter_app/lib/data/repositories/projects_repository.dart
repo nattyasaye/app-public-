@@ -126,6 +126,7 @@ class DriftProjectsRepository implements IProjectsRepository {
       description: r.description,
       status: r.status,
       priority: r.priority,
+      completedAt: r.completedAt,
       dueDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.dueDate),
       scheduledDate:
           SharedDateFormatter.tryParseFlexibleToCalendarDate(r.scheduledDate),
@@ -134,6 +135,7 @@ class DriftProjectsRepository implements IProjectsRepository {
       milestoneId: r.milestoneId,
       isPinned: r.isPinned,
       isMyDay: r.isMyDay,
+      isArchived: r.isArchived,
       recurrenceRule: r.recurrenceRule,
       createdAt: r.createdAt,
       updatedAt: r.updatedAt,

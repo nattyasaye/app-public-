@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   SharedMilestone,
   SharedProjectTrackingRecord,
+  SharedReminder,
   SharedTaskRecurrenceConfig,
   SharedTaskRecurrenceFrequency,
   SharedTaskRecurrenceRepeatFrom,
@@ -24,13 +25,26 @@ import {
   resolveEffectiveRecurrenceConfig,
 } from '../../domain/taskRecurrence';
 import {
+  TaskReminderPreset,
+  computeTaskReminderTriggerFromPreset,
+  defaultFallbackReminderDateTime,
+  findReminderForTask,
+  formatTaskReminderSummary,
+  inferTaskReminderPreset,
+  resolveTaskReminderAnchor,
+  utcIsoToEthiopiaWallDateTime,
+} from '../../domain/taskReminders';
+import {
   ProjectSectionsViewModel,
   projectsService,
 } from '../../services/projectsService';
+import { taskRemindersService } from '../../services/taskRemindersService';
 import {
+  Bell,
   Calendar,
   Check,
   CheckSquare,
+  Clock,
   Edit3,
   Flag,
   FolderPlus,
@@ -47,6 +61,10 @@ import {
   DaywellProgressBar,
   DaywellStatusBadge,
 } from '../ui';
+import {
+  TaskReminderDetailsPanel,
+  TaskReminderEditorSection,
+} from '../tasks/TaskReminderFields';
 import {
   TaskRecurrenceDetailsPanel,
   TaskRecurrenceEditorSection,
@@ -89,8 +107,15 @@ export function ProjectTasksSectionsCard({
   const [taskStatus, setTaskStatus] = useState<TaskStatus>('not_started');
   const [taskDueDate, setTaskDueDate] = useState('');
   const [taskScheduledDate, setTaskScheduledDate] = useState('');
+  const [taskScheduledTime, setTaskScheduledTime] = useState('');
   const [taskSectionId, setTaskSectionId] = useState('');
   const [taskMilestoneId, setTaskMilestoneId] = useState('');
+  const [taskReminderEnabled, setTaskReminderEnabled] = useState(false);
+  const [taskReminderPreset, setTaskReminderPreset] =
+    useState<TaskReminderPreset>('at_time');
+  const [taskReminderCustomDate, setTaskReminderCustomDate] = useState('');
+  const [taskReminderCustomTime, setTaskReminderCustomTime] = useState('');
+  const [taskReminderError, setTaskReminderError] = useState<string | undefined>();
   const [taskIsRecurring, setTaskIsRecurring] = useState(false);
   const [taskRecFrequency, setTaskRecFrequency] =
     useState<SharedTaskRecurrenceFrequency>('weekly');
@@ -109,6 +134,13 @@ export function ProjectTasksSectionsCard({
     useState<DaywellTaskRecord | null>(null);
   const [detailsTaskId, setDetailsTaskId] = useState<string | null>(null);
   const [detailsRecurrenceError, setDetailsRecurrenceError] = useState('');
+  const [reminders, setReminders] = useState<SharedReminder[]>(() =>
+    taskRemindersService.loadAllReminders()
+  );
+
+  useEffect(() => {
+    setReminders(taskRemindersService.loadAllReminders());
+  }, [sectionsView]);
 
   const allTasks = [
     ...sectionsView.sections.flatMap((s) => s.tasks),
@@ -193,6 +225,7 @@ export function ProjectTasksSectionsCard({
   };
 
   const openCreateTask = (defaultSectionId = '') => {
+    const fallbackReminderDt = defaultFallbackReminderDateTime();
     setEditingTask(null);
     setTaskTitle('');
     setTaskDescription('');
@@ -200,8 +233,14 @@ export function ProjectTasksSectionsCard({
     setTaskStatus('not_started');
     setTaskDueDate('');
     setTaskScheduledDate('');
+    setTaskScheduledTime('');
     setTaskSectionId(defaultSectionId);
     setTaskMilestoneId('');
+    setTaskReminderEnabled(false);
+    setTaskReminderPreset('at_time');
+    setTaskReminderCustomDate(fallbackReminderDt.dateIso);
+    setTaskReminderCustomTime(fallbackReminderDt.time);
+    setTaskReminderError(undefined);
     setTaskIsRecurring(false);
     setTaskRecFrequency('weekly');
     setTaskRecInterval(1);
@@ -216,6 +255,14 @@ export function ProjectTasksSectionsCard({
 
   const openEditTask = (task: DaywellTaskRecord) => {
     const rec = resolveEffectiveRecurrenceConfig(task);
+    const liveReminders = taskRemindersService.loadAllReminders();
+    const existingReminder = findReminderForTask(liveReminders, task.id);
+    const existingWall = existingReminder
+      ? utcIsoToEthiopiaWallDateTime(existingReminder.triggerTimeUtc)
+      : null;
+    const anchor = resolveTaskReminderAnchor(task);
+    const fallbackReminderDt = defaultFallbackReminderDateTime();
+
     setEditingTask(task);
     setTaskTitle(task.title);
     setTaskDescription(task.description ?? '');
@@ -223,8 +270,22 @@ export function ProjectTasksSectionsCard({
     setTaskStatus(resolveEffectiveTaskStatus(task));
     setTaskDueDate(task.dueDate ?? '');
     setTaskScheduledDate(task.scheduledDate ?? '');
+    setTaskScheduledTime(task.scheduledTime ?? '');
     setTaskSectionId(taskToSectionId.get(task.id) ?? '');
     setTaskMilestoneId(task.milestoneId ?? '');
+    setTaskReminderEnabled(Boolean(existingReminder || task.hasReminder));
+    setTaskReminderPreset(
+      existingReminder
+        ? inferTaskReminderPreset(task, existingReminder.triggerTimeUtc)
+        : 'at_time'
+    );
+    setTaskReminderCustomDate(
+      existingWall?.dateIso ?? anchor?.dateIso ?? fallbackReminderDt.dateIso
+    );
+    setTaskReminderCustomTime(
+      existingWall?.time ?? anchor?.time ?? fallbackReminderDt.time
+    );
+    setTaskReminderError(undefined);
     setTaskIsRecurring(Boolean(rec));
     setTaskRecFrequency(rec?.frequency ?? 'weekly');
     setTaskRecInterval(rec?.interval ?? 1);
@@ -239,7 +300,56 @@ export function ProjectTasksSectionsCard({
 
   const openTaskDetails = (task: DaywellTaskRecord) => {
     setDetailsRecurrenceError('');
+    setReminders(taskRemindersService.loadAllReminders());
     setDetailsTaskId(task.id);
+  };
+
+  const handleSaveDetailsReminder = (task: DaywellTaskRecord, triggerTimeUtc: string) => {
+    const prevReminders = taskRemindersService.loadAllReminders();
+    const prevTasks = [...allTasks];
+    const { reminder, reminders: nextReminders } =
+      taskRemindersService.setTaskReminder(task, triggerTimeUtc, {
+        emitSync: true,
+        syncTaskHasReminder: true,
+      });
+    setReminders(nextReminders);
+    onRefresh();
+    onNotifyUndo?.(
+      `Reminder set for "${task.title}" (${formatTaskReminderSummary(reminder.triggerTimeUtc)})`,
+      () => {
+        projectsService.restoreTasksSnapshot(
+          prevTasks,
+          undefined,
+          undefined,
+          undefined,
+          prevReminders
+        );
+        setReminders(prevReminders);
+        onRefresh();
+      }
+    );
+  };
+
+  const handleRemoveDetailsReminder = (task: DaywellTaskRecord) => {
+    const prevReminders = taskRemindersService.loadAllReminders();
+    const prevTasks = [...allTasks];
+    const nextReminders = taskRemindersService.removeTaskReminder(task.id, {
+      emitSync: true,
+      syncTaskHasReminder: true,
+    });
+    setReminders(nextReminders);
+    onRefresh();
+    onNotifyUndo?.(`Removed reminder for "${task.title}"`, () => {
+      projectsService.restoreTasksSnapshot(
+        prevTasks,
+        undefined,
+        undefined,
+        undefined,
+        prevReminders
+      );
+      setReminders(prevReminders);
+      onRefresh();
+    });
   };
 
   const handleSkipDetailsRecurrence = (taskId: string) => {
@@ -249,6 +359,7 @@ export function ProjectTasksSectionsCard({
       return;
     }
     setDetailsRecurrenceError('');
+    setReminders(taskRemindersService.loadAllReminders());
     onRefresh();
     const nextDate = res.updated.dueDate ?? res.updated.scheduledDate;
     onNotifyUndo?.(
@@ -258,8 +369,10 @@ export function ProjectTasksSectionsCard({
           res.previousTasks,
           undefined,
           undefined,
-          res.previousEntries
+          res.previousEntries,
+          res.previousReminders
         );
+        setReminders(res.previousReminders);
         onRefresh();
       }
     );
@@ -280,6 +393,7 @@ export function ProjectTasksSectionsCard({
       return;
     }
     setDetailsRecurrenceError('');
+    setReminders(taskRemindersService.loadAllReminders());
     onRefresh();
     onNotifyUndo?.(
       `Rescheduled "${res.updated.title}" to ${newDateIso}`,
@@ -288,8 +402,10 @@ export function ProjectTasksSectionsCard({
           res.previousTasks,
           undefined,
           undefined,
-          res.previousEntries
+          res.previousEntries,
+          res.previousReminders
         );
+        setReminders(res.previousReminders);
         onRefresh();
       }
     );
@@ -302,14 +418,17 @@ export function ProjectTasksSectionsCard({
       return;
     }
     setDetailsRecurrenceError('');
+    setReminders(taskRemindersService.loadAllReminders());
     onRefresh();
     onNotifyUndo?.(`Stopped recurrence for "${res.updated.title}"`, () => {
       projectsService.restoreTasksSnapshot(
         res.previousTasks,
         undefined,
         undefined,
-        res.previousEntries
+        res.previousEntries,
+        res.previousReminders
       );
+      setReminders(res.previousReminders);
       onRefresh();
     });
   };
@@ -321,6 +440,28 @@ export function ProjectTasksSectionsCard({
       setTaskFormError('Task title is required.');
       return;
     }
+    let computedReminderTriggerUtc: string | undefined;
+    if (taskReminderEnabled) {
+      const remCheck = computeTaskReminderTriggerFromPreset({
+        task: {
+          dueDate: taskDueDate.trim() || undefined,
+          scheduledDate: taskScheduledDate.trim() || undefined,
+          scheduledTime: taskScheduledTime.trim() || undefined,
+        },
+        preset: taskReminderPreset,
+        customDateIso: taskReminderCustomDate,
+        customTime: taskReminderCustomTime,
+      });
+      if (!remCheck.ok || !remCheck.triggerTimeUtc) {
+        const msg = remCheck.error ?? 'Choose a valid reminder date and time.';
+        setTaskReminderError(msg);
+        setTaskFormError(msg);
+        return;
+      }
+      computedReminderTriggerUtc = remCheck.triggerTimeUtc;
+    }
+    setTaskReminderError(undefined);
+
     const recConfig: SharedTaskRecurrenceConfig | undefined = taskIsRecurring
       ? {
           frequency: taskRecFrequency,
@@ -359,8 +500,12 @@ export function ProjectTasksSectionsCard({
             status: taskStatus,
             dueDate: taskDueDate,
             scheduledDate: taskScheduledDate,
+            scheduledTime: taskScheduledTime,
             milestoneId: taskMilestoneId || '',
             sectionId: taskSectionId || null,
+            ...(taskReminderEnabled && computedReminderTriggerUtc
+              ? { reminderTriggerUtc: computedReminderTriggerUtc }
+              : { clearReminder: true }),
             ...(recConfig
               ? { recurrenceConfig: recConfig }
               : { clearRecurrenceConfig: true }),
@@ -368,6 +513,7 @@ export function ProjectTasksSectionsCard({
         );
         setIsTaskModalOpen(false);
         setTaskFormError(null);
+        setReminders(taskRemindersService.loadAllReminders());
         onRefresh();
         if (editRes.generatedNextTask || editRes.seriesEnded) {
           const nextDate =
@@ -387,8 +533,10 @@ export function ProjectTasksSectionsCard({
                   }
                 : undefined,
               editRes.generatedNextTask?.id,
-              editRes.previousEntries
+              editRes.previousEntries,
+              editRes.previousReminders
             );
+            setReminders(editRes.previousReminders);
             onRefresh();
           });
         }
@@ -401,12 +549,15 @@ export function ProjectTasksSectionsCard({
           status: taskStatus,
           dueDate: taskDueDate || undefined,
           scheduledDate: taskScheduledDate || undefined,
+          scheduledTime: taskScheduledTime || undefined,
           milestoneId: taskMilestoneId || undefined,
           sectionId: taskSectionId || undefined,
           recurrenceConfig: recConfig,
+          reminderTriggerUtc: computedReminderTriggerUtc,
         });
         setIsTaskModalOpen(false);
         setTaskFormError(null);
+        setReminders(taskRemindersService.loadAllReminders());
         onRefresh();
       }
     } catch (err) {
@@ -419,8 +570,9 @@ export function ProjectTasksSectionsCard({
   const handleToggleTask = (task: DaywellTaskRecord) => {
     const wasDone = isTaskCompleted(task);
     const prevSectionId = taskToSectionId.get(task.id);
-    const { previousTasks, generatedNextTask } =
+    const { previousTasks, previousReminders, generatedNextTask } =
       projectsService.toggleTaskCompletionInProject(task.id);
+    setReminders(taskRemindersService.loadAllReminders());
     onRefresh();
     const nextDate = generatedNextTask?.dueDate ?? generatedNextTask?.scheduledDate;
     const message = wasDone
@@ -434,8 +586,11 @@ export function ProjectTasksSectionsCard({
         prevSectionId
           ? { projectId, taskId: task.id, sectionId: prevSectionId }
           : undefined,
-        generatedNextTask?.id
+        generatedNextTask?.id,
+        undefined,
+        previousReminders
       );
+      setReminders(previousReminders);
       onRefresh();
     });
   };
@@ -452,10 +607,11 @@ export function ProjectTasksSectionsCard({
   const handleConfirmDeleteTask = () => {
     if (!pendingDeleteTask) return;
     const target = pendingDeleteTask;
-    const { previousTasks, deleted, previousSection } =
+    const { previousTasks, previousReminders, deleted, previousSection } =
       projectsService.deleteTaskInProject(target.id);
     setPendingDeleteTask(null);
     setIsTaskModalOpen(false);
+    setReminders(taskRemindersService.loadAllReminders());
     onRefresh();
     if (deleted) {
       onNotifyUndo?.(`Deleted "${deleted.title}"`, () => {
@@ -467,8 +623,12 @@ export function ProjectTasksSectionsCard({
                 taskId: deleted.id,
                 sectionId: previousSection.sectionId,
               }
-            : undefined
+            : undefined,
+          undefined,
+          undefined,
+          previousReminders
         );
+        setReminders(previousReminders);
         onRefresh();
       });
     }
@@ -555,6 +715,12 @@ export function ProjectTasksSectionsCard({
                   Due {task.dueDate}
                 </span>
               )}
+              {task.scheduledTime && (
+                <span className="flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                  <Clock className="w-3 h-3" />
+                  {task.scheduledTime}
+                </span>
+              )}
               {(() => {
                 const rec = resolveEffectiveRecurrenceConfig(task);
                 if (!rec) return null;
@@ -562,6 +728,24 @@ export function ProjectTasksSectionsCard({
                   <span className="flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
                     <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
                     {formatRecurrenceSummary(rec)}
+                  </span>
+                );
+              })()}
+              {(() => {
+                const taskRem = findReminderForTask(reminders, task.id);
+                if (!task.hasReminder && (!taskRem || !taskRem.isActive)) {
+                  return null;
+                }
+                const remSummary = taskRem
+                  ? formatTaskReminderSummary(taskRem.triggerTimeUtc)
+                  : 'Reminder set';
+                return (
+                  <span
+                    className="flex items-center gap-0.5 text-[var(--dw-primary)] font-medium"
+                    title={remSummary}
+                  >
+                    <Bell className="w-3 h-3" />
+                    {remSummary}
                   </span>
                 );
               })()}
@@ -965,6 +1149,47 @@ export function ProjectTasksSectionsCard({
                 </div>
               </div>
 
+              <div>
+                <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
+                  Scheduled Time (Optional)
+                </label>
+                <input
+                  aria-label="Project task scheduled time"
+                  type="time"
+                  value={taskScheduledTime}
+                  onChange={(e) => setTaskScheduledTime(e.target.value)}
+                  className="w-full min-h-[38px] px-2.5 py-1.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                />
+              </div>
+
+              <TaskReminderEditorSection
+                compact
+                enabled={taskReminderEnabled}
+                onToggle={(next) => {
+                  setTaskReminderEnabled(next);
+                  setTaskReminderError(undefined);
+                }}
+                preset={taskReminderPreset}
+                onChangePreset={(next) => {
+                  setTaskReminderPreset(next);
+                  setTaskReminderError(undefined);
+                }}
+                customDate={taskReminderCustomDate}
+                onChangeCustomDate={(next) => {
+                  setTaskReminderCustomDate(next);
+                  setTaskReminderError(undefined);
+                }}
+                customTime={taskReminderCustomTime}
+                onChangeCustomTime={(next) => {
+                  setTaskReminderCustomTime(next);
+                  setTaskReminderError(undefined);
+                }}
+                dueDate={taskDueDate}
+                scheduledDate={taskScheduledDate}
+                scheduledTime={taskScheduledTime}
+                error={taskReminderError}
+              />
+
               <TaskRecurrenceEditorSection
                 compact
                 isRecurring={taskIsRecurring}
@@ -1098,6 +1323,7 @@ export function ProjectTasksSectionsCard({
                 <span className="text-[var(--dw-text-muted)]">Scheduled</span>
                 <span className="font-semibold text-[var(--dw-text-primary)]">
                   {detailsTask.scheduledDate || 'Not set'}
+                  {detailsTask.scheduledTime ? ` · ${detailsTask.scheduledTime}` : ''}
                 </span>
               </div>
               <div className="flex items-center justify-between gap-2">
@@ -1124,6 +1350,16 @@ export function ProjectTasksSectionsCard({
                 </div>
               )}
             </div>
+
+            <TaskReminderDetailsPanel
+              compact
+              task={detailsTask}
+              reminder={findReminderForTask(reminders, detailsTask.id)}
+              onSaveReminder={(triggerTimeUtc) =>
+                handleSaveDetailsReminder(detailsTask, triggerTimeUtc)
+              }
+              onRemoveReminder={() => handleRemoveDetailsReminder(detailsTask)}
+            />
 
             <TaskRecurrenceDetailsPanel
               task={detailsTask}

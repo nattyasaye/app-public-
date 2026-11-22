@@ -1338,6 +1338,7 @@ export function calculateProjectProgressSummary(params: {
   linkedTasks?: SharedTask[];
   milestones?: ProjectMilestoneInput[];
   asOfDate?: CalendarDate;
+  includeArchivedTasks?: boolean;
 }): ProjectProgressSummary {
   const {
     project,
@@ -1346,13 +1347,17 @@ export function calculateProjectProgressSummary(params: {
     linkedTasks = [],
     milestones = [],
     asOfDate,
+    includeArchivedTasks = false,
   } = params;
 
   const referenceDate = asOfDate ?? CalendarDate.today();
   const todayIso = referenceDate.toIsoString();
 
   const projectTasks = linkedTasks.filter(
-    (t) => t.projectId === project.id && t.status !== 'cancelled'
+    (t) =>
+      t.projectId === project.id &&
+      (includeArchivedTasks || !t.isArchived) &&
+      t.status !== 'cancelled'
   );
   const linkedTasksTotal = projectTasks.length;
   const linkedTasksCompleted = projectTasks.filter(

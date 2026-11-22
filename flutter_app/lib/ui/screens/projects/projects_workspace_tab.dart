@@ -405,6 +405,9 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                         projectTasks.length + projectMilestones.length;
                     final completedDerivedItems =
                         completedTasksCount + completedMilestonesCount;
+                    final remainingTasksCount =
+                        (projectTasks.length - completedTasksCount)
+                            .clamp(0, projectTasks.length);
                     final derivedPct =
                         ProgressEngine.calculateProgressPercentage(
                       totalTasks: projectTasks.length,
@@ -412,7 +415,9 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                       totalMilestones: projectMilestones.length,
                       completedMilestones: completedMilestonesCount,
                       isProjectManuallyCompleted:
-                          project.status == 'completed',
+                          project.status == 'completed' &&
+                              projectTasks.isEmpty &&
+                              projectMilestones.isEmpty,
                     );
                     final primaryPct = summary?.overallPercentage;
 
@@ -495,9 +500,12 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                               Expanded(
                                 child: Text(
                                   [
-                                    '${blocks.length} ${blocks.length == 1 ? "block" : "blocks"}',
-                                    '$completedTasksCount/${projectTasks.length} ${projectTasks.length == 1 ? "task" : "tasks"}',
-                                    '$completedMilestonesCount/${projectMilestones.length} ${projectMilestones.length == 1 ? "milestone" : "milestones"}',
+                                    if (blocks.isNotEmpty)
+                                      '${blocks.length} ${blocks.length == 1 ? "block" : "blocks"}',
+                                    if (projectTasks.isNotEmpty)
+                                      '$completedTasksCount/${projectTasks.length} ${projectTasks.length == 1 ? "task" : "tasks"} · $remainingTasksCount remaining',
+                                    if (projectMilestones.isNotEmpty)
+                                      '$completedMilestonesCount/${projectMilestones.length} ${projectMilestones.length == 1 ? "milestone" : "milestones"}',
                                     if (project.targetDate != null)
                                       'Due ${SharedDateFormatter.formatDual(project.targetDate!, useAmharic: false)}',
                                   ].join(' · '),

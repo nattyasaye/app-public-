@@ -102,6 +102,97 @@ class MoreView extends StatelessWidget {
     );
   }
 
+  void _openNotificationsInfoDialog(BuildContext context) {
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
+    final activeTaskReminders =
+        state.tasksController.state.activeReminderCount;
+    final totalTaskReminders = state.tasksController.state.reminders
+        .where((r) => r.targetType == 'task')
+        .length;
+
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (BuildContext dialogContext) {
+          return AlertDialog(
+            title: const Text('Notifications & Reminders'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DaywellStatusBanner(
+                    tone: DaywellStatusTone.info,
+                    title: '$activeTaskReminders active task reminder(s)',
+                    message: totalTaskReminders > activeTaskReminders
+                        ? '$totalTaskReminders total saved (completed or archived tasks stay paused).'
+                        : 'Shared local notifications run 100% offline with zero external push servers.',
+                  ),
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  Text(
+                    'Configured local channels:',
+                    style: Theme.of(dialogContext)
+                        .textTheme
+                        .labelLarge
+                        ?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: SharedDesignTokens.spacingXs),
+                  Text(
+                    '• Task Reminders (task_reminders_channel)\n'
+                    '• Financial Commitment Alerts (commitment_reminders_channel)\n'
+                    '• General Reminders (custom_reminders_channel)',
+                    style: Theme.of(dialogContext)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: semantic.textSecondary),
+                  ),
+                  const SizedBox(height: SharedDesignTokens.spacingSm),
+                  Text(
+                    'Future reminders schedule in-session via LocalNotificationService when tasks are created, edited, completed, rescheduled, or restored.',
+                    style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              DaywellButton(
+                label: 'Allow Notifications',
+                variant: DaywellButtonVariant.outlined,
+                size: DaywellButtonSize.compact,
+                leadingIcon: Icons.notifications_active_outlined,
+                onPressed: () async {
+                  final granted = await state.requestNotificationPermission();
+                  if (!context.mounted) return;
+                  if (dialogContext.mounted) {
+                    Navigator.of(dialogContext).pop();
+                  }
+                  ScaffoldMessenger.of(context).clearSnackBars();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        granted
+                            ? 'Local notifications permitted for Daywell reminders.'
+                            : 'Notification permission was not granted. Check Android app settings if needed.',
+                      ),
+                    ),
+                  );
+                },
+              ),
+              DaywellButton(
+                label: 'Done',
+                variant: DaywellButtonVariant.text,
+                onPressed: () => Navigator.of(dialogContext).pop(),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -349,7 +440,7 @@ class MoreView extends StatelessWidget {
                         size: DaywellIconSize.md,
                         color: semantic.textMuted,
                       ),
-                      onTap: () {},
+                      onTap: () => _openNotificationsInfoDialog(context),
                     ),
                   ],
                 ),

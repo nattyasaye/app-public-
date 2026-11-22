@@ -325,11 +325,23 @@ class ProjectDetailScreen extends StatelessWidget {
                             ),
                           ],
                           const SizedBox(height: SharedDesignTokens.spacingSm),
-                          Text(
-                            '$completedTasksCount/${linkedTasks.length} ${linkedTasks.length == 1 ? 'task' : 'tasks'} · $completedMilestonesCount/${projectMilestones.length} ${projectMilestones.length == 1 ? 'milestone' : 'milestones'}',
-                            style: DaywellTypography.numericBody(
-                              color: semantic.textSecondary,
-                            ),
+                          Builder(
+                            builder: (_) {
+                              final remainingTasksCount =
+                                  (linkedTasks.length - completedTasksCount)
+                                      .clamp(0, linkedTasks.length);
+                              final parts = <String>[
+                                '$completedTasksCount/${linkedTasks.length} ${linkedTasks.length == 1 ? 'task' : 'tasks'} · $remainingTasksCount remaining',
+                                if (projectMilestones.isNotEmpty)
+                                  '$completedMilestonesCount/${projectMilestones.length} ${projectMilestones.length == 1 ? 'milestone' : 'milestones'}',
+                              ];
+                              return Text(
+                                parts.join(' · '),
+                                style: DaywellTypography.numericBody(
+                                  color: semantic.textSecondary,
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ),
@@ -422,7 +434,9 @@ class ProjectDetailScreen extends StatelessWidget {
         completedTasks: completedTasks,
         totalMilestones: totalMilestones,
         completedMilestones: completedMilestones,
-        isProjectManuallyCompleted: project.status == 'completed',
+        isProjectManuallyCompleted: project.status == 'completed' &&
+            totalTasks == 0 &&
+            totalMilestones == 0,
       );
       return DaywellCard(
         padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),

@@ -353,15 +353,23 @@ export function ProjectDetailView({
                       label={statusSpec.label}
                     />
                   )}
-                  <div className="flex items-center gap-2 text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                  <div className="flex items-center flex-wrap gap-2 text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
                     {derivedProgress && derivedProgress.totalTasks > 0 && (
                       <span>
-                        {derivedProgress.completedTasks}/{derivedProgress.totalTasks} tasks done
+                        {derivedProgress.completedTasks}/{derivedProgress.totalTasks}{' '}
+                        {derivedProgress.totalTasks === 1 ? 'task' : 'tasks'} ·{' '}
+                        {Math.max(
+                          0,
+                          derivedProgress.totalTasks - derivedProgress.completedTasks
+                        )}{' '}
+                        remaining
                       </span>
                     )}
                     {derivedProgress && derivedProgress.totalMilestones > 0 && (
                       <span>
-                        · {derivedProgress.completedMilestones}/{derivedProgress.totalMilestones} milestones
+                        {derivedProgress.totalTasks > 0 ? '· ' : ''}
+                        {derivedProgress.completedMilestones}/{derivedProgress.totalMilestones}{' '}
+                        {derivedProgress.totalMilestones === 1 ? 'milestone' : 'milestones'}
                       </span>
                     )}
                   </div>
@@ -512,10 +520,23 @@ export function ProjectDetailView({
                         PROJECT COMPLETION
                       </div>
                       <p className="text-xs font-semibold text-[var(--dw-on-primary-container)] dw-type-numeric-body">
-                        {derivedProgress.completedTasks}/{derivedProgress.totalTasks}{' '}
-                        {derivedProgress.totalTasks === 1 ? 'task' : 'tasks'} ·{' '}
-                        {derivedProgress.completedMilestones}/{derivedProgress.totalMilestones}{' '}
-                        {derivedProgress.totalMilestones === 1 ? 'milestone' : 'milestones'}
+                        {derivedProgress.totalTasks > 0
+                          ? `${derivedProgress.completedTasks}/${derivedProgress.totalTasks} ${
+                              derivedProgress.totalTasks === 1 ? 'task' : 'tasks'
+                            } · ${Math.max(
+                              0,
+                              derivedProgress.totalTasks - derivedProgress.completedTasks
+                            )} remaining`
+                          : project.status === 'completed' && derivedProgress.totalMilestones === 0
+                          ? 'Marked complete'
+                          : null}
+                        {derivedProgress.totalMilestones > 0
+                          ? `${derivedProgress.totalTasks > 0 ? ' · ' : ''}${
+                              derivedProgress.completedMilestones
+                            }/${derivedProgress.totalMilestones} ${
+                              derivedProgress.totalMilestones === 1 ? 'milestone' : 'milestones'
+                            }`
+                          : null}
                       </p>
                     </div>
                     <span className="dw-type-numeric-hero text-[var(--dw-on-primary-container)] shrink-0">

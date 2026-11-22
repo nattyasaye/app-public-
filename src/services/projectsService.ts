@@ -192,6 +192,10 @@ class ProjectsService {
     );
   }
 
+  public listAllMilestones(): SharedMilestone[] {
+    return this.repo.getAllMilestones();
+  }
+
   public getAllProjectSummaries(
     options: { asOfDate?: CalendarDate; includeArchived?: boolean } = {}
   ): Record<string, ProjectProgressSummary> {

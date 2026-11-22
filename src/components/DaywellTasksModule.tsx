@@ -49,6 +49,7 @@ import {
   SharedInboxItem,
   SharedMilestone,
   SharedProject,
+  SharedReminder,
   SharedTaskRecurrenceConfig,
   SharedTaskRecurrenceFrequency,
   SharedTaskRecurrenceRepeatFrom,
@@ -101,13 +102,28 @@ import {
   skipRecurrenceOccurrence,
   stopTaskRecurrence,
 } from '../domain/taskRecurrence';
+import {
+  TaskReminderPreset,
+  computeTaskReminderTriggerFromPreset,
+  defaultFallbackReminderDateTime,
+  findReminderForTask,
+  formatTaskReminderSummary,
+  inferTaskReminderPreset,
+  resolveTaskReminderAnchor,
+  utcIsoToEthiopiaWallDateTime,
+} from '../domain/taskReminders';
 import { getTaskPrimaryCalendarDate } from '../domain/taskCalendar';
 import { dailyPlanningService } from '../services/dailyPlanningService';
 import { inboxService } from '../services/inboxService';
 import { projectsService } from '../services/projectsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
+import { taskRemindersService } from '../services/taskRemindersService';
 import { ProjectsWorkspaceView } from './projects';
 import { MyDayPlanningView } from './tasks/MyDayPlanningView';
+import {
+  TaskReminderDetailsPanel,
+  TaskReminderEditorSection,
+} from './tasks/TaskReminderFields';
 import {
   TaskRecurrenceDetailsPanel,
   TaskRecurrenceEditorSection,
@@ -136,7 +152,12 @@ interface DaywellTasksModuleProps {
   onUpdateInboxItems?: (updated: SharedInboxItem[]) => void;
   dailyPlanningEntries?: SharedDailyPlanningEntry[];
   onUpdateDailyPlanningEntries?: (updated: SharedDailyPlanningEntry[]) => void;
-  requestedFilter?: { filter: TaskViewFilter; nonce: number } | null;
+  requestedFilter?: {
+    filter: TaskViewFilter;
+    dueDateFilter?: TaskDueDateFilter | '';
+    planDate?: string;
+    nonce: number;
+  } | null;
   requestedTaskFocus?: {
     taskId: string;
     openMode?: 'details' | 'edit';
@@ -283,13 +304,12 @@ export function DaywellTasksModule({
     useState<SharedDailyPlanningEntry[]>(() =>
       dailyPlanningService.loadDailyPlanningEntries()
     );
+  const [reminders, setReminders] = useState<SharedReminder[]>(() =>
+    taskRemindersService.loadAllReminders()
+  );
 
   useEffect(() => {
-    if (
-      (controlledInboxItems !== undefined &&
-        controlledDailyPlanningEntries !== undefined) ||
-      typeof window === 'undefined'
-    ) {
+    if (typeof window === 'undefined') {
       return;
     }
     const handleSync = () => {
@@ -301,6 +321,7 @@ export function DaywellTasksModule({
           dailyPlanningService.loadDailyPlanningEntries()
         );
       }
+      setReminders(taskRemindersService.loadAllReminders());
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
@@ -355,14 +376,6 @@ export function DaywellTasksModule({
 
   // Filter tab: 'today' | 'my_day' | 'inbox' | 'upcoming' | 'active' | 'overdue' | 'all' | 'completed' | 'archived'
   const [activeFilter, setActiveFilter] = useState<TaskViewFilter>('today');
-
-  useEffect(() => {
-    if (requestedFilter?.filter) {
-      setSubTab('tasks');
-      setActiveFilter(requestedFilter.filter);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedFilter?.nonce]);
 
   useEffect(() => {
     if (!requestedTaskFocus?.taskId) return;
@@ -426,6 +439,10 @@ export function DaywellTasksModule({
   const [newFormLabelInput, setNewFormLabelInput] = useState('');
   const [formLabelError, setFormLabelError] = useState('');
   const [formHasReminder, setFormHasReminder] = useState<boolean>(false);
+  const [formReminderPreset, setFormReminderPreset] =
+    useState<TaskReminderPreset>('at_time');
+  const [formReminderCustomDate, setFormReminderCustomDate] = useState<string>('');
+  const [formReminderCustomTime, setFormReminderCustomTime] = useState<string>('');
   const [formIsRecurring, setFormIsRecurring] = useState<boolean>(false);
   const [formRecurrenceFrequency, setFormRecurrenceFrequency] =
     useState<SharedTaskRecurrenceFrequency>('weekly');
@@ -659,6 +676,27 @@ export function DaywellTasksModule({
 
   const [selectedPlanDate, setSelectedPlanDate] = useState<string>(todayStr);
 
+  useEffect(() => {
+    if (requestedFilter?.filter) {
+      setSubTab('tasks');
+      setSelectedProjectId(null);
+      setActiveFilter(requestedFilter.filter);
+      setSearchQuery('');
+      setStatusFilter('');
+      setPriorityFilter('');
+      setDueDateFilter(requestedFilter.dueDateFilter ?? '');
+      setProjectFilter('');
+      setSectionFilter('');
+      setTagFilters([]);
+      if (requestedFilter.planDate) {
+        setSelectedPlanDate(requestedFilter.planDate);
+      } else if (requestedFilter.filter === 'my_day') {
+        setSelectedPlanDate(todayStr);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedFilter?.nonce]);
+
   const myDaySnapshot = useMemo(
     () =>
       buildDailyPlanSnapshot(
@@ -742,16 +780,19 @@ export function DaywellTasksModule({
     triggerUndo('Deleted Inbox item', () => applyInboxUpdate(prevInbox));
   };
 
-  // Toggle Task Completion (Complete / Reopen with Recurrence + Undo + DailyPlanningEntries sync)
+  // Toggle Task Completion (Complete / Reopen with Recurrence + Reminder Reconciliation + Undo)
   const toggleTask = (taskId: string) => {
     const prev = [...tasks];
     const prevEntries = [...effectiveDailyPlanningEntries];
+    const prevReminders = taskRemindersService.loadAllReminders();
     const target = tasks.find((t) => t.id === taskId);
     if (!target) return;
 
     const wasCompleted = isTaskCompleted(target);
+    const nowUtc = EthiopiaClock.nowUtc();
     const result = completeTaskWithRecurrence(tasks, taskId, {
       todayIso: todayStr,
+      nowUtc,
     });
     if (!result.updatedTask) return;
 
@@ -765,6 +806,7 @@ export function DaywellTasksModule({
         preferredPlanDateIso:
           activeFilter === 'my_day' ? selectedPlanDate : undefined,
         todayIso: todayStr,
+        nowUtc,
       }
     );
 
@@ -776,7 +818,18 @@ export function DaywellTasksModule({
       );
     }
 
-    commitTasksAndDailyPlanning(result.tasks, nextEntries);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: result.tasks,
+      previousTasks: prev,
+      generatedFromTaskId: !wasCompleted ? taskId : undefined,
+      generatedNextTask: result.generatedNextTask,
+      persistTasks: false,
+      emitSync: false,
+      nowUtc,
+    });
+
+    commitTasksAndDailyPlanning(reconciled.tasks, nextEntries);
+    setReminders(reconciled.reminders);
     const nextDate =
       result.generatedNextTask?.dueDate ??
       result.generatedNextTask?.scheduledDate;
@@ -791,6 +844,11 @@ export function DaywellTasksModule({
       if (result.generatedNextTask?.id) {
         projectsService.cleanupSectionLinksForTask(result.generatedNextTask.id);
       }
+      taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+        tasks: prev,
+        emitSync: false,
+      });
+      setReminders(prevReminders);
       commitTasksAndDailyPlanning(prev, prevEntries);
     });
   };
@@ -799,6 +857,7 @@ export function DaywellTasksModule({
   const handleSkipRecurrence = (taskId: string) => {
     const prev = [...tasks];
     const prevEntries = [...effectiveDailyPlanningEntries];
+    const prevReminders = taskRemindersService.loadAllReminders();
     const existingTask = prev.find((t) => t.id === taskId);
     const res = skipRecurrenceOccurrence(tasks, taskId, { todayIso: todayStr });
     if (!res.ok || !res.updatedTask) {
@@ -813,11 +872,26 @@ export function DaywellTasksModule({
       res.updatedTask.isMyDay === false && prevEntries.some((e) => e.taskId === taskId)
         ? removeTaskFromPlannedDay(res.tasks, prevEntries, taskId, targetPlanDate).entries
         : prevEntries;
-    commitTasksAndDailyPlanning(res.tasks, nextEntries);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: res.tasks,
+      previousTasks: prev,
+      shiftCustomOnDateShift: true,
+      persistTasks: false,
+      emitSync: false,
+    });
+    commitTasksAndDailyPlanning(reconciled.tasks, nextEntries);
+    setReminders(reconciled.reminders);
     const nextDate = res.updatedTask.dueDate ?? res.updatedTask.scheduledDate;
     triggerUndo(
       `Skipped to next occurrence${nextDate ? ` (${nextDate})` : ''}`,
-      () => commitTasksAndDailyPlanning(prev, prevEntries)
+      () => {
+        taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+          tasks: prev,
+          emitSync: false,
+        });
+        setReminders(prevReminders);
+        commitTasksAndDailyPlanning(prev, prevEntries);
+      }
     );
   };
 
@@ -825,32 +899,132 @@ export function DaywellTasksModule({
   const handleRescheduleRecurrence = (taskId: string, newDateIso: string) => {
     const prev = [...tasks];
     const prevEntries = [...effectiveDailyPlanningEntries];
+    const prevReminders = taskRemindersService.loadAllReminders();
     const res = rescheduleRecurrenceOccurrence(tasks, taskId, newDateIso);
     if (!res.ok || !res.updatedTask) {
       setDetailRecurrenceError(res.error ?? 'Unable to reschedule occurrence.');
       return;
     }
     setDetailRecurrenceError('');
-    commitTasksAndDailyPlanning(res.tasks, prevEntries);
-    triggerUndo(`Rescheduled "${res.updatedTask.title}" to ${newDateIso}`, () =>
-      commitTasksAndDailyPlanning(prev, prevEntries)
-    );
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: res.tasks,
+      previousTasks: prev,
+      shiftCustomOnDateShift: true,
+      persistTasks: false,
+      emitSync: false,
+    });
+    commitTasksAndDailyPlanning(reconciled.tasks, prevEntries);
+    setReminders(reconciled.reminders);
+    triggerUndo(`Rescheduled "${res.updatedTask.title}" to ${newDateIso}`, () => {
+      taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+        tasks: prev,
+        emitSync: false,
+      });
+      setReminders(prevReminders);
+      commitTasksAndDailyPlanning(prev, prevEntries);
+    });
   };
 
   // Stop Future Recurrence while preserving task history
   const handleStopRecurrence = (taskId: string) => {
     const prev = [...tasks];
     const prevEntries = [...effectiveDailyPlanningEntries];
+    const prevReminders = taskRemindersService.loadAllReminders();
     const res = stopTaskRecurrence(tasks, taskId);
     if (!res.ok || !res.updatedTask) {
       setDetailRecurrenceError(res.error ?? 'Unable to stop recurrence.');
       return;
     }
     setDetailRecurrenceError('');
-    commitTasksAndDailyPlanning(res.tasks, prevEntries);
-    triggerUndo(`Stopped recurrence for "${res.updatedTask.title}"`, () =>
-      commitTasksAndDailyPlanning(prev, prevEntries)
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: res.tasks,
+      previousTasks: prev,
+      persistTasks: false,
+      emitSync: false,
+    });
+    commitTasksAndDailyPlanning(reconciled.tasks, prevEntries);
+    setReminders(reconciled.reminders);
+    triggerUndo(`Stopped recurrence for "${res.updatedTask.title}"`, () => {
+      taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+        tasks: prev,
+        emitSync: false,
+      });
+      setReminders(prevReminders);
+      commitTasksAndDailyPlanning(prev, prevEntries);
+    });
+  };
+
+  // Inline Task Details Reminder Set / Edit / Remove
+  const handleSaveDetailReminder = (taskId: string, triggerTimeUtc: string) => {
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const prev = [...tasks];
+    const prevReminders = taskRemindersService.loadAllReminders();
+    const { reminder, reminders: nextReminders } =
+      taskRemindersService.setTaskReminder(target, triggerTimeUtc, {
+        emitSync: false,
+        syncTaskHasReminder: true,
+      });
+    const updatedTasks = tasks.map((t) =>
+      t.id === taskId ? { ...t, hasReminder: reminder.isActive } : t
     );
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('daywell_tasks', JSON.stringify(updatedTasks));
+      } catch {}
+    }
+    setReminders(nextReminders);
+    onUpdateTasks(updatedTasks);
+    triggerUndo(
+      `Reminder set for "${target.title}" (${formatTaskReminderSummary(reminder.triggerTimeUtc)})`,
+      () => {
+        taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+          tasks: prev,
+          emitSync: false,
+        });
+        setReminders(prevReminders);
+        if (typeof localStorage !== 'undefined') {
+          try {
+            localStorage.setItem('daywell_tasks', JSON.stringify(prev));
+          } catch {}
+        }
+        onUpdateTasks(prev);
+      }
+    );
+  };
+
+  const handleRemoveDetailReminder = (taskId: string) => {
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const prev = [...tasks];
+    const prevReminders = taskRemindersService.loadAllReminders();
+    const nextReminders = taskRemindersService.removeTaskReminder(taskId, {
+      emitSync: false,
+      syncTaskHasReminder: true,
+    });
+    const updatedTasks = tasks.map((t) =>
+      t.id === taskId ? { ...t, hasReminder: false } : t
+    );
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem('daywell_tasks', JSON.stringify(updatedTasks));
+      } catch {}
+    }
+    setReminders(nextReminders);
+    onUpdateTasks(updatedTasks);
+    triggerUndo(`Removed reminder for "${target.title}"`, () => {
+      taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+        tasks: prev,
+        emitSync: false,
+      });
+      setReminders(prevReminders);
+      if (typeof localStorage !== 'undefined') {
+        try {
+          localStorage.setItem('daywell_tasks', JSON.stringify(prev));
+        } catch {}
+      }
+      onUpdateTasks(prev);
+    });
   };
 
   // My Day & Daily Planning Handlers
@@ -984,20 +1158,40 @@ export function DaywellTasksModule({
     );
   };
 
-  // Archive / Restore Task with Undo
+  // Archive / Restore Task with Reminder Reconciliation + Undo
   const handleToggleArchive = (task: DaywellTask) => {
     const prev = [...tasks];
+    const prevReminders = taskRemindersService.loadAllReminders();
     const nextArchived = !task.isArchived;
     const updated = tasks.map((t) =>
       t.id === task.id ? setTaskArchivedRecord(t, nextArchived) : t
     );
-    onUpdateTasks(updated);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: updated,
+      previousTasks: prev,
+      persistTasks: true,
+      emitSync: false,
+    });
+    setReminders(reconciled.reminders);
+    onUpdateTasks(reconciled.tasks);
     if (nextArchived && detailTaskId === task.id) {
       setDetailTaskId(null);
     }
     triggerUndo(
       nextArchived ? `Archived "${task.title}"` : `Restored "${task.title}"`,
-      () => onUpdateTasks(prev)
+      () => {
+        taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+          tasks: prev,
+          emitSync: false,
+        });
+        setReminders(prevReminders);
+        if (typeof localStorage !== 'undefined') {
+          try {
+            localStorage.setItem('daywell_tasks', JSON.stringify(prev));
+          } catch {}
+        }
+        onUpdateTasks(prev);
+      }
     );
   };
 
@@ -1209,6 +1403,9 @@ export function DaywellTasksModule({
     milestoneId: formMilestoneId,
     labels: formLabels,
     hasReminder: formHasReminder,
+    reminderPreset: formReminderPreset,
+    reminderCustomDate: formReminderCustomDate,
+    reminderCustomTime: formReminderCustomTime,
     isRecurring: formIsRecurring,
     recurrenceFrequency: formRecurrenceFrequency,
     recurrenceInterval: formRecurrenceInterval,
@@ -1251,7 +1448,17 @@ export function DaywellTasksModule({
     setFormLabels(initLabels);
     setNewFormLabelInput('');
     setFormLabelError('');
+    const initAnchor = resolveTaskReminderAnchor({
+      dueDate: initDueDate || undefined,
+      scheduledDate: initScheduledDate || undefined,
+    });
+    const fallbackReminderDt = defaultFallbackReminderDateTime();
+    const initRemCustomDate = initAnchor?.dateIso ?? fallbackReminderDt.dateIso;
+    const initRemCustomTime = initAnchor?.time ?? fallbackReminderDt.time;
     setFormHasReminder(false);
+    setFormReminderPreset('at_time');
+    setFormReminderCustomDate(initRemCustomDate);
+    setFormReminderCustomTime(initRemCustomTime);
     setFormIsRecurring(false);
     setFormRecurrenceFrequency('weekly');
     setFormRecurrenceInterval(1);
@@ -1281,6 +1488,9 @@ export function DaywellTasksModule({
       milestoneId: '',
       labels: initLabels,
       hasReminder: false,
+      reminderPreset: 'at_time',
+      reminderCustomDate: initRemCustomDate,
+      reminderCustomTime: initRemCustomTime,
       isRecurring: false,
       recurrenceFrequency: 'weekly',
       recurrenceInterval: 1,
@@ -1304,6 +1514,7 @@ export function DaywellTasksModule({
       ...tagFilters,
       ...draft.initialLabels,
     ]);
+    const fallbackReminderDt = defaultFallbackReminderDateTime();
     setDetailTaskId(null);
     setEditingTaskId(null);
     setConvertingInboxItem(item);
@@ -1321,6 +1532,9 @@ export function DaywellTasksModule({
     setNewFormLabelInput('');
     setFormLabelError('');
     setFormHasReminder(false);
+    setFormReminderPreset('at_time');
+    setFormReminderCustomDate(fallbackReminderDt.dateIso);
+    setFormReminderCustomTime(fallbackReminderDt.time);
     setFormIsRecurring(false);
     setFormRecurrenceFrequency('weekly');
     setFormRecurrenceInterval(1);
@@ -1350,6 +1564,9 @@ export function DaywellTasksModule({
       milestoneId: '',
       labels: initLabels,
       hasReminder: false,
+      reminderPreset: 'at_time',
+      reminderCustomDate: fallbackReminderDt.dateIso,
+      reminderCustomTime: fallbackReminderDt.time,
       isRecurring: false,
       recurrenceFrequency: 'weekly',
       recurrenceInterval: 1,
@@ -1377,6 +1594,22 @@ export function DaywellTasksModule({
     const initRecEnd = effectiveRec?.endDate ?? '';
     const initRepeatFrom = effectiveRec?.repeatFrom ?? 'due_date';
 
+    const liveReminders = taskRemindersService.loadAllReminders();
+    const existingReminder = findReminderForTask(liveReminders, task.id);
+    const initHasReminder = Boolean(existingReminder || task.hasReminder);
+    const initRemPreset: TaskReminderPreset = existingReminder
+      ? inferTaskReminderPreset(task, existingReminder.triggerTimeUtc)
+      : 'at_time';
+    const existingWall = existingReminder
+      ? utcIsoToEthiopiaWallDateTime(existingReminder.triggerTimeUtc)
+      : null;
+    const anchor = resolveTaskReminderAnchor(task);
+    const fallbackReminderDt = defaultFallbackReminderDateTime();
+    const initRemCustomDate =
+      existingWall?.dateIso ?? anchor?.dateIso ?? fallbackReminderDt.dateIso;
+    const initRemCustomTime =
+      existingWall?.time ?? anchor?.time ?? fallbackReminderDt.time;
+
     setDetailTaskId(null);
     setConvertingInboxItem(null);
     setEditingTaskId(task.id);
@@ -1394,7 +1627,10 @@ export function DaywellTasksModule({
     setFormLabels(labelsCopy);
     setNewFormLabelInput('');
     setFormLabelError('');
-    setFormHasReminder(task.hasReminder);
+    setFormHasReminder(initHasReminder);
+    setFormReminderPreset(initRemPreset);
+    setFormReminderCustomDate(initRemCustomDate);
+    setFormReminderCustomTime(initRemCustomTime);
     setFormIsRecurring(Boolean(effectiveRec));
     setFormRecurrenceFrequency(initFreq);
     setFormRecurrenceInterval(initInterval);
@@ -1424,7 +1660,10 @@ export function DaywellTasksModule({
       projectId: task.projectId || '',
       milestoneId: task.milestoneId || '',
       labels: labelsCopy,
-      hasReminder: task.hasReminder,
+      hasReminder: initHasReminder,
+      reminderPreset: initRemPreset,
+      reminderCustomDate: initRemCustomDate,
+      reminderCustomTime: initRemCustomTime,
       isRecurring: Boolean(effectiveRec),
       recurrenceFrequency: initFreq,
       recurrenceInterval: initInterval,
@@ -1446,7 +1685,30 @@ export function DaywellTasksModule({
     e.preventDefault();
     if (isSubmitting) return;
 
+    let computedReminderTriggerUtc: string | undefined;
+    if (formHasReminder) {
+      const remCheck = computeTaskReminderTriggerFromPreset({
+        task: {
+          dueDate: formDueDate.trim() || undefined,
+          scheduledDate: formScheduledDate.trim() || undefined,
+          scheduledTime: formScheduledTime.trim() || undefined,
+        },
+        preset: formReminderPreset,
+        customDateIso: formReminderCustomDate,
+        customTime: formReminderCustomTime,
+      });
+      if (!remCheck.ok || !remCheck.triggerTimeUtc) {
+        setFormErrors((prevErr) => ({
+          ...prevErr,
+          reminder: remCheck.error ?? 'Choose a valid reminder date and time.',
+        }));
+        return;
+      }
+      computedReminderTriggerUtc = remCheck.triggerTimeUtc;
+    }
+
     const prev = [...tasks];
+    const prevReminders = taskRemindersService.loadAllReminders();
     const cleanProjectId = formProjectId.trim() || undefined;
     const matchedProject = cleanProjectId
       ? projectsService.getProject(cleanProjectId)
@@ -1512,7 +1774,21 @@ export function DaywellTasksModule({
       let updated = tasks.map((t) =>
         t.id === editingTaskId ? result.task : t
       );
+      let generatedNextTask: DaywellTaskRecord | undefined;
       let spawnedTaskId: string | undefined;
+
+      if (formHasReminder && computedReminderTriggerUtc) {
+        taskRemindersService.setTaskReminder(
+          result.task,
+          computedReminderTriggerUtc,
+          { emitSync: false, syncTaskHasReminder: false }
+        );
+      } else {
+        taskRemindersService.removeTaskReminder(result.task.id, {
+          emitSync: false,
+          syncTaskHasReminder: false,
+        });
+      }
 
       const transitionedToCompleted =
         !isTaskCompleted(existing) && isTaskCompleted(result.task);
@@ -1529,6 +1805,7 @@ export function DaywellTasksModule({
           { todayIso: todayStr }
         );
         updated = recResult.tasks;
+        generatedNextTask = recResult.generatedNextTask;
         spawnedTaskId = recResult.generatedNextTask?.id;
         if (recResult.generatedNextTask?.projectId) {
           projectsService.copyTaskSectionLink(
@@ -1538,6 +1815,17 @@ export function DaywellTasksModule({
           );
         }
       }
+
+      const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+        tasks: updated,
+        previousTasks: prev,
+        generatedFromTaskId: spawnedTaskId ? editingTaskId : undefined,
+        generatedNextTask,
+        persistTasks: true,
+        emitSync: false,
+      });
+      updated = reconciled.tasks;
+      setReminders(reconciled.reminders);
 
       if (isTaskCompleted(existing) !== isTaskCompleted(result.task)) {
         const nextEntries = syncTaskCompletionWithDailyPlanning(
@@ -1567,6 +1855,11 @@ export function DaywellTasksModule({
           if (spawnedTaskId) {
             projectsService.cleanupSectionLinksForTask(spawnedTaskId);
           }
+          taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+            tasks: prev,
+            emitSync: false,
+          });
+          setReminders(prevReminders);
           commitTasksAndDailyPlanning(prev, prevEntries);
         }
       );
@@ -1602,6 +1895,24 @@ export function DaywellTasksModule({
       const prevEntries = [...effectiveDailyPlanningEntries];
       let nextTasks = [result.task, ...tasks];
       let nextEntries = effectiveDailyPlanningEntries;
+
+      if (formHasReminder && computedReminderTriggerUtc) {
+        taskRemindersService.setTaskReminder(
+          result.task,
+          computedReminderTriggerUtc,
+          { emitSync: false, syncTaskHasReminder: false }
+        );
+      }
+
+      const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+        tasks: nextTasks,
+        previousTasks: prev,
+        persistTasks: true,
+        emitSync: false,
+      });
+      nextTasks = reconciled.tasks;
+      setReminders(reconciled.reminders);
+
       if (activeFilter === 'my_day') {
         const planned = planTaskForDate(
           nextTasks,
@@ -1630,6 +1941,11 @@ export function DaywellTasksModule({
         setIsModalOpen(false);
         setFormErrors({});
         triggerUndo(`Converted "${result.task.title}" to Task`, () => {
+          taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+            tasks: prev,
+            emitSync: false,
+          });
+          setReminders(prevReminders);
           commitTasksAndDailyPlanning(prev, prevEntries);
           applyInboxUpdate(prevInbox);
         });
@@ -1638,27 +1954,46 @@ export function DaywellTasksModule({
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
-      triggerUndo(`Added "${result.task.title}"`, () =>
-        commitTasksAndDailyPlanning(prev, prevEntries)
-      );
+      triggerUndo(`Added "${result.task.title}"`, () => {
+        taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+          tasks: prev,
+          emitSync: false,
+        });
+        setReminders(prevReminders);
+        commitTasksAndDailyPlanning(prev, prevEntries);
+      });
     }
   };
 
-  // Delete Task (confirmed safely, with Undo + DailyPlanningEntries cleanup)
+  // Delete Task (confirmed safely, with Undo + Reminder & DailyPlanningEntries cleanup)
   const executeDeleteTask = (taskId: string) => {
     const prev = [...tasks];
     const prevEntries = [...effectiveDailyPlanningEntries];
+    const prevReminders = taskRemindersService.loadAllReminders();
     const { remaining, deleted } = deleteTaskFromList(tasks, taskId);
     const nextEntries = prevEntries.filter((e) => e.taskId !== taskId);
-    commitTasksAndDailyPlanning(remaining, nextEntries);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: remaining,
+      previousTasks: prev,
+      pruneOrphans: true,
+      persistTasks: false,
+      emitSync: false,
+    });
+    setReminders(reconciled.reminders);
+    commitTasksAndDailyPlanning(reconciled.tasks, nextEntries);
     SharedStateBridge.removeDailyPlanningForTask(taskId);
     projectsService.cleanupSectionLinksForTask(taskId);
     setPendingDeleteTask(null);
     setDetailTaskId(null);
     setIsModalOpen(false);
-    triggerUndo(`Deleted "${deleted?.title || 'task'}"`, () =>
-      commitTasksAndDailyPlanning(prev, prevEntries)
-    );
+    triggerUndo(`Deleted "${deleted?.title || 'task'}"`, () => {
+      taskRemindersService.restoreRemindersSnapshot(prevReminders, {
+        tasks: prev,
+        emitSync: false,
+      });
+      setReminders(prevReminders);
+      commitTasksAndDailyPlanning(prev, prevEntries);
+    });
   };
 
   // Subtask builder helpers (Create / Edit modal)
@@ -2508,6 +2843,25 @@ export function DaywellTasksModule({
                         );
                       })()}
 
+                      {(() => {
+                        const taskRem = findReminderForTask(reminders, task.id);
+                        if (!task.hasReminder && (!taskRem || !taskRem.isActive)) {
+                          return null;
+                        }
+                        const remSummary = taskRem
+                          ? formatTaskReminderSummary(taskRem.triggerTimeUtc)
+                          : 'Reminder set';
+                        return (
+                          <span
+                            className="inline-flex items-center gap-0.5 text-[var(--dw-primary)] font-medium"
+                            title={remSummary}
+                          >
+                            <Bell className="w-3 h-3" />
+                            <span>{remSummary}</span>
+                          </span>
+                        );
+                      })()}
+
                       {(task.labels ?? []).map((lbl) => (
                         <span
                           key={lbl}
@@ -2521,7 +2875,12 @@ export function DaywellTasksModule({
 
                   {/* Badges & Quick Actions */}
                   <div className="flex items-center gap-1 text-[var(--dw-text-muted)] shrink-0">
-                    {task.hasReminder && <Bell className="w-3.5 h-3.5" aria-label="Has reminder" />}
+                    {task.hasReminder && (
+                      <Bell
+                        className="w-3.5 h-3.5 text-[var(--dw-primary)]"
+                        aria-label="Has reminder"
+                      />
+                    )}
                     {task.isArchived ? (
                       <>
                         <DaywellIconButton
@@ -3162,15 +3521,40 @@ export function DaywellTasksModule({
 
               {/* Options, Reminders & Recurrence */}
               <div className="space-y-2.5 pt-1">
-                <label className="flex items-center gap-2 p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={formHasReminder}
-                    onChange={(e) => setFormHasReminder(e.target.checked)}
-                    className="w-4 h-4 accent-[var(--dw-primary)]"
-                  />
-                  <span className="text-xs font-semibold text-[var(--dw-text-secondary)]">Set Reminder</span>
-                </label>
+                <TaskReminderEditorSection
+                  enabled={formHasReminder}
+                  onToggle={(next) => {
+                    setFormHasReminder(next);
+                    if (formErrors.reminder) {
+                      setFormErrors((cur) => ({ ...cur, reminder: '' }));
+                    }
+                  }}
+                  preset={formReminderPreset}
+                  onChangePreset={(next) => {
+                    setFormReminderPreset(next);
+                    if (formErrors.reminder) {
+                      setFormErrors((cur) => ({ ...cur, reminder: '' }));
+                    }
+                  }}
+                  customDate={formReminderCustomDate}
+                  onChangeCustomDate={(next) => {
+                    setFormReminderCustomDate(next);
+                    if (formErrors.reminder) {
+                      setFormErrors((cur) => ({ ...cur, reminder: '' }));
+                    }
+                  }}
+                  customTime={formReminderCustomTime}
+                  onChangeCustomTime={(next) => {
+                    setFormReminderCustomTime(next);
+                    if (formErrors.reminder) {
+                      setFormErrors((cur) => ({ ...cur, reminder: '' }));
+                    }
+                  }}
+                  dueDate={formDueDate}
+                  scheduledDate={formScheduledDate}
+                  scheduledTime={formScheduledTime}
+                  error={formErrors.reminder}
+                />
 
                 <TaskRecurrenceEditorSection
                   isRecurring={formIsRecurring}
@@ -3461,6 +3845,16 @@ export function DaywellTasksModule({
                   }
                   onEditRecurrence={() => handleOpenEdit(detailTask)}
                   onStopRecurrence={() => handleStopRecurrence(detailTask.id)}
+                />
+
+                {/* Reminder Status & Actions */}
+                <TaskReminderDetailsPanel
+                  task={detailTask}
+                  reminder={findReminderForTask(reminders, detailTask.id)}
+                  onSaveReminder={(triggerTimeUtc) =>
+                    handleSaveDetailReminder(detailTask.id, triggerTimeUtc)
+                  }
+                  onRemoveReminder={() => handleRemoveDetailReminder(detailTask.id)}
                 />
 
                 {/* Tags / Labels Section inside Task Details */}

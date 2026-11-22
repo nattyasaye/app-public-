@@ -165,7 +165,7 @@ class TaskRemindersService {
       (r) => !(r.targetType === 'task' && r.targetId === task.id)
     );
     const nextReminders = [...nonTaskOrOther, built];
-    this.writeRemindersRaw(nextReminders, options?.emitSync ?? false);
+    this.writeRemindersRaw(nextReminders, false);
 
     let tasksForSync = this.readTasksRaw();
     if (options?.syncTaskHasReminder !== false && tasksForSync.length > 0) {
@@ -264,10 +264,7 @@ class TaskRemindersService {
       const sanitizedTasks = options.tasks.map((t) =>
         t.hasReminder ? { ...t, hasReminder: false } : t
       );
-      if (
-        options.persistTasks !== false &&
-        sanitizedTasks.some((t, i) => t !== options.tasks[i])
-      ) {
+      if (options.persistTasks !== false) {
         this.writeTasksRaw(sanitizedTasks);
       }
       this.syncWebTaskNotifications({

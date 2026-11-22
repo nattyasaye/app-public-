@@ -44,7 +44,8 @@ import {
   Monitor,
   Eye,
   CheckSquare,
-  Sparkles
+  Sparkles,
+  Sun,
 } from 'lucide-react';
 
 import { CalendarDate, EthiopiaClock, LocalDateTime, SharedDateFormatter } from './domain/date';
@@ -85,12 +86,25 @@ import { dailyPlanningService } from './services/dailyPlanningService';
 import { inboxService } from './services/inboxService';
 import { projectsService } from './services/projectsService';
 import {
+  taskRemindersService,
+  WebNotificationSupportStatus,
+  WebTaskReminderAlert,
+} from './services/taskRemindersService';
+import {
   getProcessedInboxItems,
   getUnprocessedInboxItems,
   INBOX_CATEGORY_LABELS,
 } from './domain/inboxOperations';
 import { syncTaskCompletionWithDailyPlanning } from './domain/dailyPlanningOperations';
-import { isTaskCompleted, TaskViewFilter } from './domain/taskOperations';
+import {
+  isTaskCompleted,
+  TaskDueDateFilter,
+  TaskViewFilter,
+} from './domain/taskOperations';
+import {
+  buildProjectsOverviewSummary,
+  buildTaskOverviewSummary,
+} from './domain/taskSummaries';
 import {
   completeTaskWithRecurrence,
   formatRecurrenceSummary,
@@ -189,6 +203,8 @@ export default function App() {
   const [financeSyncTick, setFinanceSyncTick] = useState(0);
   const [requestedTasksFilter, setRequestedTasksFilter] = useState<{
     filter: TaskViewFilter;
+    dueDateFilter?: TaskDueDateFilter | '';
+    planDate?: string;
     nonce: number;
   } | null>(null);
   const [requestedTaskFocus, setRequestedTaskFocus] = useState<{
@@ -200,6 +216,15 @@ export default function App() {
     dateStr: string;
     nonce: number;
   } | null>(null);
+  const [dueReminderAlerts, setDueReminderAlerts] = useState<WebTaskReminderAlert[]>([]);
+  const [isNotificationStatusModalOpen, setIsNotificationStatusModalOpen] = useState(false);
+  const [notificationSupportStatus, setNotificationSupportStatus] =
+    useState<WebNotificationSupportStatus>(() =>
+      taskRemindersService.getWebNotificationSupportStatus()
+    );
+  const [activeTaskReminderCount, setActiveTaskReminderCount] = useState<number>(() =>
+    taskRemindersService.loadTaskReminders().filter((r) => r.isActive).length
+  );
 
   const handleExportSharedFoundation = () => {
     const json = SharedStateBridge.exportToAndroidJson();
@@ -317,7 +342,29 @@ export default function App() {
     } catch (e) {
       console.error(e);
     }
+    taskRemindersService.syncWebTaskNotifications({ tasks });
+    setActiveTaskReminderCount(
+      taskRemindersService.loadTaskReminders().filter((r) => r.isActive).length
+    );
   }, [tasks]);
+
+  useEffect(() => {
+    taskRemindersService.setReminderDueListener((alert) => {
+      setDueReminderAlerts((prev) =>
+        prev.some(
+          (item) =>
+            item.reminderId === alert.reminderId &&
+            item.triggerTimeUtc === alert.triggerTimeUtc
+        )
+          ? prev
+          : [alert, ...prev]
+      );
+    });
+    return () => {
+      taskRemindersService.setReminderDueListener(undefined);
+      taskRemindersService.cancelAllWebTaskNotifications();
+    };
+  }, []);
 
   useEffect(() => {
     const handleSync = (event: Event) => {
@@ -356,6 +403,10 @@ export default function App() {
       if (!isInboxOnly) {
         setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
       }
+      setActiveTaskReminderCount(
+        taskRemindersService.loadTaskReminders().filter((r) => r.isActive).length
+      );
+      taskRemindersService.syncWebTaskNotifications();
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
@@ -463,10 +514,6 @@ export default function App() {
   }, [financeSyncTick, activeScreen]);
   const todaySafeHarbor = todayFinanceSummary.breakdown;
 
-  const activeProjectsCount = useMemo(() => {
-    return projectsService.listProjects({ includeArchived: false }).length;
-  }, [financeSyncTick, activeScreen]);
-
   // System Dark Mode Effect
   useEffect(() => {
     const updateTheme = () => {
@@ -493,6 +540,59 @@ export default function App() {
   // Dual Date under Daywell Ethiopia UTC+3 convention
   const todayCal = useMemo(() => CalendarDate.today(), []);
   const dualDate = useMemo(() => SharedDateFormatter.formatDual(todayCal), [todayCal]);
+
+  const taskOverview = useMemo(
+    () =>
+      buildTaskOverviewSummary({
+        tasks,
+        dailyPlanningEntries,
+        todayIso: todayCal.toIsoString(),
+      }),
+    [tasks, dailyPlanningEntries, todayCal]
+  );
+
+  const projectsOverview = useMemo(() => {
+    const activeProjects = projectsService.listProjects({ includeArchived: false });
+    const trackingSummaries = projectsService.getAllProjectSummaries({
+      asOfDate: todayCal,
+      includeArchived: false,
+    });
+    const milestones = projectsService.listAllMilestones();
+    return buildProjectsOverviewSummary({
+      projects: activeProjects,
+      tasks,
+      milestones,
+      trackingSummaries,
+      todayIso: todayCal.toIsoString(),
+    });
+  }, [tasks, financeSyncTick, activeScreen, todayCal]);
+
+  const activeProjectsCount = projectsOverview.totalProjectsCount;
+
+  const prioritizedDashboardTasks = useMemo(() => {
+    const todayIso = todayCal.toIsoString();
+    const priorityRank: Record<string, number> = {
+      urgent: 0,
+      high: 1,
+      medium: 2,
+      low: 3,
+    };
+    const pending = tasks.filter(
+      (t) => !t.isArchived && !isTaskCompleted(t) && t.status !== 'cancelled'
+    );
+    return pending.slice().sort((a, b) => {
+      const aUrgentOrDue = Boolean(a.dueDate && a.dueDate <= todayIso);
+      const bUrgentOrDue = Boolean(b.dueDate && b.dueDate <= todayIso);
+      if (aUrgentOrDue !== bUrgentOrDue) return aUrgentOrDue ? -1 : 1;
+      const rankA = priorityRank[a.priority] ?? 2;
+      const rankB = priorityRank[b.priority] ?? 2;
+      if (rankA !== rankB) return rankA - rankB;
+      const dueA = a.dueDate ?? '2099-12-31';
+      const dueB = b.dueDate ?? '2099-12-31';
+      if (dueA !== dueB) return dueA.localeCompare(dueB);
+      return a.title.localeCompare(b.title);
+    });
+  }, [tasks, todayCal]);
 
   // Navigate Screen Helper
   const navigateTo = (rawScreen: ScreenId) => {
@@ -522,6 +622,28 @@ export default function App() {
     } catch {
       // ignore
     }
+  };
+
+  const openTasksFromDashboard = (
+    filter: TaskViewFilter,
+    dueDateFilter: TaskDueDateFilter | '' = '',
+    planDate?: string
+  ) => {
+    setTasksSubTab('tasks');
+    setSelectedProjectId(null);
+    setRequestedTasksFilter({
+      filter,
+      dueDateFilter,
+      planDate,
+      nonce: Date.now(),
+    });
+    navigateTo('tasks');
+  };
+
+  const openProjectsFromDashboard = (projectId: string | null = null) => {
+    setTasksSubTab('projects');
+    setSelectedProjectId(projectId);
+    navigateTo('tasks');
   };
 
   const handleAttemptCloseQuickCapture = () => {
@@ -612,8 +734,11 @@ export default function App() {
     return () => window.removeEventListener('popstate', onPopState);
   }, [isQuickCaptureOpen, activeScreen, quickCaptureInput]);
 
-  // Toggle Task Completion (Recurrence-aware + syncs DailyPlanningEntries history)
+  // Toggle Task Completion (Recurrence-aware + reconciles reminders & DailyPlanningEntries)
   const toggleTask = (id: string) => {
+    const prevTasks = tasks;
+    const targetBefore = tasks.find((t) => t.id === id);
+    const wasCompleted = targetBefore ? isTaskCompleted(targetBefore) : false;
     const nowUtc = EthiopiaClock.nowUtc();
     const result = completeTaskWithRecurrence(tasks, id, { nowUtc });
     if (!result.updatedTask) return;
@@ -626,11 +751,6 @@ export default function App() {
       nextCompleted,
       { nowUtc }
     );
-    try {
-      localStorage.setItem('daywell_tasks', JSON.stringify(result.tasks));
-    } catch {
-      // ignore storage quota errors; React state will still update
-    }
     if (result.generatedNextTask?.projectId) {
       projectsService.copyTaskSectionLink(
         result.generatedNextTask.projectId,
@@ -638,7 +758,24 @@ export default function App() {
         result.generatedNextTask
       );
     }
-    setTasks(result.tasks);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: result.tasks,
+      previousTasks: prevTasks,
+      generatedFromTaskId: !wasCompleted ? id : undefined,
+      generatedNextTask: result.generatedNextTask,
+      persistTasks: true,
+      emitSync: false,
+      nowUtc,
+    });
+    try {
+      localStorage.setItem('daywell_tasks', JSON.stringify(reconciled.tasks));
+    } catch {
+      // ignore storage quota errors; React state will still update
+    }
+    if (nextCompleted) {
+      setDueReminderAlerts((prev) => prev.filter((a) => a.taskId !== id));
+    }
+    setTasks(reconciled.tasks);
     handleUpdateDailyPlanningEntries(nextEntries);
   };
 
@@ -1099,7 +1236,9 @@ export default function App() {
                     >
                       <CheckCircle2 className="w-4 h-4 text-[var(--dw-income)] mx-auto" />
                       <span className="block text-[11px] font-bold text-[var(--dw-text-primary)] mt-1">To-Do</span>
-                      <span className="block text-[9px] text-[var(--dw-text-muted)]">{tasks.filter((t) => !t.isArchived && !t.completed && t.status !== 'cancelled').length} pending</span>
+                      <span className="block text-[9px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                        {taskOverview.remainingCount} remaining
+                      </span>
                     </button>
 
                     <button
@@ -1166,70 +1305,230 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* Live Today's Priorities */}
-                  <div className="space-y-2 pt-1">
+                  {/* Live Task Overview, Today's Plan & Priorities */}
+                  <div className="space-y-2.5 pt-1">
                     <DaywellSectionHeader
-                      title="Today's priorities"
-                      actionLabel={`View all (${tasks.filter((t) => !t.isArchived).length})`}
-                      onActionPressed={() => navigateTo('tasks')}
+                      title="Tasks Overview"
+                      count={taskOverview.remainingCount > 0 ? taskOverview.remainingCount : undefined}
+                      actionLabel="Open Tasks"
+                      onActionPressed={() => openTasksFromDashboard('active')}
                     />
 
-                    <div className="space-y-2">
-                      {tasks.filter((t) => !t.isArchived).length === 0 ? (
-                        <DaywellCard variant="default" padding="compact">
-                          <p className="text-xs text-[var(--dw-text-muted)] text-center py-2">
-                            No saved tasks yet. Add one via Quick Capture or To-Do.
-                          </p>
-                        </DaywellCard>
-                      ) : (
-                        tasks.filter((t) => !t.isArchived).slice(0, 3).map((item) => (
-                          <DaywellCard
-                            key={item.id}
-                            padding="compact"
-                            onClick={() => toggleTask(item.id)}
-                            className="flex items-start gap-3"
+                    <DaywellCard padding="md" radius="lg" className="space-y-3">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-semibold text-[var(--dw-text-secondary)]">
+                          Task completion
+                        </span>
+                        <span className="font-bold text-[var(--dw-text-primary)] dw-type-numeric-body">
+                          {taskOverview.completedCount} / {taskOverview.totalActiveAndCompleted} done
+                        </span>
+                      </div>
+                      <DaywellProgressBar
+                        value={taskOverview.completionPercentage}
+                        label="Overall task completion"
+                      />
+
+                      <div className="grid grid-cols-5 gap-1.5">
+                        {[
+                          {
+                            key: 'overdue',
+                            label: 'Overdue',
+                            count: taskOverview.overdueCount,
+                            toneClass:
+                              taskOverview.overdueCount > 0
+                                ? 'bg-[var(--dw-error-container)] text-[var(--dw-on-error-container)] border-[var(--dw-error)]/25'
+                                : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border-[var(--dw-border)]',
+                            onClick: () => openTasksFromDashboard('overdue'),
+                          },
+                          {
+                            key: 'due_today',
+                            label: 'Due Today',
+                            count: taskOverview.dueTodayCount,
+                            toneClass:
+                              taskOverview.dueTodayCount > 0
+                                ? 'bg-[var(--dw-warning-container)] text-[var(--dw-on-warning-container)] border-[var(--dw-warning)]/25'
+                                : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border-[var(--dw-border)]',
+                            onClick: () => openTasksFromDashboard('active', 'today'),
+                          },
+                          {
+                            key: 'upcoming',
+                            label: 'Upcoming',
+                            count: taskOverview.upcomingCount,
+                            toneClass:
+                              'bg-[var(--dw-info-container)] text-[var(--dw-on-info-container)] border-[var(--dw-info)]/20',
+                            onClick: () => openTasksFromDashboard('upcoming'),
+                          },
+                          {
+                            key: 'completed',
+                            label: 'Completed',
+                            count: taskOverview.completedCount,
+                            toneClass:
+                              'bg-[var(--dw-success-container)] text-[var(--dw-on-success-container)] border-[var(--dw-success)]/20',
+                            onClick: () => openTasksFromDashboard('completed'),
+                          },
+                          {
+                            key: 'remaining',
+                            label: 'Remaining',
+                            count: taskOverview.remainingCount,
+                            toneClass:
+                              'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-primary)] border-[var(--dw-border)]',
+                            onClick: () => openTasksFromDashboard('active'),
+                          },
+                        ].map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={item.onClick}
+                            className={`rounded-[var(--dw-radius-md)] border px-1.5 py-2 text-center transition-opacity hover:opacity-90 cursor-pointer ${item.toneClass}`}
                           >
-                            <div
-                              className={`w-5 h-5 rounded-md border mt-0.5 flex items-center justify-center transition-colors shrink-0 ${
-                                item.completed
-                                  ? 'bg-[var(--dw-primary-brand)] border-[var(--dw-primary-brand)] text-white'
-                                  : 'border-[var(--dw-border)] bg-transparent'
-                              }`}
-                            >
-                              {item.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                            <span className="block text-sm font-extrabold dw-type-numeric-body">
+                              {item.count}
+                            </span>
+                            <span className="block text-[10px] font-semibold leading-tight mt-0.5 truncate">
+                              {item.label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Today's Planned Tasks (My Day) */}
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() =>
+                          openTasksFromDashboard('my_day', '', taskOverview.todayPlan.planDateIso)
+                        }
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            openTasksFromDashboard('my_day', '', taskOverview.todayPlan.planDateIso);
+                          }
+                        }}
+                        className="p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] hover:border-[var(--dw-primary)] transition-colors cursor-pointer space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Sun className="w-3.5 h-3.5 text-[var(--dw-warning)] shrink-0" />
+                            <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                              Today&apos;s Plan (My Day)
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-semibold text-[var(--dw-primary)] shrink-0">
+                            Open My Day
+                          </span>
+                        </div>
+                        {taskOverview.todayPlan.totalPlannedCount === 0 ? (
+                          <p className="text-[11px] text-[var(--dw-text-muted)]">
+                            No tasks planned for today yet. Tap to choose priorities in My Day.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body">
+                              <span>
+                                {taskOverview.todayPlan.completedCount} completed ·{' '}
+                                {taskOverview.todayPlan.remainingCount} remaining
+                              </span>
+                              <span className="font-bold text-[var(--dw-text-primary)]">
+                                {taskOverview.todayPlan.progressPercentage}%
+                              </span>
                             </div>
-                            <div className="flex-1 min-w-0">
-                              <p
-                                className={`text-xs font-semibold ${
-                                  item.completed
-                                    ? 'line-through text-[var(--dw-text-muted)]'
-                                    : 'text-[var(--dw-text-primary)]'
-                                }`}
+                            <DaywellProgressBar
+                              value={taskOverview.todayPlan.progressPercentage}
+                              label="Today's planned tasks progress"
+                            />
+                          </>
+                        )}
+                      </div>
+
+                      {/* Compact Pending Priorities */}
+                      {taskOverview.totalActiveAndCompleted === 0 ? (
+                        <p className="text-xs text-[var(--dw-text-muted)] text-center py-1">
+                          No active tasks yet. Add one via Quick Capture or To-Do.
+                        </p>
+                      ) : prioritizedDashboardTasks.length === 0 ? (
+                        <p className="text-xs font-semibold text-[var(--dw-primary)] py-1">
+                          All active tasks are completed.
+                        </p>
+                      ) : (
+                        <div className="space-y-1.5 pt-1 border-t border-[var(--dw-divider)]">
+                          <div className="flex items-center justify-between text-[11px] text-[var(--dw-text-muted)]">
+                            <span className="font-semibold uppercase tracking-wider">
+                              Up Next
+                            </span>
+                            <span>{prioritizedDashboardTasks.length} remaining</span>
+                          </div>
+                          {prioritizedDashboardTasks.slice(0, 3).map((item) => {
+                            const isOverdue = Boolean(
+                              item.dueDate && item.dueDate < taskOverview.todayIso
+                            );
+                            return (
+                              <div
+                                key={item.id}
+                                onClick={() => toggleTask(item.id)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    toggleTask(item.id);
+                                  }
+                                }}
+                                className="flex items-start gap-2.5 py-1.5 cursor-pointer hover:opacity-90"
                               >
-                                {item.title}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--dw-text-muted)] mt-0.5">
-                                {item.priority === 'high' && <Flag className="w-3 h-3 text-[var(--dw-warning)]" />}
-                                <span>{item.category || item.projectName || 'Personal'}</span>
-                                {(() => {
-                                  const rec = resolveEffectiveRecurrenceConfig(item);
-                                  if (!rec) return null;
-                                  return (
-                                    <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
-                                      <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
-                                      {formatRecurrenceSummary(rec)}
-                                    </span>
-                                  );
-                                })()}
+                                <div
+                                  className={`w-4 h-4 rounded-[4px] border mt-0.5 flex items-center justify-center shrink-0 ${
+                                    isTaskCompleted(item)
+                                      ? 'bg-[var(--dw-primary-brand)] border-[var(--dw-primary-brand)] text-white'
+                                      : 'border-[var(--dw-border)] bg-transparent'
+                                  }`}
+                                >
+                                  {isTaskCompleted(item) && <Check className="w-3 h-3 stroke-[3]" />}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
+                                    {item.title}
+                                  </p>
+                                  <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--dw-text-muted)] mt-0.5">
+                                    {(item.priority === 'urgent' || item.priority === 'high') && (
+                                      <Flag className="w-3 h-3 text-[var(--dw-warning)]" />
+                                    )}
+                                    {item.dueDate && (
+                                      <span className={isOverdue ? 'text-[var(--dw-error)] font-semibold' : ''}>
+                                        {isOverdue ? 'Overdue' : 'Due'} {item.dueDate}
+                                      </span>
+                                    )}
+                                    {!item.dueDate && (
+                                      <span>{item.category || item.projectName || 'Personal'}</span>
+                                    )}
+                                    {(() => {
+                                      const rec = resolveEffectiveRecurrenceConfig(item);
+                                      if (!rec) return null;
+                                      return (
+                                        <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                                          <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                                          {formatRecurrenceSummary(rec)}
+                                        </span>
+                                      );
+                                    })()}
+                                  </div>
+                                </div>
+                                {item.hasReminder && (
+                                  <Bell className="w-3.5 h-3.5 text-[var(--dw-text-muted)] mt-0.5 shrink-0" />
+                                )}
                               </div>
-                            </div>
-                            {item.hasReminder && (
-                              <Bell className="w-3.5 h-3.5 text-[var(--dw-text-muted)] mt-1 shrink-0" />
-                            )}
-                          </DaywellCard>
-                        ))
+                            );
+                          })}
+                          {prioritizedDashboardTasks.length > 3 && (
+                            <DaywellButton
+                              label={`+ ${prioritizedDashboardTasks.length - 3} more remaining tasks`}
+                              variant="text"
+                              size="compact"
+                              onClick={() => openTasksFromDashboard('active')}
+                            />
+                          )}
+                        </div>
                       )}
-                    </div>
+                    </DaywellCard>
                   </div>
 
                   {/* Shared Quick Capture Inbox Section (Live Store) */}
@@ -1328,44 +1627,106 @@ export default function App() {
                     </DaywellCard>
                   </div>
 
-                  {/* Active Project Progress Card (Deprecated Prototype Sample) */}
-                  <DaywellCard
-                    padding="md"
-                    radius="xl"
-                    onClick={() => navigateTo('project_detail')}
-                    className="space-y-3"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">
-                          Portfolio refresh
-                        </h4>
-                        <DaywellStatusBadge
-                          tone="warning"
-                          showIcon={false}
-                          label="Deprecated Prototype"
+                  {/* Live Project Progress Summary */}
+                  <div className="space-y-2 pt-1">
+                    <DaywellSectionHeader
+                      title="Project Progress"
+                      count={
+                        projectsOverview.totalProjectsCount > 0
+                          ? projectsOverview.totalProjectsCount
+                          : undefined
+                      }
+                      actionLabel="All Projects"
+                      onActionPressed={() => openProjectsFromDashboard(null)}
+                    />
+                    {projectsOverview.totalProjectsCount === 0 ? (
+                      <DaywellCard padding="md" radius="lg">
+                        <DaywellEmptyState
+                          icon={<Layers className="w-6 h-6" />}
+                          message="No active projects yet"
+                          subtitle="Group related tasks and milestones into a project to track completion."
+                          actionLabel="Open Projects"
+                          onActionPressed={() => openProjectsFromDashboard(null)}
                         />
-                      </div>
-                      <span className="text-xs font-bold text-[var(--dw-text-secondary)]">60%</span>
-                    </div>
-
-                    <DaywellProgressBar value={60} label="Portfolio refresh prototype progress" />
-
-                    <p className="text-[11px] text-[var(--dw-text-muted)]">
-                      Sample project progress card · Prototype screen
-                    </p>
-
-                    <div
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigateTo('goals');
-                      }}
-                      className="pt-2 border-t border-[var(--dw-divider)] flex items-center gap-2 text-xs font-medium text-[var(--dw-text-secondary)] hover:text-[var(--dw-primary)] transition-colors"
-                    >
-                      <Landmark className="w-3.5 h-3.5 text-[var(--dw-primary)]" />
-                      <span>Emergency fund sample · Goals prototype</span>
-                    </div>
-                  </DaywellCard>
+                      </DaywellCard>
+                    ) : (
+                      <DaywellCard padding="md" radius="lg" className="space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body">
+                          <span>
+                            {projectsOverview.completedTasks}/{projectsOverview.totalTasks}{' '}
+                            {projectsOverview.totalTasks === 1 ? 'task' : 'tasks'} ·{' '}
+                            {projectsOverview.remainingTasks} remaining
+                          </span>
+                          {projectsOverview.totalMilestones > 0 && (
+                            <span>
+                              {projectsOverview.completedMilestones}/{projectsOverview.totalMilestones}{' '}
+                              {projectsOverview.totalMilestones === 1 ? 'milestone' : 'milestones'}
+                            </span>
+                          )}
+                        </div>
+                        <div className="space-y-2.5">
+                          {projectsOverview.projects.slice(0, 4).map((item) => (
+                            <div
+                              key={item.project.id}
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => openProjectsFromDashboard(item.project.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  openProjectsFromDashboard(item.project.id);
+                                }
+                              }}
+                              className="p-2.5 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] bg-[var(--dw-surface-subtle)] hover:border-[var(--dw-primary)] transition-colors cursor-pointer space-y-1.5"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-1.5 min-w-0">
+                                  <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                                    {item.project.title}
+                                  </span>
+                                  {item.project.status !== 'active' && (
+                                    <DaywellStatusBadge
+                                      label={item.project.status === 'on_hold' ? 'On Hold' : 'Completed'}
+                                      tone={item.project.status === 'completed' ? 'success' : 'warning'}
+                                      showIcon={false}
+                                    />
+                                  )}
+                                </div>
+                                <span className="text-xs font-extrabold text-[var(--dw-text-primary)] dw-type-numeric-body shrink-0">
+                                  {item.displayPercentage}%
+                                </span>
+                              </div>
+                              <DaywellProgressBar
+                                value={item.displayPercentage}
+                                label={`${item.project.title} progress`}
+                              />
+                              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                                <span>
+                                  {item.completedTasks}/{item.totalTasks}{' '}
+                                  {item.totalTasks === 1 ? 'task' : 'tasks'} · {item.remainingTasks}{' '}
+                                  remaining
+                                </span>
+                                {item.hasMilestones && (
+                                  <span>
+                                    · {item.completedMilestones}/{item.totalMilestones}{' '}
+                                    {item.totalMilestones === 1 ? 'milestone' : 'milestones'}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        {projectsOverview.totalProjectsCount > 4 && (
+                          <DaywellButton
+                            label={`+ ${projectsOverview.totalProjectsCount - 4} more projects`}
+                            variant="text"
+                            size="compact"
+                            onClick={() => openProjectsFromDashboard(null)}
+                          />
+                        )}
+                      </DaywellCard>
+                    )}
+                  </div>
 
                   {/* Safe Harbor v7 Hero Snippet (Live Finance Data) */}
                   <DaywellCard padding="md" radius="xl" className="space-y-2">
@@ -1844,7 +2205,17 @@ export default function App() {
 
                       <DaywellCard
                         padding="compact"
-                        onClick={() => navigateTo('tasks')}
+                        onClick={() => {
+                          setNotificationSupportStatus(
+                            taskRemindersService.getWebNotificationSupportStatus()
+                          );
+                          setActiveTaskReminderCount(
+                            taskRemindersService
+                              .loadTaskReminders()
+                              .filter((r) => r.isActive).length
+                          );
+                          setIsNotificationStatusModalOpen(true);
+                        }}
                         className="flex items-center justify-between"
                       >
                         <div className="flex items-center gap-2.5">
@@ -1854,7 +2225,8 @@ export default function App() {
                               Notifications & reminders
                             </p>
                             <p className="text-[10px] text-[var(--dw-text-muted)]">
-                              Managed in Android settings & task reminders
+                              {activeTaskReminderCount} active task reminder
+                              {activeTaskReminderCount === 1 ? '' : 's'} · Web Preview tab alerts
                             </p>
                           </div>
                         </div>
@@ -2517,6 +2889,192 @@ export default function App() {
                 setQuickCaptureError(null);
               }}
             />
+
+            {/* In-App Due Task Reminder Alert Banner */}
+            {dueReminderAlerts.length > 0 && (
+              <div
+                role="alert"
+                aria-label="Due task reminder alert"
+                className="absolute bottom-20 left-4 right-4 z-50"
+              >
+                <DaywellCard padding="compact" radius="lg" className="border-[var(--dw-primary)] shadow-lg space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <Bell className="w-4 h-4 text-[var(--dw-primary)] shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--dw-primary)]">
+                          Task Reminder Due
+                        </div>
+                        <div className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                          {dueReminderAlerts[0].title}
+                        </div>
+                        <div className="text-[11px] text-[var(--dw-text-muted)]">
+                          {dueReminderAlerts[0].summary}
+                          {dueReminderAlerts.length > 1
+                            ? ` · +${dueReminderAlerts.length - 1} more`
+                            : ''}
+                        </div>
+                      </div>
+                    </div>
+                    <DaywellIconButton
+                      label="Dismiss reminder alert"
+                      size="compact"
+                      tone="muted"
+                      onClick={() =>
+                        setDueReminderAlerts((prev) =>
+                          prev.filter((_, idx) => idx !== 0)
+                        )
+                      }
+                      icon={<X className="w-3.5 h-3.5" />}
+                    />
+                  </div>
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <DaywellButton
+                      label="Open Task"
+                      variant="outlined"
+                      size="compact"
+                      onClick={() => {
+                        const activeAlert = dueReminderAlerts[0];
+                        setDueReminderAlerts((prev) =>
+                          prev.filter((item) => item.reminderId !== activeAlert.reminderId)
+                        );
+                        setTasksSubTab('tasks');
+                        navigateTo('tasks');
+                        setRequestedTaskFocus({
+                          taskId: activeAlert.taskId,
+                          openMode: 'details',
+                          nonce: Date.now(),
+                        });
+                      }}
+                    />
+                    <DaywellButton
+                      label="Complete"
+                      variant="primary"
+                      size="compact"
+                      onClick={() => {
+                        const activeAlert = dueReminderAlerts[0];
+                        toggleTask(activeAlert.taskId);
+                        setDueReminderAlerts((prev) =>
+                          prev.filter((item) => item.reminderId !== activeAlert.reminderId)
+                        );
+                      }}
+                    />
+                  </div>
+                </DaywellCard>
+              </div>
+            )}
+
+            {/* Web Notification Capabilities & Reminder Status Modal */}
+            {isNotificationStatusModalOpen && (
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-label="Notifications and reminders"
+                className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+                onClick={(e) => {
+                  if (e.target === e.currentTarget) {
+                    setIsNotificationStatusModalOpen(false);
+                  }
+                }}
+              >
+                <div className="w-full max-w-md bg-[var(--dw-elevated)] rounded-[var(--dw-radius-xl)] p-5 shadow-2xl border border-[var(--dw-border)] space-y-3.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Bell className="w-4 h-4 text-[var(--dw-primary)]" />
+                      <h2 className="dw-type-title text-[var(--dw-text-primary)]">
+                        Notifications & Reminders
+                      </h2>
+                    </div>
+                    <DaywellIconButton
+                      label="Close notification status"
+                      size="compact"
+                      tone="muted"
+                      onClick={() => setIsNotificationStatusModalOpen(false)}
+                      icon={<X className="w-4 h-4" />}
+                    />
+                  </div>
+
+                  <div className="p-3 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--dw-text-muted)]">Active task reminders</span>
+                      <span className="font-bold text-[var(--dw-text-primary)]">
+                        {activeTaskReminderCount}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--dw-text-muted)]">Scheduled in-tab timers</span>
+                      <span className="font-bold text-[var(--dw-text-primary)]">
+                        {taskRemindersService.getActiveScheduledTimerCount()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--dw-text-muted)]">Browser alert permission</span>
+                      <DaywellStatusBadge
+                        label={
+                          notificationSupportStatus.permission === 'granted'
+                            ? 'Granted'
+                            : notificationSupportStatus.permission === 'denied'
+                            ? 'Blocked'
+                            : notificationSupportStatus.supported
+                            ? 'Not requested'
+                            : 'Unavailable'
+                        }
+                        tone={
+                          notificationSupportStatus.permission === 'granted'
+                            ? 'success'
+                            : notificationSupportStatus.permission === 'denied'
+                            ? 'error'
+                            : 'neutral'
+                        }
+                        showIcon={false}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--dw-text-muted)]">Background delivery</span>
+                      <span className="font-semibold text-[var(--dw-text-secondary)]">
+                        Unsupported in Web Preview
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-[var(--dw-text-secondary)] leading-relaxed">
+                    {notificationSupportStatus.capabilityNote}
+                  </p>
+                  <p className="text-[11px] text-[var(--dw-text-muted)] leading-relaxed">
+                    Daywell task reminders reuse the shared reminder store across Tasks, Projects, Finance commitments, and Android.
+                  </p>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+                    {notificationSupportStatus.supported &&
+                      notificationSupportStatus.permission === 'default' && (
+                        <DaywellButton
+                          label="Allow Browser Alerts"
+                          variant="outlined"
+                          size="compact"
+                          onClick={() => {
+                            void (async () => {
+                              await taskRemindersService.requestWebNotificationPermission();
+                              setNotificationSupportStatus(
+                                taskRemindersService.getWebNotificationSupportStatus()
+                              );
+                            })();
+                          }}
+                        />
+                      )}
+                    <DaywellButton
+                      label="Open Task Reminders"
+                      variant="primary"
+                      size="compact"
+                      onClick={() => {
+                        setIsNotificationStatusModalOpen(false);
+                        setTasksSubTab('tasks');
+                        navigateTo('tasks');
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Toast Notification */}
             {quickCaptureToast && (

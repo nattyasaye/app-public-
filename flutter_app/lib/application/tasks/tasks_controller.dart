@@ -328,6 +328,27 @@ class TasksController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void openDashboardFilter({
+    required String viewFilter,
+    String? dueDateFilter,
+    bool resetPlanDateToToday = false,
+  }) {
+    _state = _state.copyWith(
+      viewFilter: viewFilter,
+      searchQuery: '',
+      clearStatusFilter: true,
+      clearPriorityFilter: true,
+      clearDueDateFilter: dueDateFilter == null,
+      dueDateFilter: dueDateFilter,
+      clearSelectedProject: true,
+      clearSectionFilter: true,
+      tagFilters: const {},
+      selectedTaskIds: const {},
+      clearSelectedPlanDate: resetPlanDateToToday,
+    );
+    notifyListeners();
+  }
+
   void setSearchQuery(String query) {
     _state = _state.copyWith(searchQuery: query);
     notifyListeners();

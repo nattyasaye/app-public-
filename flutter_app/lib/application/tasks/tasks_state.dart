@@ -467,11 +467,19 @@ class TasksModuleState {
   int get archivedCount => tasks.where((t) => t.isArchived).length;
 
   int getProjectProgress(String projectId) {
-    final projectTasks = tasks.where((t) => t.projectId == projectId).toList();
+    final projectTasks = tasks
+        .where(
+          (t) =>
+              t.projectId == projectId &&
+              !t.isArchived &&
+              t.status != 'cancelled',
+        )
+        .toList();
     final projectMilestones =
         milestones.where((m) => m.projectId == projectId).toList();
 
-    final completedTasks = projectTasks.where((t) => t.isCompleted).length;
+    final completedTasks =
+        projectTasks.where((t) => t.isCompleted || t.status == 'completed').length;
     final completedMilestones =
         projectMilestones.where((m) => m.isCompleted).length;
 
@@ -485,7 +493,9 @@ class TasksModuleState {
       completedTasks: completedTasks,
       totalMilestones: projectMilestones.length,
       completedMilestones: completedMilestones,
-      isProjectManuallyCompleted: project.status == 'completed',
+      isProjectManuallyCompleted: project.status == 'completed' &&
+          projectTasks.isEmpty &&
+          projectMilestones.isEmpty,
     );
   }
 }

@@ -14,12 +14,14 @@ import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_calendar_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_recurrence_engine.dart';
+import '../../domain/tasks/task_reminder_engine.dart';
 import '../app_state.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'projects/project_form_sheet.dart';
 import 'projects/projects_workspace_tab.dart';
 import 'tasks/my_day_planning_view.dart';
 import 'tasks/task_recurrence_widgets.dart';
+import 'tasks/task_reminder_widgets.dart';
 
 class TasksView extends StatefulWidget {
   final AppStateManager? state;
@@ -27,6 +29,7 @@ class TasksView extends StatefulWidget {
   final ProjectsController? projectsController;
   final InboxController? inboxController;
   final ({String taskId, int nonce})? requestedTaskFocus;
+  final ({int tabIndex, int nonce})? requestedSubTab;
   final void Function(CalendarDate date)? onOpenCalendarDate;
 
   const TasksView({
@@ -36,6 +39,7 @@ class TasksView extends StatefulWidget {
     this.projectsController,
     this.inboxController,
     this.requestedTaskFocus,
+    this.requestedSubTab,
     this.onOpenCalendarDate,
   }) : assert(
           state != null || controller != null,
@@ -61,11 +65,17 @@ class _TasksViewState extends State<TasksView>
   late TextEditingController _searchController;
   bool _showFilters = false;
   int? _lastHandledTaskFocusNonce;
+  int? _lastHandledSubTabNonce;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: (widget.requestedSubTab?.tabIndex ?? 0).clamp(0, 1),
+    );
+    _lastHandledSubTabNonce = widget.requestedSubTab?.nonce;
     _tabController.addListener(() {
       if (mounted) setState(() {});
     });
@@ -85,7 +95,21 @@ class _TasksViewState extends State<TasksView>
       widget.effectiveController.addListener(_syncSearchControllerWithState);
       _syncSearchControllerWithState();
     }
+    _scheduleSubTabIfNeeded();
     _scheduleTaskFocusIfNeeded();
+  }
+
+  void _scheduleSubTabIfNeeded() {
+    final subTab = widget.requestedSubTab;
+    if (subTab == null || subTab.nonce == _lastHandledSubTabNonce) return;
+    _lastHandledSubTabNonce = subTab.nonce;
+    final targetIndex = subTab.tabIndex.clamp(0, 1);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_tabController.index != targetIndex) {
+        _tabController.animateTo(targetIndex);
+      }
+    });
   }
 
   void _scheduleTaskFocusIfNeeded() {
@@ -187,6 +211,7 @@ class _TasksViewState extends State<TasksView>
   ) async {
     final wasCompleted = task.isCompleted;
     final previousSnapshot = task;
+    final previousReminder = controller.state.findReminderForTask(task.id);
     final projectsCtrl = widget.effectiveProjectsController;
     final res = await controller.toggleTaskWithRecurrence(task.id);
     if (res.updatedTask != null &&
@@ -235,6 +260,7 @@ class _TasksViewState extends State<TasksView>
               await controller.undoGeneratedRecurrenceCompletion(
                 previousTask: previousSnapshot,
                 generatedNextTaskId: res.generatedNextTask?.id,
+                previousReminder: previousReminder,
               );
               if (projectsCtrl != null && previousSnapshot.projectId != null) {
                 await projectsCtrl.syncTaskSectionLink(
@@ -320,6 +346,7 @@ class _TasksViewState extends State<TasksView>
     final previousPlanningEntries = controller.state.dailyPlanningEntries
         .where((e) => e.taskId == task.id)
         .toList(growable: false);
+    final previousReminder = controller.state.findReminderForTask(task.id);
     final projectsCtrl = widget.effectiveProjectsController;
     String? previousSectionId;
     if (projectsCtrl != null && task.projectId != null) {
@@ -341,6 +368,7 @@ class _TasksViewState extends State<TasksView>
               await controller.restoreDeletedTask(
                 task,
                 restorePlanningEntries: previousPlanningEntries,
+                restoreReminder: previousReminder,
               );
               if (projectsCtrl != null &&
                   task.projectId != null &&
@@ -378,6 +406,20 @@ class _TasksViewState extends State<TasksView>
     );
   }
 
+  Future<DayTimeOfDay?> _pickTimeOfDay(DayTimeOfDay? current) async {
+    final seed = current ??
+        DayTimeOfDay(
+          hour: TaskReminderEngine.defaultHour,
+          minute: TaskReminderEngine.defaultMinute,
+        );
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: seed.hour, minute: seed.minute),
+    );
+    if (picked == null) return null;
+    return DayTimeOfDay(hour: picked.hour, minute: picked.minute);
+  }
+
   void _showQuickAddModal() => _showTaskFormModal();
 
   void _showTaskFormModal({
@@ -411,6 +453,7 @@ class _TasksViewState extends State<TasksView>
             : (controller.state.viewFilter == 'today'
                 ? CalendarDate.today()
                 : null));
+    String? scheduledTime = existingTask?.scheduledTime;
     CalendarDate? dueDate = existingTask != null
         ? existingTask.dueDate
         : (isConvertingInbox
@@ -450,6 +493,25 @@ class _TasksViewState extends State<TasksView>
     String modalRecRepeatFrom =
         existingRecurrence?.repeatFrom ?? 'due_date';
     String? modalRecError;
+    final existingReminder = existingTask != null
+        ? controller.state.findReminderForTask(existingTask.id)
+        : null;
+    bool reminderEnabled = existingReminder != null;
+    TaskReminderPreset reminderPreset =
+        existingTask != null && existingReminder != null
+            ? TaskReminderEngine.inferPreset(
+                existingTask,
+                existingReminder.triggerTimeUtc,
+              )
+            : TaskReminderPreset.atTime;
+    final fallbackWall = TaskReminderEngine.defaultFallbackEthiopiaDateTime();
+    CalendarDate? reminderCustomDate = existingReminder != null
+        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).date
+        : (scheduledDate ?? dueDate ?? fallbackWall.date);
+    DayTimeOfDay? reminderCustomTime = existingReminder != null
+        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).timeOfDay
+        : (DayTimeOfDay.tryParse(scheduledTime) ?? fallbackWall.timeOfDay);
+    bool? reminderPermissionGranted;
 
     unawaited(
       showModalBottomSheet<void>(
@@ -666,13 +728,38 @@ class _TasksViewState extends State<TasksView>
                             onPressed: () =>
                                 setModalState(() => scheduledDate = null),
                           ),
+                        ActionChip(
+                          avatar: const Icon(Icons.schedule, size: 16),
+                          label: Text(
+                            scheduledTime != null
+                                ? 'Time: $scheduledTime EAT'
+                                : 'Pick Time',
+                          ),
+                          onPressed: () async {
+                            final picked = await _pickTimeOfDay(
+                              DayTimeOfDay.tryParse(scheduledTime),
+                            );
+                            if (picked != null && ctx.mounted) {
+                              setModalState(
+                                () => scheduledTime = picked.toIsoString(),
+                              );
+                            }
+                          },
+                        ),
+                        if (scheduledTime != null)
+                          ActionChip(
+                            avatar: const Icon(Icons.clear, size: 16),
+                            label: const Text('Clear Time'),
+                            onPressed: () =>
+                                setModalState(() => scheduledTime = null),
+                          ),
                       ],
                     ),
-                    if (scheduledDate != null)
+                    if (scheduledDate != null || scheduledTime != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 6),
                         child: Text(
-                          'Scheduled: ${SharedDateFormatter.formatDual(scheduledDate!, useAmharic: false)}',
+                          'Scheduled: ${scheduledDate != null ? SharedDateFormatter.formatDual(scheduledDate!, useAmharic: false) : 'Date not set'}${scheduledTime != null ? ' · $scheduledTime EAT' : ''}',
                           style: DaywellTypography.label(
                             color: semantic.textSecondary,
                           ),
@@ -780,6 +867,55 @@ class _TasksViewState extends State<TasksView>
                       dueDate: dueDate,
                       scheduledDate: scheduledDate,
                       errorText: modalRecError,
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    TaskReminderEditorSection(
+                      isEnabled: reminderEnabled,
+                      onToggleReminder: (val) => setModalState(() {
+                        reminderEnabled = val;
+                        if (val &&
+                            (reminderCustomDate == null ||
+                                reminderCustomTime == null)) {
+                          final anchorProbe = TaskEntity(
+                            id: existingTask?.id ?? 'draft',
+                            title: titleCtrl.text.trim(),
+                            dueDate: dueDate,
+                            scheduledDate: scheduledDate,
+                            scheduledTime: scheduledTime,
+                          );
+                          final anchor =
+                              TaskReminderEngine.resolveAnchor(anchorProbe);
+                          reminderCustomDate ??=
+                              anchor?.date ?? fallbackWall.date;
+                          reminderCustomTime ??=
+                              anchor?.time ?? fallbackWall.timeOfDay;
+                        }
+                      }),
+                      preset: reminderPreset,
+                      onPresetChanged: (p) =>
+                          setModalState(() => reminderPreset = p),
+                      customDate: reminderCustomDate,
+                      onCustomDateChanged: (d) =>
+                          setModalState(() => reminderCustomDate = d),
+                      customTime: reminderCustomTime,
+                      onCustomTimeChanged: (t) =>
+                          setModalState(() => reminderCustomTime = t),
+                      onPickDate: _pickCalendarDate,
+                      onPickTime: _pickTimeOfDay,
+                      dueDate: dueDate,
+                      scheduledDate: scheduledDate,
+                      scheduledTime: scheduledTime,
+                      notificationPermissionGranted:
+                          reminderPermissionGranted,
+                      onRequestPermission: () async {
+                        final granted =
+                            await controller.requestNotificationPermission();
+                        if (ctx.mounted) {
+                          setModalState(
+                            () => reminderPermissionGranted = granted,
+                          );
+                        }
+                      },
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     DaywellCard(
@@ -1085,7 +1221,25 @@ class _TasksViewState extends State<TasksView>
                         final resolvedMilestoneId =
                             selectedProjectId != null ? selectedMilestoneId : null;
                         final projectsCtrl = widget.effectiveProjectsController;
+                        final DateTime? nextReminderTriggerUtc = reminderEnabled
+                            ? TaskReminderEngine.computeTriggerFromPreset(
+                                task: TaskEntity(
+                                  id: existingTask?.id ?? 'draft',
+                                  title: title,
+                                  dueDate: dueDate,
+                                  scheduledDate: scheduledDate,
+                                  scheduledTime: scheduledTime,
+                                ),
+                                preset: reminderPreset,
+                                customDate: reminderCustomDate,
+                                customTime: reminderCustomTime,
+                              )
+                            : null;
                         if (isEditing) {
+                          if (nextReminderTriggerUtc != null &&
+                              existingReminder == null) {
+                            await controller.requestNotificationPermission();
+                          }
                           final updateRes =
                               await controller.updateTaskWithRecurrence(
                             id: existingTask.id,
@@ -1098,6 +1252,8 @@ class _TasksViewState extends State<TasksView>
                             clearDueDate: dueDate == null,
                             scheduledDate: scheduledDate,
                             clearScheduledDate: scheduledDate == null,
+                            scheduledTime: scheduledTime,
+                            clearScheduledTime: scheduledTime == null,
                             projectId: selectedProjectId,
                             clearProject: selectedProjectId == null,
                             milestoneId: resolvedMilestoneId,
@@ -1108,6 +1264,8 @@ class _TasksViewState extends State<TasksView>
                             clearRecurrenceRule: !modalIsRecurring,
                             recurrenceConfig: recConfig,
                             clearRecurrenceConfig: !modalIsRecurring,
+                            reminderTriggerUtc: nextReminderTriggerUtc,
+                            clearReminder: !reminderEnabled,
                           );
                           final updated = updateRes.updatedTask;
                           if (projectsCtrl != null &&
@@ -1142,6 +1300,7 @@ class _TasksViewState extends State<TasksView>
                             status: status,
                             dueDate: dueDate,
                             scheduledDate: scheduledDate,
+                            scheduledTime: scheduledTime,
                             projectId: selectedProjectId,
                             milestoneId: resolvedMilestoneId,
                             subtasks: modalSubtasks,
@@ -1152,6 +1311,9 @@ class _TasksViewState extends State<TasksView>
                             myDayDate: controller.state.viewFilter == 'my_day'
                                 ? controller.state.effectivePlanDate
                                 : null,
+                            reminderTriggerUtc: nextReminderTriggerUtc,
+                            requestReminderPermission:
+                                nextReminderTriggerUtc != null,
                           );
                           if (createdTask != null) {
                             if (projectsCtrl != null &&
@@ -1356,7 +1518,7 @@ class _TasksViewState extends State<TasksView>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Scheduled Date: ${task.scheduledDate != null ? SharedDateFormatter.formatDual(task.scheduledDate!, useAmharic: false) : 'Not set'}',
+                            'Scheduled: ${task.scheduledDate != null ? SharedDateFormatter.formatDual(task.scheduledDate!, useAmharic: false) : 'Date not set'}${task.scheduledTime != null ? ' · ${task.scheduledTime!} EAT' : ''}',
                             style: Theme.of(modalContext)
                                 .textTheme
                                 .bodySmall
@@ -1446,6 +1608,8 @@ class _TasksViewState extends State<TasksView>
                         task: task,
                         onSkipOccurrence: () {
                           final prevSnapshot = task;
+                          final prevReminder =
+                              controller.state.findReminderForTask(task.id);
                           unawaited(() async {
                             final skipped = await controller
                                 .skipRecurrenceOccurrence(task.id);
@@ -1470,8 +1634,10 @@ class _TasksViewState extends State<TasksView>
                                 action: SnackBarAction(
                                   label: 'Undo',
                                   onPressed: () => unawaited(
-                                    controller
-                                        .restoreTaskSnapshot(prevSnapshot),
+                                    controller.restoreTaskSnapshot(
+                                      prevSnapshot,
+                                      restoreReminder: prevReminder,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1480,6 +1646,8 @@ class _TasksViewState extends State<TasksView>
                         },
                         onRescheduleOccurrence: () {
                           final prevSnapshot = task;
+                          final prevReminder =
+                              controller.state.findReminderForTask(task.id);
                           unawaited(() async {
                             final picked = await _pickCalendarDate(
                               task.dueDate ?? task.scheduledDate,
@@ -1506,8 +1674,10 @@ class _TasksViewState extends State<TasksView>
                                 action: SnackBarAction(
                                   label: 'Undo',
                                   onPressed: () => unawaited(
-                                    controller
-                                        .restoreTaskSnapshot(prevSnapshot),
+                                    controller.restoreTaskSnapshot(
+                                      prevSnapshot,
+                                      restoreReminder: prevReminder,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1520,6 +1690,8 @@ class _TasksViewState extends State<TasksView>
                         },
                         onStopRecurrence: () {
                           final prevSnapshot = task;
+                          final prevReminder =
+                              controller.state.findReminderForTask(task.id);
                           unawaited(() async {
                             final stopped =
                                 await controller.stopTaskRecurrence(task.id);
@@ -1542,8 +1714,10 @@ class _TasksViewState extends State<TasksView>
                                 action: SnackBarAction(
                                   label: 'Undo',
                                   onPressed: () => unawaited(
-                                    controller
-                                        .restoreTaskSnapshot(prevSnapshot),
+                                    controller.restoreTaskSnapshot(
+                                      prevSnapshot,
+                                      restoreReminder: prevReminder,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1552,6 +1726,49 @@ class _TasksViewState extends State<TasksView>
                         },
                       ),
                     ],
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    TaskReminderDetailsSection(
+                      task: task,
+                      reminder: controller.state.findReminderForTask(task.id),
+                      onSaveReminder: (triggerUtc) {
+                        unawaited(
+                          controller.setTaskReminder(
+                            taskId: task.id,
+                            triggerTimeUtc: triggerUtc,
+                            requestPermissionIfNeeded: true,
+                          ),
+                        );
+                      },
+                      onRemoveReminder: () {
+                        final prevReminder =
+                            controller.state.findReminderForTask(task.id);
+                        unawaited(() async {
+                          await controller.removeTaskReminder(task.id);
+                          if (!mounted || prevReminder == null) return;
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content:
+                                  Text('Removed reminder for "${task.title}"'),
+                              action: SnackBarAction(
+                                label: 'Undo',
+                                onPressed: () => unawaited(
+                                  controller.setTaskReminder(
+                                    taskId: task.id,
+                                    triggerTimeUtc:
+                                        prevReminder.triggerTimeUtc,
+                                  ),
+                                ),
+                              ),
+                              duration: const Duration(seconds: 4),
+                            ),
+                          );
+                        }());
+                      },
+                      onRequestPermission: () {
+                        unawaited(controller.requestNotificationPermission());
+                      },
+                    ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     _TaskDetailsTagsPanel(
                       task: task,
@@ -2842,6 +3059,7 @@ class _TasksViewState extends State<TasksView>
     final isSelected = moduleState.selectedTaskIds.contains(task.id);
     final subs = task.subtasks;
     final doneSubs = subs.where((s) => s.done).length;
+    final reminder = moduleState.findReminderForTask(task.id);
     final semantic = context.daywellColors;
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -2979,7 +3197,13 @@ class _TasksViewState extends State<TasksView>
                     ),
                   if (task.scheduledDate != null)
                     Text(
-                      'Plan: ${SharedDateFormatter.formatEthiopian(task.scheduledDate!.toEthiopian(), useAmharic: false, includeEra: false)}',
+                      'Plan: ${SharedDateFormatter.formatEthiopian(task.scheduledDate!.toEthiopian(), useAmharic: false, includeEra: false)}${task.scheduledTime != null ? ' · ${task.scheduledTime!}' : ''}',
+                      style:
+                          TextStyle(fontSize: 11, color: semantic.textSecondary),
+                    )
+                  else if (task.scheduledTime != null)
+                    Text(
+                      'Time: ${task.scheduledTime!} EAT',
                       style:
                           TextStyle(fontSize: 11, color: semantic.textSecondary),
                     ),
@@ -2987,6 +3211,36 @@ class _TasksViewState extends State<TasksView>
                     Text(
                       'Due: ${SharedDateFormatter.formatEthiopian(task.dueDate!.toEthiopian(), useAmharic: false, includeEra: false)}',
                       style: TextStyle(fontSize: 11, color: colorScheme.primary),
+                    ),
+                  if (reminder != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          reminder.isActive
+                              ? Icons.notifications_active_outlined
+                              : Icons.notifications_paused_outlined,
+                          size: 12,
+                          color: reminder.isActive
+                              ? colorScheme.primary
+                              : semantic.textMuted,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          TaskReminderEngine.formatReminderSummary(
+                            reminder.triggerTimeUtc,
+                          ),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: reminder.isActive
+                                ? colorScheme.primary
+                                : semantic.textMuted,
+                            fontWeight: reminder.isActive
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                          ),
+                        ),
+                      ],
                     ),
                   if (TaskRecurrenceEngine.resolveEffectiveConfig(task) != null)
                     Row(

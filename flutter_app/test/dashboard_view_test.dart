@@ -7,6 +7,7 @@ import 'package:personal_management_app/application/calendar/calendar_controller
 import 'package:personal_management_app/application/finance/finance_controller.dart';
 import 'package:personal_management_app/application/inbox/inbox_controller.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
+import 'package:personal_management_app/application/projects/projects_controller.dart';
 import 'package:personal_management_app/application/tasks/tasks_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
@@ -18,6 +19,9 @@ import 'package:personal_management_app/domain/inbox/inbox_contracts.dart';
 import 'package:personal_management_app/domain/inbox/inbox_models.dart';
 import 'package:personal_management_app/domain/notes/note_contracts.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
+import 'package:personal_management_app/domain/projects/project_contracts.dart';
+import 'package:personal_management_app/domain/projects/project_models.dart';
+import 'package:personal_management_app/domain/projects/project_package_codec.dart';
 import 'package:personal_management_app/domain/tasks/task_contracts.dart';
 import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/main.dart';
@@ -903,12 +907,157 @@ class _FakeInboxRepository implements IInboxRepository {
   Future<void> close() => _stream.close();
 }
 
+class _FakeProjectsRepository implements IProjectsRepository {
+  int loadCalls = 0;
+  bool shouldThrow = false;
+  Completer<void>? loadGate;
+  List<ProjectEntity> projects = <ProjectEntity>[];
+  List<ProjectTrackingBlockEntity> blocks = <ProjectTrackingBlockEntity>[];
+  List<ProjectTrackingRecordEntity> records = <ProjectTrackingRecordEntity>[];
+
+  @override
+  Future<List<ProjectEntity>> getProjects({
+    String? status,
+    bool includeArchived = true,
+  }) async {
+    loadCalls++;
+    if (loadGate != null && !loadGate!.isCompleted) {
+      await loadGate!.future;
+    }
+    if (shouldThrow) {
+      throw StateError('Simulated projects load failure');
+    }
+    return projects.where((ProjectEntity p) {
+      if (!includeArchived && p.isArchived) return false;
+      if (status != null && p.status != status) return false;
+      return true;
+    }).toList(growable: false);
+  }
+
+  @override
+  Future<ProjectEntity?> getProjectById(String id) async {
+    for (final p in projects) {
+      if (p.id == id) return p;
+    }
+    return null;
+  }
+
+  @override
+  Future<ProjectEntity> createProject(ProjectEntity project) async {
+    projects = <ProjectEntity>[...projects, project];
+    return project;
+  }
+
+  @override
+  Future<ProjectEntity> updateProject(ProjectEntity project) async => project;
+
+  @override
+  Future<ProjectEntity> setProjectArchived(
+    String projectId,
+    bool isArchived,
+  ) async =>
+      projects.firstWhere((p) => p.id == projectId).copyWith(
+            isArchived: isArchived,
+          );
+
+  @override
+  Future<void> deleteProject(String projectId) async {}
+
+  @override
+  Future<List<ProjectTrackingBlockEntity>> getBlocksForProject(
+    String projectId, {
+    bool includeArchived = true,
+  }) async =>
+      blocks.where((b) => b.projectId == projectId).toList(growable: false);
+
+  @override
+  Future<ProjectTrackingBlockEntity> createBlock(
+    ProjectTrackingBlockEntity block,
+  ) async =>
+      block;
+
+  @override
+  Future<ProjectTrackingBlockEntity> updateBlock(
+    ProjectTrackingBlockEntity block,
+  ) async =>
+      block;
+
+  @override
+  Future<ProjectTrackingBlockEntity> setBlockArchived(
+    String blockId,
+    bool isArchived,
+  ) async =>
+      blocks.firstWhere((b) => b.id == blockId);
+
+  @override
+  Future<void> deleteBlock(String blockId) async {}
+
+  @override
+  Future<List<ProjectTrackingRecordEntity>> getRecordsForProject(
+    String projectId, {
+    String? blockId,
+  }) async =>
+      records.where((r) => r.projectId == projectId).toList(growable: false);
+
+  @override
+  Future<ProjectTrackingRecordEntity> createRecord(
+    ProjectTrackingRecordEntity record,
+  ) async =>
+      record;
+
+  @override
+  Future<ProjectTrackingRecordEntity> updateRecord(
+    ProjectTrackingRecordEntity record,
+  ) async =>
+      record;
+
+  @override
+  Future<ProjectTrackingRecordEntity> appendProgressLog(
+    ProjectTrackingRecordEntity logRecord,
+  ) async =>
+      logRecord;
+
+  @override
+  Future<ProjectTrackingRecordEntity> appendProgressCorrection({
+    required String targetLogId,
+    required double correctionDelta,
+    required CalendarDate recordedDate,
+    required String reason,
+    String? correctionId,
+  }) async =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteRecord(String recordId) async {}
+
+  @override
+  Future<ProjectProgressSummary> getProjectProgressSummary(
+    String projectId, {
+    CalendarDate? asOfDate,
+  }) async =>
+      ProjectProgressSummary(
+        projectId: projectId,
+        blockMetrics: const <ProjectBlockProgressMetric>[],
+      );
+
+  @override
+  Future<String> exportProjectPackageJson(String projectId) async => '{}';
+
+  @override
+  Future<PreparedProjectPackageImport> importProjectPackageJson(
+    String rawJson,
+  ) async =>
+      throw UnimplementedError();
+}
+
 class _HarnessAppStateManager extends ChangeNotifier
     implements AppStateManager {
   @override
   final FinanceController financeController;
   @override
   final TasksController tasksController;
+  @override
+  final ProjectsController projectsController;
   @override
   final CalendarController calendarController;
   @override
@@ -919,11 +1068,15 @@ class _HarnessAppStateManager extends ChangeNotifier
   _HarnessAppStateManager({
     required _FakeFinanceRepository financeRepo,
     required _FakeTasksRepository tasksRepo,
+    _FakeProjectsRepository? projectsRepo,
     required _FakeCalendarRepository calendarRepo,
     required _FakeNotesRepository notesRepo,
     required _FakeInboxRepository inboxRepo,
   })  : financeController = FinanceController(repository: financeRepo),
         tasksController = TasksController(repository: tasksRepo),
+        projectsController = ProjectsController(
+          repository: projectsRepo ?? _FakeProjectsRepository(),
+        ),
         calendarController = CalendarController(repository: calendarRepo),
         notesController = NotesController(repository: notesRepo),
         inboxController = InboxController(repository: inboxRepo);
@@ -934,6 +1087,7 @@ class _HarnessAppStateManager extends ChangeNotifier
     await Future.wait<void>(<Future<void>>[
       financeController.loadAll(),
       tasksController.loadAll(),
+      projectsController.loadAll(),
       calendarController.loadAll(),
       notesController.loadNotes(),
       inboxController.loadItems(includeProcessed: true),
@@ -944,6 +1098,7 @@ class _HarnessAppStateManager extends ChangeNotifier
   void dispose() {
     financeController.dispose();
     tasksController.dispose();
+    projectsController.dispose();
     calendarController.dispose();
     notesController.dispose();
     inboxController.dispose();

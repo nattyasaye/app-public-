@@ -10,8 +10,10 @@ import '../../../core/theme/daywell_theme.dart';
 import '../../../domain/projects/project_models.dart';
 import '../../../domain/tasks/task_models.dart';
 import '../../../domain/tasks/task_recurrence_engine.dart';
+import '../../../domain/tasks/task_reminder_engine.dart';
 import '../../widgets/shared_ui_widgets.dart';
 import '../tasks/task_recurrence_widgets.dart';
+import '../tasks/task_reminder_widgets.dart';
 import 'project_ui_helpers.dart';
 
 class ProjectTasksSectionsWidget extends StatelessWidget {
@@ -47,6 +49,23 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     ('completed', 'Completed'),
     ('inbox', 'Inbox'),
   ];
+
+  Future<DayTimeOfDay?> _pickTimeOfDay(
+    BuildContext context,
+    DayTimeOfDay? current,
+  ) async {
+    final seed = current ??
+        DayTimeOfDay(
+          hour: TaskReminderEngine.defaultHour,
+          minute: TaskReminderEngine.defaultMinute,
+        );
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: seed.hour, minute: seed.minute),
+    );
+    if (picked == null) return null;
+    return DayTimeOfDay(hour: picked.hour, minute: picked.minute);
+  }
 
   ({
     List<ProjectTrackingRecordEntity> sections,
@@ -245,6 +264,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
         : initialSectionId;
     String? selectedMilestoneId = existingTask?.milestoneId;
     CalendarDate? scheduledDate = existingTask?.scheduledDate;
+    String? scheduledTime = existingTask?.scheduledTime;
     CalendarDate? dueDate = existingTask?.dueDate;
     final existingRecurrence = existingTask != null
         ? TaskRecurrenceEngine.resolveEffectiveConfig(existingTask)
@@ -259,6 +279,25 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     String recRepeatFrom = existingRecurrence?.repeatFrom ?? 'due_date';
     String? recError;
     String? titleError;
+    final existingReminder = existingTask != null
+        ? ctrl.state.findReminderForTask(existingTask.id)
+        : null;
+    bool reminderEnabled = existingReminder != null;
+    TaskReminderPreset reminderPreset =
+        existingTask != null && existingReminder != null
+            ? TaskReminderEngine.inferPreset(
+                existingTask,
+                existingReminder.triggerTimeUtc,
+              )
+            : TaskReminderPreset.atTime;
+    final fallbackWall = TaskReminderEngine.defaultFallbackEthiopiaDateTime();
+    CalendarDate? reminderCustomDate = existingReminder != null
+        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).date
+        : (scheduledDate ?? dueDate ?? fallbackWall.date);
+    DayTimeOfDay? reminderCustomTime = existingReminder != null
+        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).timeOfDay
+        : (DayTimeOfDay.tryParse(scheduledTime) ?? fallbackWall.timeOfDay);
+    bool? reminderPermissionGranted;
 
     await showDialog<void>(
       context: context,
@@ -431,6 +470,32 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                           label: const Text('Clear Due'),
                           onPressed: () => setDialogState(() => dueDate = null),
                         ),
+                      ActionChip(
+                        avatar: const Icon(Icons.schedule, size: 16),
+                        label: Text(
+                          scheduledTime != null
+                              ? 'Time: $scheduledTime'
+                              : 'Set Time',
+                        ),
+                        onPressed: () async {
+                          final picked = await _pickTimeOfDay(
+                            ctx,
+                            DayTimeOfDay.tryParse(scheduledTime),
+                          );
+                          if (picked != null && ctx.mounted) {
+                            setDialogState(
+                              () => scheduledTime = picked.toIsoString(),
+                            );
+                          }
+                        },
+                      ),
+                      if (scheduledTime != null)
+                        ActionChip(
+                          avatar: const Icon(Icons.clear, size: 16),
+                          label: const Text('Clear Time'),
+                          onPressed: () =>
+                              setDialogState(() => scheduledTime = null),
+                        ),
                     ],
                   ),
                   const SizedBox(height: SharedDesignTokens.spacingCompact),
@@ -481,6 +546,58 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                     scheduledDate: scheduledDate,
                     errorText: recError,
                   ),
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  TaskReminderEditorSection(
+                    isEnabled: reminderEnabled,
+                    onToggleReminder: (val) => setDialogState(() {
+                      reminderEnabled = val;
+                      if (val &&
+                          (reminderCustomDate == null ||
+                              reminderCustomTime == null)) {
+                        final anchorProbe = TaskEntity(
+                          id: existingTask?.id ?? 'draft',
+                          title: titleCtrl.text.trim(),
+                          dueDate: dueDate,
+                          scheduledDate: scheduledDate,
+                          scheduledTime: scheduledTime,
+                        );
+                        final anchor =
+                            TaskReminderEngine.resolveAnchor(anchorProbe);
+                        reminderCustomDate ??=
+                            anchor?.date ?? fallbackWall.date;
+                        reminderCustomTime ??=
+                            anchor?.time ?? fallbackWall.timeOfDay;
+                      }
+                    }),
+                    preset: reminderPreset,
+                    onPresetChanged: (p) =>
+                        setDialogState(() => reminderPreset = p),
+                    customDate: reminderCustomDate,
+                    onCustomDateChanged: (d) =>
+                        setDialogState(() => reminderCustomDate = d),
+                    customTime: reminderCustomTime,
+                    onCustomTimeChanged: (t) =>
+                        setDialogState(() => reminderCustomTime = t),
+                    onPickDate: (current) => pickProjectCalendarDate(
+                      ctx,
+                      initialDate: current,
+                      helpText: 'Select Reminder Date',
+                    ),
+                    onPickTime: (current) => _pickTimeOfDay(ctx, current),
+                    dueDate: dueDate,
+                    scheduledDate: scheduledDate,
+                    scheduledTime: scheduledTime,
+                    notificationPermissionGranted: reminderPermissionGranted,
+                    onRequestPermission: () async {
+                      final granted =
+                          await ctrl.requestNotificationPermission();
+                      if (ctx.mounted) {
+                        setDialogState(
+                          () => reminderPermissionGranted = granted,
+                        );
+                      }
+                    },
+                  ),
                 ],
               ),
             ),
@@ -523,6 +640,21 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                     }
                   }
 
+                  final DateTime? nextReminderTriggerUtc = reminderEnabled
+                      ? TaskReminderEngine.computeTriggerFromPreset(
+                          task: TaskEntity(
+                            id: existingTask?.id ?? 'draft',
+                            title: trimmed,
+                            dueDate: dueDate,
+                            scheduledDate: scheduledDate,
+                            scheduledTime: scheduledTime,
+                          ),
+                          preset: reminderPreset,
+                          customDate: reminderCustomDate,
+                          customTime: reminderCustomTime,
+                        )
+                      : null;
+
                   if (existingTask == null) {
                     final created = await ctrl.createTask(
                       title: trimmed,
@@ -530,11 +662,15 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       priority: priority,
                       status: status,
                       scheduledDate: scheduledDate,
+                      scheduledTime: scheduledTime,
                       dueDate: dueDate,
                       projectId: project.id,
                       milestoneId: selectedMilestoneId,
                       recurrenceRule: recConfig?.frequency,
                       recurrenceConfig: recConfig,
+                      reminderTriggerUtc: nextReminderTriggerUtc,
+                      requestReminderPermission:
+                          nextReminderTriggerUtc != null,
                     );
                     if (created != null) {
                       await projectsController.assignTaskToProjectSection(
@@ -546,6 +682,10 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       );
                     }
                   } else {
+                    if (nextReminderTriggerUtc != null &&
+                        existingReminder == null) {
+                      await ctrl.requestNotificationPermission();
+                    }
                     final updateRes = await ctrl.updateTaskWithRecurrence(
                       id: existingTask.id,
                       title: trimmed,
@@ -555,6 +695,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       status: status,
                       scheduledDate: scheduledDate,
                       clearScheduledDate: scheduledDate == null,
+                      scheduledTime: scheduledTime,
+                      clearScheduledTime: scheduledTime == null,
                       dueDate: dueDate,
                       clearDueDate: dueDate == null,
                       projectId: project.id,
@@ -564,6 +706,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       clearRecurrenceRule: !isRecurring,
                       recurrenceConfig: recConfig,
                       clearRecurrenceConfig: !isRecurring,
+                      reminderTriggerUtc: nextReminderTriggerUtc,
+                      clearReminder: !reminderEnabled,
                     );
                     final updated = updateRes.updatedTask;
                     if (updated != null) {
@@ -609,6 +753,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                                 previousTask: existingTask,
                                 generatedNextTaskId:
                                     updateRes.generatedNextTask?.id,
+                                previousReminder: existingReminder,
                               );
                               await projectsController.syncTaskSectionLink(
                                 project.id,
@@ -718,7 +863,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Scheduled: ${task.scheduledDate != null ? SharedDateFormatter.formatDual(task.scheduledDate!, useAmharic: false) : 'Not set'}',
+                          'Scheduled: ${task.scheduledDate != null ? SharedDateFormatter.formatDual(task.scheduledDate!, useAmharic: false) : 'Date not set'}${task.scheduledTime != null ? ' · ${task.scheduledTime!} EAT' : ''}',
                           style: textTheme.bodySmall?.copyWith(
                             color: semantic.textPrimary,
                           ),
@@ -749,6 +894,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       task: task,
                       onSkipOccurrence: () {
                         final prevSnapshot = task;
+                        final prevReminder =
+                            ctrl.state.findReminderForTask(task.id);
                         unawaited(() async {
                           final skipped =
                               await ctrl.skipRecurrenceOccurrence(task.id);
@@ -778,7 +925,10 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                               action: SnackBarAction(
                                 label: 'Undo',
                                 onPressed: () => unawaited(() async {
-                                  await ctrl.restoreTaskSnapshot(prevSnapshot);
+                                  await ctrl.restoreTaskSnapshot(
+                                    prevSnapshot,
+                                    restoreReminder: prevReminder,
+                                  );
                                   await projectsController.syncTaskSectionLink(
                                     project.id,
                                     prevSnapshot,
@@ -791,6 +941,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       },
                       onRescheduleOccurrence: () {
                         final prevSnapshot = task;
+                        final prevReminder =
+                            ctrl.state.findReminderForTask(task.id);
                         unawaited(() async {
                           final picked = await pickProjectCalendarDate(
                             animCtx,
@@ -826,7 +978,10 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                               action: SnackBarAction(
                                 label: 'Undo',
                                 onPressed: () => unawaited(() async {
-                                  await ctrl.restoreTaskSnapshot(prevSnapshot);
+                                  await ctrl.restoreTaskSnapshot(
+                                    prevSnapshot,
+                                    restoreReminder: prevReminder,
+                                  );
                                   await projectsController.syncTaskSectionLink(
                                     project.id,
                                     prevSnapshot,
@@ -852,6 +1007,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       },
                       onStopRecurrence: () {
                         final prevSnapshot = task;
+                        final prevReminder =
+                            ctrl.state.findReminderForTask(task.id);
                         unawaited(() async {
                           final stopped =
                               await ctrl.stopTaskRecurrence(task.id);
@@ -879,7 +1036,10 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                               action: SnackBarAction(
                                 label: 'Undo',
                                 onPressed: () => unawaited(() async {
-                                  await ctrl.restoreTaskSnapshot(prevSnapshot);
+                                  await ctrl.restoreTaskSnapshot(
+                                    prevSnapshot,
+                                    restoreReminder: prevReminder,
+                                  );
                                   await projectsController.syncTaskSectionLink(
                                     project.id,
                                     prevSnapshot,
@@ -892,6 +1052,48 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       },
                     ),
                   ],
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  TaskReminderDetailsSection(
+                    task: task,
+                    reminder: ctrl.state.findReminderForTask(task.id),
+                    onSaveReminder: (triggerUtc) {
+                      unawaited(
+                        ctrl.setTaskReminder(
+                          taskId: task.id,
+                          triggerTimeUtc: triggerUtc,
+                          requestPermissionIfNeeded: true,
+                        ),
+                      );
+                    },
+                    onRemoveReminder: () {
+                      final prevReminder =
+                          ctrl.state.findReminderForTask(task.id);
+                      unawaited(() async {
+                        await ctrl.removeTaskReminder(task.id);
+                        if (!hostContext.mounted || prevReminder == null) return;
+                        ScaffoldMessenger.of(hostContext).clearSnackBars();
+                        ScaffoldMessenger.of(hostContext).showSnackBar(
+                          SnackBar(
+                            content:
+                                Text('Removed reminder for "${task.title}"'),
+                            action: SnackBarAction(
+                              label: 'Undo',
+                              onPressed: () => unawaited(
+                                ctrl.setTaskReminder(
+                                  taskId: task.id,
+                                  triggerTimeUtc: prevReminder.triggerTimeUtc,
+                                ),
+                              ),
+                            ),
+                            duration: const Duration(seconds: 4),
+                          ),
+                        );
+                      }());
+                    },
+                    onRequestPermission: () {
+                      unawaited(ctrl.requestNotificationPermission());
+                    },
+                  ),
                 ],
               ),
             ),
@@ -928,6 +1130,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     if (ctrl == null) return;
     final wasCompleted = task.isCompleted;
     final previousSnapshot = task;
+    final previousReminder = ctrl.state.findReminderForTask(task.id);
     final res = await ctrl.toggleTaskWithRecurrence(task.id);
     if (res.updatedTask != null) {
       await projectsController.syncTaskSectionLink(
@@ -967,6 +1170,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
               await ctrl.undoGeneratedRecurrenceCompletion(
                 previousTask: previousSnapshot,
                 generatedNextTaskId: res.generatedNextTask?.id,
+                previousReminder: previousReminder,
               );
               await projectsController.syncTaskSectionLink(
                 project.id,
@@ -997,6 +1201,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     );
     if (!confirmed || !context.mounted) return;
 
+    final previousReminder = ctrl.state.findReminderForTask(task.id);
     await projectsController.detachTaskFromProjectSections(project.id, task.id);
     await ctrl.deleteTask(task.id);
     if (!context.mounted) return;
@@ -1009,7 +1214,10 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
           label: 'Undo',
           onPressed: () {
             unawaited(() async {
-              await ctrl.restoreDeletedTask(task);
+              await ctrl.restoreDeletedTask(
+                task,
+                restoreReminder: previousReminder,
+              );
               if (previousSectionId != null) {
                 await projectsController.assignTaskToProjectSection(
                   projectId: project.id,
@@ -1035,10 +1243,12 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     required Map<String, MilestoneEntity> milestonesById,
   }) {
     final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final currentSectionId = sectionIdByTaskId[task.id];
     final milestone =
         task.milestoneId != null ? milestonesById[task.milestoneId!] : null;
+    final reminder = tasksController?.state.findReminderForTask(task.id);
 
     return Padding(
       padding: const EdgeInsets.symmetric(
@@ -1103,12 +1313,55 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                             color: Theme.of(context).colorScheme.primary,
                           ),
                         ),
+                      if (task.scheduledDate != null)
+                        Text(
+                          'Sched ${SharedDateFormatter.formatDual(task.scheduledDate!, useAmharic: false)}${task.scheduledTime != null ? ' · ${task.scheduledTime!}' : ''}',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textSecondary,
+                          ),
+                        )
+                      else if (task.scheduledTime != null)
+                        Text(
+                          'Time ${task.scheduledTime!} EAT',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textSecondary,
+                          ),
+                        ),
                       if (task.dueDate != null)
                         Text(
                           'Due ${SharedDateFormatter.formatDual(task.dueDate!, useAmharic: false)}',
                           style: textTheme.bodySmall?.copyWith(
                             color: semantic.textMuted,
                           ),
+                        ),
+                      if (reminder != null)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              reminder.isActive
+                                  ? Icons.notifications_active_outlined
+                                  : Icons.notifications_paused_outlined,
+                              size: 12,
+                              color: reminder.isActive
+                                  ? colorScheme.primary
+                                  : semantic.textMuted,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              TaskReminderEngine.formatReminderSummary(
+                                reminder.triggerTimeUtc,
+                              ),
+                              style: textTheme.bodySmall?.copyWith(
+                                color: reminder.isActive
+                                    ? colorScheme.primary
+                                    : semantic.textMuted,
+                                fontWeight: reminder.isActive
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ],
                         ),
                       if (TaskRecurrenceEngine.resolveEffectiveConfig(task) !=
                           null)

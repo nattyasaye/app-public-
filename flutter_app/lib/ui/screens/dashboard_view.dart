@@ -13,10 +13,12 @@ import '../../domain/inbox/inbox_models.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_recurrence_engine.dart';
+import '../../domain/tasks/task_summary_engine.dart';
 import '../app_state.dart';
 import '../shell/daywell_shell_routes.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'finance/finance_formatters.dart';
+import 'projects/project_detail_screen.dart';
 
 /// Primary Dashboard / Today screen coordinating per-module controller
 /// subscriptions, deduplicated pull-to-refresh, and adaptive responsive layout.
@@ -25,6 +27,7 @@ class DashboardView extends StatefulWidget {
   final VoidCallback onOpenQuickCapture;
   final void Function(int)? onNavigateTab;
   final void Function(DaywellTabId tab)? onSelectTab;
+  final void Function(int tabIndex)? onOpenTasksSubTab;
   final VoidCallback? onOpenBackup;
 
   const DashboardView({
@@ -33,6 +36,7 @@ class DashboardView extends StatefulWidget {
     required this.onOpenQuickCapture,
     this.onNavigateTab,
     this.onSelectTab,
+    this.onOpenTasksSubTab,
     this.onOpenBackup,
   });
 
@@ -56,6 +60,14 @@ class _DashboardViewState extends State<DashboardView> {
     }
   }
 
+  void _openTasksTab([int subTabIndex = 0]) {
+    if (widget.onOpenTasksSubTab != null) {
+      widget.onOpenTasksSubTab!(subTabIndex);
+      return;
+    }
+    _goToTab(DaywellTabId.tasks);
+  }
+
   void _goToBackup() {
     widget.onOpenBackup?.call();
   }
@@ -74,6 +86,7 @@ class _DashboardViewState extends State<DashboardView> {
       await Future.wait<void>(<Future<void>>[
         widget.state.financeController.loadAll(),
         widget.state.tasksController.loadAll(),
+        widget.state.projectsController.loadAll(),
         widget.state.calendarController.loadAll(),
         widget.state.notesController.loadNotes(),
         widget.state.inboxController.loadItems(includeProcessed: true),
@@ -195,7 +208,13 @@ class _DashboardViewState extends State<DashboardView> {
                           children: [
                             DashboardTasksSection(
                               state: widget.state,
-                              onOpenTasks: () => _goToTab(DaywellTabId.tasks),
+                              onOpenTasks: () => _openTasksTab(0),
+                            ),
+                            const SizedBox(
+                                height: SharedDesignTokens.spacingLg),
+                            DashboardProjectProgressSection(
+                              state: widget.state,
+                              onOpenProjects: () => _openTasksTab(1),
                             ),
                             const SizedBox(
                                 height: SharedDesignTokens.spacingLg),
@@ -216,8 +235,8 @@ class _DashboardViewState extends State<DashboardView> {
                               state: widget.state,
                               onOpenTasks: () {
                                 widget.state.tasksController
-                                    .setViewFilter('inbox');
-                                _goToTab(DaywellTabId.tasks);
+                                    .openDashboardFilter(viewFilter: 'inbox');
+                                _openTasksTab(0);
                               },
                               onOpenQuickCapture: widget.onOpenQuickCapture,
                             ),
@@ -234,7 +253,12 @@ class _DashboardViewState extends State<DashboardView> {
                   const SizedBox(height: SharedDesignTokens.spacingLg),
                   DashboardTasksSection(
                     state: widget.state,
-                    onOpenTasks: () => _goToTab(DaywellTabId.tasks),
+                    onOpenTasks: () => _openTasksTab(0),
+                  ),
+                  const SizedBox(height: SharedDesignTokens.spacingLg),
+                  DashboardProjectProgressSection(
+                    state: widget.state,
+                    onOpenProjects: () => _openTasksTab(1),
                   ),
                   const SizedBox(height: SharedDesignTokens.spacingLg),
                   DashboardCalendarSection(
@@ -250,8 +274,9 @@ class _DashboardViewState extends State<DashboardView> {
                   DashboardInboxSection(
                     state: widget.state,
                     onOpenTasks: () {
-                      widget.state.tasksController.setViewFilter('inbox');
-                      _goToTab(DaywellTabId.tasks);
+                      widget.state.tasksController
+                          .openDashboardFilter(viewFilter: 'inbox');
+                      _openTasksTab(0);
                     },
                     onOpenQuickCapture: widget.onOpenQuickCapture,
                   ),
@@ -1494,9 +1519,24 @@ class DashboardTasksSection extends StatelessWidget {
       if (rankA != rankB) return rankA.compareTo(rankB);
       final dueA = a.dueDate ?? CalendarDate(year: 2099, month: 12, day: 31);
       final dueB = b.dueDate ?? CalendarDate(year: 2099, month: 12, day: 31);
-      return dueA.compareTo(dueB);
+      final cmp = dueA.compareTo(dueB);
+      if (cmp != 0) return cmp;
+      return a.title.compareTo(b.title);
     });
     return sorted;
+  }
+
+  void _openFilteredTasks({
+    required String viewFilter,
+    String? dueDateFilter,
+    bool resetPlanDateToToday = false,
+  }) {
+    state.tasksController.openDashboardFilter(
+      viewFilter: viewFilter,
+      dueDateFilter: dueDateFilter,
+      resetPlanDateToToday: resetPlanDateToToday,
+    );
+    onOpenTasks();
   }
 
   @override
@@ -1505,6 +1545,10 @@ class DashboardTasksSection extends StatelessWidget {
       listenable: state.tasksController,
       builder: (BuildContext context, Widget? _) {
         final tasksState = state.tasksController.state;
+        final overview = TaskSummaryEngine.buildTaskOverview(
+          tasks: tasksState.tasks,
+          dailyPlanningEntries: tasksState.dailyPlanningEntries,
+        );
         final hasData = tasksState.tasks.isNotEmpty;
         final hasError = tasksState.errorMessage != null &&
             tasksState.errorMessage!.trim().isNotEmpty;
@@ -1520,21 +1564,13 @@ class DashboardTasksSection extends StatelessWidget {
           status = DaywellContentStatus.content;
         }
 
-        final activeTotal = tasksState.tasks
-            .where((TaskEntity t) => t.status != 'cancelled')
-            .length;
-        final completedCount = tasksState.completedCount;
         final pendingTasks = _prioritizedPendingTasks(tasksState.pendingTasks);
-        final double progressValue =
-            activeTotal > 0 ? completedCount / activeTotal : 0.0;
 
         return DaywellSectionContainer(
-          title: 'Today & Urgent Tasks',
-          count: tasksState.pendingTasks.isNotEmpty
-              ? tasksState.pendingTasks.length
-              : null,
+          title: 'Tasks Overview',
+          count: overview.remainingCount > 0 ? overview.remainingCount : null,
           actionLabel: 'View All',
-          onActionPressed: onOpenTasks,
+          onActionPressed: () => _openFilteredTasks(viewFilter: 'active'),
           child: DaywellContentState(
             status: status,
             loadingLabel: 'Loading tasks...',
@@ -1550,6 +1586,7 @@ class DashboardTasksSection extends StatelessWidget {
             contentBuilder: (BuildContext context) {
               final semantic = context.daywellColors;
               final textTheme = Theme.of(context).textTheme;
+              final colorScheme = Theme.of(context).colorScheme;
 
               return DaywellCard(
                 padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
@@ -1568,19 +1605,114 @@ class DashboardTasksSection extends StatelessWidget {
                       const SizedBox(height: SharedDesignTokens.spacingCompact),
                     ],
                     DaywellProgressBar(
-                      value: progressValue,
+                      value: overview.completionPercentage / 100.0,
                       label: 'Task Completion',
-                      valueText: '$completedCount / $activeTotal done',
+                      valueText:
+                          '${overview.completedCount} / ${overview.totalActiveAndCompleted} done',
                     ),
-                    const SizedBox(height: SharedDesignTokens.spacingSm),
-                    Text(
-                      '${tasksState.todayCount} due today or overdue · ${tasksState.pendingTasks.length} open',
-                      style: textTheme.bodySmall?.copyWith(
-                        color: semantic.textSecondary,
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    _TaskOverviewCountsGrid(
+                      overview: overview,
+                      onOpenOverdue: () =>
+                          _openFilteredTasks(viewFilter: 'overdue'),
+                      onOpenDueToday: () => _openFilteredTasks(
+                        viewFilter: 'active',
+                        dueDateFilter: 'today',
+                      ),
+                      onOpenUpcoming: () =>
+                          _openFilteredTasks(viewFilter: 'upcoming'),
+                      onOpenCompleted: () =>
+                          _openFilteredTasks(viewFilter: 'completed'),
+                      onOpenRemaining: () =>
+                          _openFilteredTasks(viewFilter: 'active'),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    Material(
+                      color: semantic.surfaceSubtle,
+                      borderRadius:
+                          BorderRadius.circular(SharedDesignTokens.radiusMd),
+                      child: InkWell(
+                        onTap: () => _openFilteredTasks(
+                          viewFilter: 'my_day',
+                          resetPlanDateToToday: true,
+                        ),
+                        borderRadius:
+                            BorderRadius.circular(SharedDesignTokens.radiusMd),
+                        child: Container(
+                          padding: const EdgeInsets.all(
+                            SharedDesignTokens.spacingCompact,
+                          ),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(
+                              SharedDesignTokens.radiusMd,
+                            ),
+                            border: Border.all(color: semantic.border),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.wb_sunny_outlined,
+                                    size: 16,
+                                    color: semantic.warning,
+                                  ),
+                                  const SizedBox(
+                                    width: SharedDesignTokens.spacingXs,
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      "Today's Plan (My Day)",
+                                      style: textTheme.labelLarge?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        color: semantic.textPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    'Open My Day',
+                                    style: textTheme.labelSmall?.copyWith(
+                                      color: colorScheme.primary,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(
+                                height: SharedDesignTokens.spacingXs,
+                              ),
+                              if (overview.todayPlan.totalPlannedCount == 0)
+                                Text(
+                                  'No tasks planned for today yet. Tap to choose priorities in My Day.',
+                                  style: textTheme.bodySmall?.copyWith(
+                                    color: semantic.textMuted,
+                                  ),
+                                )
+                              else
+                                DaywellProgressBar(
+                                  value:
+                                      overview.todayPlan.progressPercentage /
+                                          100.0,
+                                  label:
+                                      '${overview.todayPlan.completedCount} completed · ${overview.todayPlan.remainingCount} remaining',
+                                  valueText:
+                                      '${overview.todayPlan.progressPercentage}%',
+                                ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
-                    if (pendingTasks.isEmpty)
+                    if (overview.totalActiveAndCompleted == 0)
+                      Text(
+                        'All recorded tasks are archived. View them in Tasks > Archived.',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: semantic.textMuted,
+                        ),
+                      )
+                    else if (pendingTasks.isEmpty)
                       Text(
                         'All active tasks are completed.',
                         style: textTheme.bodyMedium?.copyWith(
@@ -1588,7 +1720,14 @@ class DashboardTasksSection extends StatelessWidget {
                           fontWeight: FontWeight.w600,
                         ),
                       )
-                    else
+                    else ...[
+                      Text(
+                        'UP NEXT',
+                        style: DaywellTypography.caption(
+                          color: semantic.textMuted,
+                        ).copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: SharedDesignTokens.spacingXs),
                       ...pendingTasks.take(4).map(
                         (TaskEntity task) {
                           final DaywellStatusTone badgeTone =
@@ -1612,8 +1751,7 @@ class DashboardTasksSection extends StatelessWidget {
                                   value: task.isCompleted,
                                   materialTapTargetSize:
                                       MaterialTapTargetSize.padded,
-                                  activeColor:
-                                      Theme.of(context).colorScheme.primary,
+                                  activeColor: colorScheme.primary,
                                   onChanged: (_) => unawaited(
                                     state.tasksController.toggleTaskStatus(
                                       task.id,
@@ -1655,9 +1793,7 @@ class DashboardTasksSection extends StatelessWidget {
                                         Icon(
                                           Icons.repeat,
                                           size: 12,
-                                          color: Theme.of(context)
-                                              .colorScheme
-                                              .primary,
+                                          color: colorScheme.primary,
                                         ),
                                         const SizedBox(width: 4),
                                         Flexible(
@@ -1685,14 +1821,409 @@ class DashboardTasksSection extends StatelessWidget {
                           );
                         },
                       ),
+                    ],
                     if (pendingTasks.length > 4)
                       Align(
                         alignment: AlignmentDirectional.centerStart,
                         child: DaywellButton(
-                          label: '+ ${pendingTasks.length - 4} more tasks',
+                          label: '+ ${pendingTasks.length - 4} more remaining tasks',
                           variant: DaywellButtonVariant.text,
                           size: DaywellButtonSize.compact,
-                          onPressed: onOpenTasks,
+                          onPressed: () =>
+                              _openFilteredTasks(viewFilter: 'active'),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TaskOverviewCountsGrid extends StatelessWidget {
+  final TaskOverviewSummary overview;
+  final VoidCallback onOpenOverdue;
+  final VoidCallback onOpenDueToday;
+  final VoidCallback onOpenUpcoming;
+  final VoidCallback onOpenCompleted;
+  final VoidCallback onOpenRemaining;
+
+  const _TaskOverviewCountsGrid({
+    required this.overview,
+    required this.onOpenOverdue,
+    required this.onOpenDueToday,
+    required this.onOpenUpcoming,
+    required this.onOpenCompleted,
+    required this.onOpenRemaining,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final errorPalette =
+        DaywellStatusTonePalette.resolve(context, DaywellStatusTone.error);
+    final warningPalette =
+        DaywellStatusTonePalette.resolve(context, DaywellStatusTone.warning);
+    final infoPalette =
+        DaywellStatusTonePalette.resolve(context, DaywellStatusTone.info);
+    final successPalette =
+        DaywellStatusTonePalette.resolve(context, DaywellStatusTone.success);
+
+    final tiles = <({
+      String label,
+      int count,
+      Color background,
+      Color foreground,
+      Color border,
+      VoidCallback onTap,
+    })>[
+      (
+        label: 'Overdue',
+        count: overview.overdueCount,
+        background: overview.overdueCount > 0
+            ? errorPalette.background
+            : semantic.surfaceSubtle,
+        foreground: overview.overdueCount > 0
+            ? errorPalette.foreground
+            : semantic.textSecondary,
+        border: overview.overdueCount > 0
+            ? errorPalette.border
+            : semantic.border,
+        onTap: onOpenOverdue,
+      ),
+      (
+        label: 'Due Today',
+        count: overview.dueTodayCount,
+        background: overview.dueTodayCount > 0
+            ? warningPalette.background
+            : semantic.surfaceSubtle,
+        foreground: overview.dueTodayCount > 0
+            ? warningPalette.foreground
+            : semantic.textSecondary,
+        border: overview.dueTodayCount > 0
+            ? warningPalette.border
+            : semantic.border,
+        onTap: onOpenDueToday,
+      ),
+      (
+        label: 'Upcoming',
+        count: overview.upcomingCount,
+        background: infoPalette.background,
+        foreground: infoPalette.foreground,
+        border: infoPalette.border,
+        onTap: onOpenUpcoming,
+      ),
+      (
+        label: 'Completed',
+        count: overview.completedCount,
+        background: successPalette.background,
+        foreground: successPalette.foreground,
+        border: successPalette.border,
+        onTap: onOpenCompleted,
+      ),
+      (
+        label: 'Remaining',
+        count: overview.remainingCount,
+        background: semantic.surfaceSubtle,
+        foreground: semantic.textPrimary,
+        border: semantic.border,
+        onTap: onOpenRemaining,
+      ),
+    ];
+
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double spacing = SharedDesignTokens.spacingXs;
+        final double maxWidth = constraints.maxWidth;
+        final double textScale = MediaQuery.textScalerOf(context).scale(1.0);
+        final int columns = (maxWidth >= 340 && textScale <= 1.25)
+            ? 5
+            : (maxWidth >= 260 ? 3 : 2);
+        final double tileWidth =
+            (maxWidth - spacing * (columns - 1)) / columns;
+
+        return Wrap(
+          spacing: spacing,
+          runSpacing: spacing,
+          children: [
+            for (final item in tiles)
+              SizedBox(
+                width: tileWidth,
+                child: Material(
+                  color: item.background,
+                  borderRadius:
+                      BorderRadius.circular(SharedDesignTokens.radiusMd),
+                  child: InkWell(
+                    onTap: item.onTap,
+                    borderRadius:
+                        BorderRadius.circular(SharedDesignTokens.radiusMd),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 48),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: SharedDesignTokens.spacingXs,
+                          vertical: SharedDesignTokens.spacingXs,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(
+                            SharedDesignTokens.radiusMd,
+                          ),
+                          border: Border.all(color: item.border),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              '${item.count}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: DaywellTypography.numericBody(
+                                color: item.foreground,
+                              ).copyWith(fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              item.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              textAlign: TextAlign.center,
+                              style: DaywellTypography.caption(
+                                color: item.foreground,
+                              ).copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Scoped live Project Progress overview section listening to both
+/// [AppStateManager.projectsController] and [AppStateManager.tasksController].
+class DashboardProjectProgressSection extends StatelessWidget {
+  final AppStateManager state;
+  final VoidCallback onOpenProjects;
+
+  const DashboardProjectProgressSection({
+    super.key,
+    required this.state,
+    required this.onOpenProjects,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[
+        state.projectsController,
+        state.tasksController,
+      ]),
+      builder: (BuildContext context, Widget? _) {
+        final projectsState = state.projectsController.state;
+        final tasksState = state.tasksController.state;
+        final overview = TaskSummaryEngine.buildProjectsOverview(
+          projects: projectsState.projects,
+          tasks: tasksState.tasks,
+          milestones: tasksState.milestones,
+          trackingSummaries: projectsState.summariesByProject,
+        );
+        final hasError = projectsState.errorMessage != null &&
+            projectsState.errorMessage!.trim().isNotEmpty;
+        final hasProjects = overview.totalProjectsCount > 0;
+
+        final DaywellContentStatus status;
+        if (projectsState.isLoading && projectsState.projects.isEmpty) {
+          status = DaywellContentStatus.loading;
+        } else if (hasError && projectsState.projects.isEmpty) {
+          status = DaywellContentStatus.error;
+        } else if (!hasProjects) {
+          status = DaywellContentStatus.empty;
+        } else {
+          status = DaywellContentStatus.content;
+        }
+
+        return DaywellSectionContainer(
+          title: 'Project Progress',
+          count: hasProjects ? overview.totalProjectsCount : null,
+          actionLabel: 'All Projects',
+          onActionPressed: onOpenProjects,
+          child: DaywellContentState(
+            status: status,
+            loadingLabel: 'Loading projects...',
+            errorTitle: 'Unable to load projects',
+            errorMessage:
+                projectsState.errorMessage ?? 'Unable to load projects.',
+            onRetry: () => unawaited(state.projectsController.loadAll()),
+            emptyIcon: Icons.layers_outlined,
+            emptyMessage: 'No active projects yet',
+            emptySubtitle:
+                'Group related tasks and milestones into a project to track completion.',
+            emptyActionLabel: 'Open Projects',
+            onEmptyAction: onOpenProjects,
+            contentBuilder: (BuildContext context) {
+              final semantic = context.daywellColors;
+              final textTheme = Theme.of(context).textTheme;
+
+              return DaywellCard(
+                padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    if (hasError) ...[
+                      DaywellStatusBanner(
+                        tone: DaywellStatusTone.error,
+                        title: 'Unable to refresh projects',
+                        message: projectsState.errorMessage!,
+                        actionLabel: 'Retry',
+                        onActionPressed: () =>
+                            unawaited(state.projectsController.loadAll()),
+                      ),
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    ],
+                    Text(
+                      [
+                        '${overview.completedTasks}/${overview.totalTasks} ${overview.totalTasks == 1 ? 'task' : 'tasks'} · ${overview.remainingTasks} remaining',
+                        if (overview.totalMilestones > 0)
+                          '${overview.completedMilestones}/${overview.totalMilestones} ${overview.totalMilestones == 1 ? 'milestone' : 'milestones'}',
+                      ].join(' · '),
+                      style: DaywellTypography.caption(
+                        color: semantic.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    ...overview.projects.take(4).map(
+                      (ProjectProgressOverviewItem item) {
+                        final subtitleParts = <String>[
+                          '${item.completedTasks}/${item.totalTasks} ${item.totalTasks == 1 ? 'task' : 'tasks'} · ${item.remainingTasks} remaining',
+                          if (item.hasMilestones)
+                            '${item.completedMilestones}/${item.totalMilestones} ${item.totalMilestones == 1 ? 'milestone' : 'milestones'}',
+                        ];
+
+                        return Padding(
+                          padding: const EdgeInsets.only(
+                            bottom: SharedDesignTokens.spacingSm,
+                          ),
+                          child: Material(
+                            color: semantic.surfaceSubtle,
+                            borderRadius: BorderRadius.circular(
+                              SharedDesignTokens.radiusMd,
+                            ),
+                            child: InkWell(
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ProjectDetailScreen(
+                                    projectId: item.project.id,
+                                    projectsController:
+                                        state.projectsController,
+                                    tasksController: state.tasksController,
+                                  ),
+                                ),
+                              ),
+                              borderRadius: BorderRadius.circular(
+                                SharedDesignTokens.radiusMd,
+                              ),
+                              child: Container(
+                                padding: const EdgeInsets.all(
+                                  SharedDesignTokens.spacingCompact,
+                                ),
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(
+                                    SharedDesignTokens.radiusMd,
+                                  ),
+                                  border: Border.all(color: semantic.border),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            item.project.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style:
+                                                textTheme.bodyMedium?.copyWith(
+                                              fontWeight: FontWeight.w700,
+                                              color: semantic.textPrimary,
+                                            ),
+                                          ),
+                                        ),
+                                        if (item.project.status !=
+                                            'active') ...[
+                                          const SizedBox(
+                                            width: SharedDesignTokens.spacingXs,
+                                          ),
+                                          DaywellStatusBadge(
+                                            label:
+                                                item.project.status == 'on_hold'
+                                                    ? 'On Hold'
+                                                    : 'Completed',
+                                            tone: item.project.status ==
+                                                    'completed'
+                                                ? DaywellStatusTone.success
+                                                : DaywellStatusTone.warning,
+                                            showIcon: false,
+                                          ),
+                                        ],
+                                        const SizedBox(
+                                          width: SharedDesignTokens.spacingXs,
+                                        ),
+                                        Text(
+                                          '${item.displayPercentage}%',
+                                          style: DaywellTypography.numericBody(
+                                            color: semantic.textPrimary,
+                                          ).copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(
+                                      height: SharedDesignTokens.spacingXs,
+                                    ),
+                                    DaywellProgressBar(
+                                      value: item.displayPercentage / 100.0,
+                                      semanticLabel:
+                                          '${item.project.title} progress',
+                                    ),
+                                    const SizedBox(
+                                      height: SharedDesignTokens.spacingXs,
+                                    ),
+                                    Text(
+                                      subtitleParts.join(' · '),
+                                      style: DaywellTypography.caption(
+                                        color: semantic.textMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                    if (overview.totalProjectsCount > 4)
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: DaywellButton(
+                          label:
+                              '+ ${overview.totalProjectsCount - 4} more projects',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: onOpenProjects,
                         ),
                       ),
                   ],
