@@ -1007,7 +1007,7 @@ export default function App() {
                     >
                       <CheckCircle2 className="w-4 h-4 text-[var(--dw-income)] mx-auto" />
                       <span className="block text-[11px] font-bold text-[var(--dw-text-primary)] mt-1">To-Do</span>
-                      <span className="block text-[9px] text-[var(--dw-text-muted)]">{tasks.filter((t) => !t.completed).length} pending</span>
+                      <span className="block text-[9px] text-[var(--dw-text-muted)]">{tasks.filter((t) => !t.isArchived && !t.completed && t.status !== 'cancelled').length} pending</span>
                     </button>
 
                     <button
@@ -1078,19 +1078,19 @@ export default function App() {
                   <div className="space-y-2 pt-1">
                     <DaywellSectionHeader
                       title="Today's priorities"
-                      actionLabel={`View all (${tasks.length})`}
+                      actionLabel={`View all (${tasks.filter((t) => !t.isArchived).length})`}
                       onActionPressed={() => navigateTo('tasks')}
                     />
 
                     <div className="space-y-2">
-                      {tasks.length === 0 ? (
+                      {tasks.filter((t) => !t.isArchived).length === 0 ? (
                         <DaywellCard variant="default" padding="compact">
                           <p className="text-xs text-[var(--dw-text-muted)] text-center py-2">
                             No saved tasks yet. Add one via Quick Capture or To-Do.
                           </p>
                         </DaywellCard>
                       ) : (
-                        tasks.slice(0, 3).map((item) => (
+                        tasks.filter((t) => !t.isArchived).slice(0, 3).map((item) => (
                           <DaywellCard
                             key={item.id}
                             padding="compact"
@@ -1352,13 +1352,15 @@ export default function App() {
               {/* SCREEN 03: CALENDAR (Preserved State) */}
               <div className={activeScreen === 'calendar' ? 'block' : 'hidden'}>
                 <DaywellCalendarModule
-                  tasks={tasks.map((t) => ({
-                    id: t.id,
-                    title: t.title,
-                    dueDate: t.dueDate,
-                    completed: t.completed,
-                    priority: t.priority,
-                  }))}
+                  tasks={tasks
+                    .filter((t) => !t.isArchived && t.status !== 'cancelled')
+                    .map((t) => ({
+                      id: t.id,
+                      title: t.title,
+                      dueDate: t.dueDate,
+                      completed: t.completed,
+                      priority: t.priority,
+                    }))}
                   onToggleTask={toggleTask}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                 />
@@ -1556,7 +1558,7 @@ export default function App() {
                         <CheckCircle2 className="w-4 h-4 text-[var(--dw-primary)]" />
                         <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">Tasks</h4>
                         <p className="text-[10px] text-[var(--dw-text-muted)]">
-                          {tasks.filter((t) => !t.completed).length} open tasks
+                          {tasks.filter((t) => !t.isArchived && !t.completed && t.status !== 'cancelled').length} open tasks
                         </p>
                       </DaywellCard>
 
@@ -1787,7 +1789,7 @@ export default function App() {
                   <DeprecatedPrototypeBanner areaName="Priorities" />
 
                   <div className="space-y-2.5">
-                    {tasks.length === 0 ? (
+                    {tasks.filter((t) => !t.isArchived).length === 0 ? (
                       <DaywellCard padding="md" radius="xl">
                         <DaywellEmptyState
                           icon={<CheckSquare className="w-8 h-8" />}
@@ -1798,7 +1800,7 @@ export default function App() {
                         />
                       </DaywellCard>
                     ) : (
-                      tasks.slice(0, 3).map((item, idx) => (
+                      tasks.filter((t) => !t.isArchived).slice(0, 3).map((item, idx) => (
                         <DaywellCard
                           key={item.id}
                           padding="compact"
@@ -1916,13 +1918,13 @@ export default function App() {
                     <div className="grid grid-cols-3 gap-2 text-center pt-1">
                       <div className="p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)]">
                         <span className="text-base font-extrabold text-[var(--dw-primary)] tabular-nums">
-                          {tasks.filter((t) => t.completed).length}
+                          {tasks.filter((t) => !t.isArchived && t.completed).length}
                         </span>
                         <span className="block text-[9px] text-[var(--dw-text-muted)]">Done</span>
                       </div>
                       <div className="p-2.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)]">
                         <span className="text-base font-extrabold text-[var(--dw-on-info-container)] tabular-nums">
-                          {tasks.filter((t) => !t.completed).length}
+                          {tasks.filter((t) => !t.isArchived && !t.completed && t.status !== 'cancelled').length}
                         </span>
                         <span className="block text-[9px] text-[var(--dw-text-muted)]">Active</span>
                       </div>

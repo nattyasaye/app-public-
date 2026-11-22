@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CalendarDate, SharedDateFormatter } from '../../domain/date';
 import { SharedProject } from '../../domain/sharedFoundation';
+import { SharedStateBridge } from '../../services/sharedStateBridge';
 import {
   EnrichedProgressLogEntry,
   ProjectDetailSnapshot,
@@ -32,6 +33,8 @@ import {
 import { ProjectFormModal } from './ProjectFormModal';
 import { ProjectTrackingBlocksSection } from './ProjectTrackingBlocksSection';
 import { ProjectProgressHistorySection } from './ProjectProgressHistorySection';
+import { ProjectMilestonesSection } from './ProjectMilestonesSection';
+import { ProjectTasksSectionsCard } from './ProjectTasksSectionsCard';
 
 export interface ProjectDetailViewProps {
   projectId: string;
@@ -74,8 +77,9 @@ export function ProjectDetailView({
   const [history, setHistory] = useState<EnrichedProgressLogEntry[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<{
-    tone: 'success' | 'error';
+    tone: 'success' | 'error' | 'info';
     message: string;
+    undoAction?: () => void;
   } | null>(null);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
@@ -97,13 +101,31 @@ export function ProjectDetailView({
 
   useEffect(() => {
     loadSnapshot();
+    const handler = () => loadSnapshot();
+    if (typeof window !== 'undefined') {
+      window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handler);
+      return () =>
+        window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handler);
+    }
+    return undefined;
   }, [loadSnapshot]);
+
+  const notifyUndo = (message: string, undoAction: () => void) => {
+    setExportNotice({
+      tone: 'info',
+      message,
+      undoAction,
+    });
+  };
 
   const project = snapshot?.project;
   const blocks = snapshot?.blocks ?? [];
   const records = snapshot?.records ?? [];
   const summary = snapshot?.summary;
   const linkedTasks = snapshot?.linkedTasks ?? [];
+  const milestones = snapshot?.milestones ?? [];
+  const sectionsView = snapshot?.sectionsView;
+  const derivedProgress = snapshot?.derivedProgress;
   const goal = project?.goalId
     ? projectsService.getGoals().find((g) => g.id === project.goalId)
     : undefined;
@@ -115,8 +137,18 @@ export function ProjectDetailView({
   const handleToggleArchive = () => {
     if (!project) return;
     try {
-      projectsService.setProjectArchived(project.id, !project.isArchived);
+      const prevArchived = Boolean(project.isArchived);
+      projectsService.setProjectArchived(project.id, !prevArchived);
       loadSnapshot();
+      notifyUndo(
+        !prevArchived
+          ? `Archived "${project.title}"`
+          : `Restored "${project.title}"`,
+        () => {
+          projectsService.setProjectArchived(project.id, prevArchived);
+          loadSnapshot();
+        }
+      );
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : 'Unable to update archive state.'
@@ -263,6 +295,16 @@ export function ProjectDetailView({
         <DaywellStatusBanner
           tone={exportNotice.tone}
           message={exportNotice.message}
+          actionLabel={exportNotice.undoAction ? 'Undo' : undefined}
+          onActionPressed={
+            exportNotice.undoAction
+              ? () => {
+                  const fn = exportNotice.undoAction!;
+                  setExportNotice(null);
+                  fn();
+                }
+              : undefined
+          }
           onDismiss={() => setExportNotice(null)}
           liveRegion
         />
@@ -297,7 +339,8 @@ export function ProjectDetailView({
                 className={`space-y-2.5 ${
                   summary.hasInvalidPrimaryBlockReference ||
                   summary.primaryMetric ||
-                  activeBlockCount > 0
+                  activeBlockCount > 0 ||
+                  (derivedProgress && (derivedProgress.totalItems > 0 || project.status === 'completed'))
                     ? 'lg:col-span-5'
                     : 'lg:col-span-12'
                 }`}
@@ -310,11 +353,18 @@ export function ProjectDetailView({
                       label={statusSpec.label}
                     />
                   )}
-                  {summary.linkedTasksTotal > 0 && (
-                    <span className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
-                      {summary.linkedTasksCompleted}/{summary.linkedTasksTotal} linked tasks done
-                    </span>
-                  )}
+                  <div className="flex items-center gap-2 text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
+                    {derivedProgress && derivedProgress.totalTasks > 0 && (
+                      <span>
+                        {derivedProgress.completedTasks}/{derivedProgress.totalTasks} tasks done
+                      </span>
+                    )}
+                    {derivedProgress && derivedProgress.totalMilestones > 0 && (
+                      <span>
+                        · {derivedProgress.completedMilestones}/{derivedProgress.totalMilestones} milestones
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {project.description && (
@@ -448,6 +498,40 @@ export function ProjectDetailView({
                     </DaywellCard>
                   );
                 })()
+              ) : derivedProgress &&
+                (derivedProgress.totalItems > 0 || project.status === 'completed') ? (
+                <DaywellCard
+                  variant="primaryContainer"
+                  padding="md"
+                  radius="lg"
+                  className="space-y-2 lg:col-span-7 flex flex-col justify-center"
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="dw-type-caption uppercase tracking-wider text-[var(--dw-on-primary-container)] opacity-80">
+                        PROJECT COMPLETION
+                      </div>
+                      <p className="text-xs font-semibold text-[var(--dw-on-primary-container)] dw-type-numeric-body">
+                        {derivedProgress.completedTasks}/{derivedProgress.totalTasks}{' '}
+                        {derivedProgress.totalTasks === 1 ? 'task' : 'tasks'} ·{' '}
+                        {derivedProgress.completedMilestones}/{derivedProgress.totalMilestones}{' '}
+                        {derivedProgress.totalMilestones === 1 ? 'milestone' : 'milestones'}
+                      </p>
+                    </div>
+                    <span className="dw-type-numeric-hero text-[var(--dw-on-primary-container)] shrink-0">
+                      {derivedProgress.percentage}%
+                    </span>
+                  </div>
+                  <DaywellProgressBar
+                    value={derivedProgress.percentage}
+                    label={`${project.title} derived task and milestone progress`}
+                  />
+                  {activeBlockCount > 0 && (
+                    <p className="text-[11px] text-[var(--dw-on-primary-container)] opacity-85">
+                      Tracking blocks below compute independent metrics. Star any block to promote it as the headline metric.
+                    </p>
+                  )}
+                </DaywellCard>
               ) : activeBlockCount > 0 ? (
                 <DaywellCard
                   variant="subtle"
@@ -462,37 +546,24 @@ export function ProjectDetailView({
               ) : null}
             </div>
 
-            {/* Linked Tasks Summary (read-only link readout if any exist) */}
-            {linkedTasks.length > 0 && (
-              <DaywellCard padding="compact" radius="lg" className="space-y-1.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-[var(--dw-text-primary)]">
-                    Linked Tasks
-                  </span>
-                  <span className="text-[11px] text-[var(--dw-text-muted)] dw-type-numeric-body">
-                    {summary.linkedTasksCompleted}/{summary.linkedTasksTotal} complete
-                  </span>
-                </div>
-                <div className="space-y-1">
-                  {linkedTasks.slice(0, 5).map((task) => (
-                    <p
-                      key={task.id}
-                      className={`text-xs truncate ${
-                        task.status === 'completed'
-                          ? 'line-through text-[var(--dw-text-muted)]'
-                          : 'text-[var(--dw-text-secondary)]'
-                      }`}
-                    >
-                      · {task.title}
-                    </p>
-                  ))}
-                  {linkedTasks.length > 5 && (
-                    <p className="text-[11px] text-[var(--dw-text-muted)]">
-                      +{linkedTasks.length - 5} more in Tasks tab
-                    </p>
-                  )}
-                </div>
-              </DaywellCard>
+            {/* Interactive Milestones */}
+            <ProjectMilestonesSection
+              projectId={project.id}
+              milestones={milestones}
+              linkedTasks={linkedTasks}
+              onRefresh={loadSnapshot}
+              onNotifyUndo={notifyUndo}
+            />
+
+            {/* Interactive Tasks & Sections */}
+            {sectionsView && (
+              <ProjectTasksSectionsCard
+                projectId={project.id}
+                sectionsView={sectionsView}
+                milestones={milestones}
+                onRefresh={loadSnapshot}
+                onNotifyUndo={notifyUndo}
+              />
             )}
 
             {/* Tracking Blocks */}

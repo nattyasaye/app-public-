@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ProjectProgressSummary } from '../../domain/projectsEngine';
+import { DerivedTaskMilestoneProgress, ProjectProgressSummary } from '../../domain/projectsEngine';
 import { SharedProject } from '../../domain/sharedFoundation';
 import { SharedStateBridge } from '../../services/sharedStateBridge';
 import {
@@ -75,16 +75,20 @@ export function ProjectsWorkspaceView({
   const [summaries, setSummaries] = useState<Record<string, ProjectProgressSummary>>(
     {}
   );
+  const [derivedMap, setDerivedMap] = useState<
+    Record<string, DerivedTaskMilestoneProgress>
+  >({});
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [filter, setFilter] = useState<ProjectWorkspaceFilter>('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isImportOpen, setIsImportOpen] = useState(false);
   const [statusNotice, setStatusNotice] = useState<{
-    tone: 'success' | 'error';
+    tone: 'success' | 'error' | 'info';
     title?: string;
     message: string;
     actionProjectId?: string;
+    undoAction?: () => void;
   } | null>(null);
   const [projectToDelete, setProjectToDelete] = useState<SharedProject | null>(
     null
@@ -96,8 +100,16 @@ export function ProjectsWorkspaceView({
       const nextSummaries = projectsService.getAllProjectSummaries({
         includeArchived: true,
       });
+      const nextDerived: Record<string, DerivedTaskMilestoneProgress> = {};
+      for (const proj of all) {
+        nextDerived[proj.id] = projectsService.getDerivedTaskMilestoneProgress(
+          proj,
+          nextSummaries[proj.id]
+        );
+      }
       setProjects(all);
       setSummaries(nextSummaries);
+      setDerivedMap(nextDerived);
       setErrorMsg(null);
     } catch (err) {
       setErrorMsg(
@@ -245,15 +257,27 @@ export function ProjectsWorkspaceView({
           tone={statusNotice.tone}
           title={statusNotice.title}
           message={statusNotice.message}
-          actionLabel={statusNotice.actionProjectId ? 'Open' : undefined}
+          actionLabel={
+            statusNotice.undoAction
+              ? 'Undo'
+              : statusNotice.actionProjectId
+                ? 'Open'
+                : undefined
+          }
           onActionPressed={
-            statusNotice.actionProjectId
+            statusNotice.undoAction
               ? () => {
-                  const id = statusNotice.actionProjectId!;
+                  const fn = statusNotice.undoAction!;
                   setStatusNotice(null);
-                  selectProject(id);
+                  fn();
                 }
-              : undefined
+              : statusNotice.actionProjectId
+                ? () => {
+                    const id = statusNotice.actionProjectId!;
+                    setStatusNotice(null);
+                    selectProject(id);
+                  }
+                : undefined
           }
           onDismiss={() => setStatusNotice(null)}
           liveRegion
@@ -320,10 +344,17 @@ export function ProjectsWorkspaceView({
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {filteredProjects.map((project) => {
             const summary = summaries[project.id];
+            const derived = derivedMap[project.id];
             const activeMetrics = (summary?.blockMetrics ?? []).filter(
               (m) => !m.isArchived
             );
             const badgeSpec = getFilterBadgeTone(project.status, Boolean(project.isArchived));
+            const taskTotal = derived?.totalTasks ?? summary?.linkedTasksTotal ?? 0;
+            const taskCompleted =
+              derived?.completedTasks ?? summary?.linkedTasksCompleted ?? 0;
+            const msTotal = derived?.totalMilestones ?? summary?.milestonesTotal ?? 0;
+            const msCompleted =
+              derived?.completedMilestones ?? summary?.milestonesCompleted ?? 0;
             const metaParts = [
               project.targetDate ? `Target ${project.targetDate}` : null,
               activeMetrics.length > 0
@@ -331,8 +362,9 @@ export function ProjectsWorkspaceView({
                     activeMetrics.length === 1 ? 'block' : 'blocks'
                   }`
                 : null,
-              summary && summary.linkedTasksTotal > 0
-                ? `${summary.linkedTasksCompleted}/${summary.linkedTasksTotal} tasks`
+              taskTotal > 0 ? `${taskCompleted}/${taskTotal} tasks` : null,
+              msTotal > 0
+                ? `${msCompleted}/${msTotal} ${msTotal === 1 ? 'milestone' : 'milestones'}`
                 : null,
             ].filter(Boolean);
 
@@ -385,11 +417,25 @@ export function ProjectsWorkspaceView({
                       size="compact"
                       tone="muted"
                       onClick={() => {
+                        const prevArchived = Boolean(project.isArchived);
                         projectsService.setProjectArchived(
                           project.id,
-                          !project.isArchived
+                          !prevArchived
                         );
                         reload();
+                        setStatusNotice({
+                          tone: 'info',
+                          message: !prevArchived
+                            ? `Archived "${project.title}".`
+                            : `Restored "${project.title}".`,
+                          undoAction: () => {
+                            projectsService.setProjectArchived(
+                              project.id,
+                              prevArchived
+                            );
+                            reload();
+                          },
+                        });
                       }}
                       icon={
                         project.isArchived ? (
@@ -440,26 +486,48 @@ export function ProjectsWorkspaceView({
                       />
                     )}
                   </div>
-                ) : activeMetrics.length > 0 ? (
-                  <div className="space-y-1 pt-0.5 border-t border-[var(--dw-divider)]">
-                    {activeMetrics.slice(0, 2).map((m) => (
-                      <div
-                        key={m.blockId}
-                        className="flex items-center justify-between text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body"
-                      >
-                        <span className="truncate">{m.title}</span>
-                        <span className="shrink-0 ml-2 font-medium">
-                          {projectsService.formatBlockMetricSummary(m)}
-                        </span>
+                ) : (
+                  <div className="space-y-1.5 pt-0.5">
+                    {derived &&
+                      (derived.totalItems > 0 || project.status === 'completed') && (
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between text-[11px] dw-type-numeric-body">
+                            <span className="text-[var(--dw-text-secondary)] truncate">
+                              Tasks & milestones: {derived.completedItems}/
+                              {derived.totalItems}
+                            </span>
+                            <span className="font-bold text-[var(--dw-text-primary)] shrink-0 ml-2">
+                              {derived.percentage}%
+                            </span>
+                          </div>
+                          <DaywellProgressBar
+                            value={derived.percentage}
+                            label={`${project.title} tasks and milestones progress`}
+                          />
+                        </div>
+                      )}
+                    {activeMetrics.length > 0 && (
+                      <div className="space-y-1 pt-1 border-t border-[var(--dw-divider)]">
+                        {activeMetrics.slice(0, 2).map((m) => (
+                          <div
+                            key={m.blockId}
+                            className="flex items-center justify-between text-[11px] text-[var(--dw-text-secondary)] dw-type-numeric-body"
+                          >
+                            <span className="truncate">{m.title}</span>
+                            <span className="shrink-0 ml-2 font-medium">
+                              {projectsService.formatBlockMetricSummary(m)}
+                            </span>
+                          </div>
+                        ))}
+                        {activeMetrics.length > 2 && (
+                          <p className="text-[11px] text-[var(--dw-text-muted)]">
+                            +{activeMetrics.length - 2} more tracking block(s)
+                          </p>
+                        )}
                       </div>
-                    ))}
-                    {activeMetrics.length > 2 && (
-                      <p className="text-[11px] text-[var(--dw-text-muted)]">
-                        +{activeMetrics.length - 2} more tracking block(s)
-                      </p>
                     )}
                   </div>
-                ) : null}
+                )}
               </DaywellCard>
             );
           })}

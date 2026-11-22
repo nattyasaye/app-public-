@@ -732,6 +732,10 @@ class _FakeTasksRepository implements ITasksRepository {
   Future<void> rescheduleTask(String id, CalendarDate? newDueDate) async {}
 
   @override
+  Future<MilestoneEntity> updateMilestone(MilestoneEntity milestone) async =>
+      milestone;
+
+  @override
   Future<void> toggleMilestone(String milestoneId, bool isCompleted) async {}
 
   @override

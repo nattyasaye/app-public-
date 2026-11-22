@@ -43,6 +43,7 @@ abstract class IMilestoneRepositoryContract {
   Future<List<MilestoneEntity>> getAllMilestones();
   Future<List<MilestoneEntity>> getMilestonesForProject(String projectId);
   Future<MilestoneEntity> createMilestone(MilestoneEntity milestone);
+  Future<MilestoneEntity> updateMilestone(MilestoneEntity milestone);
   Future<void> toggleMilestone(String milestoneId, bool isCompleted);
   Future<void> deleteMilestone(String milestoneId);
 }

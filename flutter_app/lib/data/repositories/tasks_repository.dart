@@ -499,7 +499,10 @@ class DriftTasksRepository implements ITasksRepository {
     await _db.transaction(() async {
       await (_db.update(_db.tasks)..where((tbl) => tbl.projectId.equals(id)))
           .write(
-        const TasksCompanion(projectId: Value(null)),
+        const TasksCompanion(
+          projectId: Value(null),
+          milestoneId: Value(null),
+        ),
       );
       await _db.customStatement(
         'UPDATE project_tracking_records SET parent_record_id = NULL '
@@ -580,6 +583,24 @@ class DriftTasksRepository implements ITasksRepository {
   }
 
   @override
+  Future<MilestoneEntity> updateMilestone(MilestoneEntity milestone) async {
+    final trimmedTitle = milestone.title.trim();
+    final normalized = milestone.copyWith(
+      title: trimmedTitle.isEmpty ? 'Untitled Milestone' : trimmedTitle,
+    );
+    await (_db.update(_db.milestones)
+          ..where((tbl) => tbl.id.equals(normalized.id)))
+        .write(
+      MilestonesCompanion(
+        title: Value(normalized.title),
+        dueDate: Value(normalized.dueDate?.toIsoString()),
+        isCompleted: Value(normalized.isCompleted),
+      ),
+    );
+    return normalized;
+  }
+
+  @override
   Future<void> toggleMilestone(String milestoneId, bool isCompleted) async {
     await (_db.update(_db.milestones)
           ..where((tbl) => tbl.id.equals(milestoneId)))
@@ -590,9 +611,14 @@ class DriftTasksRepository implements ITasksRepository {
 
   @override
   Future<void> deleteMilestone(String milestoneId) async {
-    await (_db.delete(_db.milestones)
-          ..where((tbl) => tbl.id.equals(milestoneId)))
-        .go();
+    await _db.transaction(() async {
+      await (_db.update(_db.tasks)
+            ..where((tbl) => tbl.milestoneId.equals(milestoneId)))
+          .write(const TasksCompanion(milestoneId: Value(null)));
+      await (_db.delete(_db.milestones)
+            ..where((tbl) => tbl.id.equals(milestoneId)))
+          .go();
+    });
   }
 
   // ==========================================================================

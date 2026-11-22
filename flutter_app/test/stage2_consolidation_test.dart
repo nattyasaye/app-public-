@@ -125,7 +125,10 @@ class _InMemoryTasksRepository implements ITasksRepository {
     _projects.remove(id);
     for (final entry in _tasks.entries.toList()) {
       if (entry.value.projectId == id) {
-        _tasks[entry.key] = entry.value.copyWith(clearProject: true);
+        _tasks[entry.key] = entry.value.copyWith(
+          clearProject: true,
+          clearMilestone: true,
+        );
       }
     }
     _milestones.removeWhere((_, m) => m.projectId == id);
@@ -151,6 +154,12 @@ class _InMemoryTasksRepository implements ITasksRepository {
   }
 
   @override
+  Future<MilestoneEntity> updateMilestone(MilestoneEntity milestone) async {
+    _milestones[milestone.id] = milestone;
+    return milestone;
+  }
+
+  @override
   Future<List<MilestoneEntity>> getAllMilestones() async =>
       _milestones.values.toList();
 
@@ -171,6 +180,11 @@ class _InMemoryTasksRepository implements ITasksRepository {
   @override
   Future<void> deleteMilestone(String id) async {
     _milestones.remove(id);
+    for (final entry in _tasks.entries.toList()) {
+      if (entry.value.milestoneId == id) {
+        _tasks[entry.key] = entry.value.copyWith(clearMilestone: true);
+      }
+    }
   }
 
   @override

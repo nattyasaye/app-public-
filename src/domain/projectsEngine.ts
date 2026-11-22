@@ -213,6 +213,76 @@ export function getCorrectionReason(
   return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
 }
 
+export interface DerivedTaskMilestoneProgress {
+  percentage: number;
+  totalTasks: number;
+  completedTasks: number;
+  totalMilestones: number;
+  completedMilestones: number;
+  totalItems: number;
+  completedItems: number;
+}
+
+export function calculateDerivedTaskMilestoneProgress(params: {
+  totalTasks: number;
+  completedTasks: number;
+  totalMilestones: number;
+  completedMilestones: number;
+  isProjectManuallyCompleted?: boolean;
+}): DerivedTaskMilestoneProgress {
+  const totalTasks = Math.max(0, Math.floor(params.totalTasks));
+  const completedTasks = Math.min(totalTasks, Math.max(0, Math.floor(params.completedTasks)));
+  const totalMilestones = Math.max(0, Math.floor(params.totalMilestones));
+  const completedMilestones = Math.min(
+    totalMilestones,
+    Math.max(0, Math.floor(params.completedMilestones))
+  );
+  const totalItems = totalTasks + totalMilestones;
+  const completedItems = completedTasks + completedMilestones;
+
+  let percentage = 0;
+  if (params.isProjectManuallyCompleted) {
+    percentage = 100;
+  } else if (totalItems > 0) {
+    percentage = Math.min(
+      100,
+      Math.max(0, Math.floor((completedItems * 100) / totalItems))
+    );
+  }
+
+  return {
+    percentage,
+    totalTasks,
+    completedTasks,
+    totalMilestones,
+    completedMilestones,
+    totalItems,
+    completedItems,
+  };
+}
+
+export function validateMilestone(milestone: ProjectMilestoneInput): void {
+  if (!milestone.id || !milestone.id.trim()) {
+    throw new ProjectValidationError('Milestone id must not be empty.');
+  }
+  if (!milestone.projectId || !milestone.projectId.trim()) {
+    throw new ProjectValidationError('Milestone projectId must not be empty.');
+  }
+  const title = (milestone.title ?? '').trim();
+  if (!title || title.length > 200) {
+    throw new ProjectValidationError(
+      'Milestone title must be between 1 and 200 characters.'
+    );
+  }
+  if (milestone.dueDate !== undefined && milestone.dueDate !== null && milestone.dueDate !== '') {
+    if (!CalendarDate.tryParse(milestone.dueDate)) {
+      throw new ProjectValidationError(
+        `Milestone dueDate "${milestone.dueDate}" must be canonical YYYY-MM-DD.`
+      );
+    }
+  }
+}
+
 export function validateProject(project: SharedProject): void {
   if (!project.id || !project.id.trim()) {
     throw new ProjectValidationError('Project id must not be empty.');

@@ -58,6 +58,55 @@ class TaskSubtask {
 
   @override
   int get hashCode => Object.hash(id, title, done);
+
+  static String nextId(String taskId, List<TaskSubtask> existing) {
+    final prefix = taskId.trim().isNotEmpty ? taskId.trim() : 'task';
+    final used = existing.map((e) => e.id).toSet();
+    var counter = existing.length + 1;
+    while (used.contains('$prefix-sub-$counter')) {
+      counter++;
+    }
+    return '$prefix-sub-$counter';
+  }
+
+  static List<TaskSubtask> normalizeList(
+    List<TaskSubtask> items, {
+    required String taskId,
+  }) {
+    final normalized = <TaskSubtask>[];
+    final seenIds = <String>{};
+    for (final item in items) {
+      final trimmedTitle = item.title.trim();
+      if (trimmedTitle.isEmpty) continue;
+      var candidateId = item.id.trim();
+      if (candidateId.isEmpty || seenIds.contains(candidateId)) {
+        candidateId = nextId(taskId, normalized);
+      }
+      seenIds.add(candidateId);
+      normalized.add(
+        TaskSubtask(id: candidateId, title: trimmedTitle, done: item.done),
+      );
+    }
+    return List<TaskSubtask>.unmodifiable(normalized);
+  }
+
+  static List<TaskSubtask> reorderList(
+    List<TaskSubtask> items,
+    int fromIndex,
+    int toIndex,
+  ) {
+    if (fromIndex < 0 ||
+        fromIndex >= items.length ||
+        toIndex < 0 ||
+        toIndex >= items.length ||
+        fromIndex == toIndex) {
+      return List<TaskSubtask>.from(items);
+    }
+    final next = List<TaskSubtask>.from(items);
+    final moved = next.removeAt(fromIndex);
+    next.insert(toIndex, moved);
+    return List<TaskSubtask>.unmodifiable(next);
+  }
 }
 
 class TaskRecurrenceConfig {
@@ -216,9 +265,16 @@ class TaskEntity {
     return dueDate!.isBefore(CalendarDate.today());
   }
 
+  int get completedSubtaskCount => subtasks.where((s) => s.done).length;
+  int get totalSubtaskCount => subtasks.length;
+  double get subtaskProgress =>
+      subtasks.isEmpty ? 0.0 : completedSubtaskCount / subtasks.length;
+  int get subtaskProgressPercentage => (subtaskProgress * 100).round();
+
   TaskEntity copyWith({
     String? title,
     String? description,
+    bool clearDescription = false,
     String? status,
     String? priority,
     DateTime? completedAt,
@@ -250,7 +306,8 @@ class TaskEntity {
     return TaskEntity(
       id: id,
       title: title ?? this.title,
-      description: description ?? this.description,
+      description:
+          clearDescription ? null : (description ?? this.description),
       status: status ?? this.status,
       priority: priority ?? this.priority,
       completedAt:

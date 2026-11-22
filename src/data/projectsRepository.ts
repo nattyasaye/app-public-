@@ -1,5 +1,6 @@
 import {
   SharedGoal,
+  SharedMilestone,
   SharedProject,
   SharedProjectTrackingBlock,
   SharedProjectTrackingRecord,
@@ -13,6 +14,7 @@ import {
   ProjectProgressSummary,
   ProjectValidationError,
   validateBlock,
+  validateMilestone,
   validateProject,
   validateRecord,
 } from '../domain/projectsEngine';
@@ -72,6 +74,16 @@ export interface IWebProjectsRepository {
   ): string;
 
   importProjectPackage(rawJson: string): PreparedProjectPackageImport;
+
+  getAllMilestones(): SharedMilestone[];
+  getMilestonesForProject(projectId: string): SharedMilestone[];
+  createMilestone(milestone: SharedMilestone): SharedMilestone;
+  updateMilestone(milestone: SharedMilestone): SharedMilestone;
+  toggleMilestone(milestoneId: string, isCompleted: boolean): SharedMilestone;
+  deleteMilestone(milestoneId: string): {
+    deleted?: SharedMilestone;
+    detachedTaskIds: string[];
+  };
 }
 
 /**
@@ -82,9 +94,9 @@ export class WebProjectsRepository implements IWebProjectsRepository {
   public static readonly PROJECTS_KEY = 'daywell_projects';
   public static readonly BLOCKS_KEY = 'daywell_project_tracking_blocks';
   public static readonly RECORDS_KEY = 'daywell_project_tracking_records';
+  public static readonly MILESTONES_KEY = 'daywell_milestones';
   private static readonly GOALS_KEY = 'daywell_goals';
   private static readonly TASKS_KEY = 'daywell_tasks';
-  private static readonly MILESTONES_KEY = 'daywell_milestones';
 
   private readArray<T>(key: string): T[] {
     if (typeof localStorage === 'undefined') return [];
@@ -705,5 +717,142 @@ export class WebProjectsRepository implements IWebProjectsRepository {
     }
 
     return prepared;
+  }
+
+  public getAllMilestones(): SharedMilestone[] {
+    return this.readArray<SharedMilestone>(WebProjectsRepository.MILESTONES_KEY)
+      .slice()
+      .sort((a, b) => {
+        if (a.dueDate && b.dueDate) {
+          const cmp = a.dueDate.localeCompare(b.dueDate);
+          if (cmp !== 0) return cmp;
+        } else if (a.dueDate && !b.dueDate) {
+          return -1;
+        } else if (!a.dueDate && b.dueDate) {
+          return 1;
+        }
+        return (a.createdAt ?? '').localeCompare(b.createdAt ?? '');
+      });
+  }
+
+  public getMilestonesForProject(projectId: string): SharedMilestone[] {
+    return this.getAllMilestones().filter((m) => m.projectId === projectId);
+  }
+
+  public createMilestone(milestone: SharedMilestone): SharedMilestone {
+    const project = this.getProjectById(milestone.projectId);
+    if (!project) {
+      throw new ProjectValidationError(
+        `Cannot create milestone "${milestone.id}": missing project "${milestone.projectId}".`
+      );
+    }
+    const cleanDue = milestone.dueDate?.trim() || undefined;
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
+    const normalized: SharedMilestone = {
+      id: milestone.id,
+      projectId: milestone.projectId,
+      title: (milestone.title ?? '').trim(),
+      ...(cleanDue !== undefined ? { dueDate: cleanDue } : {}),
+      isCompleted: milestone.isCompleted === true,
+      createdAt: milestone.createdAt ?? nowIso,
+    };
+    validateMilestone(normalized);
+
+    const all = this.readArray<SharedMilestone>(WebProjectsRepository.MILESTONES_KEY);
+    if (all.some((m) => m.id === normalized.id)) {
+      throw new ProjectValidationError(
+        `Duplicate milestone id "${normalized.id}".`
+      );
+    }
+    all.push(normalized);
+    this.writeArray(WebProjectsRepository.MILESTONES_KEY, all);
+    return normalized;
+  }
+
+  public updateMilestone(milestone: SharedMilestone): SharedMilestone {
+    const project = this.getProjectById(milestone.projectId);
+    if (!project) {
+      throw new ProjectValidationError(
+        `Cannot update milestone "${milestone.id}": missing project "${milestone.projectId}".`
+      );
+    }
+    const all = this.readArray<SharedMilestone>(WebProjectsRepository.MILESTONES_KEY);
+    const idx = all.findIndex((m) => m.id === milestone.id);
+    if (idx === -1) {
+      throw new ProjectValidationError(
+        `Cannot update missing milestone "${milestone.id}".`
+      );
+    }
+    const existing = all[idx];
+    const cleanDue = milestone.dueDate?.trim() || undefined;
+    const updated: SharedMilestone = {
+      id: existing.id,
+      projectId: milestone.projectId,
+      title: (milestone.title ?? '').trim(),
+      ...(cleanDue !== undefined ? { dueDate: cleanDue } : {}),
+      isCompleted: milestone.isCompleted === true,
+      createdAt: existing.createdAt,
+    };
+    validateMilestone(updated);
+    all[idx] = updated;
+    this.writeArray(WebProjectsRepository.MILESTONES_KEY, all);
+    return updated;
+  }
+
+  public toggleMilestone(
+    milestoneId: string,
+    isCompleted: boolean
+  ): SharedMilestone {
+    const all = this.readArray<SharedMilestone>(WebProjectsRepository.MILESTONES_KEY);
+    const idx = all.findIndex((m) => m.id === milestoneId);
+    if (idx === -1) {
+      throw new ProjectValidationError(
+        `Cannot toggle missing milestone "${milestoneId}".`
+      );
+    }
+    const updated: SharedMilestone = {
+      ...all[idx],
+      isCompleted,
+    };
+    all[idx] = updated;
+    this.writeArray(WebProjectsRepository.MILESTONES_KEY, all);
+    return updated;
+  }
+
+  public deleteMilestone(milestoneId: string): {
+    deleted?: SharedMilestone;
+    detachedTaskIds: string[];
+  } {
+    const all = this.readArray<SharedMilestone>(WebProjectsRepository.MILESTONES_KEY);
+    const deleted = all.find((m) => m.id === milestoneId);
+    if (!deleted) {
+      return { detachedTaskIds: [] };
+    }
+
+    const detachedTaskIds: string[] = [];
+    if (
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem(WebProjectsRepository.TASKS_KEY) !== null
+    ) {
+      const tasks = this.readArray<SharedTask>(WebProjectsRepository.TASKS_KEY);
+      let changed = false;
+      const nextTasks = tasks.map((t) => {
+        if (t.milestoneId !== milestoneId) return t;
+        changed = true;
+        detachedTaskIds.push(t.id);
+        const copy = { ...t };
+        delete copy.milestoneId;
+        return copy;
+      });
+      if (changed) {
+        this.writeArray(WebProjectsRepository.TASKS_KEY, nextTasks);
+      }
+    }
+
+    this.writeArray(
+      WebProjectsRepository.MILESTONES_KEY,
+      all.filter((m) => m.id !== milestoneId)
+    );
+    return { deleted, detachedTaskIds };
   }
 }

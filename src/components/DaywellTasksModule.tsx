@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useRef } from 'react';
-import { CalendarDate, EthiopiaClock } from '../domain/date';
+import { CalendarDate, EthiopiaClock, SharedDateFormatter } from '../domain/date';
 import {
   Check,
   Plus,
@@ -13,13 +13,48 @@ import {
   CheckCircle2,
   AlertTriangle,
   Loader2,
+  Archive,
+  RotateCcw,
+  Trash2,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
-import { validateTaskForm, isFormDirty } from '../domain/formValidationAndNavigation';
+import { isFormDirty } from '../domain/formValidationAndNavigation';
 import {
+  SharedMilestone,
   SharedProject,
-  SharedTaskRecurrenceConfig,
   SharedTaskStatus,
 } from '../domain/sharedFoundation';
+import {
+  addSubtaskToList,
+  addSubtaskToTask,
+  CANONICAL_TASK_PRIORITIES,
+  CANONICAL_TASK_STATUSES,
+  computeSubtaskProgress,
+  computeTaskTabCounts,
+  createTaskRecord,
+  DaywellTaskRecord,
+  deleteSubtaskFromList,
+  deleteSubtaskFromTask,
+  deleteTaskFromList,
+  filterTasksForView,
+  isTaskCompleted,
+  reorderSubtasksInList,
+  reorderTaskSubtasks,
+  resolveEffectiveTaskStatus,
+  setTaskArchivedRecord,
+  TASK_PRIORITY_LABELS,
+  TASK_STATUS_LABELS,
+  TaskSortBy,
+  TaskSubItemRecord,
+  TaskViewFilter,
+  toggleSubtaskInList,
+  toggleTaskCompletionRecord,
+  toggleTaskSubtask,
+  updateSubtaskTitleInList,
+  updateTaskRecord,
+  updateTaskSubtaskTitle,
+} from '../domain/taskOperations';
 import { projectsService } from '../services/projectsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { ProjectsWorkspaceView } from './projects';
@@ -27,51 +62,18 @@ import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import {
   DaywellButton,
   DaywellCard,
+  DaywellConfirmationDialog,
   DaywellEmptyState,
   DaywellIconButton,
   DaywellProgressBar,
   DaywellSearchField,
   DaywellStatusBadge,
   DaywellStatusBanner,
+  DaywellStatusTone,
 } from './ui';
 
-export interface TaskSubItem {
-  id: string;
-  title: string;
-  completed: boolean;
-}
-
-export interface DaywellTask {
-  id: string;
-  title: string;
-  description?: string;
-  category?: string;
-  status?: SharedTaskStatus;
-  priority: 'urgent' | 'high' | 'medium' | 'low';
-  completed: boolean;
-  completedAt?: string;
-  dueDate?: string; // YYYY-MM-DD (Hard deadline)
-  scheduledDate?: string; // YYYY-MM-DD (When you plan to work on it)
-  scheduledTime?: string; // HH:MM
-  hasReminder: boolean;
-  isRecurring?: boolean;
-  recurringRule?: 'daily' | 'weekly' | 'monthly';
-  recurrenceRule?: string;
-  recurrenceConfig?: SharedTaskRecurrenceConfig;
-  subtasks: TaskSubItem[];
-  labels?: string[];
-  isPinned?: boolean;
-  isMyDay?: boolean;
-  myDayDate?: string;
-  isArchived?: boolean;
-  sortOrder?: number;
-  projectId?: string;
-  milestoneId?: string;
-  estimatedDurationMinutes?: number;
-  projectName?: string;
-  createdAt: string;
-  updatedAt?: string;
-}
+export type TaskSubItem = TaskSubItemRecord;
+export type DaywellTask = DaywellTaskRecord;
 
 interface DaywellTasksModuleProps {
   tasks: DaywellTask[];
@@ -216,14 +218,16 @@ export function DaywellTasksModule({
     else setInternalProjectId(next);
   };
 
-  // Filter tab: 'today' | 'inbox' | 'upcoming' | 'completed'
-  const [activeFilter, setActiveFilter] = useState<'today' | 'inbox' | 'upcoming' | 'completed'>('today');
+  // Filter tab: 'today' | 'inbox' | 'upcoming' | 'all' | 'completed' | 'archived'
+  const [activeFilter, setActiveFilter] = useState<TaskViewFilter>('today');
 
   // Search & Sorting
   const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'priority' | 'time' | 'title'>('priority');
+  const [sortBy, setSortBy] = useState<TaskSortBy>('priority');
 
-  // Task Modal (Create & Edit)
+  // Task Details & Form Modals (View Details, Create, Edit, Safe Delete Confirm)
+  const [detailTaskId, setDetailTaskId] = useState<string | null>(null);
+  const [pendingDeleteTask, setPendingDeleteTask] = useState<DaywellTask | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
@@ -231,16 +235,29 @@ export function DaywellTasksModule({
   const [formTitle, setFormTitle] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formPriority, setFormPriority] = useState<DaywellTask['priority']>('medium');
+  const [formStatus, setFormStatus] = useState<SharedTaskStatus>('not_started');
   const [formDueDate, setFormDueDate] = useState<string>('');
   const [formScheduledDate, setFormScheduledDate] = useState<string>('');
   const [formScheduledTime, setFormScheduledTime] = useState<string>('');
   const [formProject, setFormProject] = useState<string>('Personal');
   const [formProjectId, setFormProjectId] = useState<string>('');
+  const [formMilestoneId, setFormMilestoneId] = useState<string>('');
   const [formHasReminder, setFormHasReminder] = useState<boolean>(false);
   const [formIsRecurring, setFormIsRecurring] = useState<boolean>(false);
   const [formRecurringRule, setFormRecurringRule] = useState<'daily' | 'weekly' | 'monthly'>('daily');
   const [formSubtasks, setFormSubtasks] = useState<TaskSubItem[]>([]);
   const [newSubtaskInput, setNewSubtaskInput] = useState('');
+  const [formSubtaskError, setFormSubtaskError] = useState('');
+  const [editingFormSubtaskId, setEditingFormSubtaskId] = useState<string | null>(null);
+  const [editingFormSubtaskTitle, setEditingFormSubtaskTitle] = useState('');
+  const [editingFormSubtaskError, setEditingFormSubtaskError] = useState('');
+
+  // Task Details inline subtask controls
+  const [detailSubtaskInput, setDetailSubtaskInput] = useState('');
+  const [detailSubtaskError, setDetailSubtaskError] = useState('');
+  const [editingDetailSubtaskId, setEditingDetailSubtaskId] = useState<string | null>(null);
+  const [editingDetailSubtaskTitle, setEditingDetailSubtaskTitle] = useState('');
+  const [editingDetailSubtaskError, setEditingDetailSubtaskError] = useState('');
 
   // Form Validation & Dirty State
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -249,10 +266,38 @@ export function DaywellTasksModule({
   const [initialTaskValues, setInitialTaskValues] = useState<Record<string, unknown> | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
+  const openTaskDetails = (taskId: string) => {
+    setDetailTaskId(taskId);
+    setDetailSubtaskInput('');
+    setDetailSubtaskError('');
+    setEditingDetailSubtaskId(null);
+    setEditingDetailSubtaskTitle('');
+    setEditingDetailSubtaskError('');
+  };
+
   const availableProjects: SharedProject[] = useMemo(() => {
     if (!isModalOpen) return [];
     return projectsService.listProjects({ includeArchived: false });
   }, [isModalOpen]);
+
+  const availableMilestones: SharedMilestone[] = useMemo(() => {
+    if (!isModalOpen || !formProjectId.trim()) return [];
+    return projectsService.listMilestones(formProjectId.trim());
+  }, [isModalOpen, formProjectId]);
+
+  const detailTask = useMemo(
+    () => (detailTaskId ? tasks.find((t) => t.id === detailTaskId) ?? null : null),
+    [detailTaskId, tasks]
+  );
+
+  const detailMilestoneTitle = useMemo(() => {
+    if (!detailTask?.projectId || !detailTask?.milestoneId) return null;
+    return (
+      projectsService
+        .listMilestones(detailTask.projectId)
+        .find((m) => m.id === detailTask.milestoneId)?.title ?? null
+    );
+  }, [detailTask?.projectId, detailTask?.milestoneId]);
 
   // Undo Toast state
   const [undoToast, setUndoToast] = useState<{ message: string; undoAction: () => void } | null>(null);
@@ -267,112 +312,131 @@ export function DaywellTasksModule({
   const todayStr = useMemo(() => CalendarDate.today().toIsoString(), []);
 
   // Filter tasks
-  const filteredTasks = useMemo(() => {
-    let list = [...tasks];
-
-    if (activeFilter === 'today') {
-      list = list.filter((t) => !t.completed && (t.dueDate === todayStr || t.scheduledDate === todayStr || (!t.dueDate && !t.scheduledDate)));
-    } else if (activeFilter === 'inbox') {
-      list = list.filter((t) => !t.completed && !t.dueDate && !t.scheduledDate);
-    } else if (activeFilter === 'upcoming') {
-      list = list.filter((t) => !t.completed && ((t.dueDate && t.dueDate > todayStr) || (t.scheduledDate && t.scheduledDate > todayStr)));
-    } else if (activeFilter === 'completed') {
-      list = list.filter((t) => t.completed);
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (t) =>
-          t.title.toLowerCase().includes(q) ||
-          (t.description && t.description.toLowerCase().includes(q)) ||
-          (t.projectName && t.projectName.toLowerCase().includes(q))
-      );
-    }
-
-    list.sort((a, b) => {
-      if (sortBy === 'priority') {
-        const priorityOrder: Record<DaywellTask['priority'], number> = {
-          urgent: 0,
-          high: 1,
-          medium: 2,
-          low: 3,
-        };
-        return priorityOrder[a.priority] - priorityOrder[b.priority];
-      }
-      if (sortBy === 'time') {
-        const timeA = a.scheduledTime || '23:59';
-        const timeB = b.scheduledTime || '23:59';
-        return timeA.localeCompare(timeB);
-      }
-      return a.title.localeCompare(b.title);
-    });
-
-    return list;
-  }, [tasks, activeFilter, searchQuery, sortBy, todayStr]);
+  const filteredTasks = useMemo(
+    () =>
+      filterTasksForView(tasks, {
+        viewFilter: activeFilter,
+        searchQuery,
+        sortBy,
+        todayIso: todayStr,
+      }),
+    [tasks, activeFilter, searchQuery, sortBy, todayStr]
+  );
 
   // Counts for tabs
-  const tabCounts = useMemo(() => {
-    const todayCount = tasks.filter((t) => !t.completed && (t.dueDate === todayStr || t.scheduledDate === todayStr || (!t.dueDate && !t.scheduledDate))).length;
-    const inboxCount = tasks.filter((t) => !t.completed && !t.dueDate && !t.scheduledDate).length;
-    const upcomingCount = tasks.filter((t) => !t.completed && ((t.dueDate && t.dueDate > todayStr) || (t.scheduledDate && t.scheduledDate > todayStr))).length;
-    const completedCount = tasks.filter((t) => t.completed).length;
-    return { todayCount, inboxCount, upcomingCount, completedCount };
-  }, [tasks, todayStr]);
+  const tabCounts = useMemo(
+    () => computeTaskTabCounts(tasks, todayStr),
+    [tasks, todayStr]
+  );
 
-  // Toggle Task Completion
+  // Toggle Task Completion (Complete / Reopen with Undo)
   const toggleTask = (taskId: string) => {
     const prev = [...tasks];
     const target = tasks.find((t) => t.id === taskId);
     if (!target) return;
 
-    const nextCompleted = !target.completed;
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
-
+    const wasCompleted = isTaskCompleted(target);
     const updated = tasks.map((t) =>
-      t.id === taskId
-        ? {
-            ...t,
-            completed: nextCompleted,
-            status: (nextCompleted ? 'completed' : 'not_started') as SharedTaskStatus,
-            completedAt: nextCompleted ? nowIso : undefined,
-            updatedAt: nowIso,
-          }
-        : t
+      t.id === taskId ? toggleTaskCompletionRecord(t) : t
     );
 
     onUpdateTasks(updated);
     triggerUndo(
-      nextCompleted ? `Completed "${target.title}"` : `Reopened "${target.title}"`,
+      wasCompleted ? `Reopened "${target.title}"` : `Completed "${target.title}"`,
       () => onUpdateTasks(prev)
     );
   };
 
-  // Toggle Subtask
-  const toggleSubtask = (taskId: string, subtaskId: string) => {
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
-    const updated = tasks.map((t) => {
-      if (t.id === taskId) {
-        return {
-          ...t,
-          subtasks: t.subtasks.map((st) => (st.id === subtaskId ? { ...st, completed: !st.completed } : st)),
-          updatedAt: nowIso,
-        };
-      }
-      return t;
-    });
+  // Archive / Restore Task with Undo
+  const handleToggleArchive = (task: DaywellTask) => {
+    const prev = [...tasks];
+    const nextArchived = !task.isArchived;
+    const updated = tasks.map((t) =>
+      t.id === task.id ? setTaskArchivedRecord(t, nextArchived) : t
+    );
     onUpdateTasks(updated);
+    if (nextArchived && detailTaskId === task.id) {
+      setDetailTaskId(null);
+    }
+    triggerUndo(
+      nextArchived ? `Archived "${task.title}"` : `Restored "${task.title}"`,
+      () => onUpdateTasks(prev)
+    );
+  };
+
+  // Subtask workflows on persisted tasks (Task Card & Task Details)
+  const toggleSubtask = (taskId: string, subtaskId: string) => {
+    const updated = tasks.map((t) =>
+      t.id === taskId ? toggleTaskSubtask(t, subtaskId) : t
+    );
+    onUpdateTasks(updated);
+  };
+
+  const handleAddDetailSubtask = (taskId: string) => {
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const res = addSubtaskToTask(target, detailSubtaskInput);
+    if (!res.ok) {
+      setDetailSubtaskError(res.error);
+      return;
+    }
+    onUpdateTasks(tasks.map((t) => (t.id === taskId ? res.task : t)));
+    setDetailSubtaskInput('');
+    setDetailSubtaskError('');
+  };
+
+  const handleSaveDetailSubtaskEdit = (taskId: string, subtaskId: string) => {
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const res = updateTaskSubtaskTitle(target, subtaskId, editingDetailSubtaskTitle);
+    if (!res.ok) {
+      setEditingDetailSubtaskError(res.error);
+      return;
+    }
+    onUpdateTasks(tasks.map((t) => (t.id === taskId ? res.task : t)));
+    setEditingDetailSubtaskId(null);
+    setEditingDetailSubtaskTitle('');
+    setEditingDetailSubtaskError('');
+  };
+
+  const handleReorderDetailSubtask = (
+    taskId: string,
+    fromIndex: number,
+    toIndex: number
+  ) => {
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const nextTask = reorderTaskSubtasks(target, fromIndex, toIndex);
+    onUpdateTasks(tasks.map((t) => (t.id === taskId ? nextTask : t)));
+  };
+
+  const handleDeleteDetailSubtask = (taskId: string, subtaskId: string) => {
+    const prev = [...tasks];
+    const target = tasks.find((t) => t.id === taskId);
+    if (!target) return;
+    const { task: nextTask, deleted } = deleteSubtaskFromTask(target, subtaskId);
+    onUpdateTasks(tasks.map((t) => (t.id === taskId ? nextTask : t)));
+    if (editingDetailSubtaskId === subtaskId) {
+      setEditingDetailSubtaskId(null);
+      setEditingDetailSubtaskTitle('');
+      setEditingDetailSubtaskError('');
+    }
+    if (deleted) {
+      triggerUndo(`Removed subtask "${deleted.title}"`, () => onUpdateTasks(prev));
+    }
   };
 
   const getCurrentTaskValues = () => ({
     title: formTitle,
     description: formDescription,
     priority: formPriority,
+    status: formStatus,
     dueDate: formDueDate,
     scheduledDate: formScheduledDate,
     scheduledTime: formScheduledTime,
     projectName: formProject,
     projectId: formProjectId,
+    milestoneId: formMilestoneId,
     hasReminder: formHasReminder,
     isRecurring: formIsRecurring,
     recurringRule: formRecurringRule,
@@ -394,18 +458,26 @@ export function DaywellTasksModule({
     setFormTitle('');
     setFormDescription('');
     setFormPriority('medium');
+    const initStatus: SharedTaskStatus =
+      activeFilter === 'inbox' ? 'inbox' : 'not_started';
     const initDueDate = activeFilter === 'today' ? todayStr : '';
     const initScheduledDate = activeFilter === 'today' ? todayStr : '';
+    setFormStatus(initStatus);
     setFormDueDate(initDueDate);
     setFormScheduledDate(initScheduledDate);
     setFormScheduledTime('');
     setFormProject('Personal');
     setFormProjectId('');
+    setFormMilestoneId('');
     setFormHasReminder(false);
     setFormIsRecurring(false);
     setFormRecurringRule('daily');
     setFormSubtasks([]);
     setNewSubtaskInput('');
+    setFormSubtaskError('');
+    setEditingFormSubtaskId(null);
+    setEditingFormSubtaskTitle('');
+    setEditingFormSubtaskError('');
     setFormErrors({});
     setIsSubmitting(false);
 
@@ -413,11 +485,13 @@ export function DaywellTasksModule({
       title: '',
       description: '',
       priority: 'medium',
+      status: initStatus,
       dueDate: initDueDate,
       scheduledDate: initScheduledDate,
       scheduledTime: '',
       projectName: 'Personal',
       projectId: '',
+      milestoneId: '',
       hasReminder: false,
       isRecurring: false,
       recurringRule: 'daily',
@@ -432,21 +506,29 @@ export function DaywellTasksModule({
 
   // Open Edit Modal
   const handleOpenEdit = (task: DaywellTask) => {
+    const effectiveStatus = resolveEffectiveTaskStatus(task);
+    setDetailTaskId(null);
     setEditingTaskId(task.id);
     setFormTitle(task.title);
     setFormDescription(task.description || '');
     setFormPriority(task.priority);
+    setFormStatus(effectiveStatus);
     setFormDueDate(task.dueDate || '');
     setFormScheduledDate(task.scheduledDate || '');
     setFormScheduledTime(task.scheduledTime || '');
     setFormProject(task.projectName || 'Personal');
     setFormProjectId(task.projectId || '');
+    setFormMilestoneId(task.milestoneId || '');
     setFormHasReminder(task.hasReminder);
     setFormIsRecurring(task.isRecurring || false);
     setFormRecurringRule(task.recurringRule || 'daily');
     const subtasksCopy = [...task.subtasks];
     setFormSubtasks(subtasksCopy);
     setNewSubtaskInput('');
+    setFormSubtaskError('');
+    setEditingFormSubtaskId(null);
+    setEditingFormSubtaskTitle('');
+    setEditingFormSubtaskError('');
     setFormErrors({});
     setIsSubmitting(false);
 
@@ -454,11 +536,13 @@ export function DaywellTasksModule({
       title: task.title,
       description: task.description || '',
       priority: task.priority,
+      status: effectiveStatus,
       dueDate: task.dueDate || '',
       scheduledDate: task.scheduledDate || '',
       scheduledTime: task.scheduledTime || '',
       projectName: task.projectName || 'Personal',
       projectId: task.projectId || '',
+      milestoneId: task.milestoneId || '',
       hasReminder: task.hasReminder,
       isRecurring: task.isRecurring || false,
       recurringRule: task.recurringRule || 'daily',
@@ -474,25 +558,7 @@ export function DaywellTasksModule({
   // Save Task (Create or Update)
   const handleSaveTask = (e: React.FormEvent) => {
     e.preventDefault();
-
-    const validation = validateTaskForm({
-      title: formTitle,
-      description: formDescription,
-      dueDate: formDueDate,
-      scheduledDate: formScheduledDate,
-      scheduledTime: formScheduledTime,
-    });
-
-    if (!validation.isValid) {
-      setFormErrors(validation.errors);
-      if (validation.errors.title) {
-        titleInputRef.current?.focus();
-      }
-      return;
-    }
-
     if (isSubmitting) return;
-    setIsSubmitting(true);
 
     const prev = [...tasks];
     const cleanProjectId = formProjectId.trim() || undefined;
@@ -502,87 +568,100 @@ export function DaywellTasksModule({
     const resolvedProjectName =
       matchedProject?.title ?? (formProject.trim() || 'Personal');
 
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
+    const cleanMilestoneId = cleanProjectId
+      ? formMilestoneId.trim() || undefined
+      : undefined;
+
     if (editingTaskId) {
+      const existing = tasks.find((t) => t.id === editingTaskId);
+      if (!existing) return;
+
+      const result = updateTaskRecord(existing, {
+        title: formTitle,
+        description: formDescription,
+        priority: formPriority,
+        status: formStatus,
+        dueDate: formDueDate,
+        scheduledDate: formScheduledDate,
+        scheduledTime: formScheduledTime,
+        projectId: cleanProjectId,
+        milestoneId: cleanMilestoneId,
+        projectName: resolvedProjectName,
+        hasReminder: formHasReminder,
+        isRecurring: formIsRecurring,
+        recurringRule: formIsRecurring ? formRecurringRule : undefined,
+        recurrenceRule: formIsRecurring ? formRecurringRule : undefined,
+        subtasks: formSubtasks,
+      });
+
+      if (!result.ok) {
+        setFormErrors(result.errors);
+        if (result.errors.title) titleInputRef.current?.focus();
+        return;
+      }
+
+      setIsSubmitting(true);
       const updated = tasks.map((t) =>
-        t.id === editingTaskId
-          ? {
-              ...t,
-              title: formTitle.trim(),
-              description: formDescription.trim() || undefined,
-              status: (t.completed
-                ? 'completed'
-                : t.status && t.status !== 'completed'
-                  ? t.status
-                  : 'not_started') as SharedTaskStatus,
-              priority: formPriority,
-              dueDate: formDueDate || undefined,
-              scheduledDate: formScheduledDate || undefined,
-              scheduledTime: formScheduledTime || undefined,
-              projectId: cleanProjectId,
-              projectName: resolvedProjectName,
-              hasReminder: formHasReminder,
-              isRecurring: formIsRecurring,
-              recurringRule: formIsRecurring ? formRecurringRule : undefined,
-              recurrenceRule: formIsRecurring
-                ? formRecurringRule
-                : t.recurringRule
-                  ? undefined
-                  : t.recurrenceRule,
-              subtasks: formSubtasks,
-              updatedAt: nowIso,
-            }
-          : t
+        t.id === editingTaskId ? result.task : t
       );
       onUpdateTasks(updated);
+      if (existing.projectId && existing.projectId !== cleanProjectId) {
+        projectsService.cleanupSectionLinksForTask(existing.id);
+      }
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
       triggerUndo('Task updated', () => onUpdateTasks(prev));
     } else {
-      const newTask: DaywellTask = {
-        id: `t-${Date.now()}`,
-        title: formTitle.trim(),
-        description: formDescription.trim() || undefined,
-        category: resolvedProjectName,
-        status: 'not_started',
+      const result = createTaskRecord({
+        title: formTitle,
+        description: formDescription,
         priority: formPriority,
-        completed: false,
-        dueDate: formDueDate || undefined,
-        scheduledDate: formScheduledDate || undefined,
-        scheduledTime: formScheduledTime || undefined,
+        status: formStatus,
+        dueDate: formDueDate,
+        scheduledDate: formScheduledDate,
+        scheduledTime: formScheduledTime,
         projectId: cleanProjectId,
+        milestoneId: cleanMilestoneId,
         projectName: resolvedProjectName,
+        category: resolvedProjectName,
         hasReminder: formHasReminder,
         isRecurring: formIsRecurring,
         recurringRule: formIsRecurring ? formRecurringRule : undefined,
-        ...(formIsRecurring ? { recurrenceRule: formRecurringRule } : {}),
+        recurrenceRule: formIsRecurring ? formRecurringRule : undefined,
         subtasks: formSubtasks,
-        isArchived: false,
-        sortOrder: 0,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      };
-      onUpdateTasks([newTask, ...tasks]);
+      });
+
+      if (!result.ok) {
+        setFormErrors(result.errors);
+        if (result.errors.title) titleInputRef.current?.focus();
+        return;
+      }
+
+      setIsSubmitting(true);
+      onUpdateTasks([result.task, ...tasks]);
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
-      triggerUndo(`Added "${newTask.title}"`, () => onUpdateTasks(prev));
+      triggerUndo(`Added "${result.task.title}"`, () => onUpdateTasks(prev));
     }
   };
 
-  // Delete Task
-  const handleDeleteTask = (taskId: string) => {
+  // Delete Task (confirmed safely, with Undo + DailyPlanningEntries cleanup)
+  const executeDeleteTask = (taskId: string) => {
     const prev = [...tasks];
-    const target = tasks.find((t) => t.id === taskId);
+    const { remaining, deleted } = deleteTaskFromList(tasks, taskId);
     const prevDailyPlanningRaw =
       typeof window !== 'undefined'
         ? localStorage.getItem(SharedStateBridge.DAILY_PLANNING_STORAGE_KEY)
         : null;
-    onUpdateTasks(tasks.filter((t) => t.id !== taskId));
+    onUpdateTasks(remaining);
     SharedStateBridge.removeDailyPlanningForTask(taskId);
+    projectsService.cleanupSectionLinksForTask(taskId);
+    setPendingDeleteTask(null);
+    setDetailTaskId(null);
     setIsModalOpen(false);
-    triggerUndo(`Deleted "${target?.title || 'task'}"`, () => {
+    triggerUndo(`Deleted "${deleted?.title || 'task'}"`, () => {
       if (prevDailyPlanningRaw !== null && typeof window !== 'undefined') {
         try {
           localStorage.setItem(
@@ -595,20 +674,54 @@ export function DaywellTasksModule({
     });
   };
 
-  // Subtask helper
+  // Subtask builder helpers (Create / Edit modal)
   const handleAddSubtask = () => {
-    if (!newSubtaskInput.trim()) return;
-    const newSt: TaskSubItem = {
-      id: `st-${Date.now()}`,
-      title: newSubtaskInput.trim(),
-      completed: false,
-    };
-    setFormSubtasks([...formSubtasks, newSt]);
+    const res = addSubtaskToList(
+      formSubtasks,
+      newSubtaskInput,
+      editingTaskId || 'draft'
+    );
+    if (!res.ok) {
+      setFormSubtaskError(res.error);
+      return;
+    }
+    setFormSubtasks(res.subtasks);
     setNewSubtaskInput('');
+    setFormSubtaskError('');
+  };
+
+  const handleToggleFormSubtask = (stId: string) => {
+    setFormSubtasks(toggleSubtaskInList(formSubtasks, stId));
+  };
+
+  const handleSaveFormSubtaskEdit = (stId: string) => {
+    const res = updateSubtaskTitleInList(
+      formSubtasks,
+      stId,
+      editingFormSubtaskTitle
+    );
+    if (!res.ok) {
+      setEditingFormSubtaskError(res.error);
+      return;
+    }
+    setFormSubtasks(res.subtasks);
+    setEditingFormSubtaskId(null);
+    setEditingFormSubtaskTitle('');
+    setEditingFormSubtaskError('');
+  };
+
+  const handleReorderFormSubtask = (fromIndex: number, toIndex: number) => {
+    setFormSubtasks(reorderSubtasksInList(formSubtasks, fromIndex, toIndex));
   };
 
   const handleRemoveSubtask = (stId: string) => {
-    setFormSubtasks(formSubtasks.filter((st) => st.id !== stId));
+    const { remaining } = deleteSubtaskFromList(formSubtasks, stId);
+    setFormSubtasks(remaining);
+    if (editingFormSubtaskId === stId) {
+      setEditingFormSubtaskId(null);
+      setEditingFormSubtaskTitle('');
+      setEditingFormSubtaskError('');
+    }
   };
 
   return (
@@ -735,7 +848,9 @@ export function DaywellTasksModule({
                 { id: 'today', label: `Today (${tabCounts.todayCount})` },
                 { id: 'inbox', label: `Inbox (${tabCounts.inboxCount})` },
                 { id: 'upcoming', label: `Upcoming (${tabCounts.upcomingCount})` },
+                { id: 'all', label: `All (${tabCounts.allCount})` },
                 { id: 'completed', label: `Completed (${tabCounts.completedCount})` },
+                { id: 'archived', label: `Archived (${tabCounts.archivedCount})` },
               ] as const
             ).map((tab) => {
               const active = activeFilter === tab.id;
@@ -762,9 +877,9 @@ export function DaywellTasksModule({
           <div className="flex items-center justify-between pt-1">
             <div>
               <span className="dw-type-numeric-body text-xl font-bold text-[var(--dw-text-primary)]">
-                {tabCounts.completedCount} of {tasks.length}
+                {tabCounts.completedCount} of {tabCounts.allCount}
               </span>
-              <p className="dw-type-label text-[var(--dw-text-muted)]">total tasks completed</p>
+              <p className="dw-type-label text-[var(--dw-text-muted)]">active tasks completed</p>
             </div>
             <DaywellStatusBadge
               tone="neutral"
@@ -778,20 +893,23 @@ export function DaywellTasksModule({
         {filteredTasks.length === 0 ? (
           <DaywellEmptyState
             icon={<CheckCircle2 className="w-8 h-8" />}
-            message="No tasks in this view"
+            message={activeFilter === 'archived' ? 'No archived tasks' : 'No tasks in this view'}
             subtitle={
               activeFilter === 'today'
                 ? "You're all caught up for today! Plan tomorrow or capture a new task."
-                : 'Nothing to display for this filter.'
+                : activeFilter === 'archived'
+                  ? 'Tasks you archive appear here so you can restore or remove them anytime.'
+                  : 'Nothing to display for this filter.'
             }
-            actionLabel="Add Task"
-            onActionPressed={handleOpenCreate}
+            actionLabel={activeFilter === 'archived' ? undefined : 'Add Task'}
+            onActionPressed={activeFilter === 'archived' ? undefined : handleOpenCreate}
           />
         ) : (
           filteredTasks.map((task) => {
-            const hasSubtasks = task.subtasks && task.subtasks.length > 0;
-            const completedSubtasks = task.subtasks ? task.subtasks.filter((s) => s.completed).length : 0;
-            const pct = hasSubtasks ? (completedSubtasks / task.subtasks.length) * 100 : 0;
+            const subProgress = computeSubtaskProgress(task.subtasks);
+            const hasSubtasks = subProgress.total > 0;
+            const effectiveStatus = resolveEffectiveTaskStatus(task);
+            const taskCompleted = effectiveStatus === 'completed';
 
             return (
               <DaywellCard
@@ -804,25 +922,33 @@ export function DaywellTasksModule({
                   {/* Complete Checkbox */}
                   <button
                     type="button"
-                    aria-label={task.completed ? `Reopen ${task.title}` : `Complete ${task.title}`}
+                    aria-label={taskCompleted ? `Reopen ${task.title}` : `Complete ${task.title}`}
                     onClick={() => toggleTask(task.id)}
                     className={`w-5 h-5 rounded-[var(--dw-radius-sm)] border mt-0.5 flex items-center justify-center transition-colors shrink-0 cursor-pointer ${
-                      task.completed
+                      taskCompleted
                         ? 'bg-[var(--dw-primary)] border-[var(--dw-primary)] text-[var(--dw-on-primary)]'
                         : 'border-[var(--dw-border)] hover:border-[var(--dw-primary)]'
                     }`}
                   >
-                    {task.completed && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                    {taskCompleted && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                   </button>
 
-                  {/* Task Content */}
+                  {/* Task Content — opens Task Details */}
                   <div
-                    onClick={() => handleOpenEdit(task)}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => openTaskDetails(task.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        openTaskDetails(task.id);
+                      }
+                    }}
                     className="flex-1 min-w-0 cursor-pointer"
                   >
                     <p
                       className={`text-xs font-semibold leading-snug ${
-                        task.completed
+                        taskCompleted
                           ? 'line-through text-[var(--dw-text-disabled)]'
                           : 'text-[var(--dw-text-primary)] group-hover:text-[var(--dw-primary)]'
                       }`}
@@ -848,13 +974,44 @@ export function DaywellTasksModule({
                           }`}
                         >
                           <Flag className="w-3 h-3" />
-                          <span className="capitalize">{task.priority}</span>
+                          <span>{TASK_PRIORITY_LABELS[task.priority]}</span>
                         </span>
+                      )}
+
+                      {(effectiveStatus === 'in_progress' ||
+                        effectiveStatus === 'cancelled' ||
+                        effectiveStatus === 'inbox') && (
+                        <DaywellStatusBadge
+                          tone={
+                            effectiveStatus === 'in_progress'
+                              ? 'info'
+                              : effectiveStatus === 'cancelled'
+                                ? 'error'
+                                : 'neutral'
+                          }
+                          showIcon={false}
+                          label={TASK_STATUS_LABELS[effectiveStatus]}
+                        />
+                      )}
+
+                      {task.isArchived && (
+                        <DaywellStatusBadge
+                          tone="warning"
+                          showIcon={false}
+                          label="Archived"
+                        />
                       )}
 
                       {task.projectName && (
                         <span className="font-semibold text-[var(--dw-text-secondary)]">
                           {task.projectName}
+                        </span>
+                      )}
+
+                      {task.scheduledDate && (
+                        <span className="flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                          <Calendar className="w-3 h-3" />
+                          Plan: {task.scheduledDate}
                         </span>
                       )}
 
@@ -874,17 +1031,36 @@ export function DaywellTasksModule({
                     </div>
                   </div>
 
-                  {/* Badges & Edit Action */}
+                  {/* Badges & Quick Actions */}
                   <div className="flex items-center gap-1 text-[var(--dw-text-muted)] shrink-0">
                     {task.hasReminder && <Bell className="w-3.5 h-3.5" aria-label="Has reminder" />}
                     {task.isRecurring && <Repeat2 className="w-3.5 h-3.5" aria-label="Recurring task" />}
-                    <DaywellIconButton
-                      label={`Edit ${task.title}`}
-                      size="compact"
-                      tone="muted"
-                      onClick={() => handleOpenEdit(task)}
-                      icon={<Edit3 className="w-3.5 h-3.5" />}
-                    />
+                    {task.isArchived ? (
+                      <>
+                        <DaywellIconButton
+                          label={`Restore ${task.title}`}
+                          size="compact"
+                          tone="primary"
+                          onClick={() => handleToggleArchive(task)}
+                          icon={<RotateCcw className="w-3.5 h-3.5" />}
+                        />
+                        <DaywellIconButton
+                          label={`Delete ${task.title}`}
+                          size="compact"
+                          tone="danger"
+                          onClick={() => setPendingDeleteTask(task)}
+                          icon={<Trash2 className="w-3.5 h-3.5" />}
+                        />
+                      </>
+                    ) : (
+                      <DaywellIconButton
+                        label={`Edit ${task.title}`}
+                        size="compact"
+                        tone="muted"
+                        onClick={() => handleOpenEdit(task)}
+                        icon={<Edit3 className="w-3.5 h-3.5" />}
+                      />
+                    )}
                   </div>
                 </div>
 
@@ -892,11 +1068,13 @@ export function DaywellTasksModule({
                 {hasSubtasks && (
                   <div className="pl-8 pt-1.5 space-y-1.5 border-t border-[var(--dw-divider)]">
                     <div className="flex items-center justify-between gap-3 text-[10px] text-[var(--dw-text-muted)]">
-                      <span>Checklist: {completedSubtasks} of {task.subtasks.length} done</span>
+                      <span>
+                        Checklist: {subProgress.completed} of {subProgress.total} done ({subProgress.percentage}%)
+                      </span>
                       <DaywellProgressBar
-                        value={pct}
+                        value={subProgress.percentage}
                         label={`Subtask progress for ${task.title}`}
-                        className="!w-20"
+                        className="!w-24"
                       />
                     </div>
                     {task.subtasks.map((st) => (
@@ -1008,94 +1186,216 @@ export function DaywellTasksModule({
                     Priority
                   </label>
                   <select
+                    aria-label="Priority"
                     value={formPriority}
                     onChange={(e) => setFormPriority(e.target.value as DaywellTask['priority'])}
                     className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
                   >
-                    <option value="urgent">Urgent</option>
-                    <option value="high">High</option>
-                    <option value="medium">Medium</option>
-                    <option value="low">Low</option>
+                    {CANONICAL_TASK_PRIORITIES.map((p) => (
+                      <option key={p} value={p}>
+                        {TASK_PRIORITY_LABELS[p]}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 <div>
                   <label className="block dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)] mb-1">
-                    {availableProjects.length > 0 ? 'Linked Project (Optional)' : 'Project / Area (Optional)'}
+                    Status
                   </label>
-                  {availableProjects.length > 0 ? (
-                    <select
-                      value={formProjectId}
-                      onChange={(e) => {
-                        const nextId = e.target.value;
-                        setFormProjectId(nextId);
-                        const found = availableProjects.find((p) => p.id === nextId);
-                        setFormProject(found ? found.title : 'Personal');
-                      }}
-                      className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
-                    >
-                      <option value="">Personal / Inbox</option>
-                      {availableProjects.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.title}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type="text"
-                      value={formProject}
-                      onChange={(e) => setFormProject(e.target.value)}
-                      placeholder="e.g. Portfolio refresh"
-                      className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
-                    />
+                  <select
+                    aria-label="Status"
+                    value={formStatus}
+                    onChange={(e) => setFormStatus(e.target.value as SharedTaskStatus)}
+                    className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  >
+                    {CANONICAL_TASK_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {TASK_STATUS_LABELS[s]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)] mb-1">
+                  {availableProjects.length > 0 ? 'Linked Project (Optional)' : 'Project / Area (Optional)'}
+                </label>
+                {availableProjects.length > 0 ? (
+                  <select
+                    aria-label="Linked Project"
+                    value={formProjectId}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setFormProjectId(nextId);
+                      setFormMilestoneId('');
+                      const found = availableProjects.find((p) => p.id === nextId);
+                      setFormProject(found ? found.title : 'Personal');
+                    }}
+                    className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  >
+                    <option value="">Personal / Inbox</option>
+                    {availableProjects.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={formProject}
+                    onChange={(e) => setFormProject(e.target.value)}
+                    placeholder="e.g. Portfolio refresh"
+                    className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  />
+                )}
+              </div>
+
+              {formProjectId && availableMilestones.length > 0 && (
+                <div>
+                  <label className="block dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)] mb-1">
+                    Milestone (Optional)
+                  </label>
+                  <select
+                    aria-label="Milestone"
+                    value={formMilestoneId}
+                    onChange={(e) => setFormMilestoneId(e.target.value)}
+                    className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                  >
+                    <option value="">No milestone</option>
+                    {availableMilestones.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)]">
+                      Scheduled Date
+                    </label>
+                    {formScheduledDate && (
+                      <button
+                        type="button"
+                        onClick={() => setFormScheduledDate('')}
+                        className="text-[10px] font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    aria-label="Scheduled Date"
+                    type="date"
+                    value={formScheduledDate}
+                    onChange={(e) => {
+                      setFormScheduledDate(e.target.value);
+                      if (formErrors.scheduledDate) {
+                        setFormErrors((prev) => ({ ...prev, scheduledDate: '' }));
+                      }
+                    }}
+                    className={`w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)] ${
+                      formErrors.scheduledDate ? 'border-[var(--dw-error)]' : 'border-[var(--dw-border)]'
+                    }`}
+                  />
+                  {formErrors.scheduledDate && (
+                    <p className="text-[11px] text-[var(--dw-error)] mt-1">{formErrors.scheduledDate}</p>
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)]">
+                      Due Date
+                    </label>
+                    {formDueDate && (
+                      <button
+                        type="button"
+                        onClick={() => setFormDueDate('')}
+                        className="text-[10px] font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    aria-label="Due Date"
+                    type="date"
+                    value={formDueDate}
+                    onChange={(e) => {
+                      setFormDueDate(e.target.value);
+                      if (formErrors.dueDate) {
+                        setFormErrors((prev) => ({ ...prev, dueDate: '' }));
+                      }
+                    }}
+                    className={`w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)] ${
+                      formErrors.dueDate ? 'border-[var(--dw-error)]' : 'border-[var(--dw-border)]'
+                    }`}
+                  />
+                  {formErrors.dueDate && (
+                    <p className="text-[11px] text-[var(--dw-error)] mt-1">{formErrors.dueDate}</p>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
-                    Hard Due Date (Optional)
-                  </label>
-                  <input
-                    type="date"
-                    value={formDueDate}
-                    onChange={(e) => setFormDueDate(e.target.value)}
-                    className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
-                  />
-                </div>
-                <div>
-                  <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
-                    Scheduled Time (Optional)
-                  </label>
-                  <input
-                    type="time"
-                    value={formScheduledTime}
-                    onChange={(e) => setFormScheduledTime(e.target.value)}
-                    className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
-                  />
-                </div>
+              <div>
+                <label className="block dw-type-caption uppercase text-[var(--dw-text-muted)] mb-1">
+                  Scheduled Time (Optional)
+                </label>
+                <input
+                  aria-label="Scheduled Time"
+                  type="time"
+                  value={formScheduledTime}
+                  onChange={(e) => setFormScheduledTime(e.target.value)}
+                  className="w-full min-h-[40px] px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                />
               </div>
 
               {/* Subtasks checklist builder */}
               <div className="space-y-2 pt-2 border-t border-[var(--dw-divider)]">
-                <label className="block dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
-                  Checklist / Subtasks (Optional)
-                </label>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="block dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                    Checklist / Subtasks (Optional)
+                  </label>
+                  {formSubtasks.length > 0 && (() => {
+                    const draftProg = computeSubtaskProgress(formSubtasks);
+                    return (
+                      <span className="text-[11px] font-semibold text-[var(--dw-text-secondary)]">
+                        {draftProg.completed} of {draftProg.total} done ({draftProg.percentage}%)
+                      </span>
+                    );
+                  })()}
+                </div>
+                {formSubtasks.length > 0 && (
+                  <DaywellProgressBar
+                    value={computeSubtaskProgress(formSubtasks).percentage}
+                    label="Draft subtask progress"
+                  />
+                )}
                 <div className="flex items-center gap-2">
                   <input
+                    aria-label="Add draft subtask"
                     type="text"
                     placeholder="Add subtask..."
                     value={newSubtaskInput}
-                    onChange={(e) => setNewSubtaskInput(e.target.value)}
+                    onChange={(e) => {
+                      setNewSubtaskInput(e.target.value);
+                      if (formSubtaskError) setFormSubtaskError('');
+                    }}
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') {
                         e.preventDefault();
                         handleAddSubtask();
                       }
                     }}
-                    className="flex-1 min-h-[38px] px-3 py-1.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                    className={`flex-1 min-h-[38px] px-3 py-1.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)] ${
+                      formSubtaskError ? 'border-[var(--dw-error)]' : 'border-[var(--dw-border)]'
+                    }`}
                   />
                   <DaywellButton
                     label="Add"
@@ -1104,24 +1404,134 @@ export function DaywellTasksModule({
                     onClick={handleAddSubtask}
                   />
                 </div>
+                {formSubtaskError && (
+                  <p className="text-[11px] text-[var(--dw-error)]">{formSubtaskError}</p>
+                )}
 
                 {formSubtasks.length > 0 && (
-                  <div className="space-y-1 max-h-32 overflow-y-auto">
-                    {formSubtasks.map((st) => (
-                      <div
-                        key={st.id}
-                        className="flex items-center justify-between p-1.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-sm)] text-xs"
-                      >
-                        <span className="text-[var(--dw-text-primary)]">{st.title}</span>
-                        <DaywellIconButton
-                          label={`Remove subtask ${st.title}`}
-                          size="compact"
-                          tone="danger"
-                          onClick={() => handleRemoveSubtask(st.id)}
-                          icon={<X className="w-3.5 h-3.5" />}
-                        />
-                      </div>
-                    ))}
+                  <div className="space-y-1.5 max-h-44 overflow-y-auto">
+                    {formSubtasks.map((st, idx) => {
+                      const isEditingSub = editingFormSubtaskId === st.id;
+                      return (
+                        <div
+                          key={st.id}
+                          className="p-1.5 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] space-y-1"
+                        >
+                          {isEditingSub ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  aria-label={`Edit draft subtask ${st.title}`}
+                                  type="text"
+                                  value={editingFormSubtaskTitle}
+                                  onChange={(e) => {
+                                    setEditingFormSubtaskTitle(e.target.value);
+                                    if (editingFormSubtaskError) setEditingFormSubtaskError('');
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      handleSaveFormSubtaskEdit(st.id);
+                                    } else if (e.key === 'Escape') {
+                                      e.preventDefault();
+                                      setEditingFormSubtaskId(null);
+                                      setEditingFormSubtaskTitle('');
+                                      setEditingFormSubtaskError('');
+                                    }
+                                  }}
+                                  className="flex-1 min-h-[32px] px-2.5 py-1 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                                />
+                                <DaywellIconButton
+                                  label={`Save draft subtask ${st.title}`}
+                                  size="compact"
+                                  tone="primary"
+                                  onClick={() => handleSaveFormSubtaskEdit(st.id)}
+                                  icon={<Check className="w-3.5 h-3.5" />}
+                                />
+                                <DaywellIconButton
+                                  label="Cancel editing draft subtask"
+                                  size="compact"
+                                  tone="muted"
+                                  onClick={() => {
+                                    setEditingFormSubtaskId(null);
+                                    setEditingFormSubtaskTitle('');
+                                    setEditingFormSubtaskError('');
+                                  }}
+                                  icon={<X className="w-3.5 h-3.5" />}
+                                />
+                              </div>
+                              {editingFormSubtaskError && (
+                                <p className="text-[11px] text-[var(--dw-error)]">
+                                  {editingFormSubtaskError}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between gap-2 text-xs">
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <button
+                                  type="button"
+                                  aria-label={`Toggle draft subtask ${st.title}`}
+                                  onClick={() => handleToggleFormSubtask(st.id)}
+                                  className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 cursor-pointer ${
+                                    st.completed
+                                      ? 'bg-[var(--dw-primary)] border-[var(--dw-primary)] text-[var(--dw-on-primary)]'
+                                      : 'border-[var(--dw-border)] bg-[var(--dw-card)]'
+                                  }`}
+                                >
+                                  {st.completed && <Check className="w-3 h-3 stroke-[3]" />}
+                                </button>
+                                <span
+                                  className={`truncate ${
+                                    st.completed
+                                      ? 'line-through text-[var(--dw-text-disabled)]'
+                                      : 'text-[var(--dw-text-primary)]'
+                                  }`}
+                                >
+                                  {st.title}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-0.5 shrink-0">
+                                <DaywellIconButton
+                                  label={`Move draft subtask up ${st.title}`}
+                                  size="compact"
+                                  tone="muted"
+                                  disabled={idx === 0}
+                                  onClick={() => handleReorderFormSubtask(idx, idx - 1)}
+                                  icon={<ArrowUp className="w-3.5 h-3.5" />}
+                                />
+                                <DaywellIconButton
+                                  label={`Move draft subtask down ${st.title}`}
+                                  size="compact"
+                                  tone="muted"
+                                  disabled={idx === formSubtasks.length - 1}
+                                  onClick={() => handleReorderFormSubtask(idx, idx + 1)}
+                                  icon={<ArrowDown className="w-3.5 h-3.5" />}
+                                />
+                                <DaywellIconButton
+                                  label={`Edit draft subtask ${st.title}`}
+                                  size="compact"
+                                  tone="muted"
+                                  onClick={() => {
+                                    setEditingFormSubtaskId(st.id);
+                                    setEditingFormSubtaskTitle(st.title);
+                                    setEditingFormSubtaskError('');
+                                  }}
+                                  icon={<Edit3 className="w-3.5 h-3.5" />}
+                                />
+                                <DaywellIconButton
+                                  label={`Remove subtask ${st.title}`}
+                                  size="compact"
+                                  tone="danger"
+                                  onClick={() => handleRemoveSubtask(st.id)}
+                                  icon={<X className="w-3.5 h-3.5" />}
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1155,7 +1565,10 @@ export function DaywellTasksModule({
                     label="Delete Task"
                     variant="text"
                     size="compact"
-                    onClick={() => handleDeleteTask(editingTaskId)}
+                    onClick={() => {
+                      const target = tasks.find((t) => t.id === editingTaskId);
+                      if (target) setPendingDeleteTask(target);
+                    }}
                     className="!text-[var(--dw-error)]"
                   />
                 ) : (
@@ -1182,6 +1595,413 @@ export function DaywellTasksModule({
           </div>
         </div>
       )}
+
+      {/* TASK DETAILS MODAL */}
+      {detailTask && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Task Details"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDetailTaskId(null);
+          }}
+        >
+          {(() => {
+            const effectiveStatus = resolveEffectiveTaskStatus(detailTask);
+            const completed = effectiveStatus === 'completed';
+            const statusTone: DaywellStatusTone =
+              effectiveStatus === 'completed'
+                ? 'success'
+                : effectiveStatus === 'in_progress'
+                  ? 'info'
+                  : effectiveStatus === 'cancelled'
+                    ? 'error'
+                    : 'neutral';
+            const priorityTone: DaywellStatusTone =
+              detailTask.priority === 'urgent'
+                ? 'error'
+                : detailTask.priority === 'high'
+                  ? 'warning'
+                  : 'neutral';
+            const parsedScheduled = detailTask.scheduledDate
+              ? CalendarDate.tryParse(detailTask.scheduledDate)
+              : null;
+            const parsedDue = detailTask.dueDate
+              ? CalendarDate.tryParse(detailTask.dueDate)
+              : null;
+
+            return (
+              <div className="w-full max-w-md bg-[var(--dw-elevated)] rounded-[var(--dw-radius-xl)] p-5 shadow-2xl border border-[var(--dw-border)] space-y-4 max-h-[90vh] overflow-y-auto">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="space-y-1 flex-1 min-w-0">
+                    <span className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)]">
+                      Task Details
+                    </span>
+                    <h2
+                      className={`dw-type-title ${
+                        completed
+                          ? 'line-through text-[var(--dw-text-muted)]'
+                          : 'text-[var(--dw-text-primary)]'
+                      }`}
+                    >
+                      {detailTask.title}
+                    </h2>
+                  </div>
+                  <DaywellIconButton
+                    label="Close task details"
+                    size="compact"
+                    tone="muted"
+                    onClick={() => setDetailTaskId(null)}
+                    icon={<X className="w-4 h-4" />}
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <DaywellStatusBadge
+                    tone={statusTone}
+                    label={TASK_STATUS_LABELS[effectiveStatus]}
+                  />
+                  <DaywellStatusBadge
+                    tone={priorityTone}
+                    icon={<Flag className="w-3 h-3" />}
+                    label={`${TASK_PRIORITY_LABELS[detailTask.priority]} Priority`}
+                  />
+                  {detailTask.isArchived && (
+                    <DaywellStatusBadge
+                      tone="warning"
+                      icon={<Archive className="w-3 h-3" />}
+                      label="Archived"
+                    />
+                  )}
+                </div>
+
+                {detailTask.description ? (
+                  <div className="p-3 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                    <p className="text-xs text-[var(--dw-text-primary)] whitespace-pre-wrap leading-relaxed">
+                      {detailTask.description}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-xs text-[var(--dw-text-muted)] italic">
+                    No description added.
+                  </p>
+                )}
+
+                <div className="grid grid-cols-1 gap-2 text-xs bg-[var(--dw-card)] p-3 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--dw-text-muted)]">Scheduled Date</span>
+                    <span className="font-semibold text-[var(--dw-text-primary)]">
+                      {parsedScheduled
+                        ? SharedDateFormatter.formatDual(parsedScheduled, false)
+                        : detailTask.scheduledDate || 'Not set'}
+                      {detailTask.scheduledTime ? ` · ${detailTask.scheduledTime}` : ''}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[var(--dw-text-muted)]">Due Date</span>
+                    <span className="font-semibold text-[var(--dw-text-primary)]">
+                      {parsedDue
+                        ? SharedDateFormatter.formatDual(parsedDue, false)
+                        : detailTask.dueDate || 'Not set'}
+                    </span>
+                  </div>
+                  {detailTask.projectName && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--dw-text-muted)]">Project / Area</span>
+                      <span className="font-semibold text-[var(--dw-text-primary)]">
+                        {detailTask.projectName}
+                      </span>
+                    </div>
+                  )}
+                  {detailMilestoneTitle && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--dw-text-muted)]">Milestone</span>
+                      <span className="font-semibold text-[var(--dw-text-primary)]">
+                        {detailMilestoneTitle}
+                      </span>
+                    </div>
+                  )}
+                  {detailTask.completedAt && (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[var(--dw-text-muted)]">Completed At</span>
+                      <span className="font-medium text-[var(--dw-text-secondary)]">
+                        {detailTask.completedAt.slice(0, 10)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Interactive Subtasks & Progress Section inside Task Details */}
+                {(() => {
+                  const detailProgress = computeSubtaskProgress(detailTask.subtasks);
+                  return (
+                    <div className="space-y-2.5 p-3 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-secondary)]">
+                          Subtasks
+                        </span>
+                        <span className="text-[11px] font-semibold text-[var(--dw-text-secondary)]">
+                          {detailProgress.total > 0
+                            ? `${detailProgress.completed} of ${detailProgress.total} done (${detailProgress.percentage}%)`
+                            : '0 subtasks'}
+                        </span>
+                      </div>
+
+                      {detailProgress.total > 0 ? (
+                        <DaywellProgressBar
+                          value={detailProgress.percentage}
+                          label={`Parent task subtask progress for ${detailTask.title}`}
+                        />
+                      ) : (
+                        <p className="text-[11px] text-[var(--dw-text-muted)] italic">
+                          No subtasks yet. Break this task into smaller steps below.
+                        </p>
+                      )}
+
+                      {detailTask.subtasks.length > 0 && (
+                        <div className="space-y-1.5 max-h-52 overflow-y-auto">
+                          {detailTask.subtasks.map((st, idx) => {
+                            const isEditingSub = editingDetailSubtaskId === st.id;
+                            return (
+                              <div
+                                key={st.id}
+                                className="p-2 bg-[var(--dw-card)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] space-y-1"
+                              >
+                                {isEditingSub ? (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        aria-label="Edit subtask title"
+                                        type="text"
+                                        value={editingDetailSubtaskTitle}
+                                        onChange={(e) => {
+                                          setEditingDetailSubtaskTitle(e.target.value);
+                                          if (editingDetailSubtaskError) {
+                                            setEditingDetailSubtaskError('');
+                                          }
+                                        }}
+                                        onKeyDown={(e) => {
+                                          if (e.key === 'Enter') {
+                                            e.preventDefault();
+                                            handleSaveDetailSubtaskEdit(detailTask.id, st.id);
+                                          } else if (e.key === 'Escape') {
+                                            e.preventDefault();
+                                            setEditingDetailSubtaskId(null);
+                                            setEditingDetailSubtaskTitle('');
+                                            setEditingDetailSubtaskError('');
+                                          }
+                                        }}
+                                        className="flex-1 min-h-[34px] px-2.5 py-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)]"
+                                      />
+                                      <DaywellIconButton
+                                        label={`Save subtask ${st.title}`}
+                                        size="compact"
+                                        tone="primary"
+                                        onClick={() =>
+                                          handleSaveDetailSubtaskEdit(detailTask.id, st.id)
+                                        }
+                                        icon={<Check className="w-3.5 h-3.5" />}
+                                      />
+                                      <DaywellIconButton
+                                        label="Cancel editing subtask"
+                                        size="compact"
+                                        tone="muted"
+                                        onClick={() => {
+                                          setEditingDetailSubtaskId(null);
+                                          setEditingDetailSubtaskTitle('');
+                                          setEditingDetailSubtaskError('');
+                                        }}
+                                        icon={<X className="w-3.5 h-3.5" />}
+                                      />
+                                    </div>
+                                    {editingDetailSubtaskError && (
+                                      <p className="text-[11px] text-[var(--dw-error)]">
+                                        {editingDetailSubtaskError}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center justify-between gap-2 text-xs">
+                                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                                      <button
+                                        type="button"
+                                        aria-label={`Toggle subtask ${st.title}`}
+                                        onClick={() => toggleSubtask(detailTask.id, st.id)}
+                                        className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 cursor-pointer ${
+                                          st.completed
+                                            ? 'bg-[var(--dw-primary)] border-[var(--dw-primary)] text-[var(--dw-on-primary)]'
+                                            : 'border-[var(--dw-border)] bg-[var(--dw-surface-subtle)]'
+                                        }`}
+                                      >
+                                        {st.completed && <Check className="w-3 h-3 stroke-[3]" />}
+                                      </button>
+                                      <span
+                                        className={`truncate ${
+                                          st.completed
+                                            ? 'line-through text-[var(--dw-text-disabled)]'
+                                            : 'text-[var(--dw-text-primary)]'
+                                        }`}
+                                      >
+                                        {st.title}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-0.5 shrink-0">
+                                      <DaywellIconButton
+                                        label={`Move subtask up ${st.title}`}
+                                        size="compact"
+                                        tone="muted"
+                                        disabled={idx === 0}
+                                        onClick={() =>
+                                          handleReorderDetailSubtask(detailTask.id, idx, idx - 1)
+                                        }
+                                        icon={<ArrowUp className="w-3.5 h-3.5" />}
+                                      />
+                                      <DaywellIconButton
+                                        label={`Move subtask down ${st.title}`}
+                                        size="compact"
+                                        tone="muted"
+                                        disabled={idx === detailTask.subtasks.length - 1}
+                                        onClick={() =>
+                                          handleReorderDetailSubtask(detailTask.id, idx, idx + 1)
+                                        }
+                                        icon={<ArrowDown className="w-3.5 h-3.5" />}
+                                      />
+                                      <DaywellIconButton
+                                        label={`Edit subtask ${st.title}`}
+                                        size="compact"
+                                        tone="muted"
+                                        onClick={() => {
+                                          setEditingDetailSubtaskId(st.id);
+                                          setEditingDetailSubtaskTitle(st.title);
+                                          setEditingDetailSubtaskError('');
+                                        }}
+                                        icon={<Edit3 className="w-3.5 h-3.5" />}
+                                      />
+                                      <DaywellIconButton
+                                        label={`Delete subtask ${st.title}`}
+                                        size="compact"
+                                        tone="danger"
+                                        onClick={() =>
+                                          handleDeleteDetailSubtask(detailTask.id, st.id)
+                                        }
+                                        icon={<Trash2 className="w-3.5 h-3.5" />}
+                                      />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      <div className="space-y-1 pt-1">
+                        <div className="flex items-center gap-2">
+                          <input
+                            aria-label="Add subtask to task"
+                            type="text"
+                            placeholder="Add a subtask..."
+                            value={detailSubtaskInput}
+                            onChange={(e) => {
+                              setDetailSubtaskInput(e.target.value);
+                              if (detailSubtaskError) setDetailSubtaskError('');
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                handleAddDetailSubtask(detailTask.id);
+                              }
+                            }}
+                            className={`flex-1 min-h-[38px] px-3 py-1.5 bg-[var(--dw-card)] rounded-[var(--dw-radius-md)] border text-xs text-[var(--dw-text-primary)] outline-none focus:border-[var(--dw-primary)] ${
+                              detailSubtaskError
+                                ? 'border-[var(--dw-error)]'
+                                : 'border-[var(--dw-border)]'
+                            }`}
+                          />
+                          <DaywellButton
+                            label="Add"
+                            variant="tonal"
+                            size="compact"
+                            onClick={() => handleAddDetailSubtask(detailTask.id)}
+                          />
+                        </div>
+                        {detailSubtaskError && (
+                          <p className="text-[11px] text-[var(--dw-error)]">
+                            {detailSubtaskError}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-[var(--dw-divider)]">
+                  <div className="flex items-center gap-1.5">
+                    <DaywellButton
+                      label={detailTask.isArchived ? 'Restore' : 'Archive'}
+                      variant="outlined"
+                      size="compact"
+                      leadingIcon={
+                        detailTask.isArchived ? (
+                          <RotateCcw className="w-3.5 h-3.5" />
+                        ) : (
+                          <Archive className="w-3.5 h-3.5" />
+                        )
+                      }
+                      onClick={() => handleToggleArchive(detailTask)}
+                    />
+                    <DaywellButton
+                      label="Delete"
+                      variant="text"
+                      size="compact"
+                      leadingIcon={<Trash2 className="w-3.5 h-3.5" />}
+                      onClick={() => setPendingDeleteTask(detailTask)}
+                      className="!text-[var(--dw-error)]"
+                    />
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <DaywellButton
+                      label="Edit"
+                      variant="tonal"
+                      size="compact"
+                      leadingIcon={<Edit3 className="w-3.5 h-3.5" />}
+                      onClick={() => handleOpenEdit(detailTask)}
+                    />
+                    <DaywellButton
+                      label={completed ? 'Reopen' : 'Complete'}
+                      variant="primary"
+                      size="compact"
+                      leadingIcon={<Check className="w-3.5 h-3.5" />}
+                      onClick={() => toggleTask(detailTask.id)}
+                    />
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+      )}
+
+      {/* Safe Delete Confirmation Dialog */}
+      <DaywellConfirmationDialog
+        isOpen={Boolean(pendingDeleteTask)}
+        title="Delete task?"
+        description={
+          pendingDeleteTask
+            ? `Delete "${pendingDeleteTask.title}"? You can undo immediately afterward.`
+            : ''
+        }
+        confirmLabel="Delete Task"
+        cancelLabel="Cancel"
+        destructive
+        onCancel={() => setPendingDeleteTask(null)}
+        onConfirm={() => {
+          if (pendingDeleteTask) {
+            executeDeleteTask(pendingDeleteTask.id);
+          }
+        }}
+      />
 
       {/* Unsaved Changes Dialog */}
       <UnsavedChangesDialog

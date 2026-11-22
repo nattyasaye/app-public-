@@ -4,10 +4,12 @@ import {
   GroupedListBlockConfig,
   ChecklistBlockConfig,
   ScheduleBlockConfig,
+  DerivedTaskMilestoneProgress,
   ProjectBlockProgressMetric,
   ProjectProgressSummary,
   ProjectScheduleSpan,
   ProjectValidationError,
+  calculateDerivedTaskMilestoneProgress,
   getProjectScheduleSpan,
   meetsScheduleDurationRule,
   parseCounterBlockConfig,
@@ -21,12 +23,22 @@ import {
 } from '../domain/bimOutreachTemplate';
 import {
   SharedGoal,
+  SharedMilestone,
   SharedProject,
   SharedProjectBlockType,
   SharedProjectTrackingBlock,
   SharedProjectTrackingRecord,
   SharedTask,
 } from '../domain/sharedFoundation';
+import {
+  DaywellTaskRecord,
+  TaskPriority,
+  TaskStatus,
+  createTaskRecord,
+  deleteTaskFromList,
+  toggleTaskCompletionRecord,
+  updateTaskRecord,
+} from '../domain/taskOperations';
 import { WebProjectsRepository } from '../data/projectsRepository';
 import {
   buildProjectPackageFilename,
@@ -69,12 +81,26 @@ export interface UpdateProjectDetailsInput {
   primaryDraftTempId?: string;
 }
 
+export interface ProjectSectionGroup {
+  record: SharedProjectTrackingRecord;
+  tasks: DaywellTaskRecord[];
+}
+
+export interface ProjectSectionsViewModel {
+  sectionBlockId?: string;
+  sections: ProjectSectionGroup[];
+  unsectionedTasks: DaywellTaskRecord[];
+}
+
 export interface ProjectDetailSnapshot {
   project: SharedProject;
   blocks: SharedProjectTrackingBlock[];
   records: SharedProjectTrackingRecord[];
   summary: ProjectProgressSummary;
-  linkedTasks: SharedTask[];
+  linkedTasks: DaywellTaskRecord[];
+  milestones: SharedMilestone[];
+  sectionsView: ProjectSectionsViewModel;
+  derivedProgress: DerivedTaskMilestoneProgress;
 }
 
 export interface EnrichedProgressLogEntry {
@@ -116,6 +142,17 @@ function readLocalArray<T>(key: string): T[] {
   }
 }
 
+function writeLocalArray<T>(key: string, items: T[]): void {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(key, JSON.stringify(items));
+}
+
+function isTaskRecordDone(
+  task: Partial<Pick<SharedTask, 'status'>> & { completed?: boolean }
+): boolean {
+  return task.completed === true || task.status === 'completed';
+}
+
 class ProjectsService {
   private readonly repo = new WebProjectsRepository();
 
@@ -133,8 +170,8 @@ class ProjectsService {
     return readLocalArray<SharedGoal>(GOALS_KEY);
   }
 
-  public getLinkedTasks(projectId: string): SharedTask[] {
-    return readLocalArray<SharedTask>(TASKS_KEY).filter(
+  public getLinkedTasks(projectId: string): DaywellTaskRecord[] {
+    return readLocalArray<DaywellTaskRecord>(TASKS_KEY).filter(
       (t) => t.projectId === projectId
     );
   }
@@ -154,6 +191,31 @@ class ProjectsService {
     return out;
   }
 
+  public getDerivedTaskMilestoneProgress(
+    project: SharedProject,
+    summary?: ProjectProgressSummary
+  ): DerivedTaskMilestoneProgress {
+    const activeLinkedTasks = this.getLinkedTasks(project.id).filter(
+      (t) => !t.isArchived && t.status !== 'cancelled'
+    );
+    const completedTasks = activeLinkedTasks.filter((t) =>
+      isTaskRecordDone(t)
+    ).length;
+    const milestones = this.repo.getMilestonesForProject(project.id);
+    const completedMilestones = milestones.filter((m) => m.isCompleted).length;
+
+    return calculateDerivedTaskMilestoneProgress({
+      totalTasks: activeLinkedTasks.length,
+      completedTasks,
+      totalMilestones: milestones.length,
+      completedMilestones,
+      isProjectManuallyCompleted:
+        project.status === 'completed' &&
+        (summary?.milestonesTotal ?? milestones.length) === 0 &&
+        activeLinkedTasks.length === 0,
+    });
+  }
+
   public getProjectDetailSnapshot(
     projectId: string,
     options: { asOfDate?: CalendarDate } = {}
@@ -168,12 +230,21 @@ class ProjectsService {
       asOfDate: options.asOfDate,
     });
     const linkedTasks = this.getLinkedTasks(projectId);
+    const milestones = this.repo.getMilestonesForProject(projectId);
+    const sectionsView = this.getProjectSectionsViewModel(projectId);
+    const derivedProgress = this.getDerivedTaskMilestoneProgress(
+      project,
+      summary
+    );
     return {
       project,
       blocks,
       records,
       summary,
       linkedTasks,
+      milestones,
+      sectionsView,
+      derivedProgress,
     };
   }
 
@@ -878,6 +949,649 @@ class ProjectsService {
       }
     }
   }
+  // --- Stage 1.3 Milestones Workflow ---
+
+  public listMilestones(projectId?: string): SharedMilestone[] {
+    return projectId
+      ? this.repo.getMilestonesForProject(projectId)
+      : this.repo.getAllMilestones();
+  }
+
+  public createMilestone(input: {
+    id?: string;
+    projectId: string;
+    title: string;
+    dueDate?: string;
+    isCompleted?: boolean;
+  }): SharedMilestone {
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
+    const created = this.repo.createMilestone({
+      id: input.id?.trim() || makeId('ms'),
+      projectId: input.projectId,
+      title: input.title.trim(),
+      ...(input.dueDate?.trim() ? { dueDate: input.dueDate.trim() } : {}),
+      isCompleted: input.isCompleted === true,
+      createdAt: nowIso,
+    });
+    broadcastSync();
+    return created;
+  }
+
+  public updateMilestone(input: {
+    milestoneId: string;
+    title: string;
+    dueDate?: string;
+    isCompleted?: boolean;
+  }): SharedMilestone {
+    const existing = this.repo
+      .getAllMilestones()
+      .find((m) => m.id === input.milestoneId);
+    if (!existing) {
+      throw new ProjectValidationError(
+        `Cannot update missing milestone "${input.milestoneId}".`
+      );
+    }
+    const updated = this.repo.updateMilestone({
+      ...existing,
+      title: input.title.trim(),
+      dueDate: input.dueDate?.trim() || undefined,
+      isCompleted:
+        input.isCompleted !== undefined
+          ? input.isCompleted
+          : existing.isCompleted,
+    });
+    broadcastSync();
+    return updated;
+  }
+
+  public toggleMilestone(
+    milestoneId: string,
+    isCompleted?: boolean
+  ): SharedMilestone {
+    const existing = this.repo
+      .getAllMilestones()
+      .find((m) => m.id === milestoneId);
+    if (!existing) {
+      throw new ProjectValidationError(
+        `Cannot toggle missing milestone "${milestoneId}".`
+      );
+    }
+    const target =
+      isCompleted !== undefined ? isCompleted : !existing.isCompleted;
+    const updated = this.repo.toggleMilestone(milestoneId, target);
+    broadcastSync();
+    return updated;
+  }
+
+  public deleteMilestone(milestoneId: string): {
+    deleted?: SharedMilestone;
+    detachedTaskIds: string[];
+  } {
+    const result = this.repo.deleteMilestone(milestoneId);
+    if (result.deleted) {
+      broadcastSync();
+    }
+    return result;
+  }
+
+  public restoreMilestoneSnapshot(
+    snapshot: SharedMilestone,
+    restoreTaskIds: string[] = []
+  ): SharedMilestone {
+    const existing = this.repo
+      .getAllMilestones()
+      .find((m) => m.id === snapshot.id);
+    const restored = existing
+      ? existing
+      : this.repo.createMilestone(snapshot);
+
+    if (restoreTaskIds.length > 0) {
+      const idSet = new Set(restoreTaskIds);
+      const tasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+      let changed = false;
+      const nextTasks = tasks.map((t) => {
+        if (!idSet.has(t.id) || t.projectId !== snapshot.projectId) return t;
+        changed = true;
+        return { ...t, milestoneId: restored.id };
+      });
+      if (changed) {
+        writeLocalArray(TASKS_KEY, nextTasks);
+      }
+    }
+    broadcastSync();
+    return restored;
+  }
+
+  // --- Stage 1.3 Project Sections & Linked Task Organization ---
+
+  public getProjectSectionsViewModel(
+    projectId: string
+  ): ProjectSectionsViewModel {
+    const blocks = this.repo
+      .getBlocksForProject(projectId, { includeArchived: false })
+      .filter((b) => b.blockType === 'grouped_list');
+    const records = this.repo.getRecordsForProject(projectId);
+    const activeTasks = this.getLinkedTasks(projectId).filter(
+      (t) => !t.isArchived && t.status !== 'cancelled'
+    );
+
+    const preferredBlock =
+      blocks.find((b) => b.config?.kind === 'task_sections') ??
+      blocks.find((b) => b.title.toLowerCase() === 'task sections') ??
+      blocks[0];
+
+    const activeGroupedBlockIds = new Set(blocks.map((b) => b.id));
+    const groupRecords = records.filter(
+      (r) =>
+        r.recordType === 'group' && activeGroupedBlockIds.has(r.blockId)
+    );
+    const groupIdSet = new Set(groupRecords.map((g) => g.id));
+
+    const tasksById = new Map(activeTasks.map((t) => [t.id, t]));
+    const taskToGroup = new Map<string, { groupId: string; sortOrder: number }>();
+
+    for (const rec of records) {
+      if (
+        rec.recordType === 'grouped_item' &&
+        activeGroupedBlockIds.has(rec.blockId) &&
+        rec.linkedTaskId &&
+        rec.parentRecordId &&
+        groupIdSet.has(rec.parentRecordId) &&
+        tasksById.has(rec.linkedTaskId)
+      ) {
+        if (!taskToGroup.has(rec.linkedTaskId)) {
+          taskToGroup.set(rec.linkedTaskId, {
+            groupId: rec.parentRecordId,
+            sortOrder: rec.sortOrder,
+          });
+        }
+      }
+    }
+
+    const groupedTasksMap = new Map<
+      string,
+      Array<{ task: DaywellTaskRecord; order: number }>
+    >();
+    for (const g of groupRecords) {
+      groupedTasksMap.set(g.id, []);
+    }
+
+    const unsectionedTasks: DaywellTaskRecord[] = [];
+    for (const task of activeTasks) {
+      const mapping = taskToGroup.get(task.id);
+      if (mapping && groupedTasksMap.has(mapping.groupId)) {
+        groupedTasksMap.get(mapping.groupId)!.push({
+          task,
+          order: mapping.sortOrder,
+        });
+      } else {
+        unsectionedTasks.push(task);
+      }
+    }
+
+    const sections: ProjectSectionGroup[] = groupRecords.map((group) => {
+      const entries = (groupedTasksMap.get(group.id) ?? []).slice();
+      entries.sort((a, b) => a.order - b.order);
+      return {
+        record: group,
+        tasks: entries.map((e) => e.task),
+      };
+    });
+
+    return {
+      sectionBlockId: preferredBlock?.id,
+      sections,
+      unsectionedTasks,
+    };
+  }
+
+  public ensureProjectSectionsBlock(
+    projectId: string
+  ): SharedProjectTrackingBlock {
+    const blocks = this.repo
+      .getBlocksForProject(projectId, { includeArchived: false })
+      .filter((b) => b.blockType === 'grouped_list');
+    const existing =
+      blocks.find((b) => b.config?.kind === 'task_sections') ??
+      blocks.find((b) => b.title.toLowerCase() === 'task sections') ??
+      blocks[0];
+    if (existing) return existing;
+
+    return this.createBlock({
+      projectId,
+      blockType: 'grouped_list',
+      title: 'Task Sections',
+      config: {
+        kind: 'task_sections',
+        groupLabel: 'Section',
+        itemLabel: 'Task',
+        showGroupTotals: false,
+        showDailyTotals: false,
+      },
+    });
+  }
+
+  public createProjectSection(
+    projectId: string,
+    title: string
+  ): SharedProjectTrackingRecord {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      throw new ProjectValidationError('Section title is required.');
+    }
+    const block = this.ensureProjectSectionsBlock(projectId);
+    return this.createGroup({
+      projectId,
+      blockId: block.id,
+      title: trimmed,
+    });
+  }
+
+  public renameProjectSection(
+    sectionRecordId: string,
+    title: string
+  ): SharedProjectTrackingRecord {
+    const trimmed = title.trim();
+    if (!trimmed) {
+      throw new ProjectValidationError('Section title is required.');
+    }
+    const allRecords = readLocalArray<SharedProjectTrackingRecord>(
+      WebProjectsRepository.RECORDS_KEY
+    );
+    const existing = allRecords.find(
+      (r) => r.id === sectionRecordId && r.recordType === 'group'
+    );
+    if (!existing) {
+      throw new ProjectValidationError(
+        `Cannot rename missing section "${sectionRecordId}".`
+      );
+    }
+    const updated = this.repo.updateRecord({
+      ...existing,
+      title: trimmed,
+    });
+    broadcastSync();
+    return updated;
+  }
+
+  public deleteProjectSection(
+    projectId: string,
+    sectionRecordId: string
+  ): {
+    deletedGroup?: SharedProjectTrackingRecord;
+    detachedTaskIds: string[];
+  } {
+    const records = this.repo.getRecordsForProject(projectId);
+    const targetGroup = records.find(
+      (r) => r.id === sectionRecordId && r.recordType === 'group'
+    );
+    if (!targetGroup) {
+      return { detachedTaskIds: [] };
+    }
+
+    const children = records.filter((r) => r.parentRecordId === sectionRecordId);
+    const detachedTaskIds: string[] = [];
+
+    for (const child of children) {
+      if (child.linkedTaskId) {
+        detachedTaskIds.push(child.linkedTaskId);
+      }
+      const hasProgressLogs = records.some(
+        (r) => r.parentRecordId === child.id && r.recordType === 'progress_log'
+      );
+      if (hasProgressLogs) {
+        const nextChild: SharedProjectTrackingRecord = { ...child };
+        delete nextChild.parentRecordId;
+        delete nextChild.linkedTaskId;
+        this.repo.updateRecord(nextChild);
+      } else {
+        this.repo.deleteRecord(child.id);
+      }
+    }
+
+    this.repo.deleteRecord(sectionRecordId);
+    broadcastSync();
+    return { deletedGroup: targetGroup, detachedTaskIds };
+  }
+
+  public restoreProjectSection(
+    projectId: string,
+    deletedGroup: SharedProjectTrackingRecord,
+    detachedTaskIds: string[] = []
+  ): SharedProjectTrackingRecord {
+    const existingBlock = this.repo
+      .getBlocksForProject(projectId, { includeArchived: true })
+      .find((b) => b.id === deletedGroup.blockId);
+    const block = existingBlock ?? this.ensureProjectSectionsBlock(projectId);
+    const records = this.repo.getRecordsForProject(projectId, { blockId: block.id });
+    const existingGroup = records.find((r) => r.id === deletedGroup.id);
+    const restoredGroup =
+      existingGroup ??
+      this.repo.createRecord({
+        ...deletedGroup,
+        blockId: block.id,
+        projectId,
+      });
+
+    for (const taskId of detachedTaskIds) {
+      this.assignTaskToProjectSection(projectId, taskId, restoredGroup.id);
+    }
+    broadcastSync();
+    return restoredGroup;
+  }
+
+  private detachTaskSectionLinks(
+    projectId: string,
+    taskId: string
+  ): string | undefined {
+    const records = this.repo.getRecordsForProject(projectId);
+    let previousSectionId: string | undefined;
+    for (const rec of records) {
+      if (rec.linkedTaskId !== taskId) continue;
+      if (rec.parentRecordId && !previousSectionId) {
+        previousSectionId = rec.parentRecordId;
+      }
+      const hasProgressLogs = records.some(
+        (r) => r.parentRecordId === rec.id && r.recordType === 'progress_log'
+      );
+      if (hasProgressLogs || rec.recordType !== 'grouped_item') {
+        const updated = { ...rec };
+        delete updated.linkedTaskId;
+        this.repo.updateRecord(updated);
+      } else {
+        this.repo.deleteRecord(rec.id);
+      }
+    }
+    return previousSectionId;
+  }
+
+  public cleanupSectionLinksForTask(taskId: string): void {
+    const allRecords = readLocalArray<SharedProjectTrackingRecord>(
+      WebProjectsRepository.RECORDS_KEY
+    );
+    const affectedProjects = new Set<string>();
+    for (const rec of allRecords) {
+      if (rec.linkedTaskId === taskId) {
+        affectedProjects.add(rec.projectId);
+      }
+    }
+    for (const projectId of affectedProjects) {
+      this.detachTaskSectionLinks(projectId, taskId);
+    }
+    if (affectedProjects.size > 0) {
+      broadcastSync();
+    }
+  }
+
+  public assignTaskToProjectSection(
+    projectId: string,
+    taskId: string,
+    sectionRecordId?: string | null
+  ): void {
+    this.detachTaskSectionLinks(projectId, taskId);
+
+    const trimmedSectionId = sectionRecordId?.trim() || undefined;
+    if (!trimmedSectionId) {
+      broadcastSync();
+      return;
+    }
+
+    const records = this.repo.getRecordsForProject(projectId);
+    const section = records.find(
+      (r) => r.id === trimmedSectionId && r.recordType === 'group'
+    );
+    if (!section) {
+      throw new ProjectValidationError(
+        `Cannot assign task to missing section "${trimmedSectionId}".`
+      );
+    }
+    const task = readLocalArray<DaywellTaskRecord>(TASKS_KEY).find(
+      (t) => t.id === taskId && t.projectId === projectId
+    );
+    if (!task) {
+      throw new ProjectValidationError(
+        `Cannot assign missing task "${taskId}" to section.`
+      );
+    }
+
+    const maxSort = records
+      .filter(
+        (r) =>
+          r.blockId === section.blockId &&
+          r.recordType === 'grouped_item' &&
+          r.parentRecordId === section.id
+      )
+      .reduce((max, r) => Math.max(max, r.sortOrder), -1);
+
+    const nowIso = EthiopiaClock.nowUtc().toISOString();
+    this.repo.createRecord({
+      id: makeId('seclink'),
+      projectId,
+      blockId: section.blockId,
+      parentRecordId: section.id,
+      recordType: 'grouped_item',
+      title: task.title,
+      sortOrder: maxSort + 1,
+      isCompleted: isTaskRecordDone(task),
+      linkedTaskId: task.id,
+      metadata: { kind: 'task_section_link' },
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    });
+    broadcastSync();
+  }
+
+  private syncLinkedSectionRecordForTask(task: DaywellTaskRecord): void {
+    if (!task.projectId) return;
+    const records = this.repo.getRecordsForProject(task.projectId);
+    for (const rec of records) {
+      if (rec.linkedTaskId !== task.id) continue;
+      if (
+        rec.title !== task.title ||
+        rec.isCompleted !== isTaskRecordDone(task)
+      ) {
+        this.repo.updateRecord({
+          ...rec,
+          title: task.title,
+          isCompleted: isTaskRecordDone(task),
+          completedAt: isTaskRecordDone(task)
+            ? rec.completedAt ?? EthiopiaClock.nowUtc().toISOString()
+            : undefined,
+        });
+      }
+    }
+  }
+
+  public createTaskInProject(input: {
+    projectId: string;
+    title: string;
+    description?: string;
+    priority?: TaskPriority;
+    status?: TaskStatus;
+    dueDate?: string;
+    scheduledDate?: string;
+    milestoneId?: string;
+    sectionId?: string;
+  }): DaywellTaskRecord {
+    const project = this.repo.getProjectById(input.projectId);
+    if (!project) {
+      throw new ProjectValidationError(
+        `Cannot create task in missing project "${input.projectId}".`
+      );
+    }
+    const result = createTaskRecord({
+      title: input.title,
+      description: input.description,
+      priority: input.priority,
+      status: input.status,
+      dueDate: input.dueDate,
+      scheduledDate: input.scheduledDate,
+      projectId: project.id,
+      milestoneId: input.milestoneId,
+      projectName: project.title,
+      category: project.title,
+    });
+    if (!result.ok) {
+      const firstErr = Object.values(result.errors)[0] ?? 'Invalid task fields.';
+      throw new ProjectValidationError(firstErr);
+    }
+    const existingTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    writeLocalArray(TASKS_KEY, [result.task, ...existingTasks]);
+
+    if (input.sectionId?.trim()) {
+      this.assignTaskToProjectSection(
+        project.id,
+        result.task.id,
+        input.sectionId.trim()
+      );
+    } else {
+      broadcastSync();
+    }
+    return result.task;
+  }
+
+  public updateTaskInProject(
+    taskId: string,
+    patch: {
+      title?: string;
+      description?: string;
+      priority?: TaskPriority;
+      status?: TaskStatus;
+      dueDate?: string;
+      scheduledDate?: string;
+      projectId?: string;
+      milestoneId?: string;
+      sectionId?: string | null;
+    }
+  ): DaywellTaskRecord | undefined {
+    const existingTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const existing = existingTasks.find((t) => t.id === taskId);
+    if (!existing) return undefined;
+
+    const targetProjectId =
+      patch.projectId !== undefined ? patch.projectId : existing.projectId;
+    const targetProject = targetProjectId
+      ? this.repo.getProjectById(targetProjectId)
+      : undefined;
+
+    const res = updateTaskRecord(existing, {
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.description !== undefined
+        ? { description: patch.description }
+        : {}),
+      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
+      ...(patch.dueDate !== undefined ? { dueDate: patch.dueDate } : {}),
+      ...(patch.scheduledDate !== undefined
+        ? { scheduledDate: patch.scheduledDate }
+        : {}),
+      ...(patch.projectId !== undefined
+        ? {
+            projectId: patch.projectId || undefined,
+            projectName: targetProject?.title ?? 'Personal',
+            category: targetProject?.title ?? 'Personal',
+          }
+        : {}),
+      ...(patch.milestoneId !== undefined
+        ? { milestoneId: patch.milestoneId || undefined }
+        : {}),
+    });
+
+    if (!res.ok) {
+      const firstErr = Object.values(res.errors)[0] ?? 'Invalid task fields.';
+      throw new ProjectValidationError(firstErr);
+    }
+
+    const updatedTasks = existingTasks.map((t) =>
+      t.id === taskId ? res.task : t
+    );
+    writeLocalArray(TASKS_KEY, updatedTasks);
+
+    if (
+      existing.projectId &&
+      existing.projectId !== res.task.projectId
+    ) {
+      this.detachTaskSectionLinks(existing.projectId, taskId);
+    }
+
+    if (res.task.projectId && patch.sectionId !== undefined) {
+      this.assignTaskToProjectSection(
+        res.task.projectId,
+        res.task.id,
+        patch.sectionId
+      );
+    } else {
+      this.syncLinkedSectionRecordForTask(res.task);
+      broadcastSync();
+    }
+
+    return res.task;
+  }
+
+  public toggleTaskCompletionInProject(taskId: string): {
+    previousTasks: DaywellTaskRecord[];
+    updated?: DaywellTaskRecord;
+  } {
+    const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const target = previousTasks.find((t) => t.id === taskId);
+    if (!target) return { previousTasks };
+
+    const updated = toggleTaskCompletionRecord(target);
+    const nextTasks = previousTasks.map((t) => (t.id === taskId ? updated : t));
+    writeLocalArray(TASKS_KEY, nextTasks);
+    this.syncLinkedSectionRecordForTask(updated);
+    broadcastSync();
+    return { previousTasks, updated };
+  }
+
+  public deleteTaskInProject(taskId: string): {
+    previousTasks: DaywellTaskRecord[];
+    deleted?: DaywellTaskRecord;
+    previousSection?: { projectId: string; sectionId: string };
+  } {
+    const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const { remaining, deleted } = deleteTaskFromList(previousTasks, taskId);
+    let previousSection: { projectId: string; sectionId: string } | undefined;
+
+    if (deleted?.projectId) {
+      const sectionId = this.detachTaskSectionLinks(deleted.projectId, taskId);
+      if (sectionId) {
+        previousSection = { projectId: deleted.projectId, sectionId };
+      }
+    } else {
+      this.cleanupSectionLinksForTask(taskId);
+    }
+
+    writeLocalArray(TASKS_KEY, remaining);
+    SharedStateBridge.removeDailyPlanningForTask(taskId);
+    broadcastSync();
+    return { previousTasks, deleted, previousSection };
+  }
+
+  public restoreTasksSnapshot(
+    tasksSnapshot: DaywellTaskRecord[],
+    sectionRestore?: { projectId: string; taskId: string; sectionId: string }
+  ): void {
+    writeLocalArray(TASKS_KEY, tasksSnapshot);
+    if (sectionRestore) {
+      const records = this.repo.getRecordsForProject(sectionRestore.projectId);
+      const sectionExists = records.some(
+        (r) => r.id === sectionRestore.sectionId && r.recordType === 'group'
+      );
+      if (sectionExists) {
+        this.assignTaskToProjectSection(
+          sectionRestore.projectId,
+          sectionRestore.taskId,
+          sectionRestore.sectionId
+        );
+        return;
+      }
+    }
+    for (const t of tasksSnapshot) {
+      this.syncLinkedSectionRecordForTask(t);
+    }
+    broadcastSync();
+  }
 }
 
 export function formatNumber(n: number): string {
@@ -892,6 +1606,7 @@ export type {
   GroupedListBlockConfig,
   ChecklistBlockConfig,
   ScheduleBlockConfig,
+  DerivedTaskMilestoneProgress,
   PreparedProjectPackageImport,
   ProjectScheduleSpan,
 };

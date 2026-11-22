@@ -525,6 +525,383 @@ class ProjectsController extends ChangeNotifier {
     }
   }
 
+  // --- Stage 1.3 Project Sections & Linked Task Organization ---
+
+  ProjectTrackingBlockEntity? findProjectSectionsBlock(String projectId) {
+    final blocks = _state
+        .blocksForProject(projectId, includeArchived: false)
+        .where((b) => b.blockType == ProjectBlockType.groupedList)
+        .toList(growable: false);
+    if (blocks.isEmpty) return null;
+    for (final b in blocks) {
+      if (b.config['kind'] == 'task_sections') return b;
+    }
+    for (final b in blocks) {
+      if (b.title.trim().toLowerCase() == 'task sections') return b;
+    }
+    return blocks.first;
+  }
+
+  Future<ProjectTrackingBlockEntity?> ensureProjectSectionsBlock(
+    String projectId,
+  ) async {
+    final cached = findProjectSectionsBlock(projectId);
+    if (cached != null) return cached;
+
+    final freshBlocks = (await _repository.getBlocksForProject(
+      projectId,
+      includeArchived: false,
+    ))
+        .where((b) => b.blockType == ProjectBlockType.groupedList)
+        .toList(growable: false);
+    for (final b in freshBlocks) {
+      if (b.config['kind'] == 'task_sections') return b;
+    }
+    for (final b in freshBlocks) {
+      if (b.title.trim().toLowerCase() == 'task sections') return b;
+    }
+    if (freshBlocks.isNotEmpty) return freshBlocks.first;
+
+    return createBlock(
+      projectId: projectId,
+      blockType: ProjectBlockType.groupedList,
+      title: 'Task Sections',
+      config: const {
+        'kind': 'task_sections',
+        'groupLabel': 'Section',
+        'itemLabel': 'Task',
+        'showGroupTotals': false,
+        'showDailyTotals': false,
+      },
+    );
+  }
+
+  Future<ProjectTrackingRecordEntity?> createProjectSection(
+    String projectId,
+    String title,
+  ) async {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Section title is required.');
+      notifyListeners();
+      return null;
+    }
+    final block = await ensureProjectSectionsBlock(projectId);
+    if (block == null) return null;
+
+    final existingGroups = _state
+        .recordsForProject(projectId)
+        .where(
+          (r) =>
+              r.blockId == block.id && r.recordType == ProjectRecordType.group,
+        )
+        .length;
+
+    return createRecord(
+      projectId: projectId,
+      blockId: block.id,
+      recordType: ProjectRecordType.group,
+      title: trimmed,
+      sortOrder: existingGroups,
+    );
+  }
+
+  Future<ProjectTrackingRecordEntity?> renameProjectSection(
+    String projectId,
+    String sectionRecordId,
+    String title,
+  ) async {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Section title is required.');
+      notifyListeners();
+      return null;
+    }
+    final records = await _repository.getRecordsForProject(projectId);
+    ProjectTrackingRecordEntity? target;
+    for (final rec in records) {
+      if (rec.id == sectionRecordId &&
+          rec.recordType == ProjectRecordType.group) {
+        target = rec;
+        break;
+      }
+    }
+    if (target == null) {
+      _state = _state.copyWith(errorMessage: 'Section not found.');
+      notifyListeners();
+      return null;
+    }
+    return updateRecord(
+      target.copyWith(
+        title: trimmed,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  Future<
+      ({
+        ProjectTrackingRecordEntity? deletedGroup,
+        List<String> detachedTaskIds,
+      })> deleteProjectSection(
+    String projectId,
+    String sectionRecordId,
+  ) async {
+    try {
+      final records = await _repository.getRecordsForProject(projectId);
+      ProjectTrackingRecordEntity? targetGroup;
+      for (final rec in records) {
+        if (rec.id == sectionRecordId &&
+            rec.recordType == ProjectRecordType.group) {
+          targetGroup = rec;
+          break;
+        }
+      }
+      if (targetGroup == null) {
+        return (deletedGroup: null, detachedTaskIds: const <String>[]);
+      }
+
+      final children =
+          records.where((r) => r.parentRecordId == sectionRecordId).toList();
+      final detachedTaskIds = <String>[];
+
+      for (final child in children) {
+        if (child.linkedTaskId != null && child.linkedTaskId!.isNotEmpty) {
+          detachedTaskIds.add(child.linkedTaskId!);
+        }
+        final hasLogs = records.any(
+          (r) =>
+              r.parentRecordId == child.id &&
+              r.recordType == ProjectRecordType.progressLog,
+        );
+        if (hasLogs) {
+          await _repository.updateRecord(
+            child.copyWith(
+              clearParentRecordId: true,
+              clearLinkedTaskId: true,
+              updatedAt: EthiopiaClock.nowUtc(),
+            ),
+          );
+        } else {
+          await _repository.deleteRecord(child.id);
+        }
+      }
+
+      await _repository.deleteRecord(sectionRecordId);
+      await refreshProject(projectId);
+      return (deletedGroup: targetGroup, detachedTaskIds: detachedTaskIds);
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return (deletedGroup: null, detachedTaskIds: const <String>[]);
+    }
+  }
+
+  Future<ProjectTrackingRecordEntity?> restoreProjectSection(
+    String projectId,
+    ProjectTrackingRecordEntity deletedGroup,
+    List<String> detachedTaskIds, {
+    List<TaskEntity> tasks = const [],
+  }) async {
+    try {
+      final blocks = await _repository.getBlocksForProject(
+        projectId,
+        includeArchived: true,
+      );
+      var targetBlockId = deletedGroup.blockId;
+      final hasBlock = blocks.any((b) => b.id == targetBlockId);
+      if (!hasBlock) {
+        final ensured = await ensureProjectSectionsBlock(projectId);
+        if (ensured == null) return null;
+        targetBlockId = ensured.id;
+      }
+
+      final records = await _repository.getRecordsForProject(
+        projectId,
+        blockId: targetBlockId,
+      );
+      ProjectTrackingRecordEntity restoredGroup;
+      final existingGroup = records
+          .where((r) => r.id == deletedGroup.id)
+          .cast<ProjectTrackingRecordEntity?>()
+          .firstWhere((_) => true, orElse: () => null);
+      if (existingGroup != null) {
+        restoredGroup = existingGroup;
+      } else {
+        restoredGroup = await _repository.createRecord(
+          ProjectTrackingRecordEntity(
+            id: deletedGroup.id,
+            projectId: projectId,
+            blockId: targetBlockId,
+            recordType: ProjectRecordType.group,
+            title: deletedGroup.title,
+            sortOrder: deletedGroup.sortOrder,
+            createdAt: deletedGroup.createdAt,
+            updatedAt: EthiopiaClock.nowUtc(),
+          ),
+        );
+      }
+
+      final taskById = <String, TaskEntity>{
+        for (final t in tasks) t.id: t,
+      };
+      for (final taskId in detachedTaskIds) {
+        final task = taskById[taskId];
+        await assignTaskToProjectSection(
+          projectId: projectId,
+          taskId: taskId,
+          taskTitle: task?.title ?? 'Task',
+          taskCompleted: task?.isCompleted ?? false,
+          sectionRecordId: restoredGroup.id,
+        );
+      }
+
+      await refreshProject(projectId);
+      return restoredGroup;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<String?> detachTaskFromProjectSections(
+    String projectId,
+    String taskId,
+  ) async {
+    try {
+      final records = await _repository.getRecordsForProject(projectId);
+      String? previousSectionId;
+      for (final rec in records) {
+        if (rec.linkedTaskId != taskId) continue;
+        previousSectionId ??= rec.parentRecordId;
+        final hasLogs = records.any(
+          (r) =>
+              r.parentRecordId == rec.id &&
+              r.recordType == ProjectRecordType.progressLog,
+        );
+        if (hasLogs || rec.recordType != ProjectRecordType.groupedItem) {
+          await _repository.updateRecord(
+            rec.copyWith(
+              clearLinkedTaskId: true,
+              updatedAt: EthiopiaClock.nowUtc(),
+            ),
+          );
+        } else {
+          await _repository.deleteRecord(rec.id);
+        }
+      }
+      await refreshProject(projectId);
+      return previousSectionId;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> assignTaskToProjectSection({
+    required String projectId,
+    required String taskId,
+    required String taskTitle,
+    bool taskCompleted = false,
+    String? sectionRecordId,
+  }) async {
+    try {
+      final records = await _repository.getRecordsForProject(projectId);
+      for (final rec in records) {
+        if (rec.linkedTaskId != taskId) continue;
+        final hasLogs = records.any(
+          (r) =>
+              r.parentRecordId == rec.id &&
+              r.recordType == ProjectRecordType.progressLog,
+        );
+        if (hasLogs || rec.recordType != ProjectRecordType.groupedItem) {
+          await _repository.updateRecord(
+            rec.copyWith(
+              clearLinkedTaskId: true,
+              updatedAt: EthiopiaClock.nowUtc(),
+            ),
+          );
+        } else {
+          await _repository.deleteRecord(rec.id);
+        }
+      }
+
+      if (sectionRecordId != null && sectionRecordId.trim().isNotEmpty) {
+        final refreshedRecords =
+            await _repository.getRecordsForProject(projectId);
+        ProjectTrackingRecordEntity? targetSection;
+        for (final rec in refreshedRecords) {
+          if (rec.id == sectionRecordId &&
+              rec.recordType == ProjectRecordType.group) {
+            targetSection = rec;
+            break;
+          }
+        }
+        if (targetSection != null) {
+          final existingItemsCount = refreshedRecords
+              .where(
+                (r) =>
+                    r.parentRecordId == targetSection!.id &&
+                    r.recordType == ProjectRecordType.groupedItem,
+              )
+              .length;
+          final now = EthiopiaClock.nowUtc();
+          await _repository.createRecord(
+            ProjectTrackingRecordEntity(
+              id: 'rec-${now.microsecondsSinceEpoch}',
+              projectId: projectId,
+              blockId: targetSection.blockId,
+              parentRecordId: targetSection.id,
+              recordType: ProjectRecordType.groupedItem,
+              title: taskTitle.trim().isEmpty ? 'Task' : taskTitle.trim(),
+              sortOrder: existingItemsCount,
+              isCompleted: taskCompleted,
+              completedAt: taskCompleted ? now : null,
+              linkedTaskId: taskId,
+              createdAt: now,
+              updatedAt: now,
+            ),
+          );
+        }
+      }
+
+      await refreshProject(projectId);
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+    }
+  }
+
+  Future<void> syncTaskSectionLink(String projectId, TaskEntity task) async {
+    try {
+      final records = await _repository.getRecordsForProject(projectId);
+      var changed = false;
+      for (final rec in records) {
+        if (rec.linkedTaskId != task.id) continue;
+        if (rec.title != task.title || rec.isCompleted != task.isCompleted) {
+          await _repository.updateRecord(
+            rec.copyWith(
+              title: task.title,
+              isCompleted: task.isCompleted,
+              completedAt: task.isCompleted ? (task.completedAt ?? EthiopiaClock.nowUtc()) : null,
+              clearCompletedAt: !task.isCompleted,
+              updatedAt: EthiopiaClock.nowUtc(),
+            ),
+          );
+          changed = true;
+        }
+      }
+      if (changed) {
+        await refreshProject(projectId);
+      }
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+    }
+  }
+
   void clearError() {
     if (_state.errorMessage != null) {
       _state = _state.copyWith(clearError: true);

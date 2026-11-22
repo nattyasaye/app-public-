@@ -10,7 +10,7 @@ class TasksModuleState {
 
   // Presentation / Filter State
   final String
-      viewFilter; // 'today', 'inbox', 'upcoming', 'my_day', 'completed'
+      viewFilter; // 'today', 'inbox', 'upcoming', 'all', 'my_day', 'completed', 'archived'
   final String searchQuery;
   final String sortBy; // 'due', 'priority', 'alpha'
   final String? priorityFilter; // null = all, 'low', 'medium', 'high', 'urgent'
@@ -38,10 +38,10 @@ class TasksModuleState {
   bool get isSelectionMode => selectedTaskIds.isNotEmpty;
 
   Set<String> get pinnedTaskIds =>
-      tasks.where((t) => t.isPinned).map((t) => t.id).toSet();
+      tasks.where((t) => !t.isArchived && t.isPinned).map((t) => t.id).toSet();
 
   Set<String> get myDayTaskIds =>
-      tasks.where((t) => t.isMyDay).map((t) => t.id).toSet();
+      tasks.where((t) => !t.isArchived && t.isMyDay).map((t) => t.id).toSet();
 
   TaskEntity? findTaskById(String id) {
     for (final t in tasks) {
@@ -88,27 +88,50 @@ class TasksModuleState {
 
   // --- Derived Calculations & Filtered Tasks ---
 
+  bool _isInToday(TaskEntity t, CalendarDate today) {
+    final dueMatch = t.dueDate != null && !t.dueDate!.isAfter(today);
+    final scheduledMatch =
+        t.scheduledDate != null && !t.scheduledDate!.isAfter(today);
+    return dueMatch || scheduledMatch;
+  }
+
+  bool _isInUpcoming(TaskEntity t, CalendarDate today) {
+    final dueMatch = t.dueDate != null && t.dueDate!.isAfter(today);
+    final scheduledMatch =
+        t.scheduledDate != null && t.scheduledDate!.isAfter(today);
+    return dueMatch || scheduledMatch;
+  }
+
+  bool _isInInbox(TaskEntity t) {
+    return t.status == 'inbox' ||
+        (t.projectId == null || t.projectId!.isEmpty);
+  }
+
   List<TaskEntity> get filteredTasks {
     final today = CalendarDate.today();
     final query = searchQuery.trim().toLowerCase();
 
     final list = tasks.where((t) {
-      if (viewFilter == 'completed') {
-        if (!t.isCompleted) return false;
+      if (viewFilter == 'archived') {
+        if (!t.isArchived) return false;
       } else {
-        if (t.isCompleted || t.status == 'cancelled') return false;
-        if (viewFilter == 'today') {
-          if (t.dueDate == null) return false;
-          if (t.dueDate!.isAfter(today)) {
-            return false; // includes overdue + today
+        if (t.isArchived) return false;
+
+        if (viewFilter == 'completed') {
+          if (!t.isCompleted) return false;
+        } else if (viewFilter == 'all') {
+          // Includes all non-archived tasks across statuses.
+        } else {
+          if (t.isCompleted || t.status == 'cancelled') return false;
+          if (viewFilter == 'today') {
+            if (!_isInToday(t, today)) return false;
+          } else if (viewFilter == 'inbox') {
+            if (!_isInInbox(t)) return false;
+          } else if (viewFilter == 'upcoming') {
+            if (!_isInUpcoming(t, today)) return false;
+          } else if (viewFilter == 'my_day') {
+            if (!t.isMyDay) return false;
           }
-        } else if (viewFilter == 'inbox') {
-          if (t.projectId != null && t.projectId!.isNotEmpty) return false;
-        } else if (viewFilter == 'upcoming') {
-          if (t.dueDate == null) return false;
-          if (!t.dueDate!.isAfter(today)) return false;
-        } else if (viewFilter == 'my_day') {
-          if (!t.isMyDay) return false;
         }
       }
 
@@ -144,8 +167,10 @@ class TasksModuleState {
       } else if (sortBy == 'alpha') {
         return a.title.toLowerCase().compareTo(b.title.toLowerCase());
       }
-      final aDue = a.dueDate ?? CalendarDate(year: 2099, month: 12, day: 31);
-      final bDue = b.dueDate ?? CalendarDate(year: 2099, month: 12, day: 31);
+      final aDue =
+          a.dueDate ?? a.scheduledDate ?? CalendarDate(year: 2099, month: 12, day: 31);
+      final bDue =
+          b.dueDate ?? b.scheduledDate ?? CalendarDate(year: 2099, month: 12, day: 31);
       return aDue.compareTo(bDue);
     });
 
@@ -153,7 +178,7 @@ class TasksModuleState {
   }
 
   List<TaskEntity> get pendingTasks => tasks
-      .where((t) => !t.isCompleted && t.status != 'cancelled')
+      .where((t) => !t.isArchived && !t.isCompleted && t.status != 'cancelled')
       .toList(growable: false);
 
   List<TaskEntity> get urgentTasks => pendingTasks
@@ -163,29 +188,39 @@ class TasksModuleState {
   int get todayCount {
     final today = CalendarDate.today();
     return tasks.where((t) {
-      if (t.isCompleted || t.dueDate == null) return false;
-      return !t.dueDate!.isAfter(today);
+      if (t.isArchived || t.isCompleted || t.status == 'cancelled') {
+        return false;
+      }
+      return _isInToday(t, today);
     }).length;
   }
 
   int get inboxCount {
     return tasks
         .where((t) =>
-            !t.isCompleted && (t.projectId == null || t.projectId!.isEmpty))
+            !t.isArchived &&
+            !t.isCompleted &&
+            t.status != 'cancelled' &&
+            _isInInbox(t))
         .length;
   }
 
   int get upcomingCount {
     final today = CalendarDate.today();
     return tasks.where((t) {
-      if (t.isCompleted || t.dueDate == null) return false;
-      return t.dueDate!.isAfter(today);
+      if (t.isArchived || t.isCompleted || t.status == 'cancelled') {
+        return false;
+      }
+      return _isInUpcoming(t, today);
     }).length;
   }
 
-  int get completedCount {
-    return tasks.where((t) => t.isCompleted).length;
-  }
+  int get allCount => tasks.where((t) => !t.isArchived).length;
+
+  int get completedCount =>
+      tasks.where((t) => !t.isArchived && t.isCompleted).length;
+
+  int get archivedCount => tasks.where((t) => t.isArchived).length;
 
   int getProjectProgress(String projectId) {
     final projectTasks = tasks.where((t) => t.projectId == projectId).toList();

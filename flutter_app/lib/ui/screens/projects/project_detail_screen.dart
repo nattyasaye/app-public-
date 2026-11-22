@@ -12,7 +12,9 @@ import '../../../domain/tasks/task_models.dart';
 import '../../../services/export/project_package_io_service.dart';
 import '../../widgets/shared_ui_widgets.dart';
 import 'project_form_sheet.dart';
+import 'project_milestones_widget.dart';
 import 'project_progress_history_widget.dart';
+import 'project_tasks_sections_widget.dart';
 import 'project_tracking_blocks_widget.dart';
 import 'project_ui_helpers.dart';
 
@@ -46,6 +48,30 @@ class ProjectDetailScreen extends StatelessWidget {
     }
     await projectsController.setProjectArchived(project.id, targetArchived);
     syncTasksControllerProjects(tasksController);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          targetArchived
+              ? 'Archived "${project.title}"'
+              : 'Restored "${project.title}"',
+        ),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            unawaited(() async {
+              await projectsController.setProjectArchived(
+                project.id,
+                !targetArchived,
+              );
+              syncTasksControllerProjects(tasksController);
+            }());
+          },
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   Future<void> _deleteForever(
@@ -134,8 +160,21 @@ class ProjectDetailScreen extends StatelessWidget {
         final summary = state.summaryForProject(project.id);
         final linkedTasks = (tasksController?.state.tasks ??
                 const <TaskEntity>[])
-            .where((t) => t.projectId == project.id && t.status != 'cancelled')
+            .where(
+              (t) =>
+                  t.projectId == project.id &&
+                  !t.isArchived &&
+                  t.status != 'cancelled',
+            )
             .toList(growable: false);
+        final projectMilestones = (tasksController?.state.milestones ??
+                const <MilestoneEntity>[])
+            .where((m) => m.projectId == project.id)
+            .toList(growable: false);
+        final completedTasksCount =
+            linkedTasks.where((t) => t.isCompleted).length;
+        final completedMilestonesCount =
+            projectMilestones.where((m) => m.isCompleted).length;
 
         final semantic = context.daywellColors;
         final textTheme = Theme.of(context).textTheme;
@@ -285,15 +324,44 @@ class ProjectDetailScreen extends StatelessWidget {
                               ),
                             ),
                           ],
+                          const SizedBox(height: SharedDesignTokens.spacingSm),
+                          Text(
+                            '$completedTasksCount/${linkedTasks.length} ${linkedTasks.length == 1 ? 'task' : 'tasks'} · $completedMilestonesCount/${projectMilestones.length} ${projectMilestones.length == 1 ? 'milestone' : 'milestones'}',
+                            style: DaywellTypography.numericBody(
+                              color: semantic.textSecondary,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
-                    _buildOverallProgressCard(context, summary),
-                    if (linkedTasks.isNotEmpty) ...[
-                      const SizedBox(height: SharedDesignTokens.spacingCompact),
-                      _buildLinkedTasksCard(context, linkedTasks),
-                    ],
+                    _buildOverallProgressCard(
+                      context,
+                      project: project,
+                      summary: summary,
+                      totalTasks: linkedTasks.length,
+                      completedTasks: completedTasksCount,
+                      totalMilestones: projectMilestones.length,
+                      completedMilestones: completedMilestonesCount,
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    ProjectMilestonesWidget(
+                      project: project,
+                      milestones: projectMilestones,
+                      tasks: linkedTasks,
+                      tasksController: tasksController,
+                      projectsController: projectsController,
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    ProjectTasksSectionsWidget(
+                      project: project,
+                      blocks: blocks,
+                      records: records,
+                      milestones: projectMilestones,
+                      tasks: linkedTasks,
+                      tasksController: tasksController,
+                      projectsController: projectsController,
+                    ),
                     const SizedBox(height: SharedDesignTokens.spacingMd),
                     ProjectTrackingBlocksWidget(
                       project: project,
@@ -321,9 +389,14 @@ class ProjectDetailScreen extends StatelessWidget {
   }
 
   Widget _buildOverallProgressCard(
-    BuildContext context,
-    ProjectProgressSummary? summary,
-  ) {
+    BuildContext context, {
+    required ProjectEntity project,
+    required ProjectProgressSummary? summary,
+    required int totalTasks,
+    required int completedTasks,
+    required int totalMilestones,
+    required int completedMilestones,
+  }) {
     final semantic = context.daywellColors;
     final textTheme = Theme.of(context).textTheme;
 
@@ -342,23 +415,64 @@ class ProjectDetailScreen extends StatelessWidget {
 
     final primaryMetric = summary.primaryMetric;
     if (primaryMetric == null) {
+      final totalItems = totalTasks + totalMilestones;
+      final completedItems = completedTasks + completedMilestones;
+      final derivedPct = ProgressEngine.calculateProgressPercentage(
+        totalTasks: totalTasks,
+        completedTasks: completedTasks,
+        totalMilestones: totalMilestones,
+        completedMilestones: completedMilestones,
+        isProjectManuallyCompleted: project.status == 'completed',
+      );
       return DaywellCard(
         padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(
-              Icons.insights_outlined,
-              size: DaywellIconSize.md,
-              color: semantic.textMuted,
-            ),
-            const SizedBox(width: SharedDesignTokens.spacingSm),
-            Expanded(
-              child: Text(
-                'Each tracking block calculates its own progress independently. Star a block below to feature it as headline progress.',
-                style: textTheme.bodySmall?.copyWith(
-                  color: semantic.textSecondary,
+            Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'PROJECT COMPLETION',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: semantic.textMuted,
+                          letterSpacing: 0.6,
+                        ),
+                      ),
+                      const SizedBox(height: SharedDesignTokens.spacingXs),
+                      Text(
+                        totalItems > 0
+                            ? 'Tasks & milestones ($completedItems/$totalItems done)'
+                            : project.status == 'completed'
+                                ? 'Marked complete'
+                                : 'No tasks or milestones linked yet',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: semantic.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                Text(
+                  '$derivedPct%',
+                  style: DaywellTypography.numericHero(
+                    color: semantic.textPrimary,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            DaywellProgressBar(
+              value: derivedPct / 100.0,
+              semanticLabel: 'Derived project completion progress',
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            Text(
+              'Star a tracking block below to feature block progress instead.',
+              style: textTheme.bodySmall?.copyWith(color: semantic.textMuted),
             ),
           ],
         ),
@@ -463,85 +577,6 @@ class ProjectDetailScreen extends StatelessWidget {
               ),
             ),
           ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildLinkedTasksCard(
-    BuildContext context,
-    List<TaskEntity> linkedTasks,
-  ) {
-    final semantic = context.daywellColors;
-    final textTheme = Theme.of(context).textTheme;
-    final completed = linkedTasks
-        .where((t) => t.isCompleted || t.status == 'completed')
-        .length;
-
-    return DaywellCard(
-      padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Linked Tasks',
-                  style: textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Text(
-                '$completed / ${linkedTasks.length} done',
-                style: DaywellTypography.numericBody(
-                  color: semantic.textSecondary,
-                ).copyWith(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: SharedDesignTokens.spacingSm),
-          for (final task in linkedTasks.take(5))
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                vertical: SharedDesignTokens.spacingXs,
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    task.isCompleted
-                        ? Icons.check_circle
-                        : Icons.radio_button_unchecked,
-                    size: DaywellIconSize.sm,
-                    color: task.isCompleted
-                        ? Theme.of(context).colorScheme.primary
-                        : semantic.textMuted,
-                  ),
-                  const SizedBox(width: SharedDesignTokens.spacingSm),
-                  Expanded(
-                    child: Text(
-                      task.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: textTheme.bodySmall?.copyWith(
-                        decoration: task.isCompleted
-                            ? TextDecoration.lineThrough
-                            : null,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (linkedTasks.length > 5)
-            Text(
-              '+${linkedTasks.length - 5} more in Tasks tab',
-              style: textTheme.bodySmall?.copyWith(color: semantic.textMuted),
-            ),
         ],
       ),
     );

@@ -138,28 +138,141 @@ class TasksController extends ChangeNotifier {
 
   Future<void> addSubtask(String taskId, String title) async {
     final trimmed = title.trim();
-    if (trimmed.isEmpty) return;
-    final existing = _state.findTaskById(taskId);
+    if (trimmed.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Subtask title is required');
+      notifyListeners();
+      return;
+    }
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
     if (existing == null) return;
     final nextSubtasks = [
       ...existing.subtasks,
       TaskSubtask(
-        id: '$taskId-sub-${existing.subtasks.length + 1}',
+        id: TaskSubtask.nextId(taskId, existing.subtasks),
         title: trimmed,
         done: false,
       ),
     ];
-    await _persistUpdatedTask(existing.copyWith(subtasks: nextSubtasks));
+    await _persistUpdatedTask(
+      existing.copyWith(
+        subtasks: nextSubtasks,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
   }
 
   Future<void> toggleSubtask(String taskId, int index, bool done) async {
-    final existing = _state.findTaskById(taskId);
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
     if (existing == null || index < 0 || index >= existing.subtasks.length) {
       return;
     }
     final nextSubtasks = List<TaskSubtask>.from(existing.subtasks);
     nextSubtasks[index] = nextSubtasks[index].copyWith(done: done);
-    await _persistUpdatedTask(existing.copyWith(subtasks: nextSubtasks));
+    await _persistUpdatedTask(
+      existing.copyWith(
+        subtasks: nextSubtasks,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  Future<void> toggleSubtaskById(String taskId, String subtaskId) async {
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return;
+    final nextSubtasks = [
+      for (final st in existing.subtasks)
+        if (st.id == subtaskId) st.copyWith(done: !st.done) else st,
+    ];
+    await _persistUpdatedTask(
+      existing.copyWith(
+        subtasks: nextSubtasks,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  Future<bool> editSubtaskTitle(
+    String taskId,
+    String subtaskId,
+    String newTitle,
+  ) async {
+    final trimmed = newTitle.trim();
+    if (trimmed.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Subtask title is required');
+      notifyListeners();
+      return false;
+    }
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return false;
+    final nextSubtasks = [
+      for (final st in existing.subtasks)
+        if (st.id == subtaskId) st.copyWith(title: trimmed) else st,
+    ];
+    await _persistUpdatedTask(
+      existing.copyWith(
+        subtasks: nextSubtasks,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+    return true;
+  }
+
+  Future<void> deleteSubtask(String taskId, String subtaskId) async {
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return;
+    final nextSubtasks = existing.subtasks
+        .where((st) => st.id != subtaskId)
+        .toList(growable: false);
+    await _persistUpdatedTask(
+      existing.copyWith(
+        subtasks: nextSubtasks,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  Future<void> restoreSubtasks(
+    String taskId,
+    List<TaskSubtask> previousSubtasks,
+  ) async {
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return;
+    await _persistUpdatedTask(
+      existing.copyWith(
+        subtasks: TaskSubtask.normalizeList(previousSubtasks, taskId: taskId),
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  Future<void> moveSubtask(String taskId, int fromIndex, int toIndex) async {
+    final existing =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (existing == null) return;
+    if (fromIndex < 0 ||
+        fromIndex >= existing.subtasks.length ||
+        toIndex < 0 ||
+        toIndex >= existing.subtasks.length ||
+        fromIndex == toIndex) {
+      return;
+    }
+    final reordered = TaskSubtask.reorderList(
+      existing.subtasks,
+      fromIndex,
+      toIndex,
+    );
+    await _persistUpdatedTask(
+      existing.copyWith(
+        subtasks: reordered,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
   }
 
   Future<void> updateRecurrence(String taskId, String? recurrenceRule) async {
@@ -185,11 +298,27 @@ class TasksController extends ChangeNotifier {
 
   // --- Task Workflow Orchestration ---
 
+  static const Set<String> _validStatuses = {
+    'inbox',
+    'not_started',
+    'in_progress',
+    'completed',
+    'cancelled',
+  };
+
+  static const Set<String> _validPriorities = {
+    'low',
+    'medium',
+    'high',
+    'urgent',
+  };
+
   Future<TaskEntity?> createTask({
     String? id,
     required String title,
     String? description,
     String priority = 'medium',
+    String status = 'not_started',
     CalendarDate? dueDate,
     CalendarDate? scheduledDate,
     String? scheduledTime,
@@ -206,19 +335,38 @@ class TasksController extends ChangeNotifier {
     bool isArchived = false,
     int sortOrder = 0,
   }) async {
+    final trimmedTitle = title.trim();
+    if (trimmedTitle.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Task title is required');
+      notifyListeners();
+      return null;
+    }
+
+    final normalizedStatus =
+        _validStatuses.contains(status) ? status : 'not_started';
+    final normalizedPriority =
+        _validPriorities.contains(priority) ? priority : 'medium';
+    final trimmedDescription = description?.trim();
+
     final now = EthiopiaClock.nowUtc();
+    final resolvedTaskId = id ?? 'task-${now.millisecondsSinceEpoch}';
     final task = TaskEntity(
-      id: id ?? 'task-${now.millisecondsSinceEpoch}',
-      title: title.trim(),
-      description: description?.trim(),
-      priority: priority,
+      id: resolvedTaskId,
+      title: trimmedTitle,
+      description:
+          (trimmedDescription == null || trimmedDescription.isEmpty)
+              ? null
+              : trimmedDescription,
+      priority: normalizedPriority,
+      status: normalizedStatus,
+      completedAt: normalizedStatus == 'completed' ? now : null,
       dueDate: dueDate,
       scheduledDate: scheduledDate,
       scheduledTime: scheduledTime,
       estimatedDurationMinutes: estimatedDurationMinutes,
       projectId: projectId,
       milestoneId: milestoneId,
-      subtasks: subtasks,
+      subtasks: TaskSubtask.normalizeList(subtasks, taskId: resolvedTaskId),
       labels: labels,
       isPinned: isPinned,
       isMyDay: isMyDay,
@@ -227,7 +375,6 @@ class TasksController extends ChangeNotifier {
       recurrenceConfig: recurrenceConfig,
       isArchived: isArchived,
       sortOrder: sortOrder,
-      status: 'not_started',
       createdAt: now,
       updatedAt: now,
     );
@@ -246,6 +393,131 @@ class TasksController extends ChangeNotifier {
       notifyListeners();
       return null;
     }
+  }
+
+  Future<TaskEntity?> updateTask({
+    required String id,
+    required String title,
+    String? description,
+    bool clearDescription = false,
+    String? priority,
+    String? status,
+    CalendarDate? dueDate,
+    bool clearDueDate = false,
+    CalendarDate? scheduledDate,
+    bool clearScheduledDate = false,
+    String? scheduledTime,
+    bool clearScheduledTime = false,
+    String? projectId,
+    bool clearProject = false,
+    String? milestoneId,
+    bool clearMilestone = false,
+    List<TaskSubtask>? subtasks,
+  }) async {
+    final trimmedTitle = title.trim();
+    if (trimmedTitle.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Task title is required');
+      notifyListeners();
+      return null;
+    }
+
+    final existing =
+        _state.findTaskById(id) ?? await _repository.getTaskById(id);
+    if (existing == null) return null;
+
+    final now = EthiopiaClock.nowUtc();
+    final nextStatus = status != null && _validStatuses.contains(status)
+        ? status
+        : existing.status;
+    final nextPriority = priority != null && _validPriorities.contains(priority)
+        ? priority
+        : existing.priority;
+    final nextCompletedAt =
+        nextStatus == 'completed' ? (existing.completedAt ?? now) : null;
+    final trimmedDesc = description?.trim();
+    final shouldClearDesc =
+        clearDescription || (description != null && trimmedDesc!.isEmpty);
+    final nextProjectId = clearProject ? null : (projectId ?? existing.projectId);
+    final projectChanged = nextProjectId != existing.projectId;
+    final shouldClearMilestone =
+        clearProject || clearMilestone || (projectChanged && milestoneId == null);
+
+    final updated = existing.copyWith(
+      title: trimmedTitle,
+      description: shouldClearDesc ? null : trimmedDesc,
+      clearDescription: shouldClearDesc,
+      priority: nextPriority,
+      status: nextStatus,
+      completedAt: nextCompletedAt,
+      clearCompletedAt: nextStatus != 'completed',
+      dueDate: dueDate,
+      clearDueDate: clearDueDate,
+      scheduledDate: scheduledDate,
+      clearScheduledDate: clearScheduledDate,
+      scheduledTime: scheduledTime,
+      clearScheduledTime: clearScheduledTime,
+      projectId: projectId,
+      clearProject: clearProject,
+      milestoneId: shouldClearMilestone ? null : milestoneId,
+      clearMilestone: shouldClearMilestone,
+      subtasks: subtasks != null
+          ? TaskSubtask.normalizeList(subtasks, taskId: existing.id)
+          : null,
+      updatedAt: now,
+    );
+
+    try {
+      final persisted = await _repository.updateTask(updated);
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        clearError: true,
+      );
+      notifyListeners();
+      return persisted;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> archiveTask(String id) async {
+    final existing =
+        _state.findTaskById(id) ?? await _repository.getTaskById(id);
+    if (existing == null) return;
+    await _persistUpdatedTask(
+      existing.copyWith(
+        isArchived: true,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  Future<void> restoreTask(String id) async {
+    final existing =
+        _state.findTaskById(id) ?? await _repository.getTaskById(id);
+    if (existing == null) return;
+    await _persistUpdatedTask(
+      existing.copyWith(
+        isArchived: false,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
+  Future<void> restoreDeletedTask(TaskEntity snapshot) async {
+    try {
+      await _repository.createTask(snapshot);
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        clearError: true,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
   }
 
   Future<void> toggleTaskStatus(String id) async {
@@ -442,11 +714,17 @@ class TasksController extends ChangeNotifier {
     required String title,
     CalendarDate? dueDate,
   }) async {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Milestone title is required');
+      notifyListeners();
+      return null;
+    }
     final now = EthiopiaClock.nowUtc();
     final milestone = MilestoneEntity(
-      id: 'ms-${now.millisecondsSinceEpoch}',
+      id: 'ms-${now.microsecondsSinceEpoch}',
       projectId: projectId,
-      title: title.trim(),
+      title: trimmed,
       dueDate: dueDate,
       isCompleted: false,
       createdAt: now,
@@ -468,12 +746,114 @@ class TasksController extends ChangeNotifier {
     }
   }
 
+  Future<MilestoneEntity?> updateMilestone({
+    required String milestoneId,
+    required String title,
+    CalendarDate? dueDate,
+    bool clearDueDate = false,
+    bool? isCompleted,
+  }) async {
+    final trimmed = title.trim();
+    if (trimmed.isEmpty) {
+      _state = _state.copyWith(errorMessage: 'Milestone title is required');
+      notifyListeners();
+      return null;
+    }
+    MilestoneEntity? existing;
+    for (final m in _state.milestones) {
+      if (m.id == milestoneId) {
+        existing = m;
+        break;
+      }
+    }
+    if (existing == null) return null;
+
+    try {
+      final updated = await _repository.updateMilestone(
+        existing.copyWith(
+          title: trimmed,
+          dueDate: dueDate,
+          clearDueDate: clearDueDate,
+          isCompleted: isCompleted,
+        ),
+      );
+      final updatedMilestones = await _repository.getAllMilestones();
+      _state = _state.copyWith(
+        milestones: List<MilestoneEntity>.unmodifiable(updatedMilestones),
+        clearError: true,
+      );
+      notifyListeners();
+      return updated;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
   Future<void> toggleMilestone(String milestoneId, bool isCompleted) async {
     try {
       await _repository.toggleMilestone(milestoneId, isCompleted);
       final updatedMilestones = await _repository.getAllMilestones();
       _state = _state.copyWith(
         milestones: List<MilestoneEntity>.unmodifiable(updatedMilestones),
+        clearError: true,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<List<String>> deleteMilestone(String milestoneId) async {
+    final detachedTaskIds = _state.tasks
+        .where((t) => t.milestoneId == milestoneId)
+        .map((t) => t.id)
+        .toList(growable: false);
+    try {
+      await _repository.deleteMilestone(milestoneId);
+      final updatedMilestones = await _repository.getAllMilestones();
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        milestones: List<MilestoneEntity>.unmodifiable(updatedMilestones),
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        clearError: true,
+      );
+      notifyListeners();
+      return detachedTaskIds;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return const [];
+    }
+  }
+
+  Future<void> restoreDeletedMilestone(
+    MilestoneEntity snapshot, {
+    List<String> restoreTaskIds = const [],
+  }) async {
+    try {
+      await _repository.createMilestone(snapshot);
+      if (restoreTaskIds.isNotEmpty) {
+        final targetIds = restoreTaskIds.toSet();
+        final currentTasks = await _repository.getTasks();
+        for (final task in currentTasks) {
+          if (targetIds.contains(task.id) &&
+              task.projectId == snapshot.projectId) {
+            await _repository.updateTask(
+              task.copyWith(
+                milestoneId: snapshot.id,
+                updatedAt: EthiopiaClock.nowUtc(),
+              ),
+            );
+          }
+        }
+      }
+      final updatedMilestones = await _repository.getAllMilestones();
+      final updatedTasks = await _repository.getTasks();
+      _state = _state.copyWith(
+        milestones: List<MilestoneEntity>.unmodifiable(updatedMilestones),
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         clearError: true,
       );
     } catch (e) {

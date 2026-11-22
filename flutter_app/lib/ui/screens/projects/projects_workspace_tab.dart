@@ -7,6 +7,7 @@ import '../../../application/tasks/tasks_controller.dart';
 import '../../../core/date/shared_date.dart';
 import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
+import '../../../domain/projects/progress_engine.dart';
 import '../../../domain/projects/project_models.dart';
 import '../../../domain/projects/project_package_codec.dart';
 import '../../../domain/tasks/task_models.dart';
@@ -98,6 +99,27 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
     }
     await ctrl.setProjectArchived(project.id, nextArchived);
     syncTasksControllerProjects(widget.tasksController);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          nextArchived
+              ? 'Archived "${project.title}"'
+              : 'Restored "${project.title}"',
+        ),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            unawaited(() async {
+              await ctrl.setProjectArchived(project.id, !nextArchived);
+              syncTasksControllerProjects(widget.tasksController);
+            }());
+          },
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
 
   Future<void> _deleteArchivedProject(
@@ -361,16 +383,37 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                       project.id,
                       includeArchived: false,
                     );
-                    final linkedActiveTasks =
-                        (widget.tasksController?.state.tasks ??
-                                const <TaskEntity>[])
-                            .where(
-                              (t) =>
-                                  t.projectId == project.id &&
-                                  !t.isCompleted &&
-                                  t.status != 'cancelled',
-                            )
-                            .length;
+                    final projectTasks = (widget.tasksController?.state.tasks ??
+                            const <TaskEntity>[])
+                        .where(
+                          (t) =>
+                              t.projectId == project.id &&
+                              !t.isArchived &&
+                              t.status != 'cancelled',
+                        )
+                        .toList(growable: false);
+                    final completedTasksCount =
+                        projectTasks.where((t) => t.isCompleted).length;
+                    final projectMilestones =
+                        (widget.tasksController?.state.milestones ??
+                                const <MilestoneEntity>[])
+                            .where((m) => m.projectId == project.id)
+                            .toList(growable: false);
+                    final completedMilestonesCount =
+                        projectMilestones.where((m) => m.isCompleted).length;
+                    final totalDerivedItems =
+                        projectTasks.length + projectMilestones.length;
+                    final completedDerivedItems =
+                        completedTasksCount + completedMilestonesCount;
+                    final derivedPct =
+                        ProgressEngine.calculateProgressPercentage(
+                      totalTasks: projectTasks.length,
+                      completedTasks: completedTasksCount,
+                      totalMilestones: projectMilestones.length,
+                      completedMilestones: completedMilestonesCount,
+                      isProjectManuallyCompleted:
+                          project.status == 'completed',
+                    );
                     final primaryPct = summary?.overallPercentage;
 
                     return DaywellCard(
@@ -424,13 +467,26 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                               label: summary!.primaryMetric!.title,
                               valueText: '${primaryPct.round()}%',
                             )
-                          else
-                            Text(
-                              _compactMetricSummary(summary),
-                              style: textTheme.bodySmall?.copyWith(
-                                color: semantic.textSecondary,
-                              ),
+                          else ...[
+                            DaywellProgressBar(
+                              value: derivedPct / 100.0,
+                              label: totalDerivedItems > 0
+                                  ? 'Tasks & milestones ($completedDerivedItems/$totalDerivedItems)'
+                                  : 'Tasks & milestones',
+                              valueText: '$derivedPct%',
                             ),
+                            if (blocks.isNotEmpty) ...[
+                              const SizedBox(
+                                height: SharedDesignTokens.spacingXs,
+                              ),
+                              Text(
+                                _compactMetricSummary(summary),
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: semantic.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ],
                           const SizedBox(
                             height: SharedDesignTokens.spacingCompact,
                           ),
@@ -440,7 +496,8 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
                                 child: Text(
                                   [
                                     '${blocks.length} ${blocks.length == 1 ? "block" : "blocks"}',
-                                    '$linkedActiveTasks active ${linkedActiveTasks == 1 ? "task" : "tasks"}',
+                                    '$completedTasksCount/${projectTasks.length} ${projectTasks.length == 1 ? "task" : "tasks"}',
+                                    '$completedMilestonesCount/${projectMilestones.length} ${projectMilestones.length == 1 ? "milestone" : "milestones"}',
                                     if (project.targetDate != null)
                                       'Due ${SharedDateFormatter.formatDual(project.targetDate!, useAmharic: false)}',
                                   ].join(' · '),
