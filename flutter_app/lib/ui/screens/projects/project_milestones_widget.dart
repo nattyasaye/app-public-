@@ -76,7 +76,8 @@ class ProjectMilestonesWidget extends StatelessWidget {
                     runSpacing: SharedDesignTokens.spacingXs,
                     children: [
                       ActionChip(
-                        avatar: const Icon(Icons.edit_calendar_outlined, size: 16),
+                        avatar:
+                            const Icon(Icons.edit_calendar_outlined, size: 16),
                         label: Text(
                           dueDate == null
                               ? 'Pick Date'
@@ -280,9 +281,8 @@ class ProjectMilestonesWidget extends StatelessWidget {
             for (final milestone in milestones) ...[
               Builder(
                 builder: (ctx) {
-                  final linkedTaskCount = tasks
-                      .where((t) => t.milestoneId == milestone.id)
-                      .length;
+                  final linkedTaskCount =
+                      tasks.where((t) => t.milestoneId == milestone.id).length;
                   return Padding(
                     padding: const EdgeInsets.symmetric(
                       vertical: SharedDesignTokens.spacingXs,

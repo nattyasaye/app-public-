@@ -319,24 +319,17 @@ class SharedTaskContracts {
     'sortOrder',
   ];
 
-  static const String defaultStatus =
-      'not_started';
-  static const String defaultPriority =
-      'medium';
-  static const String defaultRecurrenceRepeatFrom =
-      'due_date';
-  static const String recurrenceCalendarBasis =
-      'gregorian';
-  static const String weekdayConvention =
-      'iso_1_to_7';
+  static const String defaultStatus = 'not_started';
+  static const String defaultPriority = 'medium';
+  static const String defaultRecurrenceRepeatFrom = 'due_date';
+  static const String recurrenceCalendarBasis = 'gregorian';
+  static const String weekdayConvention = 'iso_1_to_7';
   static const int minWeekday = 1;
   static const int maxWeekday = 7;
   static const int minRecurrenceInterval = 1;
-  static const String subtaskLegacyDoneAlias =
-      'completed';
+  static const String subtaskLegacyDoneAlias = 'completed';
   static const bool subtaskLegacyIdOptional = true;
-  static const String dailyPlanningOnTaskDelete =
-      'cascade';
+  static const String dailyPlanningOnTaskDelete = 'cascade';
 
   static const Map<String, int> priorityWeights = {
     'urgent': 4,

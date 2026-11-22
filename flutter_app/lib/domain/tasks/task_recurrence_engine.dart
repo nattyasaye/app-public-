@@ -34,7 +34,8 @@ class TaskRecurrenceEngine {
     if (!validFrequencies.contains(freq)) return null;
 
     final rawInterval = config.interval;
-    final interval = (rawInterval != null && rawInterval >= 1) ? rawInterval : 1;
+    final interval =
+        (rawInterval != null && rawInterval >= 1) ? rawInterval : 1;
 
     List<int>? weekdays;
     if (freq == 'weekly' && config.weekdays != null) {
@@ -225,7 +226,8 @@ class TaskRecurrenceEngine {
       if (nowUtc != null) {
         return CalendarDate.fromUtcInstantInEthiopia(nowUtc);
       }
-      return today ?? CalendarDate.fromUtcInstantInEthiopia(EthiopiaClock.nowUtc());
+      return today ??
+          CalendarDate.fromUtcInstantInEthiopia(EthiopiaClock.nowUtc());
     }
 
     return task.dueDate ??

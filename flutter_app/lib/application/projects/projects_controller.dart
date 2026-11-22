@@ -885,7 +885,9 @@ class ProjectsController extends ChangeNotifier {
             rec.copyWith(
               title: task.title,
               isCompleted: task.isCompleted,
-              completedAt: task.isCompleted ? (task.completedAt ?? EthiopiaClock.nowUtc()) : null,
+              completedAt: task.isCompleted
+                  ? (task.completedAt ?? EthiopiaClock.nowUtc())
+                  : null,
               clearCompletedAt: !task.isCompleted,
               updatedAt: EthiopiaClock.nowUtc(),
             ),

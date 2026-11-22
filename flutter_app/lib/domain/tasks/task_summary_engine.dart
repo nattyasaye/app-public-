@@ -126,7 +126,9 @@ class TaskSummaryEngine {
   };
 
   static bool _isCancelledOrCompleted(TaskEntity task) =>
-      task.isCompleted || task.status == 'completed' || task.status == 'cancelled';
+      task.isCompleted ||
+      task.status == 'completed' ||
+      task.status == 'cancelled';
 
   static TaskOverviewSummary buildTaskOverview({
     required List<TaskEntity> tasks,
@@ -264,8 +266,7 @@ class TaskSummaryEngine {
       final completedTasks = projectTasks
           .where((t) => t.isCompleted || t.status == 'completed')
           .length;
-      final remainingTasks =
-          (totalTasks - completedTasks).clamp(0, totalTasks);
+      final remainingTasks = (totalTasks - completedTasks).clamp(0, totalTasks);
       final overdueTasks = projectTasks
           .where(
             (t) =>
@@ -296,11 +297,10 @@ class TaskSummaryEngine {
       );
 
       final trackingSummary = trackingSummaries[project.id];
-      final int? primaryPercentage =
-          (trackingSummary?.primaryMetric != null &&
-                  trackingSummary?.overallPercentage != null)
-              ? trackingSummary!.overallPercentage!.round()
-              : null;
+      final int? primaryPercentage = (trackingSummary?.primaryMetric != null &&
+              trackingSummary?.overallPercentage != null)
+          ? trackingSummary!.overallPercentage!.round()
+          : null;
       final displayPercentage = primaryPercentage ?? derivedPercentage;
 
       totalTasksAggregate += totalTasks;

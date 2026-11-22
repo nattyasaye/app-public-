@@ -1486,10 +1486,10 @@ class DatabasePersistenceCoordinator {
         }
         final subMap = rawItem.map((k, v) => MapEntry(k.toString(), v));
         final subCtx = '$ctx.subtasks[$sIdx]';
-        final subTitle = _reqString(subMap, 'title', subCtx, maxLength: 300).trim();
-        final subId =
-            _optString(subMap, 'id', subCtx, allowEmpty: false) ??
-                '$id-sub-${sIdx + 1}';
+        final subTitle =
+            _reqString(subMap, 'title', subCtx, maxLength: 300).trim();
+        final subId = _optString(subMap, 'id', subCtx, allowEmpty: false) ??
+            '$id-sub-${sIdx + 1}';
         final subDone = subMap.containsKey('done')
             ? (_optBool(subMap, 'done', subCtx) ?? false)
             : (_optBool(subMap, 'completed', subCtx) ?? false);
@@ -1553,7 +1553,8 @@ class DatabasePersistenceCoordinator {
     for (var i = 0; i < rawDailyPlanning.length; i++) {
       final d = rawDailyPlanning[i];
       final ctx = 'dailyPlanningEntries[$i]';
-      final id = _reqUniqueId(d, 'dailyPlanningEntries', i, dailyPlanningSeenIds);
+      final id =
+          _reqUniqueId(d, 'dailyPlanningEntries', i, dailyPlanningSeenIds);
       final planDate = _reqCanonicalDate(d, 'planDate', ctx);
       final taskId = _reqString(d, 'taskId', ctx).trim();
       if (!targetTaskIds.contains(taskId)) {
@@ -4764,8 +4765,9 @@ class DatabasePersistenceCoordinator {
       final item = decoded[i];
       if (item is Map) {
         final rawId = item['id']?.toString().trim();
-        final id =
-            (rawId != null && rawId.isNotEmpty) ? rawId : '$taskId-sub-${i + 1}';
+        final id = (rawId != null && rawId.isNotEmpty)
+            ? rawId
+            : '$taskId-sub-${i + 1}';
         normalized.add(<String, dynamic>{
           'id': id,
           'title': (item['title'] ?? '').toString(),

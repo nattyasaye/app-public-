@@ -159,8 +159,8 @@ void main() {
 
         final yesterdaySnap =
             ctrl.state.buildDailyPlanSnapshot(date: yesterday, today: today);
-        final yesterdayItem = yesterdaySnap.items
-            .firstWhere((i) => i.task.id == 'cf-unfinished');
+        final yesterdayItem =
+            yesterdaySnap.items.firstWhere((i) => i.task.id == 'cf-unfinished');
         expect(yesterdayItem.completedLater, isTrue);
         expect(yesterdayItem.isCompletedForDay, isFalse);
 

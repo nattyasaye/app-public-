@@ -122,7 +122,8 @@ class TasksModuleState {
     return count;
   }
 
-  CalendarDate get effectivePlanDate => selectedPlanDate ?? CalendarDate.today();
+  CalendarDate get effectivePlanDate =>
+      selectedPlanDate ?? CalendarDate.today();
 
   Set<String> get pinnedTaskIds =>
       tasks.where((t) => !t.isArchived && t.isPinned).map((t) => t.id).toSet();
@@ -254,8 +255,7 @@ class TasksModuleState {
   }
 
   bool _isInInbox(TaskEntity t) {
-    return t.status == 'inbox' ||
-        (t.projectId == null || t.projectId!.isEmpty);
+    return t.status == 'inbox' || (t.projectId == null || t.projectId!.isEmpty);
   }
 
   bool _matchesTagFilters(TaskEntity t) {
@@ -478,8 +478,9 @@ class TasksModuleState {
     final projectMilestones =
         milestones.where((m) => m.projectId == projectId).toList();
 
-    final completedTasks =
-        projectTasks.where((t) => t.isCompleted || t.status == 'completed').length;
+    final completedTasks = projectTasks
+        .where((t) => t.isCompleted || t.status == 'completed')
+        .length;
     final completedMilestones =
         projectMilestones.where((m) => m.isCompleted).length;
 

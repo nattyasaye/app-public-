@@ -362,7 +362,8 @@ class TaskRecurrenceEditorSection extends StatelessWidget {
               padding: const EdgeInsets.all(SharedDesignTokens.spacingSm),
               decoration: BoxDecoration(
                 color: semantic.surfaceSubtle,
-                borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
+                borderRadius:
+                    BorderRadius.circular(SharedDesignTokens.radiusSm),
                 border: Border.all(color: semantic.border),
               ),
               child: Text(

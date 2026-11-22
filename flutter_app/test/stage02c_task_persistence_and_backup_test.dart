@@ -17,7 +17,9 @@ import 'support/sqlite_test_helper.dart';
 void main() {
   configureSqliteForHostTests();
 
-  group('Stage 0.2C — Flutter Task Persistence, DailyPlanning & Backup Compatibility', () {
+  group(
+      'Stage 0.2C — Flutter Task Persistence, DailyPlanning & Backup Compatibility',
+      () {
     test(
       '1 & 2. DriftTasksRepository + TasksController persist all 6 v10 Task fields, normalized subtask IDs, and DailyPlanningEntries with cascade delete',
       () async {
@@ -177,7 +179,8 @@ void main() {
         );
 
         final restoredTasks = await DriftTasksRepository(targetDb).getTasks();
-        expect(restoredTasks.single.completedAt, DateTime.utc(2026, 11, 21, 12, 30));
+        expect(restoredTasks.single.completedAt,
+            DateTime.utc(2026, 11, 21, 12, 30));
         expect(restoredTasks.single.scheduledTime, '15:20');
         expect(restoredTasks.single.myDayDate, CalendarDate(2026, 11, 21));
         expect(restoredTasks.single.recurrenceConfig?.frequency, 'daily');
@@ -317,7 +320,8 @@ void main() {
 
         // Clean Finance-only import keeps Tasks & DailyPlanningEntries intact
         await coordinator.importFinanceOnlySnapshot(finExport);
-        expect((await DriftTasksRepository(db).getTasks()).single.scheduledTime, '08:00');
+        expect((await DriftTasksRepository(db).getTasks()).single.scheduledTime,
+            '08:00');
         expect(
           (await DriftTasksRepository(db).getDailyPlanningEntries()).single.id,
           'dpe-keep-fin',
@@ -400,7 +404,8 @@ void main() {
         );
 
         // Existing Task & DailyPlanningEntry remain intact
-        expect((await DriftTasksRepository(db).getTasks()).single.id, 'task-existing');
+        expect((await DriftTasksRepository(db).getTasks()).single.id,
+            'task-existing');
         expect(
           (await DriftTasksRepository(db).getDailyPlanningEntries()).single.id,
           'dpe-existing',

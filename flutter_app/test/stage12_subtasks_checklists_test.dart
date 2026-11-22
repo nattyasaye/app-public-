@@ -14,7 +14,8 @@ import 'support/sqlite_test_helper.dart';
 void main() {
   configureSqliteForHostTests();
 
-  group('Stage 1.2 — Subtasks & Checklists (Flutter Domain, Persistence & UI)', () {
+  group('Stage 1.2 — Subtasks & Checklists (Flutter Domain, Persistence & UI)',
+      () {
     Future<({AppDatabase db, DriftTasksRepository repo, TasksController ctrl})>
         createHarness() async {
       final db = AppDatabase(NativeDatabase.memory());

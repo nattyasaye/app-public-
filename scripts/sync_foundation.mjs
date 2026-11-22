@@ -1997,26 +1997,19 @@ ${renderDartEnumList('dailyPlanningUniqueKey', dailyPlanningUniqueKey)}
 
 ${renderDartEnumList('plannedV10TaskFields', plannedV10TaskFields)}
 
-  static const String defaultStatus =
-      '${escapeDartString(rules?.tasks?.defaultStatus ?? 'not_started')}';
-  static const String defaultPriority =
-      '${escapeDartString(rules?.tasks?.defaultPriority ?? 'medium')}';
-  static const String defaultRecurrenceRepeatFrom =
-      '${escapeDartString(rules?.tasks?.defaultRecurrenceRepeatFrom ?? 'due_date')}';
-  static const String recurrenceCalendarBasis =
-      '${escapeDartString(rules?.tasks?.recurrenceCalendarBasis ?? 'gregorian')}';
-  static const String weekdayConvention =
-      '${escapeDartString(rules?.tasks?.weekdayConvention ?? 'iso_1_to_7')}';
+${formatDartConst('String', 'defaultStatus', `'${escapeDartString(rules?.tasks?.defaultStatus ?? 'not_started')}'`)}
+${formatDartConst('String', 'defaultPriority', `'${escapeDartString(rules?.tasks?.defaultPriority ?? 'medium')}'`)}
+${formatDartConst('String', 'defaultRecurrenceRepeatFrom', `'${escapeDartString(rules?.tasks?.defaultRecurrenceRepeatFrom ?? 'due_date')}'`)}
+${formatDartConst('String', 'recurrenceCalendarBasis', `'${escapeDartString(rules?.tasks?.recurrenceCalendarBasis ?? 'gregorian')}'`)}
+${formatDartConst('String', 'weekdayConvention', `'${escapeDartString(rules?.tasks?.weekdayConvention ?? 'iso_1_to_7')}'`)}
   static const int minWeekday = ${rules?.tasks?.minWeekday ?? 1};
   static const int maxWeekday = ${rules?.tasks?.maxWeekday ?? 7};
   static const int minRecurrenceInterval = ${rules?.tasks?.minRecurrenceInterval ?? 1};
-  static const String subtaskLegacyDoneAlias =
-      '${escapeDartString(rules?.tasks?.subtaskLegacyDoneAlias ?? 'completed')}';
+${formatDartConst('String', 'subtaskLegacyDoneAlias', `'${escapeDartString(rules?.tasks?.subtaskLegacyDoneAlias ?? 'completed')}'`)}
   static const bool subtaskLegacyIdOptional = ${
     rules?.tasks?.subtaskLegacyIdOptional !== false
   };
-  static const String dailyPlanningOnTaskDelete =
-      '${escapeDartString(contracts?.entities?.DailyPlanningEntry?.onTaskDelete ?? rules?.tasks?.dailyPlanningOnTaskDelete ?? 'cascade')}';
+${formatDartConst('String', 'dailyPlanningOnTaskDelete', `'${escapeDartString(contracts?.entities?.DailyPlanningEntry?.onTaskDelete ?? rules?.tasks?.dailyPlanningOnTaskDelete ?? 'cascade')}'`)}
 
   static const Map<String, int> priorityWeights = {
     'urgent': ${priorityWeights.urgent},

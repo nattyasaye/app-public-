@@ -98,8 +98,10 @@ void main() {
       () {
         final today = CalendarDate(year: 2026, month: 11, day: 22);
         final projects = <ProjectEntity>[
-          ProjectEntity(id: 'p-active', title: 'Alpha Launch', status: 'active'),
-          ProjectEntity(id: 'p-no-ms', title: 'No Milestones', status: 'active'),
+          ProjectEntity(
+              id: 'p-active', title: 'Alpha Launch', status: 'active'),
+          ProjectEntity(
+              id: 'p-no-ms', title: 'No Milestones', status: 'active'),
           ProjectEntity(
             id: 'p-manual-pending',
             title: 'Mislabelled Complete',
@@ -275,8 +277,8 @@ void main() {
           includeArchivedTasks: true,
         );
         expect(withArchived.totalProjectsCount, 5);
-        final alphaArchived = withArchived.projects
-            .firstWhere((p) => p.project.id == 'p-active');
+        final alphaArchived =
+            withArchived.projects.firstWhere((p) => p.project.id == 'p-active');
         expect(alphaArchived.totalTasks, 3);
 
         // ProgressEngine excludes archived tasks by default

@@ -76,8 +76,8 @@ class TaskReminderEngine {
   static TaskReminderAnchor? resolveAnchor(TaskEntity task) {
     final parsedTime = DayTimeOfDay.tryParse(task.scheduledTime);
     final hasExplicitTime = parsedTime != null;
-    final effectiveTime = parsedTime ??
-        DayTimeOfDay(hour: defaultHour, minute: defaultMinute);
+    final effectiveTime =
+        parsedTime ?? DayTimeOfDay(hour: defaultHour, minute: defaultMinute);
 
     if (task.scheduledDate != null) {
       final local = LocalDateTime(
@@ -152,9 +152,7 @@ class TaskReminderEngine {
     final anchor = resolveAnchor(task);
     if (anchor == null) {
       final fallback = defaultFallbackEthiopiaDateTime(nowUtc: nowUtc);
-      return fallback
-          .toUtcInstant()
-          .subtract(Duration(minutes: offsetMinutes));
+      return fallback.toUtcInstant().subtract(Duration(minutes: offsetMinutes));
     }
     return anchor.utcInstant.subtract(Duration(minutes: offsetMinutes));
   }
@@ -169,7 +167,8 @@ class TaskReminderEngine {
     final diffMs = anchor.utcInstant.millisecondsSinceEpoch -
         triggerTimeUtc.toUtc().millisecondsSinceEpoch;
     if (diffMs == 0) return TaskReminderPreset.atTime;
-    if (diffMs == 15 * 60 * 1000) return TaskReminderPreset.fifteenMinutesBefore;
+    if (diffMs == 15 * 60 * 1000)
+      return TaskReminderPreset.fifteenMinutesBefore;
     if (diffMs == 60 * 60 * 1000) return TaskReminderPreset.oneHourBefore;
     if (diffMs == 24 * 60 * 60 * 1000) return TaskReminderPreset.oneDayBefore;
     return TaskReminderPreset.custom;
@@ -199,8 +198,7 @@ class TaskReminderEngine {
       if (prevPrimary != null && nextPrimary != null) {
         final deltaDays = nextPrimary.jdn - prevPrimary.jdn;
         if (deltaDays != 0) {
-          final existingWall =
-              LocalDateTime.fromUtcInstant(normalizedExisting);
+          final existingWall = LocalDateTime.fromUtcInstant(normalizedExisting);
           final shifted = LocalDateTime(
             date: existingWall.date.addDays(deltaDays),
             hour: existingWall.hour,

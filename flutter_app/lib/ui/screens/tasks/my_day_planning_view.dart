@@ -59,8 +59,9 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
     Map<String, String> projectTitlesById,
   ) {
     if (query.isEmpty) return true;
-    final projectTitle =
-        task.projectId != null ? (projectTitlesById[task.projectId!] ?? '') : '';
+    final projectTitle = task.projectId != null
+        ? (projectTitlesById[task.projectId!] ?? '')
+        : '';
     final hay = [
       task.title,
       task.description ?? '',
@@ -109,13 +110,15 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
     final remainingItems = query.isEmpty
         ? snapshot.remainingItems
         : snapshot.remainingItems
-            .where((item) => _matchesSearch(item.task, query, projectTitlesById))
+            .where(
+                (item) => _matchesSearch(item.task, query, projectTitlesById))
             .toList(growable: false);
 
     final completedItems = query.isEmpty
         ? snapshot.completedItems
         : snapshot.completedItems
-            .where((item) => _matchesSearch(item.task, query, projectTitlesById))
+            .where(
+                (item) => _matchesSearch(item.task, query, projectTitlesById))
             .toList(growable: false);
 
     final carryForwardIds = {
@@ -488,8 +491,7 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
             children: [
               DaywellSectionHeader(
                 title: 'Plan & Add Tasks',
-                count:
-                    totalSuggestionsCount > 0 ? totalSuggestionsCount : null,
+                count: totalSuggestionsCount > 0 ? totalSuggestionsCount : null,
               ),
               const SizedBox(height: SharedDesignTokens.spacingSm),
               if (carryForwardSuggestions.isNotEmpty) ...[
@@ -692,8 +694,7 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
     final task = item.task;
-    final isOverdue =
-        task.dueDate != null && task.dueDate!.isBefore(todayDate);
+    final isOverdue = task.dueDate != null && task.dueDate!.isBefore(todayDate);
     final projectName =
         task.projectId != null ? projectTitlesById[task.projectId!] : null;
 

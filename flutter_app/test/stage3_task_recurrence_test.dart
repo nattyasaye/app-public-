@@ -19,7 +19,8 @@ import 'support/sqlite_test_helper.dart';
 void main() {
   configureSqliteForHostTests();
 
-  group('Stage 3 — Task Recurrence System (Flutter Domain, Controller, SQLite & UI)',
+  group(
+      'Stage 3 — Task Recurrence System (Flutter Domain, Controller, SQLite & UI)',
       () {
     Future<
         ({
@@ -166,7 +167,8 @@ void main() {
           forCompletion: true,
           nowUtc: DateTime.utc(2026, 11, 22, 22, 0), // 2026-11-23 01:00 UTC+3
         );
-        expect(nextDates?.dueDate, const CalendarDate(year: 2026, month: 11, day: 26));
+        expect(nextDates?.dueDate,
+            const CalendarDate(year: 2026, month: 11, day: 26));
         expect(
           nextDates?.scheduledDate,
           const CalendarDate(year: 2026, month: 11, day: 25),
@@ -188,7 +190,8 @@ void main() {
           isMyDay: true,
           myDayDate: const CalendarDate(year: 2026, month: 11, day: 22),
           subtasks: const [
-            TaskSubtask(id: 'frec-1-sub-1', title: 'Gather receipts', done: true),
+            TaskSubtask(
+                id: 'frec-1-sub-1', title: 'Gather receipts', done: true),
             TaskSubtask(id: 'frec-1-sub-2', title: 'File PDF', done: true),
           ],
           recurrenceConfig: const TaskRecurrenceConfig(
@@ -208,7 +211,8 @@ void main() {
         expect(firstToggle.generatedNextTask, isNotNull);
         final spawned = firstToggle.generatedNextTask!;
         expect(spawned.isCompleted, isFalse);
-        expect(spawned.dueDate, const CalendarDate(year: 2026, month: 11, day: 29));
+        expect(spawned.dueDate,
+            const CalendarDate(year: 2026, month: 11, day: 29));
         expect(
           spawned.scheduledDate,
           const CalendarDate(year: 2026, month: 11, day: 28),

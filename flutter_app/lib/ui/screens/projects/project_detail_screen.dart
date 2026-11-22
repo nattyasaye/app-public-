@@ -158,19 +158,19 @@ class ProjectDetailScreen extends StatelessWidget {
             state.blocksForProject(project.id, includeArchived: true);
         final records = state.recordsForProject(project.id);
         final summary = state.summaryForProject(project.id);
-        final linkedTasks = (tasksController?.state.tasks ??
-                const <TaskEntity>[])
-            .where(
-              (t) =>
-                  t.projectId == project.id &&
-                  (project.isArchived || !t.isArchived) &&
-                  t.status != 'cancelled',
-            )
-            .toList(growable: false);
-        final projectMilestones = (tasksController?.state.milestones ??
-                const <MilestoneEntity>[])
-            .where((m) => m.projectId == project.id)
-            .toList(growable: false);
+        final linkedTasks =
+            (tasksController?.state.tasks ?? const <TaskEntity>[])
+                .where(
+                  (t) =>
+                      t.projectId == project.id &&
+                      (project.isArchived || !t.isArchived) &&
+                      t.status != 'cancelled',
+                )
+                .toList(growable: false);
+        final projectMilestones =
+            (tasksController?.state.milestones ?? const <MilestoneEntity>[])
+                .where((m) => m.projectId == project.id)
+                .toList(growable: false);
         final completedTasksCount =
             linkedTasks.where((t) => t.isCompleted).length;
         final completedMilestonesCount =

@@ -90,7 +90,9 @@ class NoteEntity {
   }
 
   bool get isLinkedToTask =>
-      linkedModule == taskLinkModule && linkedId != null && linkedId!.isNotEmpty;
+      linkedModule == taskLinkModule &&
+      linkedId != null &&
+      linkedId!.isNotEmpty;
 
   String? get linkedTaskId => isLinkedToTask ? linkedId : null;
 
@@ -167,15 +169,14 @@ class NoteEntity {
     final rawLinkedModule = json['linkedModule']?.toString();
     final rawLinkedId = json['linkedId']?.toString();
     final legacyTaskId = json['taskId']?.toString();
-    final normalizedPair =
-        (rawLinkedModule != null || rawLinkedId != null)
-            ? normalizeLinkPair(rawLinkedModule, rawLinkedId)
-            : normalizeLinkPair(
-                legacyTaskId != null && legacyTaskId.trim().isNotEmpty
-                    ? taskLinkModule
-                    : null,
-                legacyTaskId,
-              );
+    final normalizedPair = (rawLinkedModule != null || rawLinkedId != null)
+        ? normalizeLinkPair(rawLinkedModule, rawLinkedId)
+        : normalizeLinkPair(
+            legacyTaskId != null && legacyTaskId.trim().isNotEmpty
+                ? taskLinkModule
+                : null,
+            legacyTaskId,
+          );
 
     return NoteEntity(
       id: json['id'],

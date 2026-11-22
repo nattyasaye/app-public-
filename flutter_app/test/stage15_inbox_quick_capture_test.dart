@@ -222,7 +222,10 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Convert Inbox Capture to Task'), findsOneWidget);
-        await tester.tap(find.widgetWithText(FilledButton, 'Convert to Task').evaluate().isNotEmpty
+        await tester.tap(find
+                .widgetWithText(FilledButton, 'Convert to Task')
+                .evaluate()
+                .isNotEmpty
             ? find.widgetWithText(FilledButton, 'Convert to Task')
             : find.text('Convert to Task').last);
         await tester.pumpAndSettle();
@@ -284,7 +287,8 @@ void main() {
           'lib/ui/screens/dashboard_view.dart',
           'lib/ui/widgets/quick_capture_dialog.dart',
         ]) {
-          final f = File(rel).existsSync() ? File(rel) : File('flutter_app/$rel');
+          final f =
+              File(rel).existsSync() ? File(rel) : File('flutter_app/$rel');
           final src = f.readAsStringSync();
           expect(
             RegExp(r'Color\(0x').hasMatch(src),

@@ -88,8 +88,10 @@ void main() {
         final detachedTaskIds = await h.tasksCtrl.deleteMilestone(ms.id);
         expect(detachedTaskIds, ['task-f13-1']);
         expect(h.tasksCtrl.state.milestones, isEmpty);
-        expect(h.tasksCtrl.state.findTaskById('task-f13-1')?.projectId, project.id);
-        expect(h.tasksCtrl.state.findTaskById('task-f13-1')?.milestoneId, isNull);
+        expect(h.tasksCtrl.state.findTaskById('task-f13-1')?.projectId,
+            project.id);
+        expect(
+            h.tasksCtrl.state.findTaskById('task-f13-1')?.milestoneId, isNull);
 
         await h.tasksCtrl.restoreDeletedMilestone(
           snapshotBeforeDelete,
@@ -217,7 +219,8 @@ void main() {
         // 1 completed of 3 (2 tasks + 1 milestone) -> 33%
         expect(find.text('Stage 1.3 UI Check'), findsOneWidget);
         expect(find.text('33%'), findsOneWidget);
-        expect(find.textContaining('1/2 tasks · 0/1 milestone'), findsOneWidget);
+        expect(
+            find.textContaining('1/2 tasks · 0/1 milestone'), findsOneWidget);
 
         await tester.pumpWidget(
           MaterialApp(

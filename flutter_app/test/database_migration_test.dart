@@ -2661,11 +2661,10 @@ void main() {
           isEmpty,
         );
 
-        final taskCols = (await migratedDb
-                .customSelect("PRAGMA table_info('tasks')")
-                .get())
-            .map((r) => r.read<String>('name'))
-            .toSet();
+        final taskCols =
+            (await migratedDb.customSelect("PRAGMA table_info('tasks')").get())
+                .map((r) => r.read<String>('name'))
+                .toSet();
         expect(
           taskCols,
           containsAll(<String>[
@@ -2875,11 +2874,10 @@ void main() {
           isEmpty,
         );
 
-        final noteCols = (await migratedDb
-                .customSelect("PRAGMA table_info('notes')")
-                .get())
-            .map((r) => r.read<String>('name'))
-            .toSet();
+        final noteCols =
+            (await migratedDb.customSelect("PRAGMA table_info('notes')").get())
+                .map((r) => r.read<String>('name'))
+                .toSet();
         expect(noteCols, containsAll(<String>['linked_module', 'linked_id']));
 
         final noteIdx = await migratedDb
@@ -2902,7 +2900,8 @@ void main() {
         expect(amharicNote.goalId, 'goal-v10-1');
         expect(amharicNote.linkedModule, isNull);
         expect(amharicNote.linkedId, isNull);
-        expect(allNotes.firstWhere((n) => n.id == 'note-v10-arch').isArchived, isTrue);
+        expect(allNotes.firstWhere((n) => n.id == 'note-v10-arch').isArchived,
+            isTrue);
 
         // Link one existing note to a task and persist a new linked note
         await notesRepo.updateNote(
@@ -2924,7 +2923,8 @@ void main() {
               .read<int>('user_version'),
           11,
         );
-        final reopenedLinked = await DriftNotesRepository(reopened).getNotesByLink(
+        final reopenedLinked =
+            await DriftNotesRepository(reopened).getNotesByLink(
           linkedModule: 'tasks',
           linkedId: 'task-v10-1',
         );

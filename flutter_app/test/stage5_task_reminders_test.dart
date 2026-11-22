@@ -69,7 +69,8 @@ class _FakeNotificationService implements INotificationService {
 void main() {
   configureSqliteForHostTests();
 
-  group('Stage 5 — Task Reminders and Notifications (Flutter Domain, Controller & Service)',
+  group(
+      'Stage 5 — Task Reminders and Notifications (Flutter Domain, Controller & Service)',
       () {
     Future<
         ({

@@ -884,15 +884,13 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
                                 : 'Linked task unavailable',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: linkedTask != null
-                                      ? colorScheme.onPrimaryContainer
-                                      : semantic.textMuted,
-                                ),
+                            style:
+                                Theme.of(context).textTheme.bodySmall?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: linkedTask != null
+                                          ? colorScheme.onPrimaryContainer
+                                          : semantic.textMuted,
+                                    ),
                           ),
                         ),
                         if (linkedTask != null && widget.onOpenTask != null)

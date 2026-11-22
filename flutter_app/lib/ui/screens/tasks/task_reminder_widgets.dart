@@ -165,8 +165,8 @@ class TaskReminderEditorSection extends StatelessWidget {
                       if (option == TaskReminderPreset.custom &&
                           (customDate == null || customTime == null)) {
                         final anchor = TaskReminderEngine.resolveAnchor(probe);
-                        final fallback =
-                            TaskReminderEngine.defaultFallbackEthiopiaDateTime();
+                        final fallback = TaskReminderEngine
+                            .defaultFallbackEthiopiaDateTime();
                         if (customDate == null) {
                           onCustomDateChanged(anchor?.date ?? fallback.date);
                         }

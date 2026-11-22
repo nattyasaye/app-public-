@@ -125,7 +125,8 @@ class _CalendarViewState extends State<CalendarView> {
   void _jumpToToday() {
     final today = CalendarDate.today();
     setState(() {
-      _displayedMonth = CalendarDate(year: today.year, month: today.month, day: 1);
+      _displayedMonth =
+          CalendarDate(year: today.year, month: today.month, day: 1);
     });
     widget.calendarController.setSelectedCalendarDate(today);
   }
@@ -375,7 +376,8 @@ class _CalendarViewState extends State<CalendarView> {
                           if (picked != null) {
                             setModalState(() {
                               eventDate = picked;
-                              if (endDate != null && endDate!.isBefore(eventDate)) {
+                              if (endDate != null &&
+                                  endDate!.isBefore(eventDate)) {
                                 endDate = null;
                               }
                             });
@@ -749,7 +751,8 @@ class _CalendarViewState extends State<CalendarView> {
       metadataParts.add('Due ${occ.companionDueDate!.toIsoString()}');
     }
     if (occ.companionScheduledDate != null) {
-      metadataParts.add('Scheduled ${occ.companionScheduledDate!.toIsoString()}');
+      metadataParts
+          .add('Scheduled ${occ.companionScheduledDate!.toIsoString()}');
     }
     if (occ.recurrenceSummary != null) {
       metadataParts.add(
@@ -948,10 +951,13 @@ class _CalendarViewState extends State<CalendarView> {
           final monthCells = _buildMonthGridDates();
           final firstCell = monthCells.first.date;
           final lastCell = monthCells.last.date;
-          final minProj = selectedDate.isBefore(firstCell) ? selectedDate : firstCell;
-          final maxProj = selectedDate.isAfter(lastCell) ? selectedDate : lastCell;
+          final minProj =
+              selectedDate.isBefore(firstCell) ? selectedDate : firstCell;
+          final maxProj =
+              selectedDate.isAfter(lastCell) ? selectedDate : lastCell;
 
-          final allTasks = widget.tasksController?.state.tasks ?? const <TaskEntity>[];
+          final allTasks =
+              widget.tasksController?.state.tasks ?? const <TaskEntity>[];
           final monthOccurrences = TaskCalendarEngine.projectTasksForDateRange(
             allTasks,
             DateRange(start: minProj, end: maxProj),
@@ -961,8 +967,8 @@ class _CalendarViewState extends State<CalendarView> {
           final query = _searchQuery.trim().toLowerCase();
 
           var dayEvents = calendarState.eventsForCalendarDate(selectedDate);
-          var dayTasks =
-              TaskCalendarEngine.occurrencesOnDate(monthOccurrences, selectedDate);
+          var dayTasks = TaskCalendarEngine.occurrencesOnDate(
+              monthOccurrences, selectedDate);
 
           if (_categoryFilter != 'all') {
             dayEvents = dayEvents
@@ -993,7 +999,8 @@ class _CalendarViewState extends State<CalendarView> {
               // Dual Month & Selected Date Header Card
               DaywellCard(
                 color: semantic.surfaceSubtle,
-                padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+                padding:
+                    const EdgeInsets.all(SharedDesignTokens.spacingCompact),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1022,7 +1029,8 @@ class _CalendarViewState extends State<CalendarView> {
                                   ),
                                 ],
                               ),
-                              const SizedBox(height: SharedDesignTokens.spacingXs),
+                              const SizedBox(
+                                  height: SharedDesignTokens.spacingXs),
                               Text(
                                 'Selected: ${SharedDateFormatter.formatDual(selectedDate)}',
                                 style: textTheme.bodySmall?.copyWith(
@@ -1056,9 +1064,11 @@ class _CalendarViewState extends State<CalendarView> {
                   Expanded(
                     child: SegmentedButton<String>(
                       segments: const <ButtonSegment<String>>[
-                        ButtonSegment<String>(value: 'month', label: Text('Month')),
+                        ButtonSegment<String>(
+                            value: 'month', label: Text('Month')),
                         ButtonSegment<String>(value: 'day', label: Text('Day')),
-                        ButtonSegment<String>(value: 'agenda', label: Text('Agenda')),
+                        ButtonSegment<String>(
+                            value: 'agenda', label: Text('Agenda')),
                       ],
                       selected: <String>{_viewMode},
                       onSelectionChanged: (Set<String> next) {
@@ -1126,7 +1136,8 @@ class _CalendarViewState extends State<CalendarView> {
                                     builder: (BuildContext context) {
                                       final cell = monthCells[weekStart + col];
                                       final cellDate = cell.date;
-                                      final isSelected = cellDate == selectedDate;
+                                      final isSelected =
+                                          cellDate == selectedDate;
                                       final isToday = cellDate == today;
                                       final ethDay = cellDate.toEthiopian().day;
                                       final hasEvents = calendarState
@@ -1162,8 +1173,8 @@ class _CalendarViewState extends State<CalendarView> {
                                         onTap: () => widget.calendarController
                                             .setSelectedCalendarDate(cellDate),
                                         child: Container(
-                                          constraints:
-                                              const BoxConstraints(minHeight: 48),
+                                          constraints: const BoxConstraints(
+                                              minHeight: 48),
                                           padding: const EdgeInsets.symmetric(
                                             vertical: 4,
                                           ),
@@ -1365,7 +1376,8 @@ class _CalendarViewState extends State<CalendarView> {
                         (
                           sortDate: ev.dateIso,
                           kindOrder: 0,
-                          sortTime: ev.isAllDay ? '00:00' : (ev.startTime ?? '00:00'),
+                          sortTime:
+                              ev.isAllDay ? '00:00' : (ev.startTime ?? '00:00'),
                           event: ev,
                           occ: null,
                         ),

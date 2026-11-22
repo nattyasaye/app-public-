@@ -101,7 +101,8 @@ class _TasksViewState extends State<TasksView>
   void didUpdateWidget(covariant TasksView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.effectiveController != widget.effectiveController) {
-      oldWidget.effectiveController.removeListener(_syncSearchControllerWithState);
+      oldWidget.effectiveController
+          .removeListener(_syncSearchControllerWithState);
       widget.effectiveController.addListener(_syncSearchControllerWithState);
       _syncSearchControllerWithState();
     }
@@ -128,7 +129,8 @@ class _TasksViewState extends State<TasksView>
     _lastHandledTaskFocusNonce = focus.nonce;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final target = widget.effectiveController.state.findTaskById(focus.taskId);
+      final target =
+          widget.effectiveController.state.findTaskById(focus.taskId);
       if (target == null) return;
       if (_tabController.index != 0) {
         _tabController.animateTo(0);
@@ -297,9 +299,7 @@ class _TasksViewState extends State<TasksView>
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          willArchive
-              ? 'Archived "${task.title}"'
-              : 'Restored "${task.title}"',
+          willArchive ? 'Archived "${task.title}"' : 'Restored "${task.title}"',
         ),
         action: SnackBarAction(
           label: 'Undo',
@@ -472,9 +472,8 @@ class _TasksViewState extends State<TasksView>
                 ? CalendarDate.today()
                 : null));
     String? titleError;
-    final sourceProjects =
-        widget.effectiveProjectsController?.state.projects ??
-            controller.state.projects;
+    final sourceProjects = widget.effectiveProjectsController?.state.projects ??
+        controller.state.projects;
     final projects = sourceProjects
         .where((p) => !p.isArchived || p.id == selectedProjectId)
         .toList(growable: false);
@@ -484,7 +483,8 @@ class _TasksViewState extends State<TasksView>
     ]).toList();
     final modalTagAddCtrl = TextEditingController();
     String? modalTagError;
-    var modalSubtasks = List<TaskSubtask>.from(existingTask?.subtasks ?? const []);
+    var modalSubtasks =
+        List<TaskSubtask>.from(existingTask?.subtasks ?? const []);
     final modalSubtaskAddCtrl = TextEditingController();
     final modalSubtaskEditCtrl = TextEditingController();
     String? modalSubtaskAddError;
@@ -500,8 +500,7 @@ class _TasksViewState extends State<TasksView>
         List<int>.from(existingRecurrence?.weekdays ?? const <int>[]);
     CalendarDate? modalRecStartDate = existingRecurrence?.startDate;
     CalendarDate? modalRecEndDate = existingRecurrence?.endDate;
-    String modalRecRepeatFrom =
-        existingRecurrence?.repeatFrom ?? 'due_date';
+    String modalRecRepeatFrom = existingRecurrence?.repeatFrom ?? 'due_date';
     String? modalRecError;
     final existingReminder = existingTask != null
         ? controller.state.findReminderForTask(existingTask.id)
@@ -519,7 +518,8 @@ class _TasksViewState extends State<TasksView>
         ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).date
         : (scheduledDate ?? dueDate ?? fallbackWall.date);
     DayTimeOfDay? reminderCustomTime = existingReminder != null
-        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).timeOfDay
+        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc)
+            .timeOfDay
         : (DayTimeOfDay.tryParse(scheduledTime) ?? fallbackWall.timeOfDay);
     bool? reminderPermissionGranted;
 
@@ -658,7 +658,8 @@ class _TasksViewState extends State<TasksView>
                           final projectMilestones = selectedProjectId == null
                               ? const <MilestoneEntity>[]
                               : controller.state.milestones
-                                  .where((m) => m.projectId == selectedProjectId)
+                                  .where(
+                                      (m) => m.projectId == selectedProjectId)
                                   .toList(growable: false);
                           if (projectMilestones.isEmpty) {
                             return const SizedBox.shrink();
@@ -696,7 +697,10 @@ class _TasksViewState extends State<TasksView>
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     Text(
                       'Scheduled Date',
-                      style: Theme.of(modalContext).textTheme.labelMedium?.copyWith(
+                      style: Theme.of(modalContext)
+                          .textTheme
+                          .labelMedium
+                          ?.copyWith(
                             color: semantic.textSecondary,
                           ),
                     ),
@@ -716,8 +720,8 @@ class _TasksViewState extends State<TasksView>
                           avatar: const Icon(Icons.wb_sunny_outlined, size: 16),
                           label: const Text('Tomorrow'),
                           onPressed: () => setModalState(
-                            () => scheduledDate =
-                                CalendarDate.today().addDays(1),
+                            () =>
+                                scheduledDate = CalendarDate.today().addDays(1),
                           ),
                         ),
                         ActionChip(
@@ -778,7 +782,10 @@ class _TasksViewState extends State<TasksView>
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     Text(
                       'Due Date',
-                      style: Theme.of(modalContext).textTheme.labelMedium?.copyWith(
+                      style: Theme.of(modalContext)
+                          .textTheme
+                          .labelMedium
+                          ?.copyWith(
                             color: semantic.textSecondary,
                           ),
                     ),
@@ -822,7 +829,8 @@ class _TasksViewState extends State<TasksView>
                           ActionChip(
                             avatar: const Icon(Icons.clear, size: 16),
                             label: const Text('Clear Due'),
-                            onPressed: () => setModalState(() => dueDate = null),
+                            onPressed: () =>
+                                setModalState(() => dueDate = null),
                           ),
                       ],
                     ),
@@ -915,8 +923,7 @@ class _TasksViewState extends State<TasksView>
                       dueDate: dueDate,
                       scheduledDate: scheduledDate,
                       scheduledTime: scheduledTime,
-                      notificationPermissionGranted:
-                          reminderPermissionGranted,
+                      notificationPermissionGranted: reminderPermissionGranted,
                       onRequestPermission: () async {
                         final granted =
                             await controller.requestNotificationPermission();
@@ -956,7 +963,8 @@ class _TasksViewState extends State<TasksView>
                             ],
                           ),
                           if (modalLabels.isNotEmpty) ...[
-                            const SizedBox(height: SharedDesignTokens.spacingXs),
+                            const SizedBox(
+                                height: SharedDesignTokens.spacingXs),
                             Wrap(
                               spacing: SharedDesignTokens.spacingXs,
                               runSpacing: SharedDesignTokens.spacingXs,
@@ -1048,12 +1056,14 @@ class _TasksViewState extends State<TasksView>
                               (cur) => cur.toLowerCase() == tag.toLowerCase(),
                             ),
                           )) ...[
-                            const SizedBox(height: SharedDesignTokens.spacingXs),
+                            const SizedBox(
+                                height: SharedDesignTokens.spacingXs),
                             Wrap(
                               spacing: SharedDesignTokens.spacingXs,
                               runSpacing: SharedDesignTokens.spacingXs,
                               children: [
-                                for (final tag in controller.state.availableTags)
+                                for (final tag
+                                    in controller.state.availableTags)
                                   if (!modalLabels.any(
                                     (cur) =>
                                         cur.toLowerCase() == tag.toLowerCase(),
@@ -1081,8 +1091,7 @@ class _TasksViewState extends State<TasksView>
                           ? 0.0
                           : modalSubtasks.where((s) => s.done).length /
                               modalSubtasks.length,
-                      completedCount:
-                          modalSubtasks.where((s) => s.done).length,
+                      completedCount: modalSubtasks.where((s) => s.done).length,
                       addController: modalSubtaskAddCtrl,
                       addErrorText: modalSubtaskAddError,
                       editingSubtaskId: editingModalSubtaskId,
@@ -1228,8 +1237,9 @@ class _TasksViewState extends State<TasksView>
                             return;
                           }
                         }
-                        final resolvedMilestoneId =
-                            selectedProjectId != null ? selectedMilestoneId : null;
+                        final resolvedMilestoneId = selectedProjectId != null
+                            ? selectedMilestoneId
+                            : null;
                         final projectsCtrl = widget.effectiveProjectsController;
                         final DateTime? nextReminderTriggerUtc = reminderEnabled
                             ? TaskReminderEngine.computeTriggerFromPreset(
@@ -1603,7 +1613,8 @@ class _TasksViewState extends State<TasksView>
                             ),
                           ],
                           if (task.completedAt != null) ...[
-                            const SizedBox(height: SharedDesignTokens.spacingXs),
+                            const SizedBox(
+                                height: SharedDesignTokens.spacingXs),
                             Text(
                               'Completed: ${EthiopiaClock.toUtcIsoString(task.completedAt!).substring(0, 10)}',
                               style: Theme.of(modalContext)
@@ -1769,8 +1780,7 @@ class _TasksViewState extends State<TasksView>
                                 onPressed: () => unawaited(
                                   controller.setTaskReminder(
                                     taskId: task.id,
-                                    triggerTimeUtc:
-                                        prevReminder.triggerTimeUtc,
+                                    triggerTimeUtc: prevReminder.triggerTimeUtc,
                                   ),
                                 ),
                               ),
@@ -1813,8 +1823,7 @@ class _TasksViewState extends State<TasksView>
                           }
                           widget.onOpenNote?.call(noteId);
                         },
-                        onShowLinkSheet: () =>
-                            _showLinkExistingNoteSheet(
+                        onShowLinkSheet: () => _showLinkExistingNoteSheet(
                           modalContext,
                           task,
                           controller,
@@ -2156,10 +2165,10 @@ class _TasksViewState extends State<TasksView>
                                                 if (!ok) {
                                                   if (dialogContext.mounted) {
                                                     setDialogState(
-                                                      () => editError =
-                                                          controller.state
-                                                                  .errorMessage ??
-                                                              'Unable to rename tag',
+                                                      () => editError = controller
+                                                              .state
+                                                              .errorMessage ??
+                                                          'Unable to rename tag',
                                                     );
                                                   }
                                                   return;
@@ -2261,11 +2270,11 @@ class _TasksViewState extends State<TasksView>
                                                 List<TaskEntity>.from(
                                                     controller.state.tasks);
                                             final prevCustom =
-                                                List<String>.from(
-                                                    controller.state.customTags);
+                                                List<String>.from(controller
+                                                    .state.customTags);
                                             final prevFilters =
-                                                Set<String>.from(
-                                                    controller.state.tagFilters);
+                                                Set<String>.from(controller
+                                                    .state.tagFilters);
                                             await controller.deleteTag(lbl);
                                             if (!mounted) return;
                                             ScaffoldMessenger.of(context)
@@ -2322,9 +2331,8 @@ class _TasksViewState extends State<TasksView>
     ProjectsModuleState? projectsState,
   ) {
     final sourceProjects = projectsState?.projects ?? moduleState.projects;
-    final activeProjects = sourceProjects
-        .where((p) => !p.isArchived)
-        .toList(growable: false);
+    final activeProjects =
+        sourceProjects.where((p) => !p.isArchived).toList(growable: false);
     final selectedProjectId = moduleState.selectedProjectId;
     final List<ProjectTrackingRecordEntity> sections =
         (selectedProjectId != null && projectsState != null)
@@ -2684,8 +2692,7 @@ class _TasksViewState extends State<TasksView>
                             label: 'Mark Processed',
                             variant: DaywellButtonVariant.text,
                             size: DaywellButtonSize.compact,
-                            onPressed: () =>
-                                _dismissInboxItem(item, inboxCtrl),
+                            onPressed: () => _dismissInboxItem(item, inboxCtrl),
                           ),
                           IconButton(
                             icon: Icon(
@@ -3035,8 +3042,8 @@ class _TasksViewState extends State<TasksView>
                             ),
                             onCarryForwardAll: () async {
                               final targetDate = moduleState.effectivePlanDate;
-                              final carriedCount = await controller
-                                  .carryForwardUnfinishedTasks(
+                              final carriedCount =
+                                  await controller.carryForwardUnfinishedTasks(
                                 toDate: targetDate,
                               );
                               if (!mounted) return;
@@ -3055,8 +3062,8 @@ class _TasksViewState extends State<TasksView>
                             onCarryPastRemainingToToday: () async {
                               final fromDate = moduleState.effectivePlanDate;
                               final today = CalendarDate.today();
-                              final carriedCount = await controller
-                                  .carryForwardUnfinishedTasks(
+                              final carriedCount =
+                                  await controller.carryForwardUnfinishedTasks(
                                 fromDate: fromDate,
                                 toDate: today,
                               );
@@ -3076,8 +3083,7 @@ class _TasksViewState extends State<TasksView>
                             },
                             onCreateTaskForDay: _showQuickAddModal,
                           )
-                        : moduleState.viewFilter == 'inbox' &&
-                                inboxCtrl != null
+                        : moduleState.viewFilter == 'inbox' && inboxCtrl != null
                             ? (unprocessedInbox.isEmpty && tasks.isEmpty)
                                 ? DaywellEmptyState(
                                     icon: Icons.inbox_outlined,
@@ -3087,14 +3093,15 @@ class _TasksViewState extends State<TasksView>
                                     actionLabel: moduleState.hasActiveFilters
                                         ? 'Clear filters'
                                         : 'Add Task',
-                                    onActionPressed: moduleState.hasActiveFilters
-                                        ? () {
-                                            _searchController.clear();
-                                            controller.clearFilters(
-                                              resetView: false,
-                                            );
-                                          }
-                                        : () => _showQuickAddModal(),
+                                    onActionPressed:
+                                        moduleState.hasActiveFilters
+                                            ? () {
+                                                _searchController.clear();
+                                                controller.clearFilters(
+                                                  resetView: false,
+                                                );
+                                              }
+                                            : () => _showQuickAddModal(),
                                   )
                                 : ListView(
                                     padding: const EdgeInsets.all(12),
@@ -3145,18 +3152,17 @@ class _TasksViewState extends State<TasksView>
                                         : moduleState.viewFilter == 'archived'
                                             ? null
                                             : 'Add Task',
-                                    onActionPressed:
-                                        moduleState.hasActiveFilters
-                                            ? () {
-                                                _searchController.clear();
-                                                controller.clearFilters(
-                                                  resetView: false,
-                                                );
-                                              }
-                                            : moduleState.viewFilter ==
-                                                    'archived'
-                                                ? null
-                                                : () => _showQuickAddModal(),
+                                    onActionPressed: moduleState
+                                            .hasActiveFilters
+                                        ? () {
+                                            _searchController.clear();
+                                            controller.clearFilters(
+                                              resetView: false,
+                                            );
+                                          }
+                                        : moduleState.viewFilter == 'archived'
+                                            ? null
+                                            : () => _showQuickAddModal(),
                                   )
                                 : ListView.builder(
                                     padding: const EdgeInsets.all(12),
@@ -3326,19 +3332,20 @@ class _TasksViewState extends State<TasksView>
                   if (task.scheduledDate != null)
                     Text(
                       'Plan: ${SharedDateFormatter.formatEthiopian(task.scheduledDate!.toEthiopian(), useAmharic: false, includeEra: false)}${task.scheduledTime != null ? ' · ${task.scheduledTime!}' : ''}',
-                      style:
-                          TextStyle(fontSize: 11, color: semantic.textSecondary),
+                      style: TextStyle(
+                          fontSize: 11, color: semantic.textSecondary),
                     )
                   else if (task.scheduledTime != null)
                     Text(
                       'Time: ${task.scheduledTime!} EAT',
-                      style:
-                          TextStyle(fontSize: 11, color: semantic.textSecondary),
+                      style: TextStyle(
+                          fontSize: 11, color: semantic.textSecondary),
                     ),
                   if (task.dueDate != null)
                     Text(
                       'Due: ${SharedDateFormatter.formatEthiopian(task.dueDate!.toEthiopian(), useAmharic: false, includeEra: false)}',
-                      style: TextStyle(fontSize: 11, color: colorScheme.primary),
+                      style:
+                          TextStyle(fontSize: 11, color: colorScheme.primary),
                     ),
                   if (reminder != null)
                     Row(
@@ -3641,7 +3648,8 @@ class _SubtasksChecklistSection extends StatelessWidget {
             const SizedBox(height: SharedDesignTokens.spacingSm),
             for (int i = 0; i < subtasks.length; i++) ...[
               Container(
-                margin: const EdgeInsets.only(bottom: SharedDesignTokens.spacingXs),
+                margin:
+                    const EdgeInsets.only(bottom: SharedDesignTokens.spacingXs),
                 padding: const EdgeInsets.symmetric(
                   horizontal: SharedDesignTokens.spacingXs,
                   vertical: 2,
@@ -3668,7 +3676,8 @@ class _SubtasksChecklistSection extends StatelessWidget {
                                     border: InputBorder.none,
                                   ),
                                   onChanged: (_) => onEditTextChanged(),
-                                  onSubmitted: (_) => onSaveEdit(subtasks[i].id),
+                                  onSubmitted: (_) =>
+                                      onSaveEdit(subtasks[i].id),
                                 ),
                               ),
                               IconButton(
@@ -3728,8 +3737,7 @@ class _SubtasksChecklistSection extends StatelessWidget {
                               minHeight: 32,
                             ),
                             padding: EdgeInsets.zero,
-                            onPressed:
-                                i == 0 ? null : () => onMove(i, i - 1),
+                            onPressed: i == 0 ? null : () => onMove(i, i - 1),
                           ),
                           IconButton(
                             icon: const Icon(Icons.arrow_downward, size: 16),

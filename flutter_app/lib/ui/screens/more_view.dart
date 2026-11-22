@@ -105,8 +105,7 @@ class MoreView extends StatelessWidget {
   void _openNotificationsInfoDialog(BuildContext context) {
     final semantic = context.daywellColors;
     final colorScheme = Theme.of(context).colorScheme;
-    final activeTaskReminders =
-        state.tasksController.state.activeReminderCount;
+    final activeTaskReminders = state.tasksController.state.activeReminderCount;
     final totalTaskReminders = state.tasksController.state.reminders
         .where((r) => r.targetType == 'task')
         .length;
@@ -150,9 +149,10 @@ class MoreView extends StatelessWidget {
                   const SizedBox(height: SharedDesignTokens.spacingSm),
                   Text(
                     'Future reminders schedule in-session via LocalNotificationService when tasks are created, edited, completed, rescheduled, or restored.',
-                    style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
-                          color: colorScheme.onSurfaceVariant,
-                        ),
+                    style:
+                        Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
+                              color: colorScheme.onSurfaceVariant,
+                            ),
                   ),
                 ],
               ),

@@ -23,7 +23,9 @@ import 'support/sqlite_test_helper.dart';
 void main() {
   setUpAll(configureSqliteForHostTests);
 
-  group('Stage 8 — Flutter Task–Notes Integration (Persistence, Lifecycle, Backup & UI)', () {
+  group(
+      'Stage 8 — Flutter Task–Notes Integration (Persistence, Lifecycle, Backup & UI)',
+      () {
     test(
       '1. Persists linkedModule/linkedId across DriftNotesRepository & NotesController, clamps task-created titles <= 250 chars, and preserves note on unlink',
       () async {
@@ -111,7 +113,8 @@ void main() {
           2,
         );
         expect(
-          TaskNotesHelper.countNotesForTask(notesCtrl.state.notes, otherTask.id),
+          TaskNotesHelper.countNotesForTask(
+              notesCtrl.state.notes, otherTask.id),
           1,
         );
 
@@ -171,7 +174,8 @@ void main() {
         // Archiving retains note link
         await tasksCtrl.archiveTask('task-life-1');
         expect(
-          TaskNotesHelper.countNotesForTask(notesCtrl.state.notes, 'task-life-1'),
+          TaskNotesHelper.countNotesForTask(
+              notesCtrl.state.notes, 'task-life-1'),
           2,
         );
 
@@ -214,7 +218,8 @@ void main() {
         final coordinator = DatabasePersistenceCoordinator(sourceDb);
         final exported = await coordinator.exportSnapshot();
         expect(exported['databaseSchemaVersion'], 11);
-        final exportedNote = (exported['notes'] as List).single as Map<String, dynamic>;
+        final exportedNote =
+            (exported['notes'] as List).single as Map<String, dynamic>;
         expect(exportedNote['linkedModule'], 'tasks');
         expect(exportedNote['linkedId'], 'task-bk-1');
 
@@ -249,7 +254,8 @@ void main() {
         final orphanReport = await DatabasePersistenceCoordinator(targetDb)
             .importSnapshotDetailed(orphanSnap);
         expect(
-          orphanReport.diagnostics.any((d) => d.code == 'ORPHANED_NOTE_TASK_CLEARED'),
+          orphanReport.diagnostics
+              .any((d) => d.code == 'ORPHANED_NOTE_TASK_CLEARED'),
           isTrue,
         );
         final sanitizedNote =

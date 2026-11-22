@@ -295,7 +295,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
         ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).date
         : (scheduledDate ?? dueDate ?? fallbackWall.date);
     DayTimeOfDay? reminderCustomTime = existingReminder != null
-        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc).timeOfDay
+        ? LocalDateTime.fromUtcInstant(existingReminder.triggerTimeUtc)
+            .timeOfDay
         : (DayTimeOfDay.tryParse(scheduledTime) ?? fallbackWall.timeOfDay);
     bool? reminderPermissionGranted;
 
@@ -305,7 +306,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
         builder: (ctx, setDialogState) {
           final semantic = ctx.daywellColors;
           return AlertDialog(
-            title: Text(existingTask == null ? 'New Project Task' : 'Edit Task'),
+            title:
+                Text(existingTask == null ? 'New Project Task' : 'Edit Task'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -422,7 +424,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                     runSpacing: SharedDesignTokens.spacingXs,
                     children: [
                       ActionChip(
-                        avatar: const Icon(Icons.event_available_outlined, size: 16),
+                        avatar: const Icon(Icons.event_available_outlined,
+                            size: 16),
                         label: Text(
                           scheduledDate == null
                               ? 'Schedule'
@@ -447,7 +450,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                               setDialogState(() => scheduledDate = null),
                         ),
                       ActionChip(
-                        avatar: const Icon(Icons.edit_calendar_outlined, size: 16),
+                        avatar:
+                            const Icon(Icons.edit_calendar_outlined, size: 16),
                         label: Text(
                           dueDate == null
                               ? 'Due Date'
@@ -620,10 +624,10 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       ? TaskRecurrenceConfig(
                           frequency: recFrequency,
                           interval: recInterval,
-                          weekdays: recFrequency == 'weekly' &&
-                                  recWeekdays.isNotEmpty
-                              ? List<int>.unmodifiable(recWeekdays)
-                              : null,
+                          weekdays:
+                              recFrequency == 'weekly' && recWeekdays.isNotEmpty
+                                  ? List<int>.unmodifiable(recWeekdays)
+                                  : null,
                           startDate: recStartDate,
                           endDate: recEndDate,
                           repeatFrom: recRepeatFrom,
@@ -669,8 +673,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                       recurrenceRule: recConfig?.frequency,
                       recurrenceConfig: recConfig,
                       reminderTriggerUtc: nextReminderTriggerUtc,
-                      requestReminderPermission:
-                          nextReminderTriggerUtc != null,
+                      requestReminderPermission: nextReminderTriggerUtc != null,
                     );
                     if (created != null) {
                       await projectsController.assignTaskToProjectSection(
@@ -797,8 +800,9 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
           final semantic = animCtx.daywellColors;
           final colorScheme = Theme.of(animCtx).colorScheme;
           final textTheme = Theme.of(animCtx).textTheme;
-          final milestone =
-              task.milestoneId != null ? milestonesById[task.milestoneId!] : null;
+          final milestone = task.milestoneId != null
+              ? milestonesById[task.milestoneId!]
+              : null;
 
           return AlertDialog(
             title: Text(task.title),
@@ -1070,7 +1074,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                           ctrl.state.findReminderForTask(task.id);
                       unawaited(() async {
                         await ctrl.removeTaskReminder(task.id);
-                        if (!hostContext.mounted || prevReminder == null) return;
+                        if (!hostContext.mounted || prevReminder == null)
+                          return;
                         ScaffoldMessenger.of(hostContext).clearSnackBars();
                         ScaffoldMessenger.of(hostContext).showSnackBar(
                           SnackBar(
@@ -1194,7 +1199,8 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
     final confirmed = await DaywellConfirmationDialog.show(
       context,
       title: 'Delete Task?',
-      message: 'Delete "${task.title}"? You can undo immediately after deleting.',
+      message:
+          'Delete "${task.title}"? You can undo immediately after deleting.',
       confirmLabel: 'Delete Task',
       isDestructive: true,
       icon: Icons.delete_outline,
@@ -1459,8 +1465,7 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
               icon: Icons.delete_outline,
               tooltip: 'Delete task ${task.title}',
               isDestructive: true,
-              onPressed: () =>
-                  _deleteTask(context, task, currentSectionId),
+              onPressed: () => _deleteTask(context, task, currentSectionId),
             ),
           ],
         ],

@@ -253,7 +253,8 @@ class DailyPlanningEngine {
         )) {
       return preferredPlanDate;
     }
-    if (isTaskPlannedForDate(task, normalized, resolvedToday, today: resolvedToday)) {
+    if (isTaskPlannedForDate(task, normalized, resolvedToday,
+        today: resolvedToday)) {
       return resolvedToday;
     }
     if (task.myDayDate != null &&
@@ -268,8 +269,7 @@ class DailyPlanningEngine {
     final activeDates = normalized
         .where(
           (e) =>
-              e.taskId == task.id &&
-              e.action != DailyPlanningActions.dismissed,
+              e.taskId == task.id && e.action != DailyPlanningActions.dismissed,
         )
         .map((e) => e.planDate)
         .toList(growable: false);

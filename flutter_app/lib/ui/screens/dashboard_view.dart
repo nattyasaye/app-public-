@@ -1691,9 +1691,8 @@ class DashboardTasksSection extends StatelessWidget {
                                 )
                               else
                                 DaywellProgressBar(
-                                  value:
-                                      overview.todayPlan.progressPercentage /
-                                          100.0,
+                                  value: overview.todayPlan.progressPercentage /
+                                      100.0,
                                   label:
                                       '${overview.todayPlan.completedCount} completed · ${overview.todayPlan.remainingCount} remaining',
                                   valueText:
@@ -1851,7 +1850,8 @@ class DashboardTasksSection extends StatelessWidget {
                       Align(
                         alignment: AlignmentDirectional.centerStart,
                         child: DaywellButton(
-                          label: '+ ${pendingTasks.length - 4} more remaining tasks',
+                          label:
+                              '+ ${pendingTasks.length - 4} more remaining tasks',
                           variant: DaywellButtonVariant.text,
                           size: DaywellButtonSize.compact,
                           onPressed: () =>
@@ -1915,9 +1915,8 @@ class _TaskOverviewCountsGrid extends StatelessWidget {
         foreground: overview.overdueCount > 0
             ? errorPalette.foreground
             : semantic.textSecondary,
-        border: overview.overdueCount > 0
-            ? errorPalette.border
-            : semantic.border,
+        border:
+            overview.overdueCount > 0 ? errorPalette.border : semantic.border,
         onTap: onOpenOverdue,
       ),
       (
@@ -1968,8 +1967,7 @@ class _TaskOverviewCountsGrid extends StatelessWidget {
         final int columns = (maxWidth >= 340 && textScale <= 1.25)
             ? 5
             : (maxWidth >= 260 ? 3 : 2);
-        final double tileWidth =
-            (maxWidth - spacing * (columns - 1)) / columns;
+        final double tileWidth = (maxWidth - spacing * (columns - 1)) / columns;
 
         return Wrap(
           spacing: spacing,
@@ -2133,11 +2131,11 @@ class DashboardProjectProgressSection extends StatelessWidget {
                         final milestoneLabel = item.hasMilestones
                             ? '· ${item.completedMilestones}/${item.totalMilestones} ${item.totalMilestones == 1 ? 'milestone' : 'milestones'}'
                             : null;
-                        final trackingLabel =
-                            (item.primaryMetricTitle != null &&
-                                    item.primaryMetricTitle!.trim().isNotEmpty)
-                                ? '· Tracking: ${item.primaryMetricTitle!.trim()}'
-                                : null;
+                        final trackingLabel = (item.primaryMetricTitle !=
+                                    null &&
+                                item.primaryMetricTitle!.trim().isNotEmpty)
+                            ? '· Tracking: ${item.primaryMetricTitle!.trim()}'
+                            : null;
 
                         return Padding(
                           padding: const EdgeInsets.only(

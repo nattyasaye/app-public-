@@ -21,7 +21,8 @@ import 'support/sqlite_test_helper.dart';
 void main() {
   configureSqliteForHostTests();
 
-  group('Stage 4 — Task and Calendar Integration (Flutter Domain, Controllers & UI)',
+  group(
+      'Stage 4 — Task and Calendar Integration (Flutter Domain, Controllers & UI)',
       () {
     Future<
         ({

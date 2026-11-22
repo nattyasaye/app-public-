@@ -98,7 +98,8 @@ class DriftTasksRepository implements ITasksRepository {
       labels: _decodeLabels(r.labelsJson),
       isPinned: r.isPinned,
       isMyDay: r.isMyDay,
-      myDayDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.myDayDate),
+      myDayDate:
+          SharedDateFormatter.tryParseFlexibleToCalendarDate(r.myDayDate),
       recurrenceRule: r.recurrenceRule,
       recurrenceConfig: _decodeRecurrenceConfig(r.recurrenceConfigJson),
       isArchived: r.isArchived,
@@ -113,8 +114,9 @@ class DriftTasksRepository implements ITasksRepository {
   ) {
     return DailyPlanningEntryEntity(
       id: r.id,
-      planDate: SharedDateFormatter.tryParseFlexibleToCalendarDate(r.planDate) ??
-          CalendarDate.today(),
+      planDate:
+          SharedDateFormatter.tryParseFlexibleToCalendarDate(r.planDate) ??
+              CalendarDate.today(),
       taskId: r.taskId,
       action: r.action,
       createdAt: r.createdAt,
@@ -360,7 +362,9 @@ class DriftTasksRepository implements ITasksRepository {
     return _db.transaction(() async {
       final existingByComposite = await (_db.select(_db.dailyPlanningEntries)
             ..where(
-              (tbl) => tbl.taskId.equals(entry.taskId) & tbl.planDate.equals(dateIso),
+              (tbl) =>
+                  tbl.taskId.equals(entry.taskId) &
+                  tbl.planDate.equals(dateIso),
             ))
           .getSingleOrNull();
       final existingById = existingByComposite ??
@@ -553,7 +557,8 @@ class DriftTasksRepository implements ITasksRepository {
   Future<void> deleteTaskReminderForTask(String taskId) async {
     await (_db.delete(_db.reminders)
           ..where(
-            (tbl) => tbl.targetType.equals('task') & tbl.targetId.equals(taskId),
+            (tbl) =>
+                tbl.targetType.equals('task') & tbl.targetId.equals(taskId),
           ))
         .go();
   }

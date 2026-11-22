@@ -117,7 +117,8 @@ void main() {
         final affected = await h.tasksCtrl.deleteTag('Fin');
         expect(affected, 2);
         expect(h.tasksCtrl.state.findTaskById('t14-tag-1')?.labels, ['Taxes']);
-        expect(h.tasksCtrl.state.findTaskById('t14-tag-2')?.labels, ['Finance']);
+        expect(
+            h.tasksCtrl.state.findTaskById('t14-tag-2')?.labels, ['Finance']);
         expect(h.tasksCtrl.state.tagFilters, isEmpty);
       },
     );

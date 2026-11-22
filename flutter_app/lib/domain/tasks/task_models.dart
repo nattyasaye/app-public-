@@ -164,7 +164,8 @@ class TaskRecurrenceConfig {
       return null;
     }
     final rawInterval = raw['interval'];
-    final interval = rawInterval is int && rawInterval >= 1 ? rawInterval : null;
+    final interval =
+        rawInterval is int && rawInterval >= 1 ? rawInterval : null;
     final rawWeekdays = raw['weekdays'];
     List<int>? weekdays;
     if (rawWeekdays is List) {
@@ -329,12 +330,10 @@ class TaskEntity {
     return TaskEntity(
       id: id,
       title: title ?? this.title,
-      description:
-          clearDescription ? null : (description ?? this.description),
+      description: clearDescription ? null : (description ?? this.description),
       status: status ?? this.status,
       priority: priority ?? this.priority,
-      completedAt:
-          clearCompletedAt ? null : (completedAt ?? this.completedAt),
+      completedAt: clearCompletedAt ? null : (completedAt ?? this.completedAt),
       dueDate: clearDueDate ? null : (dueDate ?? this.dueDate),
       scheduledDate:
           clearScheduledDate ? null : (scheduledDate ?? this.scheduledDate),
@@ -776,4 +775,3 @@ class TaskReminderEntity {
         createdAt,
       );
 }
-

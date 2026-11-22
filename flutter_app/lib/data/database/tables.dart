@@ -154,7 +154,8 @@ class Tasks extends Table {
 /// Daily My Day planning history entries (Schema v10)
 class DailyPlanningEntries extends Table {
   TextColumn get id => text()(); // UUID v4
-  TextColumn get planDate => text()(); // Canonical YYYY-MM-DD (Africa/Addis_Ababa)
+  TextColumn get planDate =>
+      text()(); // Canonical YYYY-MM-DD (Africa/Addis_Ababa)
   TextColumn get taskId =>
       text().references(Tasks, #id, onDelete: KeyAction.cascade)();
   TextColumn get action => text().withDefault(const Constant(

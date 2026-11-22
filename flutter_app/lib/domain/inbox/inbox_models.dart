@@ -75,8 +75,10 @@ class InboxItemEntity {
   ///   remaining lines (plus full first line if truncated) stay in [description].
   /// - Single-line > 120 chars: truncated [title] + full [rawText] in [description].
   InboxTaskDraft toTaskDraft() {
-    final normalized = rawText.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
-    final initialLabels = category == 'idea' ? const ['idea'] : const <String>[];
+    final normalized =
+        rawText.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
+    final initialLabels =
+        category == 'idea' ? const ['idea'] : const <String>[];
     if (normalized.isEmpty) {
       return InboxTaskDraft(
         sourceInboxId: id,

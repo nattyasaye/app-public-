@@ -51,7 +51,8 @@ class TasksController extends ChangeNotifier {
         tasks: List<TaskEntity>.unmodifiable(loadedTasks),
         projects: List<ProjectEntity>.unmodifiable(loadedProjects),
         milestones: List<MilestoneEntity>.unmodifiable(loadedMilestones),
-        dailyPlanningEntries: DailyPlanningEngine.normalizeEntries(loadedEntries),
+        dailyPlanningEntries:
+            DailyPlanningEngine.normalizeEntries(loadedEntries),
         reminders: List<TaskReminderEntity>.unmodifiable(loadedReminders),
         isLoading: false,
         clearError: true,
@@ -121,7 +122,8 @@ class TasksController extends ChangeNotifier {
       for (final t in tasks) t.id: t,
     };
 
-    final eligibleById = <String, ({TaskReminderEntity reminder, TaskEntity task})>{};
+    final eligibleById =
+        <String, ({TaskReminderEntity reminder, TaskEntity task})>{};
     for (final reminder in reminders) {
       if (reminder.targetType != 'task' || !reminder.isActive) continue;
       final task = taskById[reminder.targetId];
@@ -187,9 +189,8 @@ class TasksController extends ChangeNotifier {
 
   Future<void> syncTaskReminders({DateTime? nowUtc}) async {
     try {
-      final loadedTasks = _state.tasks.isNotEmpty
-          ? _state.tasks
-          : await _repository.getTasks();
+      final loadedTasks =
+          _state.tasks.isNotEmpty ? _state.tasks : await _repository.getTasks();
       final loadedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         reminders: List<TaskReminderEntity>.unmodifiable(loadedReminders),
@@ -250,8 +251,7 @@ class TasksController extends ChangeNotifier {
 
   Future<void> removeTaskReminder(String taskId) async {
     try {
-      final existing =
-          _state.findReminderForTask(taskId) ??
+      final existing = _state.findReminderForTask(taskId) ??
           await _repository.getTaskReminderForTask(taskId);
       await _repository.deleteTaskReminderForTask(taskId);
       await _cancelNotificationId(
@@ -670,8 +670,8 @@ class TasksController extends ChangeNotifier {
       final now = EthiopiaClock.nowUtc();
       for (var i = 0; i < orderedTaskIds.length; i++) {
         final taskId = orderedTaskIds[i];
-        final existing =
-            _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+        final existing = _state.findTaskById(taskId) ??
+            await _repository.getTaskById(taskId);
         if (existing != null && existing.sortOrder != i) {
           await _repository.updateTask(
             existing.copyWith(sortOrder: i, updatedAt: now),
@@ -696,8 +696,7 @@ class TasksController extends ChangeNotifier {
   }) async {
     final targetDate = date ?? _state.effectivePlanDate;
     final snapshot = _state.buildDailyPlanSnapshot(date: targetDate);
-    final ids =
-        snapshot.remainingItems.map((item) => item.task.id).toList();
+    final ids = snapshot.remainingItems.map((item) => item.task.id).toList();
     final idx = ids.indexOf(taskId);
     if (idx == -1) return;
     final targetIdx = idx + delta;
@@ -794,7 +793,8 @@ class TasksController extends ChangeNotifier {
     bool isCompleted, {
     CalendarDate? preferredPlanDate,
   }) async {
-    final task = await _repository.getTaskById(taskId) ?? _state.findTaskById(taskId);
+    final task =
+        await _repository.getTaskById(taskId) ?? _state.findTaskById(taskId);
     if (task == null) return;
     final entries = DailyPlanningEngine.normalizeEntries(
       await _repository.getDailyPlanningEntries(),
@@ -814,7 +814,8 @@ class TasksController extends ChangeNotifier {
 
     await _repository.upsertDailyPlanningEntry(
       DailyPlanningEntryEntity(
-        id: existing?.id ?? DailyPlanningEngine.buildEntryId(taskId, targetDate),
+        id: existing?.id ??
+            DailyPlanningEngine.buildEntryId(taskId, targetDate),
         planDate: targetDate,
         taskId: taskId,
         action: nextAction,
@@ -851,7 +852,8 @@ class TasksController extends ChangeNotifier {
       (t) => t.toLowerCase() == normalized.toLowerCase(),
     );
     if (alreadyExists) {
-      _state = _state.copyWith(errorMessage: 'Tag "@$normalized" already exists');
+      _state =
+          _state.copyWith(errorMessage: 'Tag "@$normalized" already exists');
       notifyListeners();
       return false;
     }
@@ -944,7 +946,8 @@ class TasksController extends ChangeNotifier {
           .where((t) => t.toLowerCase() != targetKey)
           .toList(growable: false);
       final nextTagFilters = _state.tagFilters
-          .where((t) => TasksModuleState.normalizeLabel(t).toLowerCase() != targetKey)
+          .where((t) =>
+              TasksModuleState.normalizeLabel(t).toLowerCase() != targetKey)
           .toSet();
 
       final updatedTasks = await _repository.getTasks();
@@ -1269,10 +1272,9 @@ class TasksController extends ChangeNotifier {
     final task = TaskEntity(
       id: resolvedTaskId,
       title: trimmedTitle,
-      description:
-          (trimmedDescription == null || trimmedDescription.isEmpty)
-              ? null
-              : trimmedDescription,
+      description: (trimmedDescription == null || trimmedDescription.isEmpty)
+          ? null
+          : trimmedDescription,
       priority: normalizedPriority,
       status: normalizedStatus,
       completedAt: normalizedStatus == 'completed' ? now : null,
@@ -1467,10 +1469,12 @@ class TasksController extends ChangeNotifier {
     final trimmedDesc = description?.trim();
     final shouldClearDesc =
         clearDescription || (description != null && trimmedDesc!.isEmpty);
-    final nextProjectId = clearProject ? null : (projectId ?? existing.projectId);
+    final nextProjectId =
+        clearProject ? null : (projectId ?? existing.projectId);
     final projectChanged = nextProjectId != existing.projectId;
-    final shouldClearMilestone =
-        clearProject || clearMilestone || (projectChanged && milestoneId == null);
+    final shouldClearMilestone = clearProject ||
+        clearMilestone ||
+        (projectChanged && milestoneId == null);
 
     final TaskRecurrenceConfig? nextRecurrenceConfig = clearRecurrenceConfig
         ? null
@@ -1504,8 +1508,7 @@ class TasksController extends ChangeNotifier {
       subtasks: subtasks != null
           ? TaskSubtask.normalizeList(subtasks, taskId: existing.id)
           : null,
-      labels:
-          labels != null ? TasksModuleState.normalizeLabels(labels) : null,
+      labels: labels != null ? TasksModuleState.normalizeLabels(labels) : null,
       recurrenceRule: nextRecurrenceRule,
       clearRecurrenceRule: shouldClearRule,
       recurrenceConfig: nextRecurrenceConfig,
@@ -1660,9 +1663,8 @@ class TasksController extends ChangeNotifier {
     DateTime? nowUtc,
   }) async {
     try {
-      final currentTasks = _state.tasks.isNotEmpty
-          ? _state.tasks
-          : await _repository.getTasks();
+      final currentTasks =
+          _state.tasks.isNotEmpty ? _state.tasks : await _repository.getTasks();
       final previousTask = currentTasks.cast<TaskEntity?>().firstWhere(
             (t) => t?.id == id,
             orElse: () => null,
@@ -1815,7 +1817,9 @@ class TasksController extends ChangeNotifier {
         shiftCustomOnDateShift: true,
         nowUtc: nowUtc,
       );
-      if (existing.isMyDay && !persisted.isMyDay && existing.myDayDate != null) {
+      if (existing.isMyDay &&
+          !persisted.isMyDay &&
+          existing.myDayDate != null) {
         await removeTaskFromPlannedDay(taskId, date: existing.myDayDate!);
       }
       final updatedTasks = await _repository.getTasks();
@@ -1916,7 +1920,8 @@ class TasksController extends ChangeNotifier {
   }) async {
     try {
       await _repository.updateTask(previousTask);
-      if (generatedNextTaskId != null && generatedNextTaskId.trim().isNotEmpty) {
+      if (generatedNextTaskId != null &&
+          generatedNextTaskId.trim().isNotEmpty) {
         final nextReminder =
             await _repository.getTaskReminderForTask(generatedNextTaskId);
         await _repository.deleteTask(generatedNextTaskId);
@@ -1954,8 +1959,7 @@ class TasksController extends ChangeNotifier {
 
   Future<void> rescheduleTask(String id, CalendarDate? newDueDate) async {
     try {
-      final prev =
-          _state.findTaskById(id) ?? await _repository.getTaskById(id);
+      final prev = _state.findTaskById(id) ?? await _repository.getTaskById(id);
       await _repository.rescheduleTask(id, newDueDate);
       final updatedTasks = await _repository.getTasks();
       if (prev != null) {
@@ -1988,8 +1992,7 @@ class TasksController extends ChangeNotifier {
 
   Future<void> postponeTaskDays(String id, int days) async {
     try {
-      final prev =
-          _state.findTaskById(id) ?? await _repository.getTaskById(id);
+      final prev = _state.findTaskById(id) ?? await _repository.getTaskById(id);
       await _repository.postponeTaskDays(id, days);
       final updatedTasks = await _repository.getTasks();
       if (prev != null) {
@@ -2022,8 +2025,7 @@ class TasksController extends ChangeNotifier {
 
   Future<void> deleteTask(String id) async {
     try {
-      final existingReminder =
-          _state.findReminderForTask(id) ??
+      final existingReminder = _state.findReminderForTask(id) ??
           await _repository.getTaskReminderForTask(id);
       await _repository.deleteTask(id);
       if (_onTaskDeleted != null) {
@@ -2125,8 +2127,7 @@ class TasksController extends ChangeNotifier {
     if (ids.isEmpty) return;
     try {
       for (final id in ids) {
-        final existingReminder =
-            _state.findReminderForTask(id) ??
+        final existingReminder = _state.findReminderForTask(id) ??
             await _repository.getTaskReminderForTask(id);
         await _repository.deleteTask(id);
         if (_onTaskDeleted != null) {

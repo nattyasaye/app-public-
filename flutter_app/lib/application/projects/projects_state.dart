@@ -111,7 +111,8 @@ class ProjectsModuleState {
         }
       }
       return allTasks
-          .where((t) => t.projectId == projectId && !sectionedIds.contains(t.id))
+          .where(
+              (t) => t.projectId == projectId && !sectionedIds.contains(t.id))
           .map((t) => t.id)
           .toSet();
     }
