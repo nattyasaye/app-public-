@@ -726,6 +726,23 @@ class _FakeTasksRepository implements ITasksRepository {
   Future<void> deleteDailyPlanningEntriesForTask(String taskId) async {}
 
   @override
+  Future<List<TaskReminderEntity>> getTaskReminders() async =>
+      const <TaskReminderEntity>[];
+
+  @override
+  Future<TaskReminderEntity?> getTaskReminderForTask(String taskId) async =>
+      null;
+
+  @override
+  Future<TaskReminderEntity> upsertTaskReminder(
+    TaskReminderEntity reminder,
+  ) async =>
+      reminder;
+
+  @override
+  Future<void> deleteTaskReminderForTask(String taskId) async {}
+
+  @override
   Future<void> postponeTaskDays(String id, int days) async {}
 
   @override

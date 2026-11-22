@@ -29,6 +29,7 @@ import {
   SharedProjectBlockType,
   SharedProjectTrackingBlock,
   SharedProjectTrackingRecord,
+  SharedReminder,
   SharedTask,
   SharedTaskRecurrenceConfig,
 } from '../domain/sharedFoundation';
@@ -60,6 +61,7 @@ import {
 } from '../domain/projectPackage';
 import { dailyPlanningService } from './dailyPlanningService';
 import { SharedStateBridge } from './sharedStateBridge';
+import { taskRemindersService } from './taskRemindersService';
 
 export interface InlineBlockDraft {
   tempId: string;
@@ -1504,9 +1506,11 @@ class ProjectsService {
     status?: TaskStatus;
     dueDate?: string;
     scheduledDate?: string;
+    scheduledTime?: string;
     milestoneId?: string;
     sectionId?: string;
     recurrenceConfig?: SharedTaskRecurrenceConfig;
+    reminderTriggerUtc?: string;
   }): DaywellTaskRecord {
     const project = this.repo.getProjectById(input.projectId);
     if (!project) {
@@ -1521,6 +1525,8 @@ class ProjectsService {
       status: input.status,
       dueDate: input.dueDate,
       scheduledDate: input.scheduledDate,
+      scheduledTime: input.scheduledTime,
+      hasReminder: Boolean(input.reminderTriggerUtc),
       projectId: project.id,
       milestoneId: input.milestoneId,
       projectName: project.title,
@@ -1533,6 +1539,13 @@ class ProjectsService {
     }
     const existingTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
     writeLocalArray(TASKS_KEY, [result.task, ...existingTasks]);
+
+    if (input.reminderTriggerUtc) {
+      taskRemindersService.setTaskReminder(result.task, input.reminderTriggerUtc, {
+        emitSync: false,
+        syncTaskHasReminder: true,
+      });
+    }
 
     if (input.sectionId?.trim()) {
       this.assignTaskToProjectSection(
@@ -1555,11 +1568,14 @@ class ProjectsService {
       status?: TaskStatus;
       dueDate?: string;
       scheduledDate?: string;
+      scheduledTime?: string;
       projectId?: string;
       milestoneId?: string;
       sectionId?: string | null;
       recurrenceConfig?: SharedTaskRecurrenceConfig;
       clearRecurrenceConfig?: boolean;
+      reminderTriggerUtc?: string;
+      clearReminder?: boolean;
     }
   ): DaywellTaskRecord | undefined {
     return this.updateTaskInProjectWithRecurrence(taskId, patch).updated;
@@ -1574,15 +1590,19 @@ class ProjectsService {
       status?: TaskStatus;
       dueDate?: string;
       scheduledDate?: string;
+      scheduledTime?: string;
       projectId?: string;
       milestoneId?: string;
       sectionId?: string | null;
       recurrenceConfig?: SharedTaskRecurrenceConfig;
       clearRecurrenceConfig?: boolean;
+      reminderTriggerUtc?: string;
+      clearReminder?: boolean;
     }
   ): {
     previousTasks: DaywellTaskRecord[];
     previousEntries: SharedDailyPlanningEntry[];
+    previousReminders: SharedReminder[];
     updated?: DaywellTaskRecord;
     generatedNextTask?: DaywellTaskRecord;
     seriesEnded: boolean;
@@ -1590,11 +1610,13 @@ class ProjectsService {
   } {
     const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
     const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const previousReminders = taskRemindersService.loadAllReminders();
     const existing = previousTasks.find((t) => t.id === taskId);
     if (!existing) {
       return {
         previousTasks,
         previousEntries,
+        previousReminders,
         seriesEnded: false,
         duplicatePrevented: false,
       };
@@ -1617,6 +1639,9 @@ class ProjectsService {
       ...(patch.scheduledDate !== undefined
         ? { scheduledDate: patch.scheduledDate }
         : {}),
+      ...(patch.scheduledTime !== undefined
+        ? { scheduledTime: patch.scheduledTime }
+        : {}),
       ...(patch.projectId !== undefined
         ? {
             projectId: patch.projectId || undefined,
@@ -1632,6 +1657,11 @@ class ProjectsService {
         : {}),
       ...(patch.clearRecurrenceConfig === true
         ? { isRecurring: false, clearRecurrenceConfig: true }
+        : {}),
+      ...(patch.clearReminder === true
+        ? { hasReminder: false }
+        : patch.reminderTriggerUtc !== undefined
+        ? { hasReminder: true }
         : {}),
     });
 
@@ -1677,6 +1707,35 @@ class ProjectsService {
 
     writeLocalArray(TASKS_KEY, finalTasks);
 
+    if (patch.clearReminder === true) {
+      taskRemindersService.removeTaskReminder(taskId, {
+        emitSync: false,
+        syncTaskHasReminder: true,
+      });
+    } else if (patch.reminderTriggerUtc) {
+      taskRemindersService.setTaskReminder(
+        finalUpdated,
+        patch.reminderTriggerUtc,
+        { emitSync: false, syncTaskHasReminder: true }
+      );
+    }
+
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: readLocalArray<DaywellTaskRecord>(TASKS_KEY),
+      previousTasks,
+      generatedFromTaskId: generatedNextTask ? taskId : undefined,
+      generatedNextTask,
+      persistTasks: true,
+      emitSync: false,
+    });
+    finalTasks = reconciled.tasks;
+    finalUpdated = finalTasks.find((t) => t.id === taskId) ?? finalUpdated;
+    if (generatedNextTask) {
+      generatedNextTask =
+        finalTasks.find((t) => t.id === generatedNextTask!.id) ??
+        generatedNextTask;
+    }
+
     if (wasCompleted !== isNowCompleted) {
       const nextEntries = syncTaskCompletionWithDailyPlanning(
         finalTasks,
@@ -1717,6 +1776,7 @@ class ProjectsService {
     return {
       previousTasks,
       previousEntries,
+      previousReminders,
       updated: finalUpdated,
       generatedNextTask,
       seriesEnded,
@@ -1729,10 +1789,12 @@ class ProjectsService {
     error?: string;
     previousTasks: DaywellTaskRecord[];
     previousEntries: SharedDailyPlanningEntry[];
+    previousReminders: SharedReminder[];
     updated?: DaywellTaskRecord;
   } {
     const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
     const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const previousReminders = taskRemindersService.loadAllReminders();
     const existing = previousTasks.find((t) => t.id === taskId);
     const res = skipRecurrenceOccurrence(previousTasks, taskId);
     if (!res.ok || !res.updatedTask) {
@@ -1741,31 +1803,41 @@ class ProjectsService {
         error: res.error ?? 'Unable to skip occurrence.',
         previousTasks,
         previousEntries,
+        previousReminders,
       };
     }
 
-    writeLocalArray(TASKS_KEY, res.tasks);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: res.tasks,
+      previousTasks,
+      shiftCustomOnDateShift: true,
+      persistTasks: true,
+      emitSync: false,
+    });
+    const finalUpdated =
+      reconciled.tasks.find((t) => t.id === taskId) ?? res.updatedTask;
     if (
-      res.updatedTask.isMyDay === false &&
+      finalUpdated.isMyDay === false &&
       previousEntries.some((e) => e.taskId === taskId)
     ) {
       const targetPlanDate =
         existing?.myDayDate ?? CalendarDate.today().toIsoString();
       const nextEntries = removeTaskFromPlannedDay(
-        res.tasks,
+        reconciled.tasks,
         previousEntries,
         taskId,
         targetPlanDate
       ).entries;
       dailyPlanningService.saveDailyPlanningEntries(nextEntries);
     }
-    this.syncLinkedSectionRecordForTask(res.updatedTask);
+    this.syncLinkedSectionRecordForTask(finalUpdated);
     broadcastSync();
     return {
       ok: true,
       previousTasks,
       previousEntries,
-      updated: res.updatedTask,
+      previousReminders,
+      updated: finalUpdated,
     };
   }
 
@@ -1777,10 +1849,12 @@ class ProjectsService {
     error?: string;
     previousTasks: DaywellTaskRecord[];
     previousEntries: SharedDailyPlanningEntry[];
+    previousReminders: SharedReminder[];
     updated?: DaywellTaskRecord;
   } {
     const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
     const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const previousReminders = taskRemindersService.loadAllReminders();
     const res = rescheduleRecurrenceOccurrence(
       previousTasks,
       taskId,
@@ -1792,17 +1866,27 @@ class ProjectsService {
         error: res.error ?? 'Unable to reschedule occurrence.',
         previousTasks,
         previousEntries,
+        previousReminders,
       };
     }
 
-    writeLocalArray(TASKS_KEY, res.tasks);
-    this.syncLinkedSectionRecordForTask(res.updatedTask);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: res.tasks,
+      previousTasks,
+      shiftCustomOnDateShift: true,
+      persistTasks: true,
+      emitSync: false,
+    });
+    const finalUpdated =
+      reconciled.tasks.find((t) => t.id === taskId) ?? res.updatedTask;
+    this.syncLinkedSectionRecordForTask(finalUpdated);
     broadcastSync();
     return {
       ok: true,
       previousTasks,
       previousEntries,
-      updated: res.updatedTask,
+      previousReminders,
+      updated: finalUpdated,
     };
   }
 
@@ -1811,10 +1895,12 @@ class ProjectsService {
     error?: string;
     previousTasks: DaywellTaskRecord[];
     previousEntries: SharedDailyPlanningEntry[];
+    previousReminders: SharedReminder[];
     updated?: DaywellTaskRecord;
   } {
     const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
     const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const previousReminders = taskRemindersService.loadAllReminders();
     const res = stopTaskRecurrence(previousTasks, taskId);
     if (!res.ok || !res.updatedTask) {
       return {
@@ -1822,59 +1908,87 @@ class ProjectsService {
         error: res.error ?? 'Unable to stop recurrence.',
         previousTasks,
         previousEntries,
+        previousReminders,
       };
     }
 
-    writeLocalArray(TASKS_KEY, res.tasks);
-    this.syncLinkedSectionRecordForTask(res.updatedTask);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: res.tasks,
+      previousTasks,
+      persistTasks: true,
+      emitSync: false,
+    });
+    const finalUpdated =
+      reconciled.tasks.find((t) => t.id === taskId) ?? res.updatedTask;
+    this.syncLinkedSectionRecordForTask(finalUpdated);
     broadcastSync();
     return {
       ok: true,
       previousTasks,
       previousEntries,
-      updated: res.updatedTask,
+      previousReminders,
+      updated: finalUpdated,
     };
   }
 
   public toggleTaskCompletionInProject(taskId: string): {
     previousTasks: DaywellTaskRecord[];
+    previousReminders: SharedReminder[];
     updated?: DaywellTaskRecord;
     generatedNextTask?: DaywellTaskRecord;
     seriesEnded: boolean;
     duplicatePrevented: boolean;
   } {
     const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const previousReminders = taskRemindersService.loadAllReminders();
     const result = completeTaskWithRecurrence(previousTasks, taskId);
     if (!result.updatedTask) {
       return {
         previousTasks,
+        previousReminders,
         seriesEnded: false,
         duplicatePrevented: false,
       };
     }
 
-    writeLocalArray(TASKS_KEY, result.tasks);
+    const reconciled = taskRemindersService.reconcileAndPersistForTasks({
+      tasks: result.tasks,
+      previousTasks,
+      generatedFromTaskId: result.generatedNextTask ? taskId : undefined,
+      generatedNextTask: result.generatedNextTask,
+      persistTasks: true,
+      emitSync: false,
+    });
+
+    const finalUpdated =
+      reconciled.tasks.find((t) => t.id === taskId) ?? result.updatedTask;
+    const finalGeneratedNextTask = result.generatedNextTask
+      ? reconciled.tasks.find((t) => t.id === result.generatedNextTask!.id) ??
+        result.generatedNextTask
+      : undefined;
+
     const currentEntries = dailyPlanningService.loadDailyPlanningEntries();
     const nextEntries = syncTaskCompletionWithDailyPlanning(
-      result.tasks,
+      reconciled.tasks,
       currentEntries,
       taskId,
-      isTaskCompleted(result.updatedTask)
+      isTaskCompleted(finalUpdated)
     );
     dailyPlanningService.saveDailyPlanningEntries(nextEntries);
-    this.syncLinkedSectionRecordForTask(result.updatedTask);
-    if (result.generatedNextTask?.projectId) {
+    this.syncLinkedSectionRecordForTask(finalUpdated);
+    if (finalGeneratedNextTask?.projectId) {
       this.copyTaskSectionLink(
-        result.generatedNextTask.projectId,
+        finalGeneratedNextTask.projectId,
         taskId,
-        result.generatedNextTask
+        finalGeneratedNextTask
       );
     }
     broadcastSync();
     return {
       previousTasks,
-      updated: result.updatedTask,
-      generatedNextTask: result.generatedNextTask,
+      previousReminders,
+      updated: finalUpdated,
+      generatedNextTask: finalGeneratedNextTask,
       seriesEnded: result.seriesEnded,
       duplicatePrevented: result.duplicatePrevented,
     };
@@ -1882,10 +1996,12 @@ class ProjectsService {
 
   public deleteTaskInProject(taskId: string): {
     previousTasks: DaywellTaskRecord[];
+    previousReminders: SharedReminder[];
     deleted?: DaywellTaskRecord;
     previousSection?: { projectId: string; sectionId: string };
   } {
     const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const previousReminders = taskRemindersService.loadAllReminders();
     const { remaining, deleted } = deleteTaskFromList(previousTasks, taskId);
     let previousSection: { projectId: string; sectionId: string } | undefined;
 
@@ -1899,21 +2015,32 @@ class ProjectsService {
     }
 
     writeLocalArray(TASKS_KEY, remaining);
+    taskRemindersService.removeTaskReminder(taskId, {
+      emitSync: false,
+      syncTaskHasReminder: false,
+    });
     SharedStateBridge.removeDailyPlanningForTask(taskId);
     broadcastSync();
-    return { previousTasks, deleted, previousSection };
+    return { previousTasks, previousReminders, deleted, previousSection };
   }
 
   public restoreTasksSnapshot(
     tasksSnapshot: DaywellTaskRecord[],
     sectionRestore?: { projectId: string; taskId: string; sectionId: string },
     removeLinksForTaskId?: string,
-    dailyPlanningSnapshot?: SharedDailyPlanningEntry[]
+    dailyPlanningSnapshot?: SharedDailyPlanningEntry[],
+    remindersSnapshot?: SharedReminder[]
   ): void {
     if (removeLinksForTaskId) {
       this.cleanupSectionLinksForTask(removeLinksForTaskId);
     }
     writeLocalArray(TASKS_KEY, tasksSnapshot);
+    if (remindersSnapshot !== undefined) {
+      taskRemindersService.restoreRemindersSnapshot(remindersSnapshot, {
+        tasks: tasksSnapshot,
+        emitSync: false,
+      });
+    }
     if (dailyPlanningSnapshot) {
       dailyPlanningService.saveDailyPlanningEntries(dailyPlanningSnapshot);
     }

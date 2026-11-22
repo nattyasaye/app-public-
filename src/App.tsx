@@ -191,6 +191,15 @@ export default function App() {
     filter: TaskViewFilter;
     nonce: number;
   } | null>(null);
+  const [requestedTaskFocus, setRequestedTaskFocus] = useState<{
+    taskId: string;
+    openMode?: 'details' | 'edit';
+    nonce: number;
+  } | null>(null);
+  const [requestedCalendarFocus, setRequestedCalendarFocus] = useState<{
+    dateStr: string;
+    nonce: number;
+  } | null>(null);
 
   const handleExportSharedFoundation = () => {
     const json = SharedStateBridge.exportToAndroidJson();
@@ -1497,8 +1506,12 @@ export default function App() {
                   dailyPlanningEntries={dailyPlanningEntries}
                   onUpdateDailyPlanningEntries={handleUpdateDailyPlanningEntries}
                   requestedFilter={requestedTasksFilter}
+                  requestedTaskFocus={requestedTaskFocus}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
-                  onNavigateToCalendar={() => navigateTo('calendar')}
+                  onNavigateToCalendar={(dateStr) => {
+                    setRequestedCalendarFocus({ dateStr, nonce: Date.now() });
+                    navigateTo('calendar');
+                  }}
                   activeSubTab={tasksSubTab}
                   onSubTabChange={setTasksSubTab}
                   selectedProjectId={selectedProjectId}
@@ -1517,14 +1530,35 @@ export default function App() {
                         id: t.id,
                         title: t.title,
                         dueDate: t.dueDate,
+                        scheduledDate: t.scheduledDate,
+                        scheduledTime: t.scheduledTime,
+                        estimatedDurationMinutes: t.estimatedDurationMinutes,
+                        status: t.status,
+                        isArchived: t.isArchived,
                         completed: t.completed,
                         priority: t.priority,
+                        isRecurring: t.isRecurring,
+                        recurringRule: t.recurringRule,
+                        recurrenceRule: t.recurrenceRule,
+                        recurrenceConfig: t.recurrenceConfig,
                         recurrenceSummary: rec
                           ? formatRecurrenceSummary(rec)
                           : undefined,
+                        projectId: t.projectId,
+                        projectName: t.projectName,
                       };
                     })}
                   onToggleTask={toggleTask}
+                  onNavigateToTask={(taskId) => {
+                    setTasksSubTab('tasks');
+                    setRequestedTaskFocus({
+                      taskId,
+                      openMode: 'details',
+                      nonce: Date.now(),
+                    });
+                    navigateTo('tasks');
+                  }}
+                  requestedFocusDate={requestedCalendarFocus}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                 />
               </div>

@@ -22,7 +22,15 @@ import {
   DateRange,
   SharedDateFormatter,
 } from '../domain/date';
-import { SHARED_DESIGN_TOKENS } from '../domain/sharedFoundation';
+import {
+  SHARED_DESIGN_TOKENS,
+  SharedTaskRecurrenceConfig,
+} from '../domain/sharedFoundation';
+import {
+  projectTasksForDateRange,
+  TaskCalendarOccurrence,
+} from '../domain/taskCalendar';
+import { TaskStatus } from '../domain/taskOperations';
 import { validateCalendarEventForm, isFormDirty } from '../domain/formValidationAndNavigation';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import {
@@ -55,15 +63,27 @@ export interface CalendarTaskRef {
   id: string;
   title: string;
   dueDate?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
+  estimatedDurationMinutes?: number;
+  status?: TaskStatus;
+  isArchived?: boolean;
   completed: boolean;
   priority?: 'urgent' | 'high' | 'medium' | 'low';
+  isRecurring?: boolean;
+  recurringRule?: 'daily' | 'weekly' | 'monthly';
+  recurrenceRule?: string;
+  recurrenceConfig?: SharedTaskRecurrenceConfig;
   recurrenceSummary?: string;
+  projectId?: string;
+  projectName?: string;
 }
 
 interface DaywellCalendarModuleProps {
   tasks?: CalendarTaskRef[];
   onToggleTask?: (taskId: string) => void;
   onNavigateToTask?: (taskId: string) => void;
+  requestedFocusDate?: { dateStr: string; nonce: number } | null;
   onRequestQuickCapture?: () => void;
 }
 
@@ -93,10 +113,21 @@ const CATEGORY_COLORS: Record<CalendarEvent['category'], { label: string; badgeC
 export function DaywellCalendarModule({
   tasks = [],
   onToggleTask,
+  onNavigateToTask,
+  requestedFocusDate,
 }: DaywellCalendarModuleProps) {
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [currentDate, setCurrentDate] = useState<CalendarDate>(() => CalendarDate.today());
   const [selectedDateStr, setSelectedDateStr] = useState<string>(() => CalendarDate.today().toIsoString());
+
+  useEffect(() => {
+    if (!requestedFocusDate?.dateStr) return;
+    const parsed = CalendarDate.tryParse(requestedFocusDate.dateStr);
+    if (!parsed) return;
+    setCurrentDate(parsed);
+    setSelectedDateStr(parsed.toIsoString());
+    setViewMode((prev) => (prev === 'agenda' ? 'month' : prev));
+  }, [requestedFocusDate?.nonce, requestedFocusDate?.dateStr]);
 
   const [events, setEvents] = useState<CalendarEvent[]>(() => {
     try {
@@ -179,7 +210,7 @@ export function DaywellCalendarModule({
     return start.isSameDay(day);
   };
 
-  const monthDays = useMemo(() => {
+  const monthGridDates = useMemo(() => {
     const startOfMonth = currentDate.startOfGregorianMonth;
     const startDayOfWeek = startOfMonth.weekday - 1;
 
@@ -196,12 +227,26 @@ export function DaywellCalendarModule({
     for (let i = 1; i <= trailing; i++) {
       gridDates.push({ date: endOfMonth.addDays(i), isCurrentMonth: false });
     }
+    return gridDates;
+  }, [currentDate]);
 
-    return gridDates.map(({ date, isCurrentMonth }) => {
+  const monthTaskOccurrences = useMemo(() => {
+    if (monthGridDates.length === 0) return [];
+    const first = monthGridDates[0].date;
+    const last = monthGridDates[monthGridDates.length - 1].date;
+    const minDate = selectedCalendarDate.isBefore(first) ? selectedCalendarDate : first;
+    const maxDate = selectedCalendarDate.isAfter(last) ? selectedCalendarDate : last;
+    return projectTasksForDateRange(tasks, minDate.toIsoString(), maxDate.toIsoString());
+  }, [tasks, monthGridDates, selectedCalendarDate]);
+
+  const monthDays = useMemo(() => {
+    return monthGridDates.map(({ date, isCurrentMonth }) => {
       const dateStr = date.toIsoString();
       const eth = date.toEthiopian();
       const dayEvents = events.filter((e) => eventOccursOnDate(e, date));
-      const dayTasks = tasks.filter((t) => t.dueDate === dateStr);
+      const dayTasks = monthTaskOccurrences.filter((t) => t.occurrenceDate === dateStr);
+      const hasStoredTasks = dayTasks.some((t) => !t.isProjectedOccurrence);
+      const hasProjectedTasks = dayTasks.some((t) => t.isProjectedOccurrence);
       return {
         dateStr,
         dayNumber: date.day,
@@ -209,21 +254,32 @@ export function DaywellCalendarModule({
         ethiopian: eth,
         hasEvents: dayEvents.length > 0,
         hasTasks: dayTasks.length > 0,
+        hasStoredTasks,
+        hasProjectedTasks,
         eventCount: dayEvents.length + dayTasks.length,
       };
     });
-  }, [currentDate, events, tasks]);
+  }, [monthGridDates, events, monthTaskOccurrences]);
 
   const selectedDayItems = useMemo(() => {
     let dayEvents = events.filter((e) => eventOccursOnDate(e, selectedCalendarDate));
-    let dayTasks = tasks.filter((t) => t.dueDate === selectedDateStr);
+    let dayTasks = monthTaskOccurrences.filter(
+      (t) => t.occurrenceDate === selectedDateStr
+    );
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       dayEvents = dayEvents.filter(
-        (e) => e.title.toLowerCase().includes(q) || (e.description && e.description.toLowerCase().includes(q))
+        (e) =>
+          e.title.toLowerCase().includes(q) ||
+          (e.description && e.description.toLowerCase().includes(q))
       );
-      dayTasks = dayTasks.filter((t) => t.title.toLowerCase().includes(q));
+      dayTasks = dayTasks.filter(
+        (t) =>
+          t.task.title.toLowerCase().includes(q) ||
+          (t.task.projectName && t.task.projectName.toLowerCase().includes(q)) ||
+          (t.recurrenceSummary && t.recurrenceSummary.toLowerCase().includes(q))
+      );
     }
 
     if (categoryFilter !== 'all') {
@@ -237,22 +293,71 @@ export function DaywellCalendarModule({
     });
 
     return { events: dayEvents, tasks: dayTasks };
-  }, [events, tasks, selectedCalendarDate, selectedDateStr, searchQuery, categoryFilter]);
+  }, [events, monthTaskOccurrences, selectedCalendarDate, selectedDateStr, searchQuery, categoryFilter]);
 
-  const agendaList = useMemo(() => {
-    let filtered = [...events];
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (e) => e.title.toLowerCase().includes(q) || (e.description && e.description.toLowerCase().includes(q))
+  const agendaTimeline = useMemo(() => {
+    const today = CalendarDate.today();
+    const horizonEnd = today.addDays(30);
+    const q = searchQuery.trim().toLowerCase();
+
+    let filteredEvents = [...events];
+    if (q) {
+      filteredEvents = filteredEvents.filter(
+        (e) =>
+          e.title.toLowerCase().includes(q) ||
+          (e.description && e.description.toLowerCase().includes(q))
       );
     }
     if (categoryFilter !== 'all') {
-      filtered = filtered.filter((e) => e.category === categoryFilter);
+      filteredEvents = filteredEvents.filter((e) => e.category === categoryFilter);
     }
-    filtered.sort((a, b) => a.date.localeCompare(b.date) || (a.startTime || '').localeCompare(b.startTime || ''));
-    return filtered;
-  }, [events, searchQuery, categoryFilter]);
+    filteredEvents.sort(
+      (a, b) =>
+        a.date.localeCompare(b.date) || (a.startTime || '').localeCompare(b.startTime || '')
+    );
+
+    let agendaTasks = projectTasksForDateRange(
+      tasks,
+      today.toIsoString(),
+      horizonEnd.toIsoString()
+    );
+    if (q) {
+      agendaTasks = agendaTasks.filter(
+        (t) =>
+          t.task.title.toLowerCase().includes(q) ||
+          (t.task.projectName && t.task.projectName.toLowerCase().includes(q)) ||
+          (t.recurrenceSummary && t.recurrenceSummary.toLowerCase().includes(q))
+      );
+    }
+
+    type AgendaEntry =
+      | { kind: 'event'; sortDate: string; sortTime: string; event: CalendarEvent }
+      | { kind: 'task'; sortDate: string; sortTime: string; occurrence: TaskCalendarOccurrence<CalendarTaskRef> };
+
+    const combined: AgendaEntry[] = [
+      ...filteredEvents.map((ev) => ({
+        kind: 'event' as const,
+        sortDate: ev.date,
+        sortTime: ev.isAllDay ? '00:00' : ev.startTime || '00:00',
+        event: ev,
+      })),
+      ...agendaTasks.map((occ) => ({
+        kind: 'task' as const,
+        sortDate: occ.occurrenceDate,
+        sortTime: occ.scheduledTime || '23:59',
+        occurrence: occ,
+      })),
+    ];
+
+    combined.sort((a, b) => {
+      const dateCmp = a.sortDate.localeCompare(b.sortDate);
+      if (dateCmp !== 0) return dateCmp;
+      if (a.kind !== b.kind) return a.kind === 'event' ? -1 : 1;
+      return a.sortTime.localeCompare(b.sortTime);
+    });
+
+    return combined;
+  }, [events, tasks, searchQuery, categoryFilter]);
 
   const getCurrentEventValues = () => ({
     title: formTitle,
@@ -625,10 +730,17 @@ export function DaywellCalendarModule({
                         }`}
                       />
                     )}
-                    {d.hasTasks && (
+                    {d.hasStoredTasks && (
                       <span
                         className={`w-1.5 h-1.5 rounded-full ${
                           currentSelected ? 'bg-current' : 'bg-[var(--dw-info)]'
+                        }`}
+                      />
+                    )}
+                    {!d.hasStoredTasks && d.hasProjectedTasks && (
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full opacity-75 ${
+                          currentSelected ? 'bg-current' : 'bg-[var(--dw-transfer)]'
                         }`}
                       />
                     )}
@@ -723,47 +835,123 @@ export function DaywellCalendarModule({
                 );
               })}
 
-              {selectedDayItems.tasks.map((task) => (
-                <div
-                  key={task.id}
-                  onClick={() => onToggleTask && onToggleTask(task.id)}
-                  className="p-2.5 bg-[var(--dw-info-container)] rounded-[var(--dw-radius-lg)] border border-[var(--dw-info)]/25 flex items-center justify-between gap-3 cursor-pointer transition-all"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <button
-                      type="button"
-                      aria-label={task.completed ? `Reopen ${task.title}` : `Complete ${task.title}`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onToggleTask && onToggleTask(task.id);
-                      }}
-                      className="text-[var(--dw-info)] cursor-pointer"
-                    >
-                      {task.completed ? (
-                        <CheckCircle2 className="w-4 h-4" />
-                      ) : (
-                        <Circle className="w-4 h-4" />
-                      )}
-                    </button>
-                    <div className="min-w-0">
-                      <span
-                        className={`text-xs font-semibold block truncate ${
-                          task.completed ? 'line-through text-[var(--dw-text-disabled)]' : 'text-[var(--dw-on-info-container)]'
-                        }`}
-                      >
-                        {task.title}
-                      </span>
-                      {task.recurrenceSummary && (
-                        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--dw-text-secondary)]">
-                          <Repeat className="w-2.5 h-2.5 text-[var(--dw-info)]" />
-                          {task.recurrenceSummary}
+              {selectedDayItems.tasks.map((occ) => {
+                const badgeLabel =
+                  occ.kind === 'due_and_scheduled'
+                    ? 'Scheduled & Due'
+                    : occ.kind === 'scheduled'
+                    ? 'Scheduled Task'
+                    : occ.kind === 'recurring_preview'
+                    ? 'Upcoming Recurrence'
+                    : 'Task Deadline';
+                const badgeTone =
+                  occ.kind === 'scheduled'
+                    ? 'transfer'
+                    : occ.kind === 'due'
+                    ? 'warning'
+                    : occ.kind === 'recurring_preview'
+                    ? 'neutral'
+                    : 'info';
+
+                return (
+                  <div
+                    key={occ.id}
+                    onClick={() => {
+                      if (onNavigateToTask) {
+                        onNavigateToTask(occ.sourceTaskId);
+                      } else if (!occ.isProjectedOccurrence && onToggleTask) {
+                        onToggleTask(occ.sourceTaskId);
+                      }
+                    }}
+                    className={`p-2.5 rounded-[var(--dw-radius-lg)] flex items-center justify-between gap-3 cursor-pointer transition-all border ${
+                      occ.isProjectedOccurrence
+                        ? 'bg-[var(--dw-surface-subtle)] border-dashed border-[var(--dw-border)] hover:border-[var(--dw-primary)]/40'
+                        : 'bg-[var(--dw-info-container)] border-[var(--dw-info)]/25 hover:border-[var(--dw-primary)]/45'
+                    }`}
+                  >
+                    <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                      {occ.isProjectedOccurrence ? (
+                        <span
+                          aria-label={`Projected recurring occurrence for ${occ.task.title}`}
+                          className="mt-0.5 text-[var(--dw-transfer)] shrink-0"
+                        >
+                          <Repeat className="w-4 h-4" />
                         </span>
+                      ) : (
+                        <button
+                          type="button"
+                          aria-label={
+                            occ.completed
+                              ? `Reopen ${occ.task.title}`
+                              : `Complete ${occ.task.title}`
+                          }
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleTask && onToggleTask(occ.sourceTaskId);
+                          }}
+                          className="mt-0.5 text-[var(--dw-info)] cursor-pointer shrink-0"
+                        >
+                          {occ.completed ? (
+                            <CheckCircle2 className="w-4 h-4" />
+                          ) : (
+                            <Circle className="w-4 h-4" />
+                          )}
+                        </button>
                       )}
+                      <div className="min-w-0 space-y-0.5">
+                        <span
+                          className={`text-xs font-semibold block truncate ${
+                            occ.completed
+                              ? 'line-through text-[var(--dw-text-disabled)]'
+                              : occ.isProjectedOccurrence
+                              ? 'text-[var(--dw-text-primary)]'
+                              : 'text-[var(--dw-on-info-container)]'
+                          }`}
+                        >
+                          {occ.task.title}
+                        </span>
+                        <div className="flex items-center flex-wrap gap-2 text-[10px] text-[var(--dw-text-secondary)]">
+                          {occ.scheduledTime && (
+                            <span className="inline-flex items-center gap-1 font-semibold">
+                              <Clock className="w-2.5 h-2.5" />
+                              {occ.scheduledTime}
+                              {occ.estimatedDurationMinutes
+                                ? ` · ${occ.estimatedDurationMinutes}m`
+                                : ''}
+                            </span>
+                          )}
+                          {occ.companionDueDate && (
+                            <span>Due {occ.companionDueDate}</span>
+                          )}
+                          {occ.companionScheduledDate && (
+                            <span>Scheduled {occ.companionScheduledDate}</span>
+                          )}
+                          {occ.task.projectName && (
+                            <span className="text-[var(--dw-text-muted)]">
+                              {occ.task.projectName}
+                            </span>
+                          )}
+                          {occ.recurrenceSummary && (
+                            <span className="inline-flex items-center gap-1">
+                              <Repeat className="w-2.5 h-2.5 text-[var(--dw-info)]" />
+                              {occ.recurrenceSummary}
+                              {occ.isProjectedOccurrence &&
+                              occ.isCompletionBasedRecurrence
+                                ? ' (est.)'
+                                : ''}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
+                    <DaywellStatusBadge
+                      tone={badgeTone}
+                      showIcon={false}
+                      label={badgeLabel}
+                    />
                   </div>
-                  <DaywellStatusBadge tone="info" showIcon={false} label="Task Deadline" />
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -775,44 +963,139 @@ export function DaywellCalendarModule({
           <DaywellSearchField
             value={searchQuery}
             onChange={setSearchQuery}
-            placeholder="Search all upcoming events..."
-            ariaLabel="Search all upcoming events"
+            placeholder="Search upcoming events & tasks..."
+            ariaLabel="Search upcoming events and tasks"
           />
 
-          <div className="space-y-2">
-            {agendaList.map((ev) => {
-              const color = CATEGORY_COLORS[ev.category];
-              return (
-                <DaywellCard
-                  key={ev.id}
-                  radius="lg"
-                  padding="sm"
-                  onClick={() => handleOpenEdit(ev)}
-                  className="hover:border-[var(--dw-primary)]/40 flex items-center justify-between gap-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <div className="text-center w-12 py-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] shrink-0">
-                      <span className="block text-[9px] font-bold text-[var(--dw-text-muted)] uppercase">
-                        {(CalendarDate.tryParse(ev.date) ?? selectedCalendarDate).gregorianShortMonthName}
+          {agendaTimeline.length === 0 ? (
+            <DaywellEmptyState
+              icon={<CalendarIcon className="w-8 h-8" />}
+              message="No upcoming events or scheduled tasks"
+              subtitle="Create an event or assign due/scheduled dates to tasks to populate your 30-day agenda."
+              actionLabel="Add Event"
+              onActionPressed={handleOpenCreate}
+            />
+          ) : (
+            <div className="space-y-2">
+              {agendaTimeline.map((entry) => {
+                if (entry.kind === 'event') {
+                  const ev = entry.event;
+                  const color = CATEGORY_COLORS[ev.category];
+                  const parsedEvDate =
+                    CalendarDate.tryParse(ev.date) ?? selectedCalendarDate;
+                  return (
+                    <DaywellCard
+                      key={ev.id}
+                      radius="lg"
+                      padding="sm"
+                      onClick={() => handleOpenEdit(ev)}
+                      className="hover:border-[var(--dw-primary)]/40 flex items-center justify-between gap-3"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="text-center w-12 py-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] shrink-0">
+                          <span className="block text-[9px] font-bold text-[var(--dw-text-muted)] uppercase">
+                            {parsedEvDate.gregorianShortMonthName}
+                          </span>
+                          <span className="block text-sm font-extrabold text-[var(--dw-text-primary)]">
+                            {parsedEvDate.day}
+                          </span>
+                        </div>
+                        <div className="min-w-0">
+                          <h4 className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                            {ev.title}
+                          </h4>
+                          <p className="text-[11px] text-[var(--dw-text-muted)] truncate">
+                            {ev.isAllDay
+                              ? 'All Day'
+                              : `${ev.startTime} – ${ev.endTime || ''}`}{' '}
+                            {ev.location ? `· ${ev.location}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <span
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-[var(--dw-radius-sm)] border shrink-0 ${color.badgeClass}`}
+                      >
+                        {color.label}
                       </span>
-                      <span className="block text-sm font-extrabold text-[var(--dw-text-primary)]">
-                        {(CalendarDate.tryParse(ev.date) ?? selectedCalendarDate).day}
-                      </span>
+                    </DaywellCard>
+                  );
+                }
+
+                const occ = entry.occurrence;
+                const parsedTaskDate =
+                  CalendarDate.tryParse(occ.occurrenceDate) ??
+                  selectedCalendarDate;
+                const agendaTaskBadge =
+                  occ.kind === 'scheduled'
+                    ? 'Scheduled Task'
+                    : occ.kind === 'due_and_scheduled'
+                    ? 'Scheduled & Due'
+                    : occ.kind === 'recurring_preview'
+                    ? 'Upcoming Recurrence'
+                    : 'Task Deadline';
+
+                return (
+                  <DaywellCard
+                    key={occ.id}
+                    radius="lg"
+                    padding="sm"
+                    onClick={() => {
+                      if (onNavigateToTask) {
+                        onNavigateToTask(occ.sourceTaskId);
+                      } else if (!occ.isProjectedOccurrence && onToggleTask) {
+                        onToggleTask(occ.sourceTaskId);
+                      }
+                    }}
+                    className={`flex items-center justify-between gap-3 ${
+                      occ.isProjectedOccurrence
+                        ? '!bg-[var(--dw-surface-subtle)] border-dashed'
+                        : '!bg-[var(--dw-info-container)]/50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="text-center w-12 py-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] shrink-0">
+                        <span className="block text-[9px] font-bold text-[var(--dw-text-muted)] uppercase">
+                          {parsedTaskDate.gregorianShortMonthName}
+                        </span>
+                        <span className="block text-sm font-extrabold text-[var(--dw-info)]">
+                          {parsedTaskDate.day}
+                        </span>
+                      </div>
+                      <div className="min-w-0">
+                        <h4
+                          className={`text-xs font-bold truncate ${
+                            occ.completed
+                              ? 'line-through text-[var(--dw-text-disabled)]'
+                              : 'text-[var(--dw-text-primary)]'
+                          }`}
+                        >
+                          {occ.task.title}
+                        </h4>
+                        <p className="text-[11px] text-[var(--dw-text-muted)] truncate">
+                          {occ.scheduledTime ? `${occ.scheduledTime} · ` : ''}
+                          {occ.recurrenceSummary
+                            ? `${occ.recurrenceSummary} · `
+                            : ''}
+                          {occ.task.projectName || 'Task'}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <h4 className="text-xs font-bold text-[var(--dw-text-primary)]">{ev.title}</h4>
-                      <p className="text-[11px] text-[var(--dw-text-muted)]">
-                        {ev.isAllDay ? 'All Day' : `${ev.startTime} – ${ev.endTime || ''}`} {ev.location ? `· ${ev.location}` : ''}
-                      </p>
-                    </div>
-                  </div>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded-[var(--dw-radius-sm)] border ${color.badgeClass}`}>
-                    {color.label}
-                  </span>
-                </DaywellCard>
-              );
-            })}
-          </div>
+                    <DaywellStatusBadge
+                      tone={
+                        occ.kind === 'recurring_preview'
+                          ? 'neutral'
+                          : occ.kind === 'scheduled'
+                          ? 'transfer'
+                          : 'info'
+                      }
+                      showIcon={false}
+                      label={agendaTaskBadge}
+                    />
+                  </DaywellCard>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

@@ -27,6 +27,10 @@ abstract class ITaskRepositoryContract {
   );
   Future<void> deleteDailyPlanningEntry(String id);
   Future<void> deleteDailyPlanningEntriesForTask(String taskId);
+  Future<List<TaskReminderEntity>> getTaskReminders();
+  Future<TaskReminderEntity?> getTaskReminderForTask(String taskId);
+  Future<TaskReminderEntity> upsertTaskReminder(TaskReminderEntity reminder);
+  Future<void> deleteTaskReminderForTask(String taskId);
 }
 
 /// Domain contract for Project persistence and lifecycle management.

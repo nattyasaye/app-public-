@@ -679,3 +679,101 @@ class MilestoneEntity {
             EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
       );
 }
+
+class TaskReminderEntity {
+  final String id;
+  final String targetId;
+  final String targetType;
+  final String? title;
+  final String? channelId;
+  final DateTime triggerTimeUtc;
+  final bool isActive;
+  final DateTime createdAt;
+
+  TaskReminderEntity({
+    required this.id,
+    required this.targetId,
+    this.targetType = 'task',
+    this.title,
+    this.channelId,
+    required DateTime triggerTimeUtc,
+    this.isActive = true,
+    DateTime? createdAt,
+  })  : triggerTimeUtc = triggerTimeUtc.toUtc(),
+        createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc();
+
+  TaskReminderEntity copyWith({
+    String? id,
+    String? targetId,
+    String? targetType,
+    String? title,
+    String? channelId,
+    DateTime? triggerTimeUtc,
+    bool? isActive,
+  }) {
+    return TaskReminderEntity(
+      id: id ?? this.id,
+      targetId: targetId ?? this.targetId,
+      targetType: targetType ?? this.targetType,
+      title: title ?? this.title,
+      channelId: channelId ?? this.channelId,
+      triggerTimeUtc: triggerTimeUtc ?? this.triggerTimeUtc,
+      isActive: isActive ?? this.isActive,
+      createdAt: createdAt,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'targetId': targetId,
+        'targetType': targetType,
+        if (title != null && title!.trim().isNotEmpty) 'title': title,
+        if (channelId != null && channelId!.trim().isNotEmpty)
+          'channelId': channelId,
+        'triggerTimeUtc': EthiopiaClock.toUtcIsoString(triggerTimeUtc),
+        'isActive': isActive,
+        'createdAt': EthiopiaClock.toUtcIsoString(createdAt),
+      };
+
+  factory TaskReminderEntity.fromJson(Map<String, dynamic> json) {
+    return TaskReminderEntity(
+      id: (json['id'] ?? '').toString(),
+      targetId: (json['targetId'] ?? '').toString(),
+      targetType: (json['targetType'] ?? 'task').toString(),
+      title: json['title']?.toString(),
+      channelId: json['channelId']?.toString(),
+      triggerTimeUtc:
+          EthiopiaClock.tryParseInstantUtc(json['triggerTimeUtc']?.toString()),
+      isActive: json['isActive'] != false,
+      createdAt:
+          EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TaskReminderEntity &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          targetId == other.targetId &&
+          targetType == other.targetType &&
+          title == other.title &&
+          channelId == other.channelId &&
+          triggerTimeUtc == other.triggerTimeUtc &&
+          isActive == other.isActive &&
+          createdAt == other.createdAt;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        targetId,
+        targetType,
+        title,
+        channelId,
+        triggerTimeUtc,
+        isActive,
+        createdAt,
+      );
+}
+

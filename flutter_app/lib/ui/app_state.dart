@@ -283,6 +283,7 @@ class AppStateManager extends ChangeNotifier {
     );
     tasksController = TasksController(
       repository: DriftTasksRepository(db),
+      notificationService: _notificationService,
     );
     projectsController = ProjectsController(
       repository: DriftProjectsRepository(db),
@@ -738,6 +739,10 @@ class AppStateManager extends ChangeNotifier {
     final alreadySuperDisposed = _isDisposed;
     _isDisposed = true;
     _disposeControllersOnly();
+    final service = _notificationService;
+    if (service is LocalNotificationService) {
+      service.dispose();
+    }
     if (!alreadySuperDisposed) {
       super.dispose();
     }
@@ -750,6 +755,10 @@ class AppStateManager extends ChangeNotifier {
     if (_isDisposed) return;
     _isDisposed = true;
     _disposeControllersOnly();
+    final service = _notificationService;
+    if (service is LocalNotificationService) {
+      service.dispose();
+    }
     super.dispose();
     _disposeFuture ??= _closeDatabaseAfterPendingInit();
     unawaited(_disposeFuture!);
@@ -1031,6 +1040,7 @@ class AppStateManager extends ChangeNotifier {
     try {
       _scheduledCommitmentReminders.clear();
       await syncFinanceDueReminders();
+      await tasksController.syncTaskReminders();
     } catch (_) {}
     notifyListeners();
     return true;
@@ -1134,6 +1144,18 @@ class AppStateManager extends ChangeNotifier {
       }
     } catch (_) {
       // Safe no-op on environments without notification plugin bindings.
+    }
+  }
+
+  Future<bool> requestNotificationPermission() async {
+    try {
+      if (!_notificationServiceReady) {
+        await _notificationService.initialize();
+        _notificationServiceReady = true;
+      }
+      return await _notificationService.requestPermissions();
+    } catch (_) {
+      return false;
     }
   }
 
@@ -1277,6 +1299,11 @@ class AppStateManager extends ChangeNotifier {
       );
       await _rehydrateAllControllersStrict();
       await _processDueRecurringRulesStrict();
+      try {
+        _scheduledCommitmentReminders.clear();
+        await syncFinanceDueReminders();
+        await tasksController.syncTaskReminders();
+      } catch (_) {}
       final ok = BackupRestoreResult.success(
         'Successfully loaded canonical snapshot state!',
         report.warnings,
@@ -1307,6 +1334,9 @@ class AppStateManager extends ChangeNotifier {
   Future<int> purgeKnownSeedData() async {
     final purged = await _persistenceCoordinator.purgeKnownSeedData();
     await _rehydrateAllControllers();
+    try {
+      await tasksController.syncTaskReminders();
+    } catch (_) {}
     notifyListeners();
     return purged;
   }
@@ -1382,6 +1412,7 @@ class AppStateManager extends ChangeNotifier {
       try {
         _scheduledCommitmentReminders.clear();
         await syncFinanceDueReminders();
+        await tasksController.syncTaskReminders();
       } catch (_) {}
       notifyListeners();
       return ok;

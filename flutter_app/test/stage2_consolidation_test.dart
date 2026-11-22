@@ -58,6 +58,7 @@ class _InMemoryCalendarRepository implements ICalendarRepository {
 class _InMemoryTasksRepository implements ITasksRepository {
   final Map<String, TaskEntity> _tasks = {};
   final Map<String, DailyPlanningEntryEntity> _dailyPlanningEntries = {};
+  final Map<String, TaskReminderEntity> _reminders = {};
   final Map<String, ProjectEntity> _projects = {};
   final Map<String, MilestoneEntity> _milestones = {};
 
@@ -68,7 +69,36 @@ class _InMemoryTasksRepository implements ITasksRepository {
   }
 
   @override
-  Future<void> deleteTask(String id) async => _tasks.remove(id);
+  Future<void> deleteTask(String id) async {
+    _tasks.remove(id);
+    _reminders.removeWhere((_, r) => r.targetId == id);
+  }
+
+  @override
+  Future<List<TaskReminderEntity>> getTaskReminders() async =>
+      _reminders.values.toList();
+
+  @override
+  Future<TaskReminderEntity?> getTaskReminderForTask(String taskId) async {
+    for (final r in _reminders.values) {
+      if (r.targetId == taskId) return r;
+    }
+    return null;
+  }
+
+  @override
+  Future<TaskReminderEntity> upsertTaskReminder(
+    TaskReminderEntity reminder,
+  ) async {
+    _reminders.removeWhere((_, r) => r.targetId == reminder.targetId);
+    _reminders[reminder.id] = reminder;
+    return reminder;
+  }
+
+  @override
+  Future<void> deleteTaskReminderForTask(String taskId) async {
+    _reminders.removeWhere((_, r) => r.targetId == taskId);
+  }
 
   @override
   Future<TaskEntity?> getTaskById(String id) async => _tasks[id];

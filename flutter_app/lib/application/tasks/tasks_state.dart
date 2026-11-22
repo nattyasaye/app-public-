@@ -9,6 +9,7 @@ class TasksModuleState {
   final List<ProjectEntity> projects;
   final List<MilestoneEntity> milestones;
   final List<DailyPlanningEntryEntity> dailyPlanningEntries;
+  final List<TaskReminderEntity> reminders;
   final CalendarDate? selectedPlanDate;
 
   // Presentation / Filter State
@@ -34,6 +35,7 @@ class TasksModuleState {
     this.projects = const [],
     this.milestones = const [],
     this.dailyPlanningEntries = const [],
+    this.reminders = const [],
     this.selectedPlanDate,
     this.viewFilter = 'today',
     this.searchQuery = '',
@@ -160,11 +162,26 @@ class TasksModuleState {
     return null;
   }
 
+  TaskReminderEntity? findReminderForTask(String taskId) {
+    TaskReminderEntity? fallback;
+    for (final r in reminders) {
+      if (r.targetType == 'task' && r.targetId == taskId) {
+        if (r.isActive) return r;
+        fallback ??= r;
+      }
+    }
+    return fallback;
+  }
+
+  int get activeReminderCount =>
+      reminders.where((r) => r.targetType == 'task' && r.isActive).length;
+
   TasksModuleState copyWith({
     List<TaskEntity>? tasks,
     List<ProjectEntity>? projects,
     List<MilestoneEntity>? milestones,
     List<DailyPlanningEntryEntity>? dailyPlanningEntries,
+    List<TaskReminderEntity>? reminders,
     CalendarDate? selectedPlanDate,
     bool clearSelectedPlanDate = false,
     String? viewFilter,
@@ -193,6 +210,7 @@ class TasksModuleState {
       projects: projects ?? this.projects,
       milestones: milestones ?? this.milestones,
       dailyPlanningEntries: dailyPlanningEntries ?? this.dailyPlanningEntries,
+      reminders: reminders ?? this.reminders,
       selectedPlanDate: clearSelectedPlanDate
           ? null
           : (selectedPlanDate ?? this.selectedPlanDate),

@@ -13,6 +13,7 @@ import 'package:personal_management_app/domain/calendar/calendar_models.dart';
 import 'package:personal_management_app/main.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 import 'package:personal_management_app/ui/screens/backup_view.dart';
+import 'package:personal_management_app/ui/screens/calendar_view.dart';
 import 'package:personal_management_app/ui/screens/dashboard_view.dart';
 import 'package:personal_management_app/ui/screens/finance_view.dart';
 import 'package:personal_management_app/ui/screens/more_view.dart';
@@ -648,7 +649,7 @@ void main() {
       expect(shellController.hasSecondaryRoute, isFalse);
       expect(shellController.currentTab, DaywellTabId.today);
 
-      // Navigate via More All-areas cards -> CalendarPlaceholderView, Sync & backup
+      // Navigate via More All-areas cards -> CalendarView, Sync & backup
       await tester.tap(
         find.descendant(
           of: find.byType(NavigationBar),
@@ -673,7 +674,7 @@ void main() {
       await tester.tap(moreCalendarCard);
       await tester.pumpAndSettle();
       expect(shellController.currentTab, DaywellTabId.calendar);
-      expect(find.byType(CalendarPlaceholderView), findsOneWidget);
+      expect(find.byType(CalendarView), findsOneWidget);
 
       await tester.tap(
         find.descendant(

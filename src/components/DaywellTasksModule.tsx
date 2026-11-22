@@ -101,6 +101,7 @@ import {
   skipRecurrenceOccurrence,
   stopTaskRecurrence,
 } from '../domain/taskRecurrence';
+import { getTaskPrimaryCalendarDate } from '../domain/taskCalendar';
 import { dailyPlanningService } from '../services/dailyPlanningService';
 import { inboxService } from '../services/inboxService';
 import { projectsService } from '../services/projectsService';
@@ -136,6 +137,11 @@ interface DaywellTasksModuleProps {
   dailyPlanningEntries?: SharedDailyPlanningEntry[];
   onUpdateDailyPlanningEntries?: (updated: SharedDailyPlanningEntry[]) => void;
   requestedFilter?: { filter: TaskViewFilter; nonce: number } | null;
+  requestedTaskFocus?: {
+    taskId: string;
+    openMode?: 'details' | 'edit';
+    nonce: number;
+  } | null;
   onRequestQuickCapture?: () => void;
   onNavigateToCalendar?: (dateStr: string) => void;
   activeSubTab?: 'tasks' | 'projects';
@@ -259,7 +265,9 @@ export function DaywellTasksModule({
   dailyPlanningEntries: controlledDailyPlanningEntries,
   onUpdateDailyPlanningEntries,
   requestedFilter,
+  requestedTaskFocus,
   onRequestQuickCapture,
+  onNavigateToCalendar,
   activeSubTab: controlledSubTab,
   onSubTabChange,
   selectedProjectId: controlledProjectId,
@@ -355,6 +363,19 @@ export function DaywellTasksModule({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedFilter?.nonce]);
+
+  useEffect(() => {
+    if (!requestedTaskFocus?.taskId) return;
+    const target = tasks.find((t) => t.id === requestedTaskFocus.taskId);
+    if (!target) return;
+    setSubTab('tasks');
+    if (requestedTaskFocus.openMode === 'edit') {
+      handleOpenEdit(target);
+    } else {
+      openTaskDetails(target.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedTaskFocus?.nonce]);
 
   // Search, Multi-Criteria Filters & Sorting
   const [searchQuery, setSearchQuery] = useState('');
@@ -3362,20 +3383,47 @@ export function DaywellTasksModule({
                 <div className="grid grid-cols-1 gap-2 text-xs bg-[var(--dw-card)] p-3 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[var(--dw-text-muted)]">Scheduled Date</span>
-                    <span className="font-semibold text-[var(--dw-text-primary)]">
-                      {parsedScheduled
-                        ? SharedDateFormatter.formatDual(parsedScheduled, false)
-                        : detailTask.scheduledDate || 'Not set'}
-                      {detailTask.scheduledTime ? ` · ${detailTask.scheduledTime}` : ''}
-                    </span>
+                    {onNavigateToCalendar && parsedScheduled ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailTaskId(null);
+                          onNavigateToCalendar(parsedScheduled.toIsoString());
+                        }}
+                        className="font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer text-right"
+                      >
+                        {SharedDateFormatter.formatDual(parsedScheduled, false)}
+                        {detailTask.scheduledTime ? ` · ${detailTask.scheduledTime}` : ''}
+                      </button>
+                    ) : (
+                      <span className="font-semibold text-[var(--dw-text-primary)]">
+                        {parsedScheduled
+                          ? SharedDateFormatter.formatDual(parsedScheduled, false)
+                          : detailTask.scheduledDate || 'Not set'}
+                        {detailTask.scheduledTime ? ` · ${detailTask.scheduledTime}` : ''}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[var(--dw-text-muted)]">Due Date</span>
-                    <span className="font-semibold text-[var(--dw-text-primary)]">
-                      {parsedDue
-                        ? SharedDateFormatter.formatDual(parsedDue, false)
-                        : detailTask.dueDate || 'Not set'}
-                    </span>
+                    {onNavigateToCalendar && parsedDue ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDetailTaskId(null);
+                          onNavigateToCalendar(parsedDue.toIsoString());
+                        }}
+                        className="font-semibold text-[var(--dw-primary)] hover:underline cursor-pointer text-right"
+                      >
+                        {SharedDateFormatter.formatDual(parsedDue, false)}
+                      </button>
+                    ) : (
+                      <span className="font-semibold text-[var(--dw-text-primary)]">
+                        {parsedDue
+                          ? SharedDateFormatter.formatDual(parsedDue, false)
+                          : detailTask.dueDate || 'Not set'}
+                      </span>
+                    )}
                   </div>
                   {detailTask.projectName && (
                     <div className="flex items-center justify-between gap-2">
@@ -3742,7 +3790,25 @@ export function DaywellTasksModule({
                       className="!text-[var(--dw-error)]"
                     />
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {onNavigateToCalendar &&
+                      (() => {
+                        const primaryCalDate =
+                          getTaskPrimaryCalendarDate(detailTask);
+                        if (!primaryCalDate) return null;
+                        return (
+                          <DaywellButton
+                            label="View in Calendar"
+                            variant="outlined"
+                            size="compact"
+                            leadingIcon={<Calendar className="w-3.5 h-3.5" />}
+                            onClick={() => {
+                              setDetailTaskId(null);
+                              onNavigateToCalendar(primaryCalDate);
+                            }}
+                          />
+                        );
+                      })()}
                     <DaywellButton
                       label="Edit"
                       variant="tonal"

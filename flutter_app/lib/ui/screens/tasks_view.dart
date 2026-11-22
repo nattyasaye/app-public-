@@ -11,6 +11,7 @@ import '../../core/theme/daywell_theme.dart';
 import '../../domain/inbox/inbox_models.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/daily_planning_engine.dart';
+import '../../domain/tasks/task_calendar_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_recurrence_engine.dart';
 import '../app_state.dart';
@@ -25,6 +26,8 @@ class TasksView extends StatefulWidget {
   final TasksController? controller;
   final ProjectsController? projectsController;
   final InboxController? inboxController;
+  final ({String taskId, int nonce})? requestedTaskFocus;
+  final void Function(CalendarDate date)? onOpenCalendarDate;
 
   const TasksView({
     super.key,
@@ -32,6 +35,8 @@ class TasksView extends StatefulWidget {
     this.controller,
     this.projectsController,
     this.inboxController,
+    this.requestedTaskFocus,
+    this.onOpenCalendarDate,
   }) : assert(
           state != null || controller != null,
           'Either state or controller must be provided to TasksView',
@@ -55,6 +60,7 @@ class _TasksViewState extends State<TasksView>
   late TabController _tabController;
   late TextEditingController _searchController;
   bool _showFilters = false;
+  int? _lastHandledTaskFocusNonce;
 
   @override
   void initState() {
@@ -68,6 +74,7 @@ class _TasksViewState extends State<TasksView>
       text: ctrl.state.searchQuery,
     );
     ctrl.addListener(_syncSearchControllerWithState);
+    _scheduleTaskFocusIfNeeded();
   }
 
   @override
@@ -78,6 +85,22 @@ class _TasksViewState extends State<TasksView>
       widget.effectiveController.addListener(_syncSearchControllerWithState);
       _syncSearchControllerWithState();
     }
+    _scheduleTaskFocusIfNeeded();
+  }
+
+  void _scheduleTaskFocusIfNeeded() {
+    final focus = widget.requestedTaskFocus;
+    if (focus == null || focus.nonce == _lastHandledTaskFocusNonce) return;
+    _lastHandledTaskFocusNonce = focus.nonce;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final target = widget.effectiveController.state.findTaskById(focus.taskId);
+      if (target == null) return;
+      if (_tabController.index != 0) {
+        _tabController.animateTo(0);
+      }
+      _showTaskDetails(target, widget.effectiveController);
+    });
   }
 
   void _syncSearchControllerWithState() {
@@ -1552,6 +1575,27 @@ class _TasksViewState extends State<TasksView>
                       spacing: SharedDesignTokens.spacingSm,
                       runSpacing: SharedDesignTokens.spacingSm,
                       children: [
+                        if (widget.onOpenCalendarDate != null &&
+                            TaskCalendarEngine.getTaskPrimaryCalendarDate(
+                                  task,
+                                ) !=
+                                null)
+                          DaywellButton(
+                            label: 'View in Calendar',
+                            variant: DaywellButtonVariant.outlined,
+                            size: DaywellButtonSize.compact,
+                            leadingIcon: Icons.calendar_month_outlined,
+                            onPressed: () {
+                              final targetDate =
+                                  TaskCalendarEngine.getTaskPrimaryCalendarDate(
+                                task,
+                              );
+                              if (targetDate != null) {
+                                Navigator.pop(ctx);
+                                widget.onOpenCalendarDate!(targetDate);
+                              }
+                            },
+                          ),
                         DaywellButton(
                           label: 'Edit',
                           variant: DaywellButtonVariant.secondary,

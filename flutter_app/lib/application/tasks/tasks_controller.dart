@@ -1,9 +1,11 @@
 import 'package:flutter/foundation.dart';
 import '../../core/date/shared_date.dart';
+import '../../core/interfaces/platform_service_interfaces.dart';
 import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_contracts.dart';
 import '../../domain/tasks/task_recurrence_engine.dart';
+import '../../domain/tasks/task_reminder_engine.dart';
 import 'tasks_state.dart';
 
 /// Module-scoped application controller for Daywell To-Do and Projects.
@@ -12,13 +14,20 @@ import 'tasks_state.dart';
 /// from and persisted directly to [ITasksRepository] (authoritative Drift SQLite).
 class TasksController extends ChangeNotifier {
   final ITasksRepository _repository;
+  final INotificationService? _notificationService;
   TasksModuleState _state;
   bool _isDisposed = false;
+  bool _notificationReady = false;
+  final Map<String, ({DateTime trigger, String body})> _scheduledReminderMeta =
+      <String, ({DateTime trigger, String body})>{};
+  final Set<String> _deliveredOrSkippedPastKeys = <String>{};
 
   TasksController({
     required ITasksRepository repository,
+    INotificationService? notificationService,
     TasksModuleState? initialState,
   })  : _repository = repository,
+        _notificationService = notificationService,
         _state = initialState ?? const TasksModuleState();
 
   TasksModuleState get state => _state;
@@ -33,14 +42,20 @@ class TasksController extends ChangeNotifier {
       final loadedProjects = await _repository.getProjects();
       final loadedMilestones = await _repository.getAllMilestones();
       final loadedEntries = await _repository.getDailyPlanningEntries();
+      final loadedReminders = await _repository.getTaskReminders();
 
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(loadedTasks),
         projects: List<ProjectEntity>.unmodifiable(loadedProjects),
         milestones: List<MilestoneEntity>.unmodifiable(loadedMilestones),
         dailyPlanningEntries: DailyPlanningEngine.normalizeEntries(loadedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(loadedReminders),
         isLoading: false,
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: loadedTasks,
+        reminders: loadedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(
@@ -49,6 +64,261 @@ class TasksController extends ChangeNotifier {
       );
     }
     notifyListeners();
+  }
+
+  // --- Task Reminder Orchestration (Stage 5) ---
+
+  Future<bool> requestNotificationPermission() async {
+    final service = _notificationService;
+    if (service == null) return false;
+    try {
+      if (!_notificationReady) {
+        await service.initialize();
+        _notificationReady = true;
+      }
+      return await service.requestPermissions();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _ensureNotificationServiceInitialized() async {
+    final service = _notificationService;
+    if (service == null || _notificationReady) return;
+    try {
+      await service.initialize();
+      _notificationReady = true;
+    } catch (_) {
+      // Safe no-op in headless/test environments without plugin bindings.
+    }
+  }
+
+  Future<void> _cancelNotificationId(String reminderId) async {
+    _scheduledReminderMeta.remove(reminderId);
+    final service = _notificationService;
+    if (service == null) return;
+    try {
+      await service.cancelReminder(reminderId);
+    } catch (_) {
+      // Safe no-op in headless/test environments without plugin bindings.
+    }
+  }
+
+  Future<void> _syncNotificationSchedules({
+    required List<TaskEntity> tasks,
+    required List<TaskReminderEntity> reminders,
+    DateTime? nowUtc,
+  }) async {
+    final service = _notificationService;
+    if (service == null || _isDisposed) return;
+
+    final now = (nowUtc ?? EthiopiaClock.nowUtc()).toUtc();
+    final pastCutoff = now.subtract(const Duration(minutes: 5));
+    final taskById = <String, TaskEntity>{
+      for (final t in tasks) t.id: t,
+    };
+
+    final eligibleById = <String, ({TaskReminderEntity reminder, TaskEntity task})>{};
+    for (final reminder in reminders) {
+      if (reminder.targetType != 'task' || !reminder.isActive) continue;
+      final task = taskById[reminder.targetId];
+      if (task == null ||
+          !TaskReminderEngine.isTaskEligibleForActiveReminder(task)) {
+        continue;
+      }
+      eligibleById[reminder.id] = (reminder: reminder, task: task);
+    }
+
+    // Cancel reminders that are no longer active, eligible, or existing.
+    for (final trackedId in List<String>.from(_scheduledReminderMeta.keys)) {
+      if (!eligibleById.containsKey(trackedId)) {
+        await _cancelNotificationId(trackedId);
+      }
+    }
+
+    if (eligibleById.isEmpty) return;
+    await _ensureNotificationServiceInitialized();
+
+    for (final entry in eligibleById.values) {
+      final r = entry.reminder;
+      final t = entry.task;
+      final trigger = r.triggerTimeUtc.toUtc();
+      final body = t.title.trim().isEmpty ? 'Task due' : t.title.trim();
+
+      if (trigger.isBefore(pastCutoff)) {
+        if (_scheduledReminderMeta.containsKey(r.id)) {
+          await _cancelNotificationId(r.id);
+        }
+        continue;
+      }
+
+      if (!trigger.isAfter(now)) {
+        final key = '${r.id}:${trigger.millisecondsSinceEpoch}';
+        if (_deliveredOrSkippedPastKeys.contains(key)) {
+          continue;
+        }
+        _deliveredOrSkippedPastKeys.add(key);
+      }
+
+      final existingMeta = _scheduledReminderMeta[r.id];
+      if (existingMeta != null &&
+          existingMeta.trigger == trigger &&
+          existingMeta.body == body) {
+        continue;
+      }
+
+      try {
+        await service.scheduleReminder(
+          id: r.id,
+          title: 'Task Reminder',
+          body: body,
+          scheduledDateUtc: trigger,
+          payload: 'task:${t.id}',
+        );
+        _scheduledReminderMeta[r.id] = (trigger: trigger, body: body);
+      } catch (_) {
+        // Safe no-op in environments without notification plugin bindings.
+      }
+    }
+  }
+
+  Future<void> syncTaskReminders({DateTime? nowUtc}) async {
+    try {
+      final loadedTasks = _state.tasks.isNotEmpty
+          ? _state.tasks
+          : await _repository.getTasks();
+      final loadedReminders = await _repository.getTaskReminders();
+      _state = _state.copyWith(
+        reminders: List<TaskReminderEntity>.unmodifiable(loadedReminders),
+      );
+      await _syncNotificationSchedules(
+        tasks: loadedTasks,
+        reminders: loadedReminders,
+        nowUtc: nowUtc,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<TaskReminderEntity?> setTaskReminder({
+    required String taskId,
+    required DateTime triggerTimeUtc,
+    bool requestPermissionIfNeeded = false,
+    DateTime? nowUtc,
+  }) async {
+    final task =
+        _state.findTaskById(taskId) ?? await _repository.getTaskById(taskId);
+    if (task == null) return null;
+    if (requestPermissionIfNeeded) {
+      await requestNotificationPermission();
+    }
+    try {
+      final existing = await _repository.getTaskReminderForTask(taskId);
+      final built = TaskReminderEngine.buildReminder(
+        task: task,
+        triggerTimeUtc: triggerTimeUtc,
+        existingReminder: existing,
+        nowUtc: nowUtc,
+      );
+      final persisted = await _repository.upsertTaskReminder(built);
+      final updatedReminders = await _repository.getTaskReminders();
+      _state = _state.copyWith(
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
+        clearError: true,
+      );
+      if (!persisted.isActive) {
+        await _cancelNotificationId(persisted.id);
+      }
+      await _syncNotificationSchedules(
+        tasks: _state.tasks,
+        reminders: updatedReminders,
+        nowUtc: nowUtc,
+      );
+      notifyListeners();
+      return persisted;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> removeTaskReminder(String taskId) async {
+    try {
+      final existing =
+          _state.findReminderForTask(taskId) ??
+          await _repository.getTaskReminderForTask(taskId);
+      await _repository.deleteTaskReminderForTask(taskId);
+      await _cancelNotificationId(
+        existing?.id ?? TaskReminderEngine.canonicalReminderId(taskId),
+      );
+      final updatedReminders = await _repository.getTaskReminders();
+      _state = _state.copyWith(
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
+        clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: _state.tasks,
+        reminders: updatedReminders,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<void> _reconcileReminderForTaskMutation({
+    required TaskEntity previousTask,
+    required TaskEntity updatedTask,
+    DateTime? explicitReminderTriggerUtc,
+    bool clearExplicitReminder = false,
+    bool shiftCustomOnDateShift = false,
+    DateTime? nowUtc,
+  }) async {
+    final existing = await _repository.getTaskReminderForTask(updatedTask.id);
+    if (clearExplicitReminder) {
+      if (existing != null) {
+        await _repository.deleteTaskReminderForTask(updatedTask.id);
+        await _cancelNotificationId(existing.id);
+      } else {
+        await _cancelNotificationId(
+          TaskReminderEngine.canonicalReminderId(updatedTask.id),
+        );
+      }
+      return;
+    }
+
+    if (explicitReminderTriggerUtc != null) {
+      final built = TaskReminderEngine.buildReminder(
+        task: updatedTask,
+        triggerTimeUtc: explicitReminderTriggerUtc,
+        existingReminder: existing,
+        nowUtc: nowUtc,
+      );
+      final saved = await _repository.upsertTaskReminder(built);
+      if (!saved.isActive) {
+        await _cancelNotificationId(saved.id);
+      }
+      return;
+    }
+
+    if (existing != null) {
+      final reconciled = TaskReminderEngine.reconcileForUpdatedTask(
+        previousTask: previousTask,
+        nextTask: updatedTask,
+        existingReminder: existing,
+        nowUtc: nowUtc,
+        shiftCustomOnDateShift: shiftCustomOnDateShift,
+      );
+      if (reconciled != null && reconciled != existing) {
+        final saved = await _repository.upsertTaskReminder(reconciled);
+        if (!saved.isActive) {
+          await _cancelNotificationId(saved.id);
+        }
+      }
+    }
   }
 
   // --- Presentation Filter & View Controls ---
@@ -846,13 +1116,35 @@ class TasksController extends ChangeNotifier {
         existing.copyWith(recurrenceRule: recurrenceRule));
   }
 
-  Future<TaskEntity?> _persistUpdatedTask(TaskEntity updated) async {
+  Future<TaskEntity?> _persistUpdatedTask(
+    TaskEntity updated, {
+    TaskEntity? previousTask,
+    bool shiftCustomOnDateShift = false,
+    DateTime? nowUtc,
+  }) async {
     try {
+      final prev = previousTask ??
+          _state.findTaskById(updated.id) ??
+          await _repository.getTaskById(updated.id) ??
+          updated;
       final persisted = await _repository.updateTask(updated);
+      await _reconcileReminderForTaskMutation(
+        previousTask: prev,
+        updatedTask: persisted,
+        shiftCustomOnDateShift: shiftCustomOnDateShift,
+        nowUtc: nowUtc,
+      );
       final updatedTasks = await _repository.getTasks();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
+        nowUtc: nowUtc,
       );
       notifyListeners();
       return persisted;
@@ -901,6 +1193,8 @@ class TasksController extends ChangeNotifier {
     TaskRecurrenceConfig? recurrenceConfig,
     bool isArchived = false,
     int sortOrder = 0,
+    DateTime? reminderTriggerUtc,
+    bool requestReminderPermission = false,
   }) async {
     final trimmedTitle = title.trim();
     if (trimmedTitle.isEmpty) {
@@ -977,6 +1271,10 @@ class TasksController extends ChangeNotifier {
       updatedAt: now,
     );
 
+    if (reminderTriggerUtc != null && requestReminderPermission) {
+      await requestNotificationPermission();
+    }
+
     try {
       final created = await _repository.createTask(task);
       if (isMyDay && resolvedMyDayDate != null) {
@@ -996,13 +1294,28 @@ class TasksController extends ChangeNotifier {
           ),
         );
       }
+      if (reminderTriggerUtc != null) {
+        final builtReminder = TaskReminderEngine.buildReminder(
+          task: created,
+          triggerTimeUtc: reminderTriggerUtc,
+          nowUtc: now,
+        );
+        await _repository.upsertTaskReminder(builtReminder);
+      }
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
+        nowUtc: now,
       );
       notifyListeners();
       return created;
@@ -1036,6 +1349,8 @@ class TasksController extends ChangeNotifier {
     bool clearRecurrenceRule = false,
     TaskRecurrenceConfig? recurrenceConfig,
     bool clearRecurrenceConfig = false,
+    DateTime? reminderTriggerUtc,
+    bool clearReminder = false,
   }) async {
     final result = await updateTaskWithRecurrence(
       id: id,
@@ -1060,6 +1375,8 @@ class TasksController extends ChangeNotifier {
       clearRecurrenceRule: clearRecurrenceRule,
       recurrenceConfig: recurrenceConfig,
       clearRecurrenceConfig: clearRecurrenceConfig,
+      reminderTriggerUtc: reminderTriggerUtc,
+      clearReminder: clearReminder,
     );
     return result.updatedTask;
   }
@@ -1088,6 +1405,8 @@ class TasksController extends ChangeNotifier {
     bool clearRecurrenceRule = false,
     TaskRecurrenceConfig? recurrenceConfig,
     bool clearRecurrenceConfig = false,
+    DateTime? reminderTriggerUtc,
+    bool clearReminder = false,
   }) async {
     final trimmedTitle = title.trim();
     if (trimmedTitle.isEmpty) {
@@ -1172,6 +1491,16 @@ class TasksController extends ChangeNotifier {
 
     try {
       final persisted = await _repository.updateTask(updated);
+      await _reconcileReminderForTaskMutation(
+        previousTask: existing,
+        updatedTask: persisted,
+        explicitReminderTriggerUtc: reminderTriggerUtc,
+        clearExplicitReminder: clearReminder,
+        nowUtc: now,
+      );
+      final updatedParentReminder =
+          await _repository.getTaskReminderForTask(persisted.id);
+
       TaskEntity? generatedNextTask;
       final transitionedToCompleted =
           !existing.isCompleted && updated.isCompleted;
@@ -1195,6 +1524,16 @@ class TasksController extends ChangeNotifier {
         if (recResult.generatedNextTask != null) {
           generatedNextTask =
               await _repository.createTask(recResult.generatedNextTask!);
+          final carryOver =
+              TaskReminderEngine.buildCarryOverForGeneratedOccurrence(
+            previousParentTask: tempOpen,
+            generatedNextTask: generatedNextTask,
+            parentReminder: updatedParentReminder,
+            nowUtc: now,
+          );
+          if (carryOver != null) {
+            await _repository.upsertTaskReminder(carryOver);
+          }
         }
       }
       if (existing.isCompleted != updated.isCompleted) {
@@ -1205,11 +1544,18 @@ class TasksController extends ChangeNotifier {
       }
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
+        nowUtc: now,
       );
       notifyListeners();
       return (updatedTask: persisted, generatedNextTask: generatedNextTask);
@@ -1229,6 +1575,7 @@ class TasksController extends ChangeNotifier {
         isArchived: true,
         updatedAt: EthiopiaClock.nowUtc(),
       ),
+      previousTask: existing,
     );
   }
 
@@ -1241,25 +1588,36 @@ class TasksController extends ChangeNotifier {
         isArchived: false,
         updatedAt: EthiopiaClock.nowUtc(),
       ),
+      previousTask: existing,
     );
   }
 
   Future<void> restoreDeletedTask(
     TaskEntity snapshot, {
     List<DailyPlanningEntryEntity> restorePlanningEntries = const [],
+    TaskReminderEntity? restoreReminder,
   }) async {
     try {
       await _repository.createTask(snapshot);
       for (final entry in restorePlanningEntries) {
         await _repository.upsertDailyPlanningEntry(entry);
       }
+      if (restoreReminder != null) {
+        await _repository.upsertTaskReminder(restoreReminder);
+      }
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1281,6 +1639,10 @@ class TasksController extends ChangeNotifier {
       final currentTasks = _state.tasks.isNotEmpty
           ? _state.tasks
           : await _repository.getTasks();
+      final previousTask = currentTasks.cast<TaskEntity?>().firstWhere(
+            (t) => t?.id == id,
+            orElse: () => null,
+          );
       final result = TaskRecurrenceEngine.completeTaskWithRecurrence(
         currentTasks,
         id,
@@ -1294,20 +1656,47 @@ class TasksController extends ChangeNotifier {
           duplicatePrevented: false,
         );
       }
+      final prevReminder = await _repository.getTaskReminderForTask(id);
       final persisted = await _repository.updateTask(result.updatedTask!);
+      if (previousTask != null) {
+        await _reconcileReminderForTaskMutation(
+          previousTask: previousTask,
+          updatedTask: persisted,
+          nowUtc: nowUtc,
+        );
+      }
       TaskEntity? spawned;
       if (result.generatedNextTask != null) {
         spawned = await _repository.createTask(result.generatedNextTask!);
+        if (previousTask != null && prevReminder != null) {
+          final carryOver =
+              TaskReminderEngine.buildCarryOverForGeneratedOccurrence(
+            previousParentTask: previousTask,
+            generatedNextTask: spawned,
+            parentReminder: prevReminder,
+            nowUtc: nowUtc,
+          );
+          if (carryOver != null) {
+            await _repository.upsertTaskReminder(carryOver);
+          }
+        }
       }
       await _syncCompletionWithDailyPlanning(id, persisted.isCompleted);
 
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
+        nowUtc: nowUtc,
       );
       notifyListeners();
       return (
@@ -1347,12 +1736,30 @@ class TasksController extends ChangeNotifier {
       await _repository.updateTaskStatus(id, newStatus);
       await _syncCompletionWithDailyPlanning(id, newStatus == 'completed');
       final updatedTasks = await _repository.getTasks();
+      if (existing != null) {
+        final refreshed = updatedTasks.cast<TaskEntity?>().firstWhere(
+              (t) => t?.id == id,
+              orElse: () => null,
+            );
+        if (refreshed != null) {
+          await _reconcileReminderForTaskMutation(
+            previousTask: existing,
+            updatedTask: refreshed,
+          );
+        }
+      }
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1378,16 +1785,29 @@ class TasksController extends ChangeNotifier {
 
     try {
       final persisted = await _repository.updateTask(skipped.updatedTask!);
+      await _reconcileReminderForTaskMutation(
+        previousTask: existing,
+        updatedTask: persisted,
+        shiftCustomOnDateShift: true,
+        nowUtc: nowUtc,
+      );
       if (existing.isMyDay && !persisted.isMyDay && existing.myDayDate != null) {
         await removeTaskFromPlannedDay(taskId, date: existing.myDayDate!);
       }
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
+        nowUtc: nowUtc,
       );
       notifyListeners();
       return persisted;
@@ -1412,7 +1832,12 @@ class TasksController extends ChangeNotifier {
       newDate,
       nowUtc: nowUtc,
     );
-    return _persistUpdatedTask(updated);
+    return _persistUpdatedTask(
+      updated,
+      previousTask: existing,
+      shiftCustomOnDateShift: true,
+      nowUtc: nowUtc,
+    );
   }
 
   Future<TaskEntity?> stopTaskRecurrence(
@@ -1427,21 +1852,57 @@ class TasksController extends ChangeNotifier {
       existing,
       nowUtc: nowUtc,
     );
-    return _persistUpdatedTask(updated);
+    return _persistUpdatedTask(
+      updated,
+      previousTask: existing,
+      nowUtc: nowUtc,
+    );
   }
 
-  Future<void> restoreTaskSnapshot(TaskEntity snapshot) async {
-    await _persistUpdatedTask(snapshot);
+  Future<void> restoreTaskSnapshot(
+    TaskEntity snapshot, {
+    TaskReminderEntity? restoreReminder,
+  }) async {
+    try {
+      await _repository.updateTask(snapshot);
+      if (restoreReminder != null) {
+        await _repository.upsertTaskReminder(restoreReminder);
+      }
+      final updatedTasks = await _repository.getTasks();
+      final updatedReminders = await _repository.getTaskReminders();
+      _state = _state.copyWith(
+        tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
+        clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
+      );
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
   }
 
   Future<void> undoGeneratedRecurrenceCompletion({
     required TaskEntity previousTask,
     String? generatedNextTaskId,
+    TaskReminderEntity? previousReminder,
   }) async {
     try {
       await _repository.updateTask(previousTask);
       if (generatedNextTaskId != null && generatedNextTaskId.trim().isNotEmpty) {
+        final nextReminder =
+            await _repository.getTaskReminderForTask(generatedNextTaskId);
         await _repository.deleteTask(generatedNextTaskId);
+        await _cancelNotificationId(
+          nextReminder?.id ??
+              TaskReminderEngine.canonicalReminderId(generatedNextTaskId),
+        );
+      }
+      if (previousReminder != null) {
+        await _repository.upsertTaskReminder(previousReminder);
       }
       await _syncCompletionWithDailyPlanning(
         previousTask.id,
@@ -1449,11 +1910,17 @@ class TasksController extends ChangeNotifier {
       );
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1463,11 +1930,31 @@ class TasksController extends ChangeNotifier {
 
   Future<void> rescheduleTask(String id, CalendarDate? newDueDate) async {
     try {
+      final prev =
+          _state.findTaskById(id) ?? await _repository.getTaskById(id);
       await _repository.rescheduleTask(id, newDueDate);
       final updatedTasks = await _repository.getTasks();
+      if (prev != null) {
+        final refreshed = updatedTasks.cast<TaskEntity?>().firstWhere(
+              (t) => t?.id == id,
+              orElse: () => null,
+            );
+        if (refreshed != null) {
+          await _reconcileReminderForTaskMutation(
+            previousTask: prev,
+            updatedTask: refreshed,
+          );
+        }
+      }
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1477,11 +1964,31 @@ class TasksController extends ChangeNotifier {
 
   Future<void> postponeTaskDays(String id, int days) async {
     try {
+      final prev =
+          _state.findTaskById(id) ?? await _repository.getTaskById(id);
       await _repository.postponeTaskDays(id, days);
       final updatedTasks = await _repository.getTasks();
+      if (prev != null) {
+        final refreshed = updatedTasks.cast<TaskEntity?>().firstWhere(
+              (t) => t?.id == id,
+              orElse: () => null,
+            );
+        if (refreshed != null) {
+          await _reconcileReminderForTaskMutation(
+            previousTask: prev,
+            updatedTask: refreshed,
+          );
+        }
+      }
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1491,17 +1998,29 @@ class TasksController extends ChangeNotifier {
 
   Future<void> deleteTask(String id) async {
     try {
+      final existingReminder =
+          _state.findReminderForTask(id) ??
+          await _repository.getTaskReminderForTask(id);
       await _repository.deleteTask(id);
+      await _cancelNotificationId(
+        existingReminder?.id ?? TaskReminderEngine.canonicalReminderId(id),
+      );
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       final nextSelection = Set<String>.from(_state.selectedTaskIds)
         ..remove(id);
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         selectedTaskIds: nextSelection,
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1515,16 +2034,36 @@ class TasksController extends ChangeNotifier {
     try {
       var runningTasks = List<TaskEntity>.from(_state.tasks);
       for (final id in ids) {
-        final task = _state.findTaskById(id);
+        final task = runningTasks.cast<TaskEntity?>().firstWhere(
+              (t) => t?.id == id,
+              orElse: () => null,
+            );
         if (task == null) continue;
+        final prevReminder = await _repository.getTaskReminderForTask(id);
         final result = TaskRecurrenceEngine.completeTaskWithRecurrence(
           runningTasks,
           id,
         );
         if (result.updatedTask != null) {
-          await _repository.updateTask(result.updatedTask!);
+          final persisted = await _repository.updateTask(result.updatedTask!);
+          await _reconcileReminderForTaskMutation(
+            previousTask: task,
+            updatedTask: persisted,
+          );
           if (result.generatedNextTask != null) {
-            await _repository.createTask(result.generatedNextTask!);
+            final spawned =
+                await _repository.createTask(result.generatedNextTask!);
+            if (prevReminder != null) {
+              final carryOver =
+                  TaskReminderEngine.buildCarryOverForGeneratedOccurrence(
+                previousParentTask: task,
+                generatedNextTask: spawned,
+                parentReminder: prevReminder,
+              );
+              if (carryOver != null) {
+                await _repository.upsertTaskReminder(carryOver);
+              }
+            }
           }
           await _syncCompletionWithDailyPlanning(
             id,
@@ -1535,12 +2074,18 @@ class TasksController extends ChangeNotifier {
       }
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         selectedTaskIds: const {},
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1553,16 +2098,28 @@ class TasksController extends ChangeNotifier {
     if (ids.isEmpty) return;
     try {
       for (final id in ids) {
+        final existingReminder =
+            _state.findReminderForTask(id) ??
+            await _repository.getTaskReminderForTask(id);
         await _repository.deleteTask(id);
+        await _cancelNotificationId(
+          existingReminder?.id ?? TaskReminderEngine.canonicalReminderId(id),
+        );
       }
       final updatedTasks = await _repository.getTasks();
       final updatedEntries = await _repository.getDailyPlanningEntries();
+      final updatedReminders = await _repository.getTaskReminders();
       _state = _state.copyWith(
         tasks: List<TaskEntity>.unmodifiable(updatedTasks),
         dailyPlanningEntries:
             DailyPlanningEngine.normalizeEntries(updatedEntries),
+        reminders: List<TaskReminderEntity>.unmodifiable(updatedReminders),
         selectedTaskIds: const {},
         clearError: true,
+      );
+      await _syncNotificationSchedules(
+        tasks: updatedTasks,
+        reminders: updatedReminders,
       );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
@@ -1814,6 +2371,7 @@ class TasksController extends ChangeNotifier {
   void dispose() {
     if (_isDisposed) return;
     _isDisposed = true;
+    _scheduledReminderMeta.clear();
     super.dispose();
   }
 }

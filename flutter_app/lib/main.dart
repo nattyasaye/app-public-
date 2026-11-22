@@ -6,9 +6,11 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'core/date/shared_date.dart';
 import 'core/theme/daywell_theme.dart';
 import 'ui/app_state.dart';
 import 'ui/screens/backup_view.dart';
+import 'ui/screens/calendar_view.dart';
 import 'ui/screens/dashboard_view.dart';
 import 'ui/screens/finance/finance_composer_sheet.dart';
 import 'ui/screens/finance/finance_formatters.dart';
@@ -16,7 +18,6 @@ import 'ui/screens/finance_view.dart';
 import 'ui/screens/more_view.dart';
 import 'ui/screens/notes_view.dart';
 import 'ui/screens/tasks_view.dart';
-import 'ui/shell/calendar_placeholder_view.dart';
 import 'ui/shell/daywell_app_shell.dart';
 import 'ui/shell/daywell_shell_routes.dart';
 import 'ui/shell/daywell_shell_status_view.dart';
@@ -157,6 +158,8 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
   bool _drainScheduled = false;
   bool _isRecoveryBusy = false;
   String? _recoveryNotice;
+  ({String taskId, int nonce})? _requestedTaskFocus;
+  int _taskFocusNonce = 0;
 
   @override
   void initState() {
@@ -390,12 +393,26 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
         return TasksView(
           state: _state,
           controller: _state.tasksController,
+          projectsController: _state.projectsController,
           inboxController: _state.inboxController,
+          requestedTaskFocus: _requestedTaskFocus,
+          onOpenCalendarDate: (CalendarDate date) {
+            _state.calendarController.setSelectedCalendarDate(date);
+            _shellController.selectTab(DaywellTabId.calendar);
+          },
         );
       case DaywellTabId.calendar:
-        return CalendarPlaceholderView(
-          controller: _state.calendarController,
+        return CalendarView(
+          calendarController: _state.calendarController,
+          tasksController: _state.tasksController,
+          projectsController: _state.projectsController,
           onOpenTasks: () => _shellController.selectTab(DaywellTabId.tasks),
+          onOpenTask: (String taskId) {
+            setState(() {
+              _requestedTaskFocus = (taskId: taskId, nonce: ++_taskFocusNonce);
+            });
+            _shellController.selectTab(DaywellTabId.tasks);
+          },
         );
       case DaywellTabId.notes:
         return NotesView(

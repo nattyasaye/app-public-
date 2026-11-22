@@ -300,6 +300,11 @@ class DriftTasksRepository implements ITasksRepository {
       await (_db.delete(_db.dailyPlanningEntries)
             ..where((tbl) => tbl.taskId.equals(id)))
           .go();
+      await (_db.delete(_db.reminders)
+            ..where(
+              (tbl) => tbl.targetType.equals('task') & tbl.targetId.equals(id),
+            ))
+          .go();
       await (_db.delete(_db.tasks)..where((tbl) => tbl.id.equals(id))).go();
     });
   }
@@ -397,6 +402,146 @@ class DriftTasksRepository implements ITasksRepository {
   Future<void> deleteDailyPlanningEntriesForTask(String taskId) async {
     await (_db.delete(_db.dailyPlanningEntries)
           ..where((tbl) => tbl.taskId.equals(taskId)))
+        .go();
+  }
+
+  TaskReminderEntity _mapReminderRowToEntity(Reminder row) {
+    return TaskReminderEntity(
+      id: row.id,
+      targetId: row.targetId,
+      targetType: row.targetType,
+      title: row.title,
+      channelId: row.channelId,
+      triggerTimeUtc: row.triggerTimeUtc,
+      isActive: row.isActive,
+      createdAt: row.createdAt,
+    );
+  }
+
+  @override
+  Future<List<TaskReminderEntity>> getTaskReminders() async {
+    final rows = await (_db.select(_db.reminders)
+          ..where((tbl) => tbl.targetType.equals('task'))
+          ..orderBy([(tbl) => OrderingTerm.asc(tbl.triggerTimeUtc)]))
+        .get();
+    final byTaskId = <String, TaskReminderEntity>{};
+    for (final row in rows) {
+      final entity = _mapReminderRowToEntity(row);
+      final prev = byTaskId[entity.targetId];
+      if (prev == null ||
+          (entity.isActive && !prev.isActive) ||
+          (entity.isActive == prev.isActive &&
+              entity.id == 'rem-task-${entity.targetId}' &&
+              prev.id != 'rem-task-${entity.targetId}')) {
+        byTaskId[entity.targetId] = entity;
+      }
+    }
+    return List<TaskReminderEntity>.unmodifiable(byTaskId.values);
+  }
+
+  @override
+  Future<TaskReminderEntity?> getTaskReminderForTask(String taskId) async {
+    final rows = await (_db.select(_db.reminders)
+          ..where(
+            (tbl) =>
+                tbl.targetType.equals('task') & tbl.targetId.equals(taskId),
+          ))
+        .get();
+    if (rows.isEmpty) return null;
+    final entities = rows.map(_mapReminderRowToEntity).toList(growable: false);
+    final canonicalId = 'rem-task-$taskId';
+    return entities.firstWhere(
+      (r) => r.id == canonicalId && r.isActive,
+      orElse: () => entities.firstWhere(
+        (r) => r.isActive,
+        orElse: () => entities.firstWhere(
+          (r) => r.id == canonicalId,
+          orElse: () => entities.first,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Future<TaskReminderEntity> upsertTaskReminder(
+    TaskReminderEntity reminder,
+  ) async {
+    return _db.transaction(() async {
+      final existingForTask = await (_db.select(_db.reminders)
+            ..where(
+              (tbl) =>
+                  tbl.targetType.equals('task') &
+                  tbl.targetId.equals(reminder.targetId),
+            ))
+          .get();
+
+      final targetRow = existingForTask.isNotEmpty
+          ? existingForTask.firstWhere(
+              (r) => r.id == reminder.id,
+              orElse: () => existingForTask.first,
+            )
+          : await (_db.select(_db.reminders)
+                ..where((tbl) => tbl.id.equals(reminder.id)))
+              .getSingleOrNull();
+
+      // Remove any duplicate task reminder rows for this taskId.
+      for (final dup in existingForTask) {
+        if (targetRow == null || dup.id != targetRow.id) {
+          await (_db.delete(_db.reminders)
+                ..where((tbl) => tbl.id.equals(dup.id)))
+              .go();
+        }
+      }
+
+      final effectiveId = targetRow?.id ?? reminder.id;
+      final normalized = reminder.copyWith(id: effectiveId, targetType: 'task');
+      if (targetRow != null) {
+        await (_db.update(_db.reminders)
+              ..where((tbl) => tbl.id.equals(effectiveId)))
+            .write(
+          RemindersCompanion(
+            targetId: Value(normalized.targetId),
+            targetType: const Value('task'),
+            title: Value(normalized.title),
+            channelId: Value(normalized.channelId),
+            triggerTimeUtc: Value(normalized.triggerTimeUtc),
+            isActive: Value(normalized.isActive),
+          ),
+        );
+        return TaskReminderEntity(
+          id: effectiveId,
+          targetId: normalized.targetId,
+          targetType: 'task',
+          title: normalized.title,
+          channelId: normalized.channelId,
+          triggerTimeUtc: normalized.triggerTimeUtc,
+          isActive: normalized.isActive,
+          createdAt: targetRow.createdAt,
+        );
+      }
+
+      await _db.into(_db.reminders).insert(
+            RemindersCompanion.insert(
+              id: normalized.id,
+              targetId: normalized.targetId,
+              targetType: 'task',
+              title: Value(normalized.title),
+              channelId: Value(normalized.channelId),
+              triggerTimeUtc: normalized.triggerTimeUtc,
+              isActive: Value(normalized.isActive),
+              createdAt: normalized.createdAt,
+            ),
+          );
+      return normalized;
+    });
+  }
+
+  @override
+  Future<void> deleteTaskReminderForTask(String taskId) async {
+    await (_db.delete(_db.reminders)
+          ..where(
+            (tbl) => tbl.targetType.equals('task') & tbl.targetId.equals(taskId),
+          ))
         .go();
   }
 
