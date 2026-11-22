@@ -471,6 +471,8 @@ class DatabasePersistenceCoordinator {
                 'category': n.category,
                 'projectId': n.projectId,
                 'goalId': n.goalId,
+                'linkedModule': n.linkedModule,
+                'linkedId': n.linkedId,
                 'tags': _decodeStringList(n.tagsJson),
                 'isPinned': n.isPinned,
                 'isFavorite': n.isFavorite,
@@ -776,7 +778,7 @@ class DatabasePersistenceCoordinator {
   static const int legacyOmittedSnapshotFormatVersion = 1;
   static const int minSupportedSnapshotFormatVersion = 1;
   static const int maxSupportedSnapshotFormatVersion = 2;
-  static const int maxSupportedDatabaseSchemaVersion = 10;
+  static const int maxSupportedDatabaseSchemaVersion = 11;
   static const int minSupportedCanonicalSnapshotVersion = 4;
   static const int maxSupportedCanonicalSnapshotVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
@@ -885,6 +887,11 @@ class DatabasePersistenceCoordinator {
     'carried_forward',
     'completed',
     'dismissed',
+  };
+  static const Set<String> _noteLinkedModules = <String>{
+    'tasks',
+    'finance',
+    'calendar',
   };
   static final RegExp _scheduledTimeHhmmPattern =
       RegExp(r'^(?:[01]\d|2[0-3]):[0-5]\d$');
@@ -2052,6 +2059,54 @@ class DatabasePersistenceCoordinator {
           );
         }
       }
+      final rawLinkedModule =
+          _optEnum(n, 'linkedModule', _noteLinkedModules, ctx);
+      final rawLinkedId = _optString(n, 'linkedId', ctx, allowEmpty: false);
+      final legacyTaskId = (rawLinkedModule == null && rawLinkedId == null)
+          ? _optString(n, 'taskId', ctx, allowEmpty: false)
+          : null;
+      String? safeLinkedModule;
+      String? safeLinkedId;
+      if (legacyTaskId != null) {
+        if (targetTaskIds.contains(legacyTaskId)) {
+          safeLinkedModule = 'tasks';
+          safeLinkedId = legacyTaskId;
+        } else {
+          diagnostics.add(
+            SnapshotImportDiagnostic(
+              code: 'ORPHANED_NOTE_TASK_CLEARED',
+              message:
+                  'Cleared missing linked taskId "$legacyTaskId" on note "$id".',
+              table: 'notes',
+              recordId: id,
+              field: 'linkedId',
+              severity: SnapshotDiagnosticSeverity.warning,
+            ),
+          );
+        }
+      } else if (rawLinkedModule != null && rawLinkedId != null) {
+        if (rawLinkedModule == 'tasks') {
+          if (targetTaskIds.contains(rawLinkedId)) {
+            safeLinkedModule = rawLinkedModule;
+            safeLinkedId = rawLinkedId;
+          } else {
+            diagnostics.add(
+              SnapshotImportDiagnostic(
+                code: 'ORPHANED_NOTE_TASK_CLEARED',
+                message:
+                    'Cleared missing linked taskId "$rawLinkedId" on note "$id".',
+                table: 'notes',
+                recordId: id,
+                field: 'linkedId',
+                severity: SnapshotDiagnosticSeverity.warning,
+              ),
+            );
+          }
+        } else {
+          safeLinkedModule = rawLinkedModule;
+          safeLinkedId = rawLinkedId;
+        }
+      }
       final tags = _optStringList(n, 'tags', ctx);
       final isPinned = _optBool(n, 'isPinned', ctx) ?? false;
       final isFavorite = _optBool(n, 'isFavorite', ctx) ?? false;
@@ -2068,6 +2123,8 @@ class DatabasePersistenceCoordinator {
           category: Value(category),
           projectId: Value(safeProjectId),
           goalId: Value(safeGoalId),
+          linkedModule: Value(safeLinkedModule),
+          linkedId: Value(safeLinkedId),
           tagsJson: Value(jsonEncode(tags)),
           isPinned: Value(isPinned),
           isFavorite: Value(isFavorite),

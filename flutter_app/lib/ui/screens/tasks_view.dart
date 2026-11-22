@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../application/inbox/inbox_controller.dart';
+import '../../application/notes/notes_controller.dart';
 import '../../application/projects/projects_controller.dart';
 import '../../application/projects/projects_state.dart';
 import '../../application/tasks/tasks_controller.dart';
@@ -9,6 +10,8 @@ import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
 import '../../domain/inbox/inbox_models.dart';
+import '../../domain/notes/note_models.dart';
+import '../../domain/notes/task_notes_helpers.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/daily_planning_engine.dart';
 import '../../domain/tasks/task_calendar_engine.dart';
@@ -28,9 +31,11 @@ class TasksView extends StatefulWidget {
   final TasksController? controller;
   final ProjectsController? projectsController;
   final InboxController? inboxController;
+  final NotesController? notesController;
   final ({String taskId, int nonce})? requestedTaskFocus;
   final ({int tabIndex, int nonce})? requestedSubTab;
   final void Function(CalendarDate date)? onOpenCalendarDate;
+  final void Function(String noteId)? onOpenNote;
 
   const TasksView({
     super.key,
@@ -38,9 +43,11 @@ class TasksView extends StatefulWidget {
     this.controller,
     this.projectsController,
     this.inboxController,
+    this.notesController,
     this.requestedTaskFocus,
     this.requestedSubTab,
     this.onOpenCalendarDate,
+    this.onOpenNote,
   }) : assert(
           state != null || controller != null,
           'Either state or controller must be provided to TasksView',
@@ -54,6 +61,9 @@ class TasksView extends StatefulWidget {
 
   InboxController? get effectiveInboxController =>
       inboxController ?? state?.inboxController;
+
+  NotesController? get effectiveNotesController =>
+      notesController ?? state?.notesController;
 
   @override
   State<TasksView> createState() => _TasksViewState();
@@ -1375,6 +1385,7 @@ class _TasksViewState extends State<TasksView>
   }
 
   void _showTaskDetails(TaskEntity initialTask, TasksController controller) {
+    final notesCtrl = widget.effectiveNotesController;
     unawaited(
       showModalBottomSheet<void>(
         context: context,
@@ -1385,7 +1396,10 @@ class _TasksViewState extends State<TasksView>
           ),
         ),
         builder: (ctx) => AnimatedBuilder(
-          animation: controller,
+          animation: Listenable.merge([
+            controller,
+            if (notesCtrl != null) notesCtrl,
+          ]),
           builder: (modalContext, _) {
             final task =
                 controller.state.findTaskById(initialTask.id) ?? initialTask;
@@ -1787,6 +1801,49 @@ class _TasksViewState extends State<TasksView>
                         controller,
                       ),
                     ),
+                    if (notesCtrl != null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                      _TaskDetailsLinkedNotesPanel(
+                        task: task,
+                        tasksController: controller,
+                        notesController: notesCtrl,
+                        onOpenNote: (noteId) {
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                          }
+                          widget.onOpenNote?.call(noteId);
+                        },
+                        onShowLinkSheet: () =>
+                            _showLinkExistingNoteSheet(
+                          modalContext,
+                          task,
+                          controller,
+                          notesCtrl,
+                        ),
+                        onUnlinkedWithUndo: (note) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).clearSnackBars();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Unlinked "${note.displayTitle}" from "${task.title}"',
+                              ),
+                              action: SnackBarAction(
+                                label: 'Undo',
+                                onPressed: () => unawaited(
+                                  notesCtrl.linkNoteToEntity(
+                                    note.id,
+                                    module: NoteEntity.taskLinkModule,
+                                    entityId: task.id,
+                                  ),
+                                ),
+                              ),
+                              duration: const Duration(seconds: 4),
+                            ),
+                          );
+                        },
+                      ),
+                    ],
                     const SizedBox(height: SharedDesignTokens.spacingMd),
                     Wrap(
                       spacing: SharedDesignTokens.spacingSm,
@@ -1867,6 +1924,30 @@ class _TasksViewState extends State<TasksView>
               ),
             );
           },
+        ),
+      ),
+    );
+  }
+
+  void _showLinkExistingNoteSheet(
+    BuildContext sheetContext,
+    TaskEntity task,
+    TasksController tasksController,
+    NotesController notesController,
+  ) {
+    unawaited(
+      showModalBottomSheet<void>(
+        context: sheetContext,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(SharedDesignTokens.radiusSheet),
+          ),
+        ),
+        builder: (_) => _LinkExistingNoteSheet(
+          task: task,
+          tasksController: tasksController,
+          notesController: notesController,
         ),
       ),
     );
@@ -3103,6 +3184,10 @@ class _TasksViewState extends State<TasksView>
     final subs = task.subtasks;
     final doneSubs = subs.where((s) => s.done).length;
     final reminder = moduleState.findReminderForTask(task.id);
+    final notesCtrl = widget.effectiveNotesController;
+    final linkedNotesCount = notesCtrl != null
+        ? TaskNotesHelper.countNotesForTask(notesCtrl.state.notes, task.id)
+        : 0;
     final semantic = context.daywellColors;
     final colorScheme = Theme.of(context).colorScheme;
 
@@ -3313,6 +3398,28 @@ class _TasksViewState extends State<TasksView>
                         fontSize: 11,
                         color: semantic.textSecondary,
                       ),
+                    ),
+                  if (linkedNotesCount > 0)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.note_alt_outlined,
+                          size: 12,
+                          color: colorScheme.primary,
+                        ),
+                        const SizedBox(width: 2),
+                        Text(
+                          linkedNotesCount == 1
+                              ? '1 note'
+                              : '$linkedNotesCount notes',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colorScheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
                     ),
                   for (final l in task.labels)
                     Text(
@@ -3854,6 +3961,347 @@ class _TaskDetailsTagsPanelState extends State<_TaskDetailsTagsPanel> {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+class _TaskDetailsLinkedNotesPanel extends StatelessWidget {
+  final TaskEntity task;
+  final TasksController tasksController;
+  final NotesController notesController;
+  final void Function(String noteId) onOpenNote;
+  final VoidCallback onShowLinkSheet;
+  final void Function(NoteEntity unlinkedNote) onUnlinkedWithUndo;
+
+  const _TaskDetailsLinkedNotesPanel({
+    required this.task,
+    required this.tasksController,
+    required this.notesController,
+    required this.onOpenNote,
+    required this.onShowLinkSheet,
+    required this.onUnlinkedWithUndo,
+  });
+
+  Future<void> _createAndOpenNote(BuildContext context) async {
+    final created = await notesController.createNote(
+      title: TaskNotesHelper.buildDefaultTaskNoteTitle(task),
+      content: TaskNotesHelper.buildDefaultTaskNoteBody(task),
+      category: 'general',
+      linkedModule: NoteEntity.taskLinkModule,
+      linkedId: task.id,
+    );
+    onOpenNote(created.id);
+  }
+
+  Future<void> _unlinkNote(NoteEntity note) async {
+    await notesController.unlinkNote(note.id);
+    onUnlinkedWithUndo(note);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
+    final linkedNotes = TaskNotesHelper.getNotesForTask(
+      notesController.state.notes,
+      task.id,
+    );
+
+    return DaywellCard(
+      padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Linked Notes (${linkedNotes.length})',
+                  style: Theme.of(context)
+                      .textTheme
+                      .titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: onShowLinkSheet,
+                icon: const Icon(Icons.link, size: 16),
+                label: const Text('Link Existing'),
+              ),
+              const SizedBox(width: SharedDesignTokens.spacingXs),
+              TextButton.icon(
+                onPressed: () => unawaited(_createAndOpenNote(context)),
+                icon: const Icon(Icons.note_add_outlined, size: 16),
+                label: const Text('New Note'),
+              ),
+            ],
+          ),
+          if (linkedNotes.isEmpty) ...[
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            Text(
+              'No linked notes yet.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: semantic.textMuted,
+                    fontStyle: FontStyle.italic,
+                  ),
+            ),
+          ] else ...[
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            for (final note in linkedNotes)
+              Container(
+                margin: const EdgeInsets.only(
+                  bottom: SharedDesignTokens.spacingXs,
+                ),
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerLowest,
+                  borderRadius:
+                      BorderRadius.circular(SharedDesignTokens.radiusSm),
+                  border: Border.all(color: semantic.border),
+                ),
+                child: ListTile(
+                  dense: true,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: SharedDesignTokens.spacingSm,
+                    vertical: 2,
+                  ),
+                  onTap: () => onOpenNote(note.id),
+                  leading: Icon(
+                    Icons.note_alt_outlined,
+                    size: 18,
+                    color: colorScheme.primary,
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          note.displayTitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      if (note.isArchived) ...[
+                        const SizedBox(width: SharedDesignTokens.spacingXs),
+                        const DaywellStatusBadge(
+                          label: 'Archived',
+                          tone: DaywellStatusTone.warning,
+                        ),
+                      ],
+                    ],
+                  ),
+                  subtitle: Text(
+                    note.content.trim().isNotEmpty
+                        ? '${note.category} · ${note.content.trim()}'
+                        : note.category,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context)
+                        .textTheme
+                        .bodySmall
+                        ?.copyWith(color: semantic.textSecondary),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.open_in_new, size: 18),
+                        tooltip: 'Open in Notes',
+                        onPressed: () => onOpenNote(note.id),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.link_off_outlined, size: 18),
+                        tooltip: 'Unlink Note',
+                        onPressed: () => unawaited(_unlinkNote(note)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _LinkExistingNoteSheet extends StatefulWidget {
+  final TaskEntity task;
+  final TasksController tasksController;
+  final NotesController notesController;
+
+  const _LinkExistingNoteSheet({
+    required this.task,
+    required this.tasksController,
+    required this.notesController,
+  });
+
+  @override
+  State<_LinkExistingNoteSheet> createState() => _LinkExistingNoteSheetState();
+}
+
+class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
+    final candidates = TaskNotesHelper.getAvailableNotesForTaskLink(
+      widget.notesController.state.notes,
+      widget.task.id,
+      query: _query,
+    );
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: SharedDesignTokens.spacingMd,
+          left: SharedDesignTokens.spacingMd,
+          right: SharedDesignTokens.spacingMd,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              SharedDesignTokens.spacingMd,
+        ),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.65,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Link Existing Note',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              DaywellSearchField(
+                controller: _searchCtrl,
+                hintText: 'Search notes by title, content, or tag...',
+                onChanged: (val) => setState(() => _query = val),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              Expanded(
+                child: candidates.isEmpty
+                    ? DaywellEmptyState(
+                        icon: Icons.note_alt_outlined,
+                        message: _query.trim().isNotEmpty
+                            ? 'No available notes match "${_query.trim()}"'
+                            : 'No other non-trashed notes available to link.',
+                      )
+                    : ListView.separated(
+                        itemCount: candidates.length,
+                        separatorBuilder: (_, __) => const SizedBox(
+                          height: SharedDesignTokens.spacingXs,
+                        ),
+                        itemBuilder: (_, index) {
+                          final note = candidates[index];
+                          final existingOtherTaskId = note.linkedTaskId;
+                          final existingOtherTask = existingOtherTaskId != null
+                              ? widget.tasksController.state
+                                  .findTaskById(existingOtherTaskId)
+                              : null;
+
+                          return DaywellCard(
+                            padding: EdgeInsets.zero,
+                            child: ListTile(
+                              onTap: () async {
+                                await widget.notesController.linkNoteToEntity(
+                                  note.id,
+                                  module: NoteEntity.taskLinkModule,
+                                  entityId: widget.task.id,
+                                );
+                                if (context.mounted) {
+                                  Navigator.pop(context);
+                                }
+                              },
+                              leading: Icon(
+                                Icons.note_alt_outlined,
+                                color: colorScheme.primary,
+                              ),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      note.displayTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                  if (note.isArchived) ...[
+                                    const SizedBox(
+                                      width: SharedDesignTokens.spacingXs,
+                                    ),
+                                    const DaywellStatusBadge(
+                                      label: 'Archived',
+                                      tone: DaywellStatusTone.warning,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    note.content.trim().isNotEmpty
+                                        ? '${note.category} · ${note.content.trim()}'
+                                        : note.category,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(
+                                          color: semantic.textSecondary,
+                                        ),
+                                  ),
+                                  if (existingOtherTaskId != null)
+                                    Text(
+                                      existingOtherTask != null
+                                          ? 'Linked to "${existingOtherTask.title}" (tap reassigns)'
+                                          : 'Linked to another task (tap reassigns)',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(color: semantic.warning),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

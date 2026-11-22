@@ -184,6 +184,9 @@ class Notes extends Table {
       .references(Projects, #id, onDelete: KeyAction.setNull)();
   TextColumn get goalId =>
       text().nullable().references(Goals, #id, onDelete: KeyAction.setNull)();
+  // Schema v11 additions (cross-module entity links; e.g. linkedModule='tasks')
+  TextColumn get linkedModule => text().nullable()();
+  TextColumn get linkedId => text().nullable()();
   // Schema v4 additions
   TextColumn get tagsJson => text().withDefault(const Constant('[]'))();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();

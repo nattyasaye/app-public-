@@ -815,6 +815,8 @@ class _FakeNotesRepository implements INotesRepository {
     String? category,
     String? projectId,
     String? goalId,
+    String? linkedModule,
+    String? linkedId,
     bool includeArchived = false,
     bool includeTrashed = false,
   }) async {
@@ -826,6 +828,22 @@ class _FakeNotesRepository implements INotesRepository {
       throw StateError('Simulated notes load failure');
     }
     return List<NoteEntity>.from(notes);
+  }
+
+  @override
+  Future<List<NoteEntity>> getNotesByLink({
+    required String linkedModule,
+    required String linkedId,
+    bool includeArchived = true,
+    bool includeTrashed = false,
+  }) async {
+    return notes
+        .where((n) =>
+            n.linkedModule == linkedModule &&
+            n.linkedId == linkedId &&
+            (includeArchived || !n.isArchived) &&
+            (includeTrashed || !n.isTrashed))
+        .toList();
   }
 
   @override
@@ -845,6 +863,13 @@ class _FakeNotesRepository implements INotesRepository {
 
   @override
   Future<NoteEntity> updateNote(NoteEntity note) async => note;
+
+  @override
+  Future<int> clearLinksForTarget({
+    required String linkedModule,
+    required String linkedId,
+  }) async =>
+      0;
 }
 
 class _FakeInboxRepository implements IInboxRepository {

@@ -39,11 +39,34 @@ class _InMemoryNotesRepository implements INotesRepository {
     String? category,
     String? projectId,
     String? goalId,
+    String? linkedModule,
+    String? linkedId,
     bool includeArchived = false,
     bool includeTrashed = false,
   }) async {
-    // Simulates schema v4 SQLite returning full persisted note metadata columns.
-    return _store.map((n) => n.copyWith()).toList();
+    // Simulates schema v4/v11 SQLite returning full persisted note metadata columns.
+    return _store.where((n) {
+      if (linkedModule != null && n.linkedModule != linkedModule) return false;
+      if (linkedId != null && n.linkedId != linkedId) return false;
+      return true;
+    }).map((n) => n.copyWith()).toList();
+  }
+
+  @override
+  Future<List<NoteEntity>> getNotesByLink({
+    required String linkedModule,
+    required String linkedId,
+    bool includeArchived = true,
+    bool includeTrashed = false,
+  }) async {
+    return _store
+        .where((n) =>
+            n.linkedModule == linkedModule &&
+            n.linkedId == linkedId &&
+            (includeArchived || !n.isArchived) &&
+            (includeTrashed || !n.isTrashed))
+        .map((n) => n.copyWith())
+        .toList();
   }
 
   @override
@@ -59,6 +82,22 @@ class _InMemoryNotesRepository implements INotesRepository {
       _store[idx] = note;
     }
     return note;
+  }
+
+  @override
+  Future<int> clearLinksForTarget({
+    required String linkedModule,
+    required String linkedId,
+  }) async {
+    var cleared = 0;
+    for (var i = 0; i < _store.length; i++) {
+      final n = _store[i];
+      if (n.linkedModule == linkedModule && n.linkedId == linkedId) {
+        _store[i] = n.copyWith(clearLink: true);
+        cleared++;
+      }
+    }
+    return cleared;
   }
 }
 

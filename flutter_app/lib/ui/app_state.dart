@@ -129,6 +129,8 @@ class NoteModel {
   final String content;
   final String category;
   final String? projectId;
+  final String? linkedModule;
+  final String? linkedId;
   final List<String> tags;
   final bool isPinned;
   final bool isArchived;
@@ -141,6 +143,8 @@ class NoteModel {
     required this.content,
     this.category = 'general',
     this.projectId,
+    this.linkedModule,
+    this.linkedId,
     this.tags = const [],
     this.isPinned = false,
     this.isArchived = false,
@@ -157,6 +161,8 @@ class NoteModel {
         'category': category,
         'folder': category,
         'projectId': projectId,
+        'linkedModule': linkedModule,
+        'linkedId': linkedId,
         'tags': tags,
         'isPinned': isPinned,
         'isArchived': isArchived,
@@ -170,6 +176,8 @@ class NoteModel {
         content: json['content'] ?? json['body'] ?? '',
         category: json['category'] ?? json['folder'] ?? 'general',
         projectId: json['projectId'],
+        linkedModule: json['linkedModule']?.toString(),
+        linkedId: json['linkedId']?.toString(),
         tags: json['tags'] is List
             ? (json['tags'] as List).map((e) => e.toString()).toList()
             : const [],
@@ -284,6 +292,7 @@ class AppStateManager extends ChangeNotifier {
     tasksController = TasksController(
       repository: DriftTasksRepository(db),
       notificationService: _notificationService,
+      onTaskDeleted: _handleTaskDeleted,
     );
     projectsController = ProjectsController(
       repository: DriftProjectsRepository(db),
@@ -315,6 +324,13 @@ class AppStateManager extends ChangeNotifier {
       unawaited(syncFinanceDueReminders());
     }
     notifyListeners();
+  }
+
+  Future<void> _handleTaskDeleted(String taskId) async {
+    await notesController.clearLinksForTarget(
+      module: NoteEntity.taskLinkModule,
+      targetId: taskId,
+    );
   }
 
   Future<void> _rebindDatabase(AppDatabase newDb) async {
@@ -1221,6 +1237,8 @@ class AppStateManager extends ChangeNotifier {
           content: n.content,
           category: n.category,
           projectId: n.projectId,
+          linkedModule: n.linkedModule,
+          linkedId: n.linkedId,
           tags: n.tags,
           isPinned: n.isPinned,
           isArchived: n.isArchived,

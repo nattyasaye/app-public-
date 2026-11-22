@@ -49,7 +49,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration {
@@ -597,6 +597,29 @@ class AppDatabase extends _$AppDatabase {
             );
           }
         }
+        if (from < 11) {
+          // Schema v10 -> v11: Non-destructive Notes cross-module entity link columns
+          await _addColumnIfMissing(
+            table: 'notes',
+            column: 'linked_module',
+            addFn: () => m.addColumn(notes, notes.linkedModule),
+          );
+          await _addColumnIfMissing(
+            table: 'notes',
+            column: 'linked_id',
+            addFn: () => m.addColumn(notes, notes.linkedId),
+          );
+          await _createV11NotePerformanceIndices();
+
+          final fkViolations =
+              await customSelect('PRAGMA foreign_key_check').get();
+          if (fkViolations.isNotEmpty) {
+            throw LedgerMigrationException(
+              'Schema v11 upgrade aborted due to foreign key violations '
+              '(${fkViolations.length} row(s)).',
+            );
+          }
+        }
       },
       beforeOpen: (details) async {
         // Enforce foreign key constraints in SQLite
@@ -935,6 +958,10 @@ class AppDatabase extends _$AppDatabase {
         taskCols.contains('sort_order')) {
       await _createV10TaskPerformanceIndices();
     }
+    final noteCols = await _existingTableColumns('notes');
+    if (noteCols.contains('linked_module') && noteCols.contains('linked_id')) {
+      await _createV11NotePerformanceIndices();
+    }
   }
 
   Future<void> _createV9ProjectPerformanceIndices() async {
@@ -976,6 +1003,13 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_tasks_archived_sort '
       'ON tasks(is_archived, sort_order);',
+    );
+  }
+
+  Future<void> _createV11NotePerformanceIndices() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_notes_linked '
+      'ON notes(linked_module, linked_id);',
     );
   }
 

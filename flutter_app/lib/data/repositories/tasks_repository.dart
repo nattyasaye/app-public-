@@ -296,7 +296,20 @@ class DriftTasksRepository implements ITasksRepository {
 
   @override
   Future<void> deleteTask(String id) async {
+    final now = EthiopiaClock.nowUtc();
     await _db.transaction(() async {
+      await (_db.update(_db.notes)
+            ..where(
+              (tbl) =>
+                  tbl.linkedModule.equals('tasks') & tbl.linkedId.equals(id),
+            ))
+          .write(
+        NotesCompanion(
+          linkedModule: const Value(null),
+          linkedId: const Value(null),
+          updatedAt: Value(now),
+        ),
+      );
       await (_db.delete(_db.dailyPlanningEntries)
             ..where((tbl) => tbl.taskId.equals(id)))
           .go();

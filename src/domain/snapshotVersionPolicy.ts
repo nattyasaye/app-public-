@@ -7,8 +7,8 @@ export const SNAPSHOT_VERSION_BOUNDS = {
   minSupportedSnapshotFormatVersion: 1,
   maxSupportedSnapshotFormatVersion: 2,
   supportedFinanceSchemaVersion: 7,
-  supportedDatabaseSchemaVersion: 10,
-  maxSupportedDatabaseSchemaVersion: 10,
+  supportedDatabaseSchemaVersion: 11,
+  maxSupportedDatabaseSchemaVersion: 11,
   minSupportedCanonicalSchemaVersion: 4,
   maxSupportedCanonicalSchemaVersion: 9,
   legacyOmittedSnapshotVersion: 5,
@@ -181,11 +181,12 @@ export function interpretSnapshotVersions(
       resolvedSnapshotFormatVersion >=
         SNAPSHOT_VERSION_BOUNDS.supportedSnapshotFormatVersion &&
       dsv !== 9 &&
+      dsv !== 10 &&
       dsv !== SNAPSHOT_VERSION_BOUNDS.supportedDatabaseSchemaVersion
     ) {
       throw new BackupValidationError(
         'invalid_snapshot_version',
-        `Snapshot format v2 requires databaseSchemaVersion 9 or ${SNAPSHOT_VERSION_BOUNDS.supportedDatabaseSchemaVersion} when specified (got ${dsv}).`
+        `Snapshot format v2 requires databaseSchemaVersion 9, 10, or ${SNAPSHOT_VERSION_BOUNDS.supportedDatabaseSchemaVersion} when specified (got ${dsv}).`
       );
     }
     resolvedDatabaseSchemaVersion = dsv;

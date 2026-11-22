@@ -7,6 +7,14 @@ import '../../core/date/shared_date.dart';
 /// - Immutable value objects with copyWith and JSON serialization.
 
 class NoteEntity {
+  static const String taskLinkModule = 'tasks';
+  static const Set<String> allowedLinkedModules = <String>{
+    'tasks',
+    'finance',
+    'calendar',
+  };
+  static const int maxTitleLength = 250;
+
   static const List<String> defaultCategories = [
     'general',
     'reference',
@@ -20,6 +28,8 @@ class NoteEntity {
   final String category; // 'general', 'reference', 'reflection', 'learning'
   final String? projectId;
   final String? goalId;
+  final String? linkedModule;
+  final String? linkedId;
   final List<String> tags;
   final bool isPinned;
   final bool isFavorite;
@@ -35,6 +45,8 @@ class NoteEntity {
     String category = 'general',
     this.projectId,
     this.goalId,
+    String? linkedModule,
+    String? linkedId,
     List<String> tags = const [],
     this.isPinned = false,
     this.isFavorite = false,
@@ -43,6 +55,8 @@ class NoteEntity {
     DateTime? createdAt,
     DateTime? updatedAt,
   })  : category = normalizeCategory(category),
+        linkedModule = normalizeLinkPair(linkedModule, linkedId).$1,
+        linkedId = normalizeLinkPair(linkedModule, linkedId).$2,
         tags = List<String>.unmodifiable(tags),
         createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc(),
         updatedAt = (updatedAt ?? EthiopiaClock.nowUtc()).toUtc();
@@ -51,6 +65,34 @@ class NoteEntity {
     final trimmed = raw.trim().toLowerCase();
     return trimmed.isEmpty ? 'general' : trimmed;
   }
+
+  static (String?, String?) normalizeLinkPair(
+    String? rawModule,
+    String? rawId,
+  ) {
+    final mod = rawModule?.trim().toLowerCase();
+    final id = rawId?.trim();
+    if (mod == null ||
+        mod.isEmpty ||
+        !allowedLinkedModules.contains(mod) ||
+        id == null ||
+        id.isEmpty) {
+      return (null, null);
+    }
+    return (mod, id);
+  }
+
+  static String clampTitle(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return 'Untitled Note';
+    if (trimmed.length <= maxTitleLength) return trimmed;
+    return trimmed.substring(0, maxTitleLength);
+  }
+
+  bool get isLinkedToTask =>
+      linkedModule == taskLinkModule && linkedId != null && linkedId!.isNotEmpty;
+
+  String? get linkedTaskId => isLinkedToTask ? linkedId : null;
 
   String get displayTitle => title.trim().isEmpty ? 'Untitled Note' : title;
 
@@ -70,6 +112,11 @@ class NoteEntity {
     String? category,
     String? projectId,
     String? goalId,
+    String? linkedModule,
+    String? linkedId,
+    bool clearProjectId = false,
+    bool clearGoalId = false,
+    bool clearLink = false,
     List<String>? tags,
     bool? isPinned,
     bool? isFavorite,
@@ -77,13 +124,17 @@ class NoteEntity {
     bool? isTrashed,
     DateTime? updatedAt,
   }) {
+    final nextModule = clearLink ? null : (linkedModule ?? this.linkedModule);
+    final nextId = clearLink ? null : (linkedId ?? this.linkedId);
     return NoteEntity(
       id: id,
       title: title ?? this.title,
       content: content ?? this.content,
       category: category ?? this.category,
-      projectId: projectId ?? this.projectId,
-      goalId: goalId ?? this.goalId,
+      projectId: clearProjectId ? null : (projectId ?? this.projectId),
+      goalId: clearGoalId ? null : (goalId ?? this.goalId),
+      linkedModule: nextModule,
+      linkedId: nextId,
       tags: tags ?? this.tags,
       isPinned: isPinned ?? this.isPinned,
       isFavorite: isFavorite ?? this.isFavorite,
@@ -101,6 +152,8 @@ class NoteEntity {
         'category': category,
         'projectId': projectId,
         'goalId': goalId,
+        'linkedModule': linkedModule,
+        'linkedId': linkedId,
         'tags': tags,
         'isPinned': isPinned,
         'isFavorite': isFavorite,
@@ -110,23 +163,40 @@ class NoteEntity {
         'updatedAt': EthiopiaClock.toUtcIsoString(updatedAt),
       };
 
-  factory NoteEntity.fromJson(Map<String, dynamic> json) => NoteEntity(
-        id: json['id'],
-        title: json['title'] ?? '',
-        content: json['content'] ?? json['body'] ?? '',
-        category: json['category'] ?? json['folder'] ?? 'general',
-        projectId: json['projectId'],
-        goalId: json['goalId'],
-        tags: json['tags'] is List
-            ? (json['tags'] as List).map((e) => e.toString()).toList()
-            : const [],
-        isPinned: json['isPinned'] ?? false,
-        isFavorite: json['isFavorite'] ?? false,
-        isArchived: json['isArchived'] ?? false,
-        isTrashed: json['isTrashed'] ?? false,
-        createdAt:
-            EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
-        updatedAt:
-            EthiopiaClock.tryParseInstantUtc(json['updatedAt']?.toString()),
-      );
+  factory NoteEntity.fromJson(Map<String, dynamic> json) {
+    final rawLinkedModule = json['linkedModule']?.toString();
+    final rawLinkedId = json['linkedId']?.toString();
+    final legacyTaskId = json['taskId']?.toString();
+    final normalizedPair =
+        (rawLinkedModule != null || rawLinkedId != null)
+            ? normalizeLinkPair(rawLinkedModule, rawLinkedId)
+            : normalizeLinkPair(
+                legacyTaskId != null && legacyTaskId.trim().isNotEmpty
+                    ? taskLinkModule
+                    : null,
+                legacyTaskId,
+              );
+
+    return NoteEntity(
+      id: json['id'],
+      title: json['title'] ?? '',
+      content: json['content'] ?? json['body'] ?? '',
+      category: json['category'] ?? json['folder'] ?? 'general',
+      projectId: json['projectId'],
+      goalId: json['goalId'],
+      linkedModule: normalizedPair.$1,
+      linkedId: normalizedPair.$2,
+      tags: json['tags'] is List
+          ? (json['tags'] as List).map((e) => e.toString()).toList()
+          : const [],
+      isPinned: json['isPinned'] ?? false,
+      isFavorite: json['isFavorite'] ?? false,
+      isArchived: json['isArchived'] ?? false,
+      isTrashed: json['isTrashed'] ?? false,
+      createdAt:
+          EthiopiaClock.tryParseInstantUtc(json['createdAt']?.toString()),
+      updatedAt:
+          EthiopiaClock.tryParseInstantUtc(json['updatedAt']?.toString()),
+    );
+  }
 }

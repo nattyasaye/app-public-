@@ -160,6 +160,8 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
   String? _recoveryNotice;
   ({String taskId, int nonce})? _requestedTaskFocus;
   int _taskFocusNonce = 0;
+  ({String noteId, int nonce})? _requestedNoteFocus;
+  int _noteFocusNonce = 0;
   ({int tabIndex, int nonce})? _requestedTasksSubTab;
   int _tasksSubTabNonce = 0;
 
@@ -406,11 +408,18 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           controller: _state.tasksController,
           projectsController: _state.projectsController,
           inboxController: _state.inboxController,
+          notesController: _state.notesController,
           requestedTaskFocus: _requestedTaskFocus,
           requestedSubTab: _requestedTasksSubTab,
           onOpenCalendarDate: (CalendarDate date) {
             _state.calendarController.setSelectedCalendarDate(date);
             _shellController.selectTab(DaywellTabId.calendar);
+          },
+          onOpenNote: (String noteId) {
+            setState(() {
+              _requestedNoteFocus = (noteId: noteId, nonce: ++_noteFocusNonce);
+            });
+            _shellController.selectTab(DaywellTabId.notes);
           },
         );
       case DaywellTabId.calendar:
@@ -430,6 +439,14 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
         return NotesView(
           state: _state,
           controller: _state.notesController,
+          tasksController: _state.tasksController,
+          requestedNoteFocus: _requestedNoteFocus,
+          onOpenTask: (String taskId) {
+            setState(() {
+              _requestedTaskFocus = (taskId: taskId, nonce: ++_taskFocusNonce);
+            });
+            _shellController.selectTab(DaywellTabId.tasks);
+          },
         );
       case DaywellTabId.finance:
         return FinanceView(

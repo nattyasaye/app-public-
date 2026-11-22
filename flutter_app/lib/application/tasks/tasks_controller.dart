@@ -15,6 +15,7 @@ import 'tasks_state.dart';
 class TasksController extends ChangeNotifier {
   final ITasksRepository _repository;
   final INotificationService? _notificationService;
+  final Future<void> Function(String taskId)? _onTaskDeleted;
   TasksModuleState _state;
   bool _isDisposed = false;
   bool _notificationReady = false;
@@ -25,9 +26,11 @@ class TasksController extends ChangeNotifier {
   TasksController({
     required ITasksRepository repository,
     INotificationService? notificationService,
+    Future<void> Function(String taskId)? onTaskDeleted,
     TasksModuleState? initialState,
   })  : _repository = repository,
         _notificationService = notificationService,
+        _onTaskDeleted = onTaskDeleted,
         _state = initialState ?? const TasksModuleState();
 
   TasksModuleState get state => _state;
@@ -2023,6 +2026,9 @@ class TasksController extends ChangeNotifier {
           _state.findReminderForTask(id) ??
           await _repository.getTaskReminderForTask(id);
       await _repository.deleteTask(id);
+      if (_onTaskDeleted != null) {
+        await _onTaskDeleted!(id);
+      }
       await _cancelNotificationId(
         existingReminder?.id ?? TaskReminderEngine.canonicalReminderId(id),
       );
@@ -2123,6 +2129,9 @@ class TasksController extends ChangeNotifier {
             _state.findReminderForTask(id) ??
             await _repository.getTaskReminderForTask(id);
         await _repository.deleteTask(id);
+        if (_onTaskDeleted != null) {
+          await _onTaskDeleted!(id);
+        }
         await _cancelNotificationId(
           existingReminder?.id ?? TaskReminderEngine.canonicalReminderId(id),
         );

@@ -114,19 +114,24 @@ class NotesController extends ChangeNotifier {
     String category = 'general',
     String? projectId,
     String? goalId,
+    String? linkedModule,
+    String? linkedId,
     List<String> tags = const [],
     bool isPinned = false,
     bool isFavorite = false,
   }) async {
     final now = EthiopiaClock.nowUtc();
-    final trimmedTitle = title.trim();
+    final safeTitle = NoteEntity.clampTitle(title);
+    final linkPair = NoteEntity.normalizeLinkPair(linkedModule, linkedId);
     final note = NoteEntity(
       id: id ?? 'note-${now.millisecondsSinceEpoch}',
-      title: trimmedTitle.isEmpty ? 'Untitled Note' : trimmedTitle,
+      title: safeTitle,
       content: content.trim(),
       category: category,
       projectId: projectId,
       goalId: goalId,
+      linkedModule: linkPair.$1,
+      linkedId: linkPair.$2,
       tags: tags,
       isPinned: isPinned,
       isFavorite: isFavorite,
@@ -154,16 +159,22 @@ class NotesController extends ChangeNotifier {
     required String content,
     String? category,
     List<String>? tags,
+    String? linkedModule,
+    String? linkedId,
+    bool clearLink = false,
   }) async {
     final existing = _state.findById(id);
     if (existing == null) return;
 
-    final trimmedTitle = title.trim();
+    final safeTitle = NoteEntity.clampTitle(title);
     final updated = existing.copyWith(
-      title: trimmedTitle.isEmpty ? 'Untitled Note' : trimmedTitle,
+      title: safeTitle,
       content: content.trim(),
       category: category ?? existing.category,
       tags: tags ?? existing.tags,
+      linkedModule: linkedModule,
+      linkedId: linkedId,
+      clearLink: clearLink,
       updatedAt: EthiopiaClock.nowUtc(),
     );
 
@@ -201,6 +212,86 @@ class NotesController extends ChangeNotifier {
     try {
       final saved = await _repository.updateNote(updated);
       _upsertInState(saved);
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+    }
+    notifyListeners();
+  }
+
+  Future<NoteEntity?> linkNoteToEntity(
+    String id, {
+    required String module,
+    required String entityId,
+  }) async {
+    final existing = _state.findById(id);
+    if (existing == null) return null;
+    final pair = NoteEntity.normalizeLinkPair(module, entityId);
+    if (pair.$1 == null || pair.$2 == null) return existing;
+
+    final updated = existing.copyWith(
+      linkedModule: pair.$1,
+      linkedId: pair.$2,
+      updatedAt: EthiopiaClock.nowUtc(),
+    );
+
+    try {
+      final saved = await _repository.updateNote(updated);
+      _upsertInState(saved);
+      notifyListeners();
+      return saved;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<NoteEntity?> unlinkNote(String id) async {
+    final existing = _state.findById(id);
+    if (existing == null) return null;
+    if (existing.linkedModule == null && existing.linkedId == null) {
+      return existing;
+    }
+
+    final updated = existing.copyWith(
+      clearLink: true,
+      updatedAt: EthiopiaClock.nowUtc(),
+    );
+
+    try {
+      final saved = await _repository.updateNote(updated);
+      _upsertInState(saved);
+      notifyListeners();
+      return saved;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<void> clearLinksForTarget({
+    required String module,
+    required String targetId,
+  }) async {
+    final pair = NoteEntity.normalizeLinkPair(module, targetId);
+    if (pair.$1 == null || pair.$2 == null) return;
+    try {
+      await _repository.clearLinksForTarget(
+        linkedModule: pair.$1!,
+        linkedId: pair.$2!,
+      );
+      final now = EthiopiaClock.nowUtc();
+      final next = _state.notes.map((n) {
+        if (n.linkedModule == pair.$1 && n.linkedId == pair.$2) {
+          return n.copyWith(clearLink: true, updatedAt: now);
+        }
+        return n;
+      }).toList(growable: false);
+      _state = _state.copyWith(
+        notes: List<NoteEntity>.unmodifiable(next),
+        clearError: true,
+      );
     } catch (e) {
       _state = _state.copyWith(errorMessage: e.toString());
     }

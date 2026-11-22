@@ -564,6 +564,8 @@ export interface SharedNote {
   isFavorite?: boolean;
   isArchived: boolean;
   isTrashed?: boolean;
+  linkedModule?: 'tasks' | 'finance' | 'calendar';
+  linkedId?: string;
   createdAt: string;
   updatedAt: string;
 }

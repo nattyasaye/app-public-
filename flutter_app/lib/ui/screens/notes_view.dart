@@ -3,24 +3,37 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
+import '../../core/theme/daywell_theme.dart';
 import '../../domain/notes/note_models.dart';
+import '../../domain/notes/task_notes_helpers.dart';
+import '../../domain/tasks/task_models.dart';
 import '../../application/notes/notes_controller.dart';
+import '../../application/tasks/tasks_controller.dart';
 import '../app_state.dart';
 import '../widgets/shared_ui_widgets.dart';
 
 class NotesView extends StatefulWidget {
   final AppStateManager? state;
   final NotesController? controller;
+  final TasksController? tasksController;
+  final ({String noteId, int nonce})? requestedNoteFocus;
+  final void Function(String taskId)? onOpenTask;
 
   const NotesView({
     super.key,
     this.state,
     this.controller,
+    this.tasksController,
+    this.requestedNoteFocus,
+    this.onOpenTask,
   }) : assert(state != null || controller != null,
             'Either state or controller must be provided to NotesView');
 
   NotesController get effectiveController =>
       controller ?? state!.notesController;
+
+  TasksController? get effectiveTasksController =>
+      tasksController ?? state?.tasksController;
 
   @override
   State<NotesView> createState() => _NotesViewState();
@@ -28,6 +41,7 @@ class NotesView extends StatefulWidget {
 
 class _NotesViewState extends State<NotesView> {
   late TextEditingController _searchController;
+  int? _lastHandledNoteFocusNonce;
 
   @override
   void initState() {
@@ -35,6 +49,25 @@ class _NotesViewState extends State<NotesView> {
     _searchController = TextEditingController(
       text: widget.effectiveController.state.searchQuery,
     );
+    _scheduleNoteFocusIfNeeded();
+  }
+
+  @override
+  void didUpdateWidget(covariant NotesView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _scheduleNoteFocusIfNeeded();
+  }
+
+  void _scheduleNoteFocusIfNeeded() {
+    final focus = widget.requestedNoteFocus;
+    if (focus == null || focus.nonce == _lastHandledNoteFocusNonce) return;
+    _lastHandledNoteFocusNonce = focus.nonce;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final note = widget.effectiveController.state.findById(focus.noteId);
+      if (note == null || note.isTrashed) return;
+      _openNoteEditor(note);
+    });
   }
 
   @override
@@ -49,6 +82,8 @@ class _NotesViewState extends State<NotesView> {
         MaterialPageRoute<void>(
           builder: (_) => _NoteEditorScreen(
             controller: widget.effectiveController,
+            tasksController: widget.effectiveTasksController,
+            onOpenTask: widget.onOpenTask,
             existingNote: existingNote,
           ),
         ),
@@ -89,13 +124,17 @@ class _NotesViewState extends State<NotesView> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.effectiveController;
+    final tasksController = widget.effectiveTasksController;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primary = isDark
         ? SharedDesignTokens.primaryDarkMode
         : SharedDesignTokens.primaryEmerald;
 
     return AnimatedBuilder(
-      animation: controller,
+      animation: Listenable.merge([
+        controller,
+        if (tasksController != null) tasksController,
+      ]),
       builder: (context, _) {
         final moduleState = controller.state;
         final notes = moduleState.filteredNotes;
@@ -256,6 +295,12 @@ class _NotesViewState extends State<NotesView> {
 
   Widget _buildNoteCard(NoteEntity note, bool isGridView) {
     final controller = widget.effectiveController;
+    final tasksCtrl = widget.effectiveTasksController;
+    final linkedTask = tasksCtrl != null
+        ? TaskNotesHelper.findLinkedTask(note, tasksCtrl.state.tasks)
+        : null;
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
     final ethDate =
         CalendarDate.fromUtcInstantInEthiopia(note.createdAt).toEthiopian();
 
@@ -401,6 +446,56 @@ class _NotesViewState extends State<NotesView> {
                   ),
                 ],
               ),
+              if (note.isLinkedToTask) ...[
+                const SizedBox(height: 6),
+                InkWell(
+                  borderRadius:
+                      BorderRadius.circular(SharedDesignTokens.radiusSm),
+                  onTap: linkedTask != null && widget.onOpenTask != null
+                      ? () => widget.onOpenTask!(linkedTask.id)
+                      : null,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer,
+                      borderRadius:
+                          BorderRadius.circular(SharedDesignTokens.radiusSm),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.check_circle_outline,
+                          size: 12,
+                          color: linkedTask != null
+                              ? colorScheme.primary
+                              : semantic.textMuted,
+                        ),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            linkedTask != null
+                                ? 'Task: ${linkedTask.title}'
+                                : 'Linked task unavailable',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: linkedTask != null
+                                  ? colorScheme.onPrimaryContainer
+                                  : semantic.textMuted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -411,10 +506,14 @@ class _NotesViewState extends State<NotesView> {
 
 class _NoteEditorScreen extends StatefulWidget {
   final NotesController controller;
+  final TasksController? tasksController;
+  final void Function(String taskId)? onOpenTask;
   final NoteEntity? existingNote;
 
   const _NoteEditorScreen({
     required this.controller,
+    this.tasksController,
+    this.onOpenTask,
     required this.existingNote,
   });
 
@@ -428,6 +527,8 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
   late String _category;
   late List<String> _tags;
   String? _noteId;
+  String? _linkedModule;
+  String? _linkedId;
   Timer? _autosaveTimer;
   String _saveStatus = 'Saved';
   bool _isSaving = false;
@@ -442,6 +543,8 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         TextEditingController(text: widget.existingNote?.content ?? '');
     _category = widget.existingNote?.category ?? 'reflection';
     _tags = List<String>.from(widget.existingNote?.tags ?? const []);
+    _linkedModule = widget.existingNote?.linkedModule;
+    _linkedId = widget.existingNote?.linkedId;
   }
 
   @override
@@ -476,6 +579,8 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
           content: content,
           category: _category,
           tags: _tags,
+          linkedModule: _linkedModule,
+          linkedId: _linkedId,
         );
         _noteId = created.id;
       } else {
@@ -485,6 +590,9 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
           content: content,
           category: _category,
           tags: _tags,
+          linkedModule: _linkedModule,
+          linkedId: _linkedId,
+          clearLink: _linkedModule == null || _linkedId == null,
         );
       }
       if (!fromDispose && mounted) {
@@ -493,6 +601,82 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
     } finally {
       _isSaving = false;
     }
+  }
+
+  Future<void> _linkTask(TaskEntity task) async {
+    setState(() {
+      _linkedModule = NoteEntity.taskLinkModule;
+      _linkedId = task.id;
+    });
+    if (_noteId != null) {
+      await widget.controller.linkNoteToEntity(
+        _noteId!,
+        module: NoteEntity.taskLinkModule,
+        entityId: task.id,
+      );
+    }
+  }
+
+  Future<void> _unlinkTask() async {
+    final prevModule = _linkedModule;
+    final prevId = _linkedId;
+    setState(() {
+      _linkedModule = null;
+      _linkedId = null;
+    });
+    if (_noteId != null) {
+      await widget.controller.unlinkNote(_noteId!);
+    }
+    if (!mounted || prevModule == null || prevId == null) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Unlinked task from note'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (mounted) {
+              setState(() {
+                _linkedModule = prevModule;
+                _linkedId = prevId;
+              });
+            }
+            if (_noteId != null) {
+              unawaited(
+                widget.controller.linkNoteToEntity(
+                  _noteId!,
+                  module: prevModule,
+                  entityId: prevId,
+                ),
+              );
+            }
+          },
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _openTaskPicker() {
+    final tasksCtrl = widget.tasksController;
+    if (tasksCtrl == null) return;
+    unawaited(
+      showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(SharedDesignTokens.radiusSheet),
+          ),
+        ),
+        builder: (_) => _NoteTaskPickerSheet(
+          tasksController: tasksCtrl,
+          currentTaskId:
+              _linkedModule == NoteEntity.taskLinkModule ? _linkedId : null,
+          onSelectTask: (task) => unawaited(_linkTask(task)),
+        ),
+      ),
+    );
   }
 
   void _insertFormat(String prefix, [String suffix = '']) {
@@ -549,13 +733,29 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tasksCtrl = widget.tasksController;
     return AnimatedBuilder(
-      animation: widget.controller,
+      animation: Listenable.merge([
+        widget.controller,
+        if (tasksCtrl != null) tasksCtrl,
+      ]),
       builder: (context, _) {
         final currentNote =
             _noteId != null ? widget.controller.state.findById(_noteId!) : null;
         final isPinned = currentNote?.isPinned ?? false;
         final isFavorite = currentNote?.isFavorite ?? false;
+        final effectiveLinkedModule =
+            currentNote != null ? currentNote.linkedModule : _linkedModule;
+        final effectiveLinkedId =
+            currentNote != null ? currentNote.linkedId : _linkedId;
+        final isTaskLinked =
+            effectiveLinkedModule == NoteEntity.taskLinkModule &&
+                effectiveLinkedId != null;
+        final linkedTask = isTaskLinked && tasksCtrl != null
+            ? tasksCtrl.state.findTaskById(effectiveLinkedId!)
+            : null;
+        final semantic = context.daywellColors;
+        final colorScheme = Theme.of(context).colorScheme;
 
         return Scaffold(
           appBar: AppBar(
@@ -613,7 +813,9 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
+                child: Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     DropdownButton<String>(
                       value: _category,
@@ -635,16 +837,90 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
                         }
                       },
                     ),
-                    const SizedBox(width: 8),
                     ActionChip(
                       avatar: const Icon(Icons.tag, size: 14),
                       label:
                           const Text('Add Tag', style: TextStyle(fontSize: 12)),
                       onPressed: _addTagDialog,
                     ),
+                    if (tasksCtrl != null && !isTaskLinked)
+                      ActionChip(
+                        avatar: const Icon(Icons.add_link, size: 14),
+                        label: const Text('Link Task',
+                            style: TextStyle(fontSize: 12)),
+                        onPressed: _openTaskPicker,
+                      ),
                   ],
                 ),
               ),
+              if (isTaskLinked)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: colorScheme.primaryContainer,
+                      borderRadius:
+                          BorderRadius.circular(SharedDesignTokens.radiusSm),
+                      border: Border.all(color: semantic.border),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.check_circle_outline,
+                          size: 16,
+                          color: linkedTask != null
+                              ? colorScheme.primary
+                              : semantic.textMuted,
+                        ),
+                        const SizedBox(width: 6),
+                        Expanded(
+                          child: Text(
+                            linkedTask != null
+                                ? 'Linked Task: ${linkedTask.title}'
+                                : 'Linked task unavailable',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: linkedTask != null
+                                      ? colorScheme.onPrimaryContainer
+                                      : semantic.textMuted,
+                                ),
+                          ),
+                        ),
+                        if (linkedTask != null && widget.onOpenTask != null)
+                          TextButton(
+                            onPressed: () async {
+                              await _saveNow();
+                              if (context.mounted) {
+                                Navigator.pop(context);
+                              }
+                              widget.onOpenTask!(linkedTask.id);
+                            },
+                            child: const Text('Open'),
+                          ),
+                        if (tasksCtrl != null)
+                          IconButton(
+                            icon: const Icon(Icons.swap_horiz, size: 18),
+                            tooltip: 'Change Linked Task',
+                            onPressed: _openTaskPicker,
+                          ),
+                        IconButton(
+                          icon: const Icon(Icons.link_off_outlined, size: 18),
+                          tooltip: 'Unlink Task',
+                          onPressed: () => unawaited(_unlinkTask()),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               if (_tags.isNotEmpty)
                 Padding(
                   padding:
@@ -738,6 +1014,167 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+class _NoteTaskPickerSheet extends StatefulWidget {
+  final TasksController tasksController;
+  final String? currentTaskId;
+  final void Function(TaskEntity task) onSelectTask;
+
+  const _NoteTaskPickerSheet({
+    required this.tasksController,
+    required this.currentTaskId,
+    required this.onSelectTask,
+  });
+
+  @override
+  State<_NoteTaskPickerSheet> createState() => _NoteTaskPickerSheetState();
+}
+
+class _NoteTaskPickerSheetState extends State<_NoteTaskPickerSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
+    final q = _query.trim().toLowerCase();
+    final tasks = widget.tasksController.state.tasks.where((t) {
+      if (t.id == widget.currentTaskId) return false;
+      if (q.isEmpty) return true;
+      return t.title.toLowerCase().contains(q) ||
+          (t.description?.toLowerCase().contains(q) ?? false);
+    }).toList();
+    tasks.sort((a, b) {
+      if (a.isArchived != b.isArchived) {
+        return a.isArchived ? 1 : -1;
+      }
+      if (a.isCompleted != b.isCompleted) {
+        return a.isCompleted ? 1 : -1;
+      }
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: SharedDesignTokens.spacingMd,
+          left: SharedDesignTokens.spacingMd,
+          right: SharedDesignTokens.spacingMd,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              SharedDesignTokens.spacingMd,
+        ),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.65,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Link Note to Task',
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              DaywellSearchField(
+                controller: _searchCtrl,
+                hintText: 'Search tasks...',
+                onChanged: (val) => setState(() => _query = val),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              Expanded(
+                child: tasks.isEmpty
+                    ? DaywellEmptyState(
+                        icon: Icons.check_circle_outline,
+                        message: q.isNotEmpty
+                            ? 'No tasks match "$q"'
+                            : 'No tasks available to link.',
+                      )
+                    : ListView.separated(
+                        itemCount: tasks.length,
+                        separatorBuilder: (_, __) => const SizedBox(
+                          height: SharedDesignTokens.spacingXs,
+                        ),
+                        itemBuilder: (_, index) {
+                          final task = tasks[index];
+                          return DaywellCard(
+                            padding: EdgeInsets.zero,
+                            child: ListTile(
+                              onTap: () {
+                                widget.onSelectTask(task);
+                                Navigator.pop(context);
+                              },
+                              leading: Icon(
+                                task.isCompleted
+                                    ? Icons.check_circle
+                                    : Icons.radio_button_unchecked,
+                                color: colorScheme.primary,
+                              ),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      task.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                  if (task.isArchived) ...[
+                                    const SizedBox(
+                                      width: SharedDesignTokens.spacingXs,
+                                    ),
+                                    const DaywellStatusBadge(
+                                      label: 'Archived',
+                                      tone: DaywellStatusTone.warning,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              subtitle: Text(
+                                task.description?.trim().isNotEmpty == true
+                                    ? task.description!.trim()
+                                    : task.status.replaceAll('_', ' '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: semantic.textSecondary),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

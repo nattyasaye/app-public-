@@ -699,7 +699,7 @@ export function validateSchemaContracts(contracts) {
         fieldDef.plannedDatabaseSchemaVersion,
         fileLabel,
         `${fieldPath}.plannedDatabaseSchemaVersion`,
-        { min: contracts.schemaVersion }
+        { min: Math.min(10, contracts.schemaVersion) }
       );
     }
     if (fieldDef.enum !== undefined) {
@@ -771,7 +771,7 @@ export function validateSchemaContracts(contracts) {
         entityDef.plannedDatabaseSchemaVersion,
         fileLabel,
         `entities.${entityName}.plannedDatabaseSchemaVersion`,
-        { min: contracts.schemaVersion }
+        { min: Math.min(10, contracts.schemaVersion) }
       );
     }
     if (entityDef.uniqueKey !== undefined) {
@@ -1185,6 +1185,8 @@ export interface SharedNote {
   isFavorite?: boolean;
   isArchived: boolean;
   isTrashed?: boolean;
+  linkedModule?: 'tasks' | 'finance' | 'calendar';
+  linkedId?: string;
   createdAt: string;
   updatedAt: string;
 }

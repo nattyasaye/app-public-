@@ -35,6 +35,8 @@ class DriftNotesRepository implements INotesRepository {
       category: r.category,
       projectId: r.projectId,
       goalId: r.goalId,
+      linkedModule: r.linkedModule,
+      linkedId: r.linkedId,
       tags: _decodeTags(r.tagsJson),
       isPinned: r.isPinned,
       isFavorite: r.isFavorite,
@@ -50,6 +52,8 @@ class DriftNotesRepository implements INotesRepository {
     String? category,
     String? projectId,
     String? goalId,
+    String? linkedModule,
+    String? linkedId,
     bool includeArchived = false,
     bool includeTrashed = false,
   }) async {
@@ -64,6 +68,14 @@ class DriftNotesRepository implements INotesRepository {
     }
     if (goalId != null) {
       query.where((tbl) => tbl.goalId.equals(goalId));
+    }
+    if (linkedModule != null && linkedModule.trim().isNotEmpty) {
+      query.where(
+        (tbl) => tbl.linkedModule.equals(linkedModule.trim().toLowerCase()),
+      );
+    }
+    if (linkedId != null && linkedId.trim().isNotEmpty) {
+      query.where((tbl) => tbl.linkedId.equals(linkedId.trim()));
     }
     if (!includeArchived) {
       query.where((tbl) => tbl.isArchived.equals(false));
@@ -81,6 +93,21 @@ class DriftNotesRepository implements INotesRepository {
   }
 
   @override
+  Future<List<NoteEntity>> getNotesByLink({
+    required String linkedModule,
+    required String linkedId,
+    bool includeArchived = true,
+    bool includeTrashed = false,
+  }) {
+    return getNotes(
+      linkedModule: linkedModule,
+      linkedId: linkedId,
+      includeArchived: includeArchived,
+      includeTrashed: includeTrashed,
+    );
+  }
+
+  @override
   Future<NoteEntity?> getNoteById(String id) async {
     final query = _db.select(_db.notes)..where((tbl) => tbl.id.equals(id));
     final r = await query.getSingleOrNull();
@@ -91,18 +118,22 @@ class DriftNotesRepository implements INotesRepository {
   @override
   Future<NoteEntity> createNote(NoteEntity note) async {
     final now = EthiopiaClock.nowUtc();
-    final trimmedTitle = note.title.trim();
+    final safeTitle = NoteEntity.clampTitle(note.title);
     final trimmedContent = note.content.trim();
     final normalizedCat = NoteEntity.normalizeCategory(note.category);
+    final linkPair =
+        NoteEntity.normalizeLinkPair(note.linkedModule, note.linkedId);
 
     await _db.into(_db.notes).insert(
           NotesCompanion.insert(
             id: note.id,
-            title: trimmedTitle.isEmpty ? 'Untitled Note' : trimmedTitle,
+            title: safeTitle,
             content: trimmedContent,
             category: Value(normalizedCat),
             projectId: Value(note.projectId),
             goalId: Value(note.goalId),
+            linkedModule: Value(linkPair.$1),
+            linkedId: Value(linkPair.$2),
             tagsJson: Value(jsonEncode(note.tags)),
             isPinned: Value(note.isPinned),
             isFavorite: Value(note.isFavorite),
@@ -114,9 +145,12 @@ class DriftNotesRepository implements INotesRepository {
         );
 
     return note.copyWith(
-      title: trimmedTitle.isEmpty ? 'Untitled Note' : trimmedTitle,
+      title: safeTitle,
       content: trimmedContent,
       category: normalizedCat,
+      linkedModule: linkPair.$1,
+      linkedId: linkPair.$2,
+      clearLink: linkPair.$1 == null,
       updatedAt: now,
     );
   }
@@ -124,17 +158,21 @@ class DriftNotesRepository implements INotesRepository {
   @override
   Future<NoteEntity> updateNote(NoteEntity note) async {
     final now = EthiopiaClock.nowUtc();
-    final trimmedTitle = note.title.trim();
+    final safeTitle = NoteEntity.clampTitle(note.title);
     final trimmedContent = note.content.trim();
     final normalizedCat = NoteEntity.normalizeCategory(note.category);
+    final linkPair =
+        NoteEntity.normalizeLinkPair(note.linkedModule, note.linkedId);
 
     await (_db.update(_db.notes)..where((tbl) => tbl.id.equals(note.id))).write(
       NotesCompanion(
-        title: Value(trimmedTitle.isEmpty ? 'Untitled Note' : trimmedTitle),
+        title: Value(safeTitle),
         content: Value(trimmedContent),
         category: Value(normalizedCat),
         projectId: Value(note.projectId),
         goalId: Value(note.goalId),
+        linkedModule: Value(linkPair.$1),
+        linkedId: Value(linkPair.$2),
         tagsJson: Value(jsonEncode(note.tags)),
         isPinned: Value(note.isPinned),
         isFavorite: Value(note.isFavorite),
@@ -145,10 +183,36 @@ class DriftNotesRepository implements INotesRepository {
     );
 
     return note.copyWith(
-      title: trimmedTitle.isEmpty ? 'Untitled Note' : trimmedTitle,
+      title: safeTitle,
       content: trimmedContent,
       category: normalizedCat,
+      linkedModule: linkPair.$1,
+      linkedId: linkPair.$2,
+      clearLink: linkPair.$1 == null,
       updatedAt: now,
+    );
+  }
+
+  @override
+  Future<int> clearLinksForTarget({
+    required String linkedModule,
+    required String linkedId,
+  }) async {
+    final pair = NoteEntity.normalizeLinkPair(linkedModule, linkedId);
+    if (pair.$1 == null || pair.$2 == null) return 0;
+    final now = EthiopiaClock.nowUtc();
+    return (_db.update(_db.notes)
+          ..where(
+            (tbl) =>
+                tbl.linkedModule.equals(pair.$1!) &
+                tbl.linkedId.equals(pair.$2!),
+          ))
+        .write(
+      NotesCompanion(
+        linkedModule: const Value(null),
+        linkedId: const Value(null),
+        updatedAt: Value(now),
+      ),
     );
   }
 

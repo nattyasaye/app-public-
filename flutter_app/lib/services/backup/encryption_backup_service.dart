@@ -51,7 +51,7 @@ class EncryptionBackupService {
   static const int legacyOmittedSnapshotVersion = 5;
   static const int minSupportedSnapshotFormatVersion = 1;
   static const int maxSupportedSnapshotFormatVersion = 2;
-  static const int maxSupportedDatabaseSchemaVersion = 10;
+  static const int maxSupportedDatabaseSchemaVersion = 11;
   static const String currentAppVersion = '1.0.2+3';
   static const String authenticationFailureMessage =
       'Backup authentication failed. Check the passphrase and ensure the backup file has not been modified.';

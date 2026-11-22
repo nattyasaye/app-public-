@@ -20,7 +20,7 @@ describe('STAGE 4.1: CANONICAL V6 FINANCE SCHEMA CONTRACTS & CONTROL ACCOUNTS', 
     );
     const schema = JSON.parse(fs.readFileSync(schemaPath, 'utf8'));
 
-    assert.strictEqual(schema.schemaVersion, 10);
+    assert.strictEqual(schema.schemaVersion, 11);
     assert.ok(schema.entities.Account.fields.subType);
     assert.ok(schema.entities.Account.fields.isSystem);
     assert.strictEqual(schema.entities.Account.fields.openingBalanceCents.minimum, undefined);

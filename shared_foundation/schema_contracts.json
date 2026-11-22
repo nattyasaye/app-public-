@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "version": "2.0.0",
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "timeConvention": {
     "id": "Africa/Addis_Ababa",
     "fixedUtcOffsetMinutes": 180,
@@ -101,6 +101,8 @@
         "isFavorite": { "type": "boolean", "default": false },
         "isArchived": { "type": "boolean", "default": false },
         "isTrashed": { "type": "boolean", "default": false },
+        "linkedModule": { "type": "string", "enum": ["tasks", "finance", "calendar"], "required": false },
+        "linkedId": { "type": "string", "required": false },
         "createdAt": { "type": "string", "format": "date-time", "required": true },
         "updatedAt": { "type": "string", "format": "date-time", "required": true }
       }
