@@ -12,6 +12,7 @@ import {
   Flag,
   History,
   Plus,
+  Repeat2,
   Sun,
   X,
 } from 'lucide-react';
@@ -27,6 +28,10 @@ import {
   DaywellTaskRecord,
   TASK_PRIORITY_LABELS,
 } from '../../domain/taskOperations';
+import {
+  formatRecurrenceSummary,
+  resolveEffectiveRecurrenceConfig,
+} from '../../domain/taskRecurrence';
 import {
   DaywellButton,
   DaywellCard,
@@ -291,6 +296,16 @@ export function MyDayPlanningView({
                 Due {task.dueDate}
               </span>
             )}
+            {(() => {
+              const rec = resolveEffectiveRecurrenceConfig(task);
+              if (!rec) return null;
+              return (
+                <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                  <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                  {formatRecurrenceSummary(rec)}
+                </span>
+              );
+            })()}
             {hasSubtasks && (
               <span className="text-[var(--dw-text-muted)]">
                 {subProgress.completed}/{subProgress.total} subtasks
@@ -602,6 +617,16 @@ export function MyDayPlanningView({
                             label="Overdue"
                           />
                         )}
+                        {(() => {
+                          const rec = resolveEffectiveRecurrenceConfig(s.task);
+                          if (!rec) return null;
+                          return (
+                            <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                              <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                              {formatRecurrenceSummary(rec)}
+                            </span>
+                          );
+                        })()}
                       </div>
                     </div>
                     <DaywellButton
@@ -646,6 +671,16 @@ export function MyDayPlanningView({
                         <Flag className="w-3 h-3" />
                         {TASK_PRIORITY_LABELS[s.task.priority]}
                       </span>
+                      {(() => {
+                        const rec = resolveEffectiveRecurrenceConfig(s.task);
+                        if (!rec) return null;
+                        return (
+                          <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                            <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                            {formatRecurrenceSummary(rec)}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                   <DaywellButton
@@ -689,6 +724,16 @@ export function MyDayPlanningView({
                             : 'Scheduled this day'
                         }
                       />
+                      {(() => {
+                        const rec = resolveEffectiveRecurrenceConfig(s.task);
+                        if (!rec) return null;
+                        return (
+                          <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                            <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                            {formatRecurrenceSummary(rec)}
+                          </span>
+                        );
+                      })()}
                     </div>
                   </div>
                   <DaywellButton
@@ -720,7 +765,9 @@ export function MyDayPlanningView({
             </button>
             {showOtherActive && (
               <div className="space-y-1.5">
-                {otherActiveTasks.map((task) => (
+                {otherActiveTasks.map((task) => {
+                  const rec = resolveEffectiveRecurrenceConfig(task);
+                  return (
                   <div
                     key={task.id}
                     className="p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] flex items-center justify-between gap-2"
@@ -732,9 +779,17 @@ export function MyDayPlanningView({
                       <p className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
                         {task.title}
                       </p>
-                      <p className="text-[10px] text-[var(--dw-text-muted)]">
-                        {TASK_PRIORITY_LABELS[task.priority]}
-                        {task.dueDate ? ` · Due ${task.dueDate}` : ''}
+                      <p className="text-[10px] text-[var(--dw-text-muted)] flex flex-wrap items-center gap-1.5">
+                        <span>
+                          {TASK_PRIORITY_LABELS[task.priority]}
+                          {task.dueDate ? ` · Due ${task.dueDate}` : ''}
+                        </span>
+                        {rec && (
+                          <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                            <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                            {formatRecurrenceSummary(rec)}
+                          </span>
+                        )}
                       </p>
                     </div>
                     <DaywellButton
@@ -745,7 +800,8 @@ export function MyDayPlanningView({
                       onClick={() => onAddToDay(task.id, 'planned')}
                     />
                   </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

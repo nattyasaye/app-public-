@@ -582,10 +582,339 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                         updateRes.generatedNextTask!,
                       );
                     }
+                    if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
+                    if (context.mounted &&
+                        (updateRes.generatedNextTask != null ||
+                            updateRes.seriesEnded)) {
+                      final nextDate = updateRes.generatedNextTask?.dueDate ??
+                          updateRes.generatedNextTask?.scheduledDate;
+                      final msg = updateRes.generatedNextTask != null
+                          ? 'Completed "$trimmed" · Next: ${nextDate?.toIsoString() ?? 'scheduled'}'
+                          : 'Completed "$trimmed" · Recurrence series ended';
+                      ScaffoldMessenger.of(context).clearSnackBars();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(msg),
+                          action: SnackBarAction(
+                            label: 'Undo',
+                            onPressed: () => unawaited(() async {
+                              if (updateRes.generatedNextTask != null) {
+                                await projectsController
+                                    .detachTaskFromProjectSections(
+                                  project.id,
+                                  updateRes.generatedNextTask!.id,
+                                );
+                              }
+                              await ctrl.undoGeneratedRecurrenceCompletion(
+                                previousTask: existingTask,
+                                generatedNextTaskId:
+                                    updateRes.generatedNextTask?.id,
+                              );
+                              await projectsController.syncTaskSectionLink(
+                                project.id,
+                                existingTask,
+                              );
+                            }()),
+                          ),
+                          duration: const Duration(seconds: 4),
+                        ),
+                      );
+                    }
+                    return;
                   }
                   if (dialogCtx.mounted) Navigator.of(dialogCtx).pop();
                 },
                 child: Text(existingTask == null ? 'Create Task' : 'Save'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _openTaskDetailsDialog(
+    BuildContext hostContext, {
+    required TaskEntity initialTask,
+    required List<ProjectTrackingRecordEntity> sections,
+    required Map<String, String> sectionIdByTaskId,
+    required Map<String, MilestoneEntity> milestonesById,
+  }) async {
+    final ctrl = tasksController;
+    if (ctrl == null) return;
+
+    await showDialog<void>(
+      context: hostContext,
+      builder: (dialogCtx) => AnimatedBuilder(
+        animation: ctrl,
+        builder: (animCtx, _) {
+          final task = ctrl.state.findTaskById(initialTask.id) ?? initialTask;
+          final semantic = animCtx.daywellColors;
+          final colorScheme = Theme.of(animCtx).colorScheme;
+          final textTheme = Theme.of(animCtx).textTheme;
+          final milestone =
+              task.milestoneId != null ? milestonesById[task.milestoneId!] : null;
+
+          return AlertDialog(
+            title: Text(task.title),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: SharedDesignTokens.spacingSm,
+                    runSpacing: SharedDesignTokens.spacingXs,
+                    children: [
+                      DaywellStatusBadge(
+                        label: task.isCompleted ? 'Completed' : 'Active',
+                        tone: task.isCompleted
+                            ? DaywellStatusTone.success
+                            : DaywellStatusTone.neutral,
+                        showIcon: false,
+                      ),
+                      DaywellStatusBadge(
+                        label: task.priority[0].toUpperCase() +
+                            task.priority.substring(1),
+                        tone: task.priority == 'urgent'
+                            ? DaywellStatusTone.error
+                            : task.priority == 'high'
+                                ? DaywellStatusTone.warning
+                                : DaywellStatusTone.neutral,
+                        showIcon: false,
+                      ),
+                      if (milestone != null)
+                        DaywellStatusBadge(
+                          label: milestone.title,
+                          tone: milestone.isCompleted
+                              ? DaywellStatusTone.success
+                              : DaywellStatusTone.info,
+                          showIcon: false,
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  if (task.description != null && task.description!.isNotEmpty)
+                    Text(
+                      task.description!,
+                      style: textTheme.bodyMedium?.copyWith(
+                        color: semantic.textSecondary,
+                      ),
+                    )
+                  else
+                    Text(
+                      'No description added.',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: semantic.textMuted,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  DaywellCard(
+                    padding: const EdgeInsets.all(
+                      SharedDesignTokens.spacingCompact,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Scheduled: ${task.scheduledDate != null ? SharedDateFormatter.formatDual(task.scheduledDate!, useAmharic: false) : 'Not set'}',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textPrimary,
+                          ),
+                        ),
+                        const SizedBox(height: SharedDesignTokens.spacingXs),
+                        Text(
+                          'Due Date: ${task.dueDate != null ? SharedDateFormatter.formatDual(task.dueDate!, useAmharic: false) : 'Not set'}',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: colorScheme.primary,
+                          ),
+                        ),
+                        if (task.subtasks.isNotEmpty) ...[
+                          const SizedBox(height: SharedDesignTokens.spacingXs),
+                          Text(
+                            'Subtasks: ${task.completedSubtaskCount}/${task.totalSubtaskCount}',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: semantic.textMuted,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (TaskRecurrenceEngine.resolveEffectiveConfig(task) !=
+                      null) ...[
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    TaskRecurrenceDetailsSection(
+                      task: task,
+                      onSkipOccurrence: () {
+                        final prevSnapshot = task;
+                        unawaited(() async {
+                          final skipped =
+                              await ctrl.skipRecurrenceOccurrence(task.id);
+                          if (!hostContext.mounted) return;
+                          if (skipped == null) {
+                            final err = ctrl.state.errorMessage;
+                            if (err != null) {
+                              ScaffoldMessenger.of(hostContext).showSnackBar(
+                                SnackBar(content: Text(err)),
+                              );
+                            }
+                            return;
+                          }
+                          await projectsController.syncTaskSectionLink(
+                            project.id,
+                            skipped,
+                          );
+                          if (!hostContext.mounted) return;
+                          final nextDate =
+                              skipped.dueDate ?? skipped.scheduledDate;
+                          ScaffoldMessenger.of(hostContext).clearSnackBars();
+                          ScaffoldMessenger.of(hostContext).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Skipped to ${nextDate?.toIsoString() ?? 'next occurrence'}',
+                              ),
+                              action: SnackBarAction(
+                                label: 'Undo',
+                                onPressed: () => unawaited(() async {
+                                  await ctrl.restoreTaskSnapshot(prevSnapshot);
+                                  await projectsController.syncTaskSectionLink(
+                                    project.id,
+                                    prevSnapshot,
+                                  );
+                                }()),
+                              ),
+                            ),
+                          );
+                        }());
+                      },
+                      onRescheduleOccurrence: () {
+                        final prevSnapshot = task;
+                        unawaited(() async {
+                          final picked = await pickProjectCalendarDate(
+                            animCtx,
+                            initialDate: task.dueDate ?? task.scheduledDate,
+                            helpText: 'Reschedule Occurrence',
+                          );
+                          if (picked == null) return;
+                          final updated = await ctrl.rescheduleTaskOccurrence(
+                            task.id,
+                            picked,
+                          );
+                          if (!hostContext.mounted) return;
+                          if (updated == null) {
+                            final err = ctrl.state.errorMessage;
+                            if (err != null) {
+                              ScaffoldMessenger.of(hostContext).showSnackBar(
+                                SnackBar(content: Text(err)),
+                              );
+                            }
+                            return;
+                          }
+                          await projectsController.syncTaskSectionLink(
+                            project.id,
+                            updated,
+                          );
+                          if (!hostContext.mounted) return;
+                          ScaffoldMessenger.of(hostContext).clearSnackBars();
+                          ScaffoldMessenger.of(hostContext).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Rescheduled "${updated.title}" to ${picked.toIsoString()}',
+                              ),
+                              action: SnackBarAction(
+                                label: 'Undo',
+                                onPressed: () => unawaited(() async {
+                                  await ctrl.restoreTaskSnapshot(prevSnapshot);
+                                  await projectsController.syncTaskSectionLink(
+                                    project.id,
+                                    prevSnapshot,
+                                  );
+                                }()),
+                              ),
+                            ),
+                          );
+                        }());
+                      },
+                      onEditRecurrence: () {
+                        Navigator.of(dialogCtx).pop();
+                        if (hostContext.mounted) {
+                          unawaited(
+                            _openTaskDialog(
+                              hostContext,
+                              sections: sections,
+                              sectionIdByTaskId: sectionIdByTaskId,
+                              existingTask: task,
+                            ),
+                          );
+                        }
+                      },
+                      onStopRecurrence: () {
+                        final prevSnapshot = task;
+                        unawaited(() async {
+                          final stopped =
+                              await ctrl.stopTaskRecurrence(task.id);
+                          if (!hostContext.mounted) return;
+                          if (stopped == null) {
+                            final err = ctrl.state.errorMessage;
+                            if (err != null) {
+                              ScaffoldMessenger.of(hostContext).showSnackBar(
+                                SnackBar(content: Text(err)),
+                              );
+                            }
+                            return;
+                          }
+                          await projectsController.syncTaskSectionLink(
+                            project.id,
+                            stopped,
+                          );
+                          if (!hostContext.mounted) return;
+                          ScaffoldMessenger.of(hostContext).clearSnackBars();
+                          ScaffoldMessenger.of(hostContext).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Stopped recurrence for "${stopped.title}"',
+                              ),
+                              action: SnackBarAction(
+                                label: 'Undo',
+                                onPressed: () => unawaited(() async {
+                                  await ctrl.restoreTaskSnapshot(prevSnapshot);
+                                  await projectsController.syncTaskSectionLink(
+                                    project.id,
+                                    prevSnapshot,
+                                  );
+                                }()),
+                              ),
+                            ),
+                          );
+                        }());
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  Navigator.of(dialogCtx).pop();
+                  if (hostContext.mounted) {
+                    unawaited(
+                      _openTaskDialog(
+                        hostContext,
+                        sections: sections,
+                        sectionIdByTaskId: sectionIdByTaskId,
+                        existingTask: task,
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Edit'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogCtx).pop(),
+                child: const Text('Close'),
               ),
             ],
           );
@@ -725,82 +1054,96 @@ class ProjectTasksSectionsWidget extends StatelessWidget {
                 : (_) => _toggleTask(context, task),
           ),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  task.title,
-                  style: textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    decoration:
-                        task.isCompleted ? TextDecoration.lineThrough : null,
-                    color: task.isCompleted
-                        ? semantic.textMuted
-                        : semantic.textPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Wrap(
-                  spacing: SharedDesignTokens.spacingSm,
-                  runSpacing: 2,
-                  children: [
-                    Text(
-                      task.priority[0].toUpperCase() +
-                          task.priority.substring(1),
-                      style: textTheme.bodySmall?.copyWith(
-                        color: task.priority == 'urgent'
-                            ? semantic.error
-                            : task.priority == 'high'
-                                ? semantic.warning
-                                : semantic.textMuted,
-                        fontWeight: FontWeight.w600,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
+              onTap: tasksController == null
+                  ? null
+                  : () => _openTaskDetailsDialog(
+                        context,
+                        initialTask: task,
+                        sections: sections,
+                        sectionIdByTaskId: sectionIdByTaskId,
+                        milestonesById: milestonesById,
                       ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    task.title,
+                    style: textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      decoration:
+                          task.isCompleted ? TextDecoration.lineThrough : null,
+                      color: task.isCompleted
+                          ? semantic.textMuted
+                          : semantic.textPrimary,
                     ),
-                    if (milestone != null)
+                  ),
+                  const SizedBox(height: 2),
+                  Wrap(
+                    spacing: SharedDesignTokens.spacingSm,
+                    runSpacing: 2,
+                    children: [
                       Text(
-                        'Milestone: ${milestone.title}',
+                        task.priority[0].toUpperCase() +
+                            task.priority.substring(1),
                         style: textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.primary,
+                          color: task.priority == 'urgent'
+                              ? semantic.error
+                              : task.priority == 'high'
+                                  ? semantic.warning
+                                  : semantic.textMuted,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
-                    if (task.dueDate != null)
-                      Text(
-                        'Due ${SharedDateFormatter.formatDual(task.dueDate!, useAmharic: false)}',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: semantic.textMuted,
-                        ),
-                      ),
-                    if (TaskRecurrenceEngine.resolveEffectiveConfig(task) !=
-                        null)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.repeat,
-                            size: 12,
+                      if (milestone != null)
+                        Text(
+                          'Milestone: ${milestone.title}',
+                          style: textTheme.bodySmall?.copyWith(
                             color: Theme.of(context).colorScheme.primary,
                           ),
-                          const SizedBox(width: 2),
-                          Text(
-                            TaskRecurrenceEngine.formatSummary(
-                              TaskRecurrenceEngine.resolveEffectiveConfig(task),
-                            ),
-                            style: textTheme.bodySmall?.copyWith(
-                              color: semantic.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    if (task.subtasks.isNotEmpty)
-                      Text(
-                        '${task.completedSubtaskCount}/${task.totalSubtaskCount} subtasks',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: semantic.textMuted,
                         ),
-                      ),
-                  ],
-                ),
-              ],
+                      if (task.dueDate != null)
+                        Text(
+                          'Due ${SharedDateFormatter.formatDual(task.dueDate!, useAmharic: false)}',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textMuted,
+                          ),
+                        ),
+                      if (TaskRecurrenceEngine.resolveEffectiveConfig(task) !=
+                          null)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.repeat,
+                              size: 12,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              TaskRecurrenceEngine.formatSummary(
+                                TaskRecurrenceEngine.resolveEffectiveConfig(
+                                  task,
+                                ),
+                              ),
+                              style: textTheme.bodySmall?.copyWith(
+                                color: semantic.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      if (task.subtasks.isNotEmpty)
+                        Text(
+                          '${task.completedSubtaskCount}/${task.totalSubtaskCount} subtasks',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textMuted,
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
           if (sections.isNotEmpty)

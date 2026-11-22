@@ -57,6 +57,7 @@ export interface CalendarTaskRef {
   dueDate?: string;
   completed: boolean;
   priority?: 'urgent' | 'high' | 'medium' | 'low';
+  recurrenceSummary?: string;
 }
 
 interface DaywellCalendarModuleProps {
@@ -744,13 +745,21 @@ export function DaywellCalendarModule({
                         <Circle className="w-4 h-4" />
                       )}
                     </button>
-                    <span
-                      className={`text-xs font-semibold ${
-                        task.completed ? 'line-through text-[var(--dw-text-disabled)]' : 'text-[var(--dw-on-info-container)]'
-                      }`}
-                    >
-                      {task.title}
-                    </span>
+                    <div className="min-w-0">
+                      <span
+                        className={`text-xs font-semibold block truncate ${
+                          task.completed ? 'line-through text-[var(--dw-text-disabled)]' : 'text-[var(--dw-on-info-container)]'
+                        }`}
+                      >
+                        {task.title}
+                      </span>
+                      {task.recurrenceSummary && (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--dw-text-secondary)]">
+                          <Repeat className="w-2.5 h-2.5 text-[var(--dw-info)]" />
+                          {task.recurrenceSummary}
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <DaywellStatusBadge tone="info" showIcon={false} label="Task Deadline" />
                 </div>

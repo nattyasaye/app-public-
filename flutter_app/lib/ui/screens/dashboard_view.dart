@@ -12,6 +12,7 @@ import '../../domain/finance/financial_engine.dart';
 import '../../domain/inbox/inbox_models.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/tasks/task_models.dart';
+import '../../domain/tasks/task_recurrence_engine.dart';
 import '../app_state.dart';
 import '../shell/daywell_shell_routes.dart';
 import '../widgets/shared_ui_widgets.dart';
@@ -1643,6 +1644,36 @@ class DashboardTasksSection extends StatelessWidget {
                                       style: textTheme.bodySmall?.copyWith(
                                         color: semantic.textSecondary,
                                       ),
+                                    ),
+                                  if (TaskRecurrenceEngine.resolveEffectiveConfig(
+                                        task,
+                                      ) !=
+                                      null)
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.repeat,
+                                          size: 12,
+                                          color: Theme.of(context)
+                                              .colorScheme
+                                              .primary,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Flexible(
+                                          child: Text(
+                                            TaskRecurrenceEngine.formatSummary(
+                                              TaskRecurrenceEngine
+                                                  .resolveEffectiveConfig(task),
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: textTheme.bodySmall?.copyWith(
+                                              color: semantic.textSecondary,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                 ],
                               ),

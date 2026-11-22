@@ -75,7 +75,6 @@ function makeTask(
       subtasks: overrides.subtasks,
       isMyDay: overrides.isMyDay,
       myDayDate: overrides.myDayDate,
-      isArchived: overrides.isArchived,
     },
     new Date('2026-11-20T09:00:00.000Z')
   );
@@ -475,7 +474,7 @@ describe('Stage 3 — Task Recurrence System (Web Domain, Services, Bridge & UI)
     });
   });
 
-  it('6. Static Web domain/UI boundaries keep taskRecurrence pure and TaskRecurrenceFields free of hardcoded hexes', () => {
+  it('6. Static Web domain/UI boundaries keep taskRecurrence pure, hex-free, and visible across My Day, Projects, Today, and Calendar', () => {
     const repoRoot = path.resolve(process.cwd());
     const domainSrc = fs.readFileSync(
       path.join(repoRoot, 'src/domain/taskRecurrence.ts'),
@@ -489,11 +488,156 @@ describe('Stage 3 — Task Recurrence System (Web Domain, Services, Bridge & UI)
       path.join(repoRoot, 'src/components/DaywellTasksModule.tsx'),
       'utf8'
     );
+    const myDaySrc = fs.readFileSync(
+      path.join(repoRoot, 'src/components/tasks/MyDayPlanningView.tsx'),
+      'utf8'
+    );
+    const projectTasksSrc = fs.readFileSync(
+      path.join(repoRoot, 'src/components/projects/ProjectTasksSectionsCard.tsx'),
+      'utf8'
+    );
+    const calendarSrc = fs.readFileSync(
+      path.join(repoRoot, 'src/components/DaywellCalendarModule.tsx'),
+      'utf8'
+    );
+    const appSrc = fs.readFileSync(
+      path.join(repoRoot, 'src/App.tsx'),
+      'utf8'
+    );
 
     assert.strictEqual(/from ['"]react['"]/.test(domainSrc), false);
     assert.strictEqual(domainSrc.includes('localStorage'), false);
     assert.strictEqual(/#[0-9a-fA-F]{3,8}\b/.test(uiSrc), false);
     assert.ok(tasksModuleSrc.includes('TaskRecurrenceEditorSection'));
     assert.ok(tasksModuleSrc.includes('TaskRecurrenceDetailsPanel'));
+    assert.ok(myDaySrc.includes('formatRecurrenceSummary'));
+    assert.ok(projectTasksSrc.includes('TaskRecurrenceDetailsPanel'));
+    assert.ok(projectTasksSrc.includes('updateTaskInProjectWithRecurrence'));
+    assert.ok(calendarSrc.includes('recurrenceSummary'));
+    assert.ok(appSrc.includes('formatRecurrenceSummary'));
+  });
+
+  it('7. Project updateTaskInProjectWithRecurrence spawns next occurrence on completion status edit, copies section link, syncs DailyPlanning, and supports undo restore', () => {
+    withMockBrowserStorage(() => {
+      const project = projectsService.createProjectWithBlocks({
+        title: 'Editorial Calendar',
+        status: 'active',
+        startDate: '2026-11-01',
+        blocks: [],
+      });
+      const section = projectsService.createProjectSection(project.id, 'Publishing');
+      const task = projectsService.createTaskInProject({
+        projectId: project.id,
+        sectionId: section.id,
+        title: 'Publish weekly digest',
+        status: 'in_progress',
+        dueDate: '2026-11-22',
+        recurrenceConfig: {
+          frequency: 'weekly',
+          interval: 1,
+          weekdays: [7],
+          repeatFrom: 'due_date',
+        },
+      });
+
+      // Completing by editing status inside Project triggers recurrence spawn & section link copy
+      const updateRes = projectsService.updateTaskInProjectWithRecurrence(
+        task.id,
+        { status: 'completed' }
+      );
+      assert.strictEqual(updateRes.updated?.completed, true);
+      assert.ok(updateRes.generatedNextTask);
+      assert.strictEqual(
+        updateRes.generatedNextTask?.dueDate,
+        '2026-11-29'
+      );
+
+      const vmAfter = projectsService.getProjectSectionsViewModel(project.id);
+      const pubSection = vmAfter.sections.find((s) => s.record.id === section.id)!;
+      const linkedIds = pubSection.tasks.map((t) => t.id);
+      assert.ok(linkedIds.includes(task.id));
+      assert.ok(linkedIds.includes(updateRes.generatedNextTask!.id));
+
+      // Undo restores pre-completion task list and detaches spawned section link
+      projectsService.restoreTasksSnapshot(
+        updateRes.previousTasks,
+        { projectId: project.id, taskId: task.id, sectionId: section.id },
+        updateRes.generatedNextTask?.id,
+        updateRes.previousEntries
+      );
+      const vmUndo = projectsService.getProjectSectionsViewModel(project.id);
+      const pubAfterUndo = vmUndo.sections.find((s) => s.record.id === section.id)!;
+      assert.strictEqual(pubAfterUndo.tasks.length, 1);
+      assert.strictEqual(pubAfterUndo.tasks[0].completed, false);
+    });
+  });
+
+  it('8. Project Skip, Reschedule, and Stop recurrence actions update dates cleanly, clear planned My Day entry on skip, and preserve history', () => {
+    withMockBrowserStorage(() => {
+      const project = projectsService.createProjectWithBlocks({
+        title: 'Facility Ops',
+        status: 'active',
+        startDate: '2026-11-01',
+        blocks: [],
+      });
+      const task = projectsService.createTaskInProject({
+        projectId: project.id,
+        title: 'Inspect fire extinguishers',
+        dueDate: '2026-11-22',
+        scheduledDate: '2026-11-21',
+        recurrenceConfig: {
+          frequency: 'daily',
+          interval: 2,
+          repeatFrom: 'due_date',
+        },
+      });
+
+      // Schedule into My Day on 2026-11-22
+      const loaded = JSON.parse(
+        localStorage.getItem('daywell_tasks') ?? '[]'
+      ) as DaywellTaskRecord[];
+      const planned = planTaskForDate(loaded, [], task.id, '2026-11-22', {
+        todayIso: '2026-11-22',
+      });
+      localStorage.setItem('daywell_tasks', JSON.stringify(planned.tasks));
+      localStorage.setItem(
+        'daywell_daily_planning_entries',
+        JSON.stringify(planned.entries)
+      );
+
+      // Skip advances dates and removes stale My Day plan entry
+      const skipped = projectsService.skipTaskRecurrenceInProject(task.id);
+      assert.strictEqual(skipped.ok, true);
+      assert.strictEqual(skipped.updated?.dueDate, '2026-11-24');
+      assert.strictEqual(skipped.updated?.scheduledDate, '2026-11-23');
+      assert.strictEqual(skipped.updated?.isMyDay, false);
+      const entriesAfterSkip = JSON.parse(
+        localStorage.getItem('daywell_daily_planning_entries') ?? '[]'
+      ) as Array<{ taskId: string; planDate: string; action: string }>;
+      const dayEntry = entriesAfterSkip.find(
+        (e) => e.taskId === task.id && e.planDate === '2026-11-22'
+      );
+      assert.strictEqual(dayEntry?.action, 'dismissed');
+
+      // Reschedule preserves lead time & recurrence rule
+      const rescheduled = projectsService.rescheduleTaskOccurrenceInProject(
+        task.id,
+        '2026-11-28'
+      );
+      assert.strictEqual(rescheduled.ok, true);
+      assert.strictEqual(rescheduled.updated?.dueDate, '2026-11-28');
+      assert.strictEqual(rescheduled.updated?.scheduledDate, '2026-11-27');
+      assert.strictEqual(
+        resolveEffectiveRecurrenceConfig(rescheduled.updated!)?.interval,
+        2
+      );
+
+      // Stop removes recurrence while keeping task & dates
+      const stopped = projectsService.stopTaskRecurrenceInProject(task.id);
+      assert.strictEqual(stopped.ok, true);
+      assert.strictEqual(stopped.updated?.isRecurring, false);
+      assert.strictEqual(stopped.updated?.recurrenceConfig, undefined);
+      assert.strictEqual(stopped.updated?.dueDate, '2026-11-28');
+    });
   });
 });

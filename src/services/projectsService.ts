@@ -22,6 +22,7 @@ import {
   serializeBimOutreachTemplateJson,
 } from '../domain/bimOutreachTemplate';
 import {
+  SharedDailyPlanningEntry,
   SharedGoal,
   SharedMilestone,
   SharedProject,
@@ -40,8 +41,17 @@ import {
   isTaskCompleted,
   updateTaskRecord,
 } from '../domain/taskOperations';
-import { syncTaskCompletionWithDailyPlanning } from '../domain/dailyPlanningOperations';
-import { completeTaskWithRecurrence } from '../domain/taskRecurrence';
+import {
+  removeTaskFromPlannedDay,
+  syncTaskCompletionWithDailyPlanning,
+} from '../domain/dailyPlanningOperations';
+import {
+  completeTaskWithRecurrence,
+  rescheduleRecurrenceOccurrence,
+  resolveEffectiveRecurrenceConfig,
+  skipRecurrenceOccurrence,
+  stopTaskRecurrence,
+} from '../domain/taskRecurrence';
 import { WebProjectsRepository } from '../data/projectsRepository';
 import {
   buildProjectPackageFilename,
@@ -1552,9 +1562,43 @@ class ProjectsService {
       clearRecurrenceConfig?: boolean;
     }
   ): DaywellTaskRecord | undefined {
-    const existingTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
-    const existing = existingTasks.find((t) => t.id === taskId);
-    if (!existing) return undefined;
+    return this.updateTaskInProjectWithRecurrence(taskId, patch).updated;
+  }
+
+  public updateTaskInProjectWithRecurrence(
+    taskId: string,
+    patch: {
+      title?: string;
+      description?: string;
+      priority?: TaskPriority;
+      status?: TaskStatus;
+      dueDate?: string;
+      scheduledDate?: string;
+      projectId?: string;
+      milestoneId?: string;
+      sectionId?: string | null;
+      recurrenceConfig?: SharedTaskRecurrenceConfig;
+      clearRecurrenceConfig?: boolean;
+    }
+  ): {
+    previousTasks: DaywellTaskRecord[];
+    previousEntries: SharedDailyPlanningEntry[];
+    updated?: DaywellTaskRecord;
+    generatedNextTask?: DaywellTaskRecord;
+    seriesEnded: boolean;
+    duplicatePrevented: boolean;
+  } {
+    const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const existing = previousTasks.find((t) => t.id === taskId);
+    if (!existing) {
+      return {
+        previousTasks,
+        previousEntries,
+        seriesEnded: false,
+        duplicatePrevented: false,
+      };
+    }
 
     const targetProjectId =
       patch.projectId !== undefined ? patch.projectId : existing.projectId;
@@ -1596,30 +1640,200 @@ class ProjectsService {
       throw new ProjectValidationError(firstErr);
     }
 
-    const updatedTasks = existingTasks.map((t) =>
+    let finalTasks = previousTasks.map((t) =>
       t.id === taskId ? res.task : t
     );
-    writeLocalArray(TASKS_KEY, updatedTasks);
+    let finalUpdated = res.task;
+    let generatedNextTask: DaywellTaskRecord | undefined;
+    let seriesEnded = false;
+    let duplicatePrevented = false;
+
+    const wasCompleted = isTaskCompleted(existing);
+    const isNowCompleted = isTaskCompleted(res.task);
+    const transitionedToCompleted = !wasCompleted && isNowCompleted;
+
+    if (
+      transitionedToCompleted &&
+      resolveEffectiveRecurrenceConfig(res.task)
+    ) {
+      const tempOpen: DaywellTaskRecord = {
+        ...res.task,
+        status: 'not_started',
+        completed: false,
+        completedAt: undefined,
+      };
+      const recRes = completeTaskWithRecurrence(
+        previousTasks.map((t) => (t.id === taskId ? tempOpen : t)),
+        taskId
+      );
+      if (recRes.updatedTask) {
+        finalTasks = recRes.tasks;
+        finalUpdated = recRes.updatedTask;
+        generatedNextTask = recRes.generatedNextTask;
+        seriesEnded = recRes.seriesEnded;
+        duplicatePrevented = recRes.duplicatePrevented;
+      }
+    }
+
+    writeLocalArray(TASKS_KEY, finalTasks);
+
+    if (wasCompleted !== isNowCompleted) {
+      const nextEntries = syncTaskCompletionWithDailyPlanning(
+        finalTasks,
+        previousEntries,
+        taskId,
+        isNowCompleted
+      );
+      dailyPlanningService.saveDailyPlanningEntries(nextEntries);
+    }
 
     if (
       existing.projectId &&
-      existing.projectId !== res.task.projectId
+      existing.projectId !== finalUpdated.projectId
     ) {
       this.detachTaskSectionLinks(existing.projectId, taskId);
     }
 
-    if (res.task.projectId && patch.sectionId !== undefined) {
+    if (finalUpdated.projectId && patch.sectionId !== undefined) {
       this.assignTaskToProjectSection(
-        res.task.projectId,
-        res.task.id,
+        finalUpdated.projectId,
+        finalUpdated.id,
         patch.sectionId
       );
     } else {
-      this.syncLinkedSectionRecordForTask(res.task);
-      broadcastSync();
+      this.syncLinkedSectionRecordForTask(finalUpdated);
     }
 
-    return res.task;
+    if (generatedNextTask?.projectId) {
+      this.copyTaskSectionLink(
+        generatedNextTask.projectId,
+        taskId,
+        generatedNextTask
+      );
+    }
+
+    broadcastSync();
+
+    return {
+      previousTasks,
+      previousEntries,
+      updated: finalUpdated,
+      generatedNextTask,
+      seriesEnded,
+      duplicatePrevented,
+    };
+  }
+
+  public skipTaskRecurrenceInProject(taskId: string): {
+    ok: boolean;
+    error?: string;
+    previousTasks: DaywellTaskRecord[];
+    previousEntries: SharedDailyPlanningEntry[];
+    updated?: DaywellTaskRecord;
+  } {
+    const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const existing = previousTasks.find((t) => t.id === taskId);
+    const res = skipRecurrenceOccurrence(previousTasks, taskId);
+    if (!res.ok || !res.updatedTask) {
+      return {
+        ok: false,
+        error: res.error ?? 'Unable to skip occurrence.',
+        previousTasks,
+        previousEntries,
+      };
+    }
+
+    writeLocalArray(TASKS_KEY, res.tasks);
+    if (
+      res.updatedTask.isMyDay === false &&
+      previousEntries.some((e) => e.taskId === taskId)
+    ) {
+      const targetPlanDate =
+        existing?.myDayDate ?? CalendarDate.today().toIsoString();
+      const nextEntries = removeTaskFromPlannedDay(
+        res.tasks,
+        previousEntries,
+        taskId,
+        targetPlanDate
+      ).entries;
+      dailyPlanningService.saveDailyPlanningEntries(nextEntries);
+    }
+    this.syncLinkedSectionRecordForTask(res.updatedTask);
+    broadcastSync();
+    return {
+      ok: true,
+      previousTasks,
+      previousEntries,
+      updated: res.updatedTask,
+    };
+  }
+
+  public rescheduleTaskOccurrenceInProject(
+    taskId: string,
+    newDateIso: string
+  ): {
+    ok: boolean;
+    error?: string;
+    previousTasks: DaywellTaskRecord[];
+    previousEntries: SharedDailyPlanningEntry[];
+    updated?: DaywellTaskRecord;
+  } {
+    const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const res = rescheduleRecurrenceOccurrence(
+      previousTasks,
+      taskId,
+      newDateIso
+    );
+    if (!res.ok || !res.updatedTask) {
+      return {
+        ok: false,
+        error: res.error ?? 'Unable to reschedule occurrence.',
+        previousTasks,
+        previousEntries,
+      };
+    }
+
+    writeLocalArray(TASKS_KEY, res.tasks);
+    this.syncLinkedSectionRecordForTask(res.updatedTask);
+    broadcastSync();
+    return {
+      ok: true,
+      previousTasks,
+      previousEntries,
+      updated: res.updatedTask,
+    };
+  }
+
+  public stopTaskRecurrenceInProject(taskId: string): {
+    ok: boolean;
+    error?: string;
+    previousTasks: DaywellTaskRecord[];
+    previousEntries: SharedDailyPlanningEntry[];
+    updated?: DaywellTaskRecord;
+  } {
+    const previousTasks = readLocalArray<DaywellTaskRecord>(TASKS_KEY);
+    const previousEntries = dailyPlanningService.loadDailyPlanningEntries();
+    const res = stopTaskRecurrence(previousTasks, taskId);
+    if (!res.ok || !res.updatedTask) {
+      return {
+        ok: false,
+        error: res.error ?? 'Unable to stop recurrence.',
+        previousTasks,
+        previousEntries,
+      };
+    }
+
+    writeLocalArray(TASKS_KEY, res.tasks);
+    this.syncLinkedSectionRecordForTask(res.updatedTask);
+    broadcastSync();
+    return {
+      ok: true,
+      previousTasks,
+      previousEntries,
+      updated: res.updatedTask,
+    };
   }
 
   public toggleTaskCompletionInProject(taskId: string): {
@@ -1693,12 +1907,16 @@ class ProjectsService {
   public restoreTasksSnapshot(
     tasksSnapshot: DaywellTaskRecord[],
     sectionRestore?: { projectId: string; taskId: string; sectionId: string },
-    removeLinksForTaskId?: string
+    removeLinksForTaskId?: string,
+    dailyPlanningSnapshot?: SharedDailyPlanningEntry[]
   ): void {
     if (removeLinksForTaskId) {
       this.cleanupSectionLinksForTask(removeLinksForTaskId);
     }
     writeLocalArray(TASKS_KEY, tasksSnapshot);
+    if (dailyPlanningSnapshot) {
+      dailyPlanningService.saveDailyPlanningEntries(dailyPlanningSnapshot);
+    }
     if (sectionRestore) {
       const records = this.repo.getRecordsForProject(sectionRestore.projectId);
       const sectionExists = records.some(

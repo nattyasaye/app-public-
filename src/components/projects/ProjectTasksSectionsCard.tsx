@@ -47,7 +47,10 @@ import {
   DaywellProgressBar,
   DaywellStatusBadge,
 } from '../ui';
-import { TaskRecurrenceEditorSection } from '../tasks/TaskRecurrenceFields';
+import {
+  TaskRecurrenceDetailsPanel,
+  TaskRecurrenceEditorSection,
+} from '../tasks/TaskRecurrenceFields';
 
 export interface ProjectTasksSectionsCardProps {
   projectId: string;
@@ -104,11 +107,16 @@ export function ProjectTasksSectionsCard({
 
   const [pendingDeleteTask, setPendingDeleteTask] =
     useState<DaywellTaskRecord | null>(null);
+  const [detailsTaskId, setDetailsTaskId] = useState<string | null>(null);
+  const [detailsRecurrenceError, setDetailsRecurrenceError] = useState('');
 
   const allTasks = [
     ...sectionsView.sections.flatMap((s) => s.tasks),
     ...sectionsView.unsectionedTasks,
   ];
+  const detailsTask = detailsTaskId
+    ? allTasks.find((t) => t.id === detailsTaskId) ?? null
+    : null;
   const completedTasksCount = allTasks.filter((t) => isTaskCompleted(t)).length;
   const tasksPct =
     allTasks.length > 0
@@ -229,6 +237,83 @@ export function ProjectTasksSectionsCard({
     setIsTaskModalOpen(true);
   };
 
+  const openTaskDetails = (task: DaywellTaskRecord) => {
+    setDetailsRecurrenceError('');
+    setDetailsTaskId(task.id);
+  };
+
+  const handleSkipDetailsRecurrence = (taskId: string) => {
+    const res = projectsService.skipTaskRecurrenceInProject(taskId);
+    if (!res.ok || !res.updated) {
+      setDetailsRecurrenceError(res.error ?? 'Unable to skip occurrence.');
+      return;
+    }
+    setDetailsRecurrenceError('');
+    onRefresh();
+    const nextDate = res.updated.dueDate ?? res.updated.scheduledDate;
+    onNotifyUndo?.(
+      `Skipped to next occurrence${nextDate ? ` (${nextDate})` : ''}`,
+      () => {
+        projectsService.restoreTasksSnapshot(
+          res.previousTasks,
+          undefined,
+          undefined,
+          res.previousEntries
+        );
+        onRefresh();
+      }
+    );
+  };
+
+  const handleRescheduleDetailsRecurrence = (
+    taskId: string,
+    newDateIso: string
+  ) => {
+    const res = projectsService.rescheduleTaskOccurrenceInProject(
+      taskId,
+      newDateIso
+    );
+    if (!res.ok || !res.updated) {
+      setDetailsRecurrenceError(
+        res.error ?? 'Unable to reschedule occurrence.'
+      );
+      return;
+    }
+    setDetailsRecurrenceError('');
+    onRefresh();
+    onNotifyUndo?.(
+      `Rescheduled "${res.updated.title}" to ${newDateIso}`,
+      () => {
+        projectsService.restoreTasksSnapshot(
+          res.previousTasks,
+          undefined,
+          undefined,
+          res.previousEntries
+        );
+        onRefresh();
+      }
+    );
+  };
+
+  const handleStopDetailsRecurrence = (taskId: string) => {
+    const res = projectsService.stopTaskRecurrenceInProject(taskId);
+    if (!res.ok || !res.updated) {
+      setDetailsRecurrenceError(res.error ?? 'Unable to stop recurrence.');
+      return;
+    }
+    setDetailsRecurrenceError('');
+    onRefresh();
+    onNotifyUndo?.(`Stopped recurrence for "${res.updated.title}"`, () => {
+      projectsService.restoreTasksSnapshot(
+        res.previousTasks,
+        undefined,
+        undefined,
+        res.previousEntries
+      );
+      onRefresh();
+    });
+  };
+
   const handleSaveTaskModal = (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = taskTitle.trim();
@@ -264,19 +349,49 @@ export function ProjectTasksSectionsCard({
 
     try {
       if (editingTask) {
-        projectsService.updateTaskInProject(editingTask.id, {
-          title: trimmed,
-          description: taskDescription,
-          priority: taskPriority,
-          status: taskStatus,
-          dueDate: taskDueDate,
-          scheduledDate: taskScheduledDate,
-          milestoneId: taskMilestoneId || '',
-          sectionId: taskSectionId || null,
-          ...(recConfig
-            ? { recurrenceConfig: recConfig }
-            : { clearRecurrenceConfig: true }),
-        });
+        const prevSectionId = taskToSectionId.get(editingTask.id);
+        const editRes = projectsService.updateTaskInProjectWithRecurrence(
+          editingTask.id,
+          {
+            title: trimmed,
+            description: taskDescription,
+            priority: taskPriority,
+            status: taskStatus,
+            dueDate: taskDueDate,
+            scheduledDate: taskScheduledDate,
+            milestoneId: taskMilestoneId || '',
+            sectionId: taskSectionId || null,
+            ...(recConfig
+              ? { recurrenceConfig: recConfig }
+              : { clearRecurrenceConfig: true }),
+          }
+        );
+        setIsTaskModalOpen(false);
+        setTaskFormError(null);
+        onRefresh();
+        if (editRes.generatedNextTask || editRes.seriesEnded) {
+          const nextDate =
+            editRes.generatedNextTask?.dueDate ??
+            editRes.generatedNextTask?.scheduledDate;
+          const msg = editRes.generatedNextTask
+            ? `Completed "${trimmed}" · Next: ${nextDate ?? 'scheduled'}`
+            : `Completed "${trimmed}" · Recurrence series ended`;
+          onNotifyUndo?.(msg, () => {
+            projectsService.restoreTasksSnapshot(
+              editRes.previousTasks,
+              prevSectionId
+                ? {
+                    projectId,
+                    taskId: editingTask.id,
+                    sectionId: prevSectionId,
+                  }
+                : undefined,
+              editRes.generatedNextTask?.id,
+              editRes.previousEntries
+            );
+            onRefresh();
+          });
+        }
       } else {
         projectsService.createTaskInProject({
           projectId,
@@ -290,10 +405,10 @@ export function ProjectTasksSectionsCard({
           sectionId: taskSectionId || undefined,
           recurrenceConfig: recConfig,
         });
+        setIsTaskModalOpen(false);
+        setTaskFormError(null);
+        onRefresh();
       }
-      setIsTaskModalOpen(false);
-      setTaskFormError(null);
-      onRefresh();
     } catch (err) {
       setTaskFormError(
         err instanceof Error ? err.message : 'Unable to save task.'
@@ -391,11 +506,11 @@ export function ProjectTasksSectionsCard({
           <div
             role="button"
             tabIndex={0}
-            onClick={() => openEditTask(task)}
+            onClick={() => openTaskDetails(task)}
             onKeyDown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
-                openEditTask(task);
+                openTaskDetails(task);
               }
             }}
             className="min-w-0 flex-1 space-y-1 cursor-pointer"
@@ -905,6 +1020,156 @@ export function ProjectTasksSectionsCard({
                 </div>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Project Task Details Modal (Recurrence Controls & Metadata) */}
+      {detailsTask && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Project Task Details"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDetailsTaskId(null);
+          }}
+        >
+          <div className="w-full max-w-md bg-[var(--dw-elevated)] rounded-[var(--dw-radius-xl)] p-5 shadow-2xl border border-[var(--dw-border)] space-y-3.5 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0 space-y-1">
+                <h3 className="dw-type-title text-[var(--dw-text-primary)]">
+                  {detailsTask.title}
+                </h3>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <DaywellStatusBadge
+                    tone={isTaskCompleted(detailsTask) ? 'success' : 'neutral'}
+                    showIcon={false}
+                    label={
+                      TASK_STATUS_LABELS[resolveEffectiveTaskStatus(detailsTask)]
+                    }
+                  />
+                  <DaywellStatusBadge
+                    tone={
+                      detailsTask.priority === 'urgent'
+                        ? 'error'
+                        : detailsTask.priority === 'high'
+                        ? 'warning'
+                        : 'neutral'
+                    }
+                    showIcon={false}
+                    label={TASK_PRIORITY_LABELS[detailsTask.priority]}
+                  />
+                  {detailsTask.milestoneId &&
+                    milestoneById.get(detailsTask.milestoneId) && (
+                      <DaywellStatusBadge
+                        tone={
+                          milestoneById.get(detailsTask.milestoneId)!.isCompleted
+                            ? 'success'
+                            : 'info'
+                        }
+                        showIcon={false}
+                        label={milestoneById.get(detailsTask.milestoneId)!.title}
+                      />
+                    )}
+                </div>
+              </div>
+              <DaywellIconButton
+                label="Close project task details"
+                size="compact"
+                tone="muted"
+                onClick={() => setDetailsTaskId(null)}
+                icon={<X className="w-4 h-4" />}
+              />
+            </div>
+
+            {detailsTask.description ? (
+              <p className="text-xs text-[var(--dw-text-secondary)] whitespace-pre-wrap">
+                {detailsTask.description}
+              </p>
+            ) : (
+              <p className="text-xs italic text-[var(--dw-text-muted)]">
+                No description added.
+              </p>
+            )}
+
+            <div className="p-3 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] space-y-1 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[var(--dw-text-muted)]">Scheduled</span>
+                <span className="font-semibold text-[var(--dw-text-primary)]">
+                  {detailsTask.scheduledDate || 'Not set'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[var(--dw-text-muted)]">Due Date</span>
+                <span className="font-semibold text-[var(--dw-primary)]">
+                  {detailsTask.dueDate || 'Not set'}
+                </span>
+              </div>
+              {detailsTask.subtasks.length > 0 && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[var(--dw-text-muted)]">Subtasks</span>
+                  <span className="font-semibold text-[var(--dw-text-primary)]">
+                    {computeSubtaskProgress(detailsTask.subtasks).completed}/
+                    {computeSubtaskProgress(detailsTask.subtasks).total}
+                  </span>
+                </div>
+              )}
+              {detailsTask.completedAt && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[var(--dw-text-muted)]">Completed</span>
+                  <span className="font-semibold text-[var(--dw-text-primary)]">
+                    {detailsTask.completedAt.slice(0, 10)}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <TaskRecurrenceDetailsPanel
+              task={detailsTask}
+              onSkipOccurrence={() => handleSkipDetailsRecurrence(detailsTask.id)}
+              onRescheduleOccurrence={(nextIso) =>
+                handleRescheduleDetailsRecurrence(detailsTask.id, nextIso)
+              }
+              onEditRecurrence={() => {
+                setDetailsTaskId(null);
+                openEditTask(detailsTask);
+              }}
+              onStopRecurrence={() => handleStopDetailsRecurrence(detailsTask.id)}
+              actionError={detailsRecurrenceError}
+            />
+
+            <div className="flex items-center justify-between gap-2 pt-1">
+              <DaywellButton
+                label="Delete"
+                variant="text"
+                size="compact"
+                onClick={() => {
+                  const target = detailsTask;
+                  setDetailsTaskId(null);
+                  setPendingDeleteTask(target);
+                }}
+                className="!text-[var(--dw-error)]"
+              />
+              <div className="flex items-center gap-2">
+                <DaywellButton
+                  label="Edit Task"
+                  variant="outlined"
+                  size="compact"
+                  onClick={() => {
+                    const target = detailsTask;
+                    setDetailsTaskId(null);
+                    openEditTask(target);
+                  }}
+                />
+                <DaywellButton
+                  label="Done"
+                  variant="primary"
+                  size="compact"
+                  onClick={() => setDetailsTaskId(null)}
+                />
+              </div>
+            </div>
           </div>
         </div>
       )}

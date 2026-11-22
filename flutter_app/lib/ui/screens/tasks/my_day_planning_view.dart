@@ -5,6 +5,7 @@ import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
 import '../../../domain/tasks/daily_planning_engine.dart';
 import '../../../domain/tasks/task_models.dart';
+import '../../../domain/tasks/task_recurrence_engine.dart';
 import '../../widgets/shared_ui_widgets.dart';
 
 /// Stage 2 My Day & Daily Planning workspace for Flutter.
@@ -778,6 +779,29 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
                               color: colorScheme.primary,
                             ),
                           ),
+                        if (TaskRecurrenceEngine.resolveEffectiveConfig(task) !=
+                            null)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.repeat,
+                                size: 12,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(width: 2),
+                              Text(
+                                TaskRecurrenceEngine.formatSummary(
+                                  TaskRecurrenceEngine.resolveEffectiveConfig(
+                                    task,
+                                  ),
+                                ),
+                                style: DaywellTypography.caption(
+                                  color: semantic.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
                         if (task.subtasks.isNotEmpty)
                           Text(
                             '${task.completedSubtaskCount}/${task.subtasks.length} subtasks',
@@ -846,7 +870,30 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
     required List<Widget> badges,
   }) {
     final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
+    final recConfig = TaskRecurrenceEngine.resolveEffectiveConfig(task);
+    final allBadges = <Widget>[
+      ...badges,
+      if (recConfig != null)
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.repeat,
+              size: 12,
+              color: colorScheme.primary,
+            ),
+            const SizedBox(width: 2),
+            Text(
+              TaskRecurrenceEngine.formatSummary(recConfig),
+              style: DaywellTypography.caption(
+                color: semantic.textSecondary,
+              ),
+            ),
+          ],
+        ),
+    ];
 
     return Container(
       margin: const EdgeInsets.only(bottom: SharedDesignTokens.spacingXs),
@@ -877,12 +924,12 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
                       color: semantic.textPrimary,
                     ),
                   ),
-                  if (badges.isNotEmpty) ...[
+                  if (allBadges.isNotEmpty) ...[
                     const SizedBox(height: SharedDesignTokens.spacingXs),
                     Wrap(
                       spacing: SharedDesignTokens.spacingXs,
                       runSpacing: SharedDesignTokens.spacingXs,
-                      children: badges,
+                      children: allBadges,
                     ),
                   ],
                 ],

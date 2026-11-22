@@ -778,15 +778,19 @@ export function DaywellTasksModule({
   const handleSkipRecurrence = (taskId: string) => {
     const prev = [...tasks];
     const prevEntries = [...effectiveDailyPlanningEntries];
+    const existingTask = prev.find((t) => t.id === taskId);
     const res = skipRecurrenceOccurrence(tasks, taskId, { todayIso: todayStr });
     if (!res.ok || !res.updatedTask) {
       setDetailRecurrenceError(res.error ?? 'Unable to skip occurrence.');
       return;
     }
     setDetailRecurrenceError('');
+    const targetPlanDate =
+      existingTask?.myDayDate ??
+      (activeFilter === 'my_day' ? selectedPlanDate : todayStr);
     const nextEntries =
       res.updatedTask.isMyDay === false && prevEntries.some((e) => e.taskId === taskId)
-        ? removeTaskFromPlannedDay(res.tasks, prevEntries, taskId, todayStr).entries
+        ? removeTaskFromPlannedDay(res.tasks, prevEntries, taskId, targetPlanDate).entries
         : prevEntries;
     commitTasksAndDailyPlanning(res.tasks, nextEntries);
     const nextDate = res.updatedTask.dueDate ?? res.updatedTask.scheduledDate;

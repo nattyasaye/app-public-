@@ -1464,7 +1464,16 @@ class _TasksViewState extends State<TasksView>
                             if (picked == null) return;
                             final updated = await controller
                                 .rescheduleTaskOccurrence(task.id, picked);
-                            if (!mounted || updated == null) return;
+                            if (!mounted) return;
+                            if (updated == null) {
+                              final err = controller.state.errorMessage;
+                              if (err != null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(err)),
+                                );
+                              }
+                              return;
+                            }
                             ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
@@ -1491,7 +1500,16 @@ class _TasksViewState extends State<TasksView>
                           unawaited(() async {
                             final stopped =
                                 await controller.stopTaskRecurrence(task.id);
-                            if (!mounted || stopped == null) return;
+                            if (!mounted) return;
+                            if (stopped == null) {
+                              final err = controller.state.errorMessage;
+                              if (err != null) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(err)),
+                                );
+                              }
+                              return;
+                            }
                             ScaffoldMessenger.of(context).clearSnackBars();
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(

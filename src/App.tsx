@@ -91,7 +91,11 @@ import {
 } from './domain/inboxOperations';
 import { syncTaskCompletionWithDailyPlanning } from './domain/dailyPlanningOperations';
 import { isTaskCompleted, TaskViewFilter } from './domain/taskOperations';
-import { completeTaskWithRecurrence } from './domain/taskRecurrence';
+import {
+  completeTaskWithRecurrence,
+  formatRecurrenceSummary,
+  resolveEffectiveRecurrenceConfig,
+} from './domain/taskRecurrence';
 import {
   SharedDailyPlanningEntry,
   SharedInboxItem,
@@ -1195,9 +1199,19 @@ export default function App() {
                               >
                                 {item.title}
                               </p>
-                              <div className="flex items-center gap-1.5 text-[11px] text-[var(--dw-text-muted)] mt-0.5">
+                              <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-[var(--dw-text-muted)] mt-0.5">
                                 {item.priority === 'high' && <Flag className="w-3 h-3 text-[var(--dw-warning)]" />}
                                 <span>{item.category || item.projectName || 'Personal'}</span>
+                                {(() => {
+                                  const rec = resolveEffectiveRecurrenceConfig(item);
+                                  if (!rec) return null;
+                                  return (
+                                    <span className="inline-flex items-center gap-0.5 text-[var(--dw-text-secondary)]">
+                                      <Repeat2 className="w-3 h-3 text-[var(--dw-primary)]" />
+                                      {formatRecurrenceSummary(rec)}
+                                    </span>
+                                  );
+                                })()}
                               </div>
                             </div>
                             {item.hasReminder && (
@@ -1497,13 +1511,19 @@ export default function App() {
                 <DaywellCalendarModule
                   tasks={tasks
                     .filter((t) => !t.isArchived && t.status !== 'cancelled')
-                    .map((t) => ({
-                      id: t.id,
-                      title: t.title,
-                      dueDate: t.dueDate,
-                      completed: t.completed,
-                      priority: t.priority,
-                    }))}
+                    .map((t) => {
+                      const rec = resolveEffectiveRecurrenceConfig(t);
+                      return {
+                        id: t.id,
+                        title: t.title,
+                        dueDate: t.dueDate,
+                        completed: t.completed,
+                        priority: t.priority,
+                        recurrenceSummary: rec
+                          ? formatRecurrenceSummary(rec)
+                          : undefined,
+                      };
+                    })}
                   onToggleTask={toggleTask}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                 />
