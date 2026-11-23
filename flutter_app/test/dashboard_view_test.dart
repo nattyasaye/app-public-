@@ -1466,9 +1466,15 @@ void main() {
 
         final Finder retries = find.text('Retry');
         expect(retries, findsNWidgets(2));
+        await tester.ensureVisible(retries.first);
+        await tester.pumpAndSettle();
         await tester.tap(retries.first);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Retry').first);
+
+        final Finder secondRetry = find.text('Retry').first;
+        await tester.ensureVisible(secondRetry);
+        await tester.pumpAndSettle();
+        await tester.tap(secondRetry);
         await tester.pumpAndSettle();
 
         expect(find.text('Unable to refresh finance overview'), findsNothing);

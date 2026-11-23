@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -35,6 +36,8 @@ void main() {
       final projectsRepo = DriftProjectsRepository(db);
       final tasksCtrl = TasksController(repository: tasksRepo);
       final projectsCtrl = ProjectsController(repository: projectsRepo);
+      addTearDown(tasksCtrl.dispose);
+      addTearDown(projectsCtrl.dispose);
       await tasksCtrl.loadAll();
       await projectsCtrl.loadAll();
 
@@ -155,7 +158,7 @@ void main() {
           projectId: project.id,
           labels: const ['Backend', 'Release'],
         );
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        await Future<void>.delayed(const Duration(milliseconds: 1100));
         final tB = await h.tasksCtrl.createTask(
           id: 'org-b',
           title: 'Alpha endpoint',
@@ -166,7 +169,7 @@ void main() {
           projectId: project.id,
           labels: const ['Backend', 'Release'],
         );
-        await Future<void>.delayed(const Duration(milliseconds: 5));
+        await Future<void>.delayed(const Duration(milliseconds: 1100));
         final tOverdue = await h.tasksCtrl.createTask(
           id: 'org-overdue',
           title: 'Backfill audit',
@@ -299,7 +302,14 @@ void main() {
     testWidgets(
       '3. TasksView renders shared DaywellSearchFilterBar, Active/Overdue chips, Filter controls, Manage Tags, and Clear filters',
       (WidgetTester tester) async {
+        await tester.binding.setSurfaceSize(const Size(1000, 1400));
+        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
+
         final h = await createHarness();
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump();
+        });
         final today = CalendarDate.today();
         final yesterday = today.addDays(-1);
 
@@ -336,34 +346,52 @@ void main() {
         );
 
         // Switch to Overdue view chip
-        await tester.tap(find.text('Overdue'));
+        final overdueChip = find.text('Overdue');
+        await tester.ensureVisible(overdueChip);
+        await tester.pumpAndSettle();
+        await tester.tap(overdueChip);
         await tester.pumpAndSettle();
         expect(find.text('Review release notes'), findsOneWidget);
         expect(find.text('Buy groceries'), findsNothing);
 
         // Switch to Active view chip -> shows both
-        await tester.tap(find.text('Active'));
+        final activeChip = find.text('Active');
+        await tester.ensureVisible(activeChip);
+        await tester.pumpAndSettle();
+        await tester.tap(activeChip);
         await tester.pumpAndSettle();
         expect(find.text('Review release notes'), findsOneWidget);
         expect(find.text('Buy groceries'), findsOneWidget);
 
         // Open Filters panel and filter by @Launch tag
-        await tester.tap(find.byTooltip('Toggle Filters'));
+        final toggleFiltersBtn = find.byTooltip('Toggle Filters');
+        await tester.ensureVisible(toggleFiltersBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(toggleFiltersBtn);
         await tester.pumpAndSettle();
         expect(find.text('@Launch'), findsWidgets);
-        await tester.tap(find.widgetWithText(FilterChip, '@Launch'));
+        final launchFilterChip = find.widgetWithText(FilterChip, '@Launch');
+        await tester.ensureVisible(launchFilterChip);
+        await tester.pumpAndSettle();
+        await tester.tap(launchFilterChip);
         await tester.pumpAndSettle();
         expect(find.text('Review release notes'), findsOneWidget);
         expect(find.text('Buy groceries'), findsNothing);
 
         // Clear filters brings both tasks back
-        await tester.tap(find.text('Clear filters').first);
+        final clearFiltersBtn = find.text('Clear filters').first;
+        await tester.ensureVisible(clearFiltersBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(clearFiltersBtn);
         await tester.pumpAndSettle();
         expect(find.text('Review release notes'), findsOneWidget);
         expect(find.text('Buy groceries'), findsOneWidget);
 
         // Open Manage Tags dialog
-        await tester.tap(find.byTooltip('Manage Tags'));
+        final manageTagsBtn = find.byTooltip('Manage Tags');
+        await tester.ensureVisible(manageTagsBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(manageTagsBtn);
         await tester.pumpAndSettle();
         expect(find.text('Manage Tags'), findsOneWidget);
         await tester.tap(find.text('Done'));
