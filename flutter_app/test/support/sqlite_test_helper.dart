@@ -1,6 +1,7 @@
 import 'dart:ffi';
 import 'dart:io';
 
+import 'package:drift/drift.dart' show driftRuntimeOptions;
 // ignore: depend_on_referenced_packages
 import 'package:sqlite3/open.dart';
 
@@ -8,10 +9,12 @@ bool _sqliteConfigured = false;
 
 /// Ensures Linux host `flutter test` runs can resolve `libsqlite3.so` even
 /// when only versioned `libsqlite3.so.0` (standard `libsqlite3-0` runtime
-/// without `-dev` symlink) is present in the environment.
+/// without `-dev` symlink) is present in the environment, and suppresses
+/// Drift's multi-database warning when tests open isolated DB instances.
 void configureSqliteForHostTests() {
   if (_sqliteConfigured) return;
   _sqliteConfigured = true;
+  driftRuntimeOptions.dontWarnAboutMultipleDatabases = true;
   if (!Platform.isLinux) return;
 
   open.overrideFor(OperatingSystem.linux, _openLinuxSqlite);
