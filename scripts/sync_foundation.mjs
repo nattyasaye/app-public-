@@ -647,6 +647,72 @@ export function validateBusinessRules(rules) {
     );
   }
 
+  if (rules.dailyRhythm !== undefined) {
+    if (!isPlainObject(rules.dailyRhythm)) {
+      throw new Error(`Missing or invalid "dailyRhythm" object in ${fileLabel}.`);
+    }
+    assertFieldInteger(
+      rules.dailyRhythm.qualifyingDaysPerFreeze,
+      fileLabel,
+      'dailyRhythm.qualifyingDaysPerFreeze',
+      { min: 1 }
+    );
+    assertFieldInteger(
+      rules.dailyRhythm.maxStreakFreezes,
+      fileLabel,
+      'dailyRhythm.maxStreakFreezes',
+      { min: 1 }
+    );
+    assertFieldInteger(
+      rules.dailyRhythm.maxProtectedGapDays,
+      fileLabel,
+      'dailyRhythm.maxProtectedGapDays',
+      { min: 1, max: 1 }
+    );
+    for (const listKey of ['dayStatuses', 'financeCloseStatuses']) {
+      if (!Array.isArray(rules.dailyRhythm[listKey]) || rules.dailyRhythm[listKey].length === 0) {
+        throw new Error(`Missing or empty "${fileLabel}" array "dailyRhythm.${listKey}".`);
+      }
+      for (let i = 0; i < rules.dailyRhythm[listKey].length; i += 1) {
+        assertFieldNonEmptyString(
+          rules.dailyRhythm[listKey][i],
+          fileLabel,
+          `dailyRhythm.${listKey}[${i}]`
+        );
+      }
+    }
+    assertFieldNonEmptyString(
+      rules.dailyRhythm.defaultFinanceCloseStatus,
+      fileLabel,
+      'dailyRhythm.defaultFinanceCloseStatus'
+    );
+    if (
+      !rules.dailyRhythm.financeCloseStatuses.includes(rules.dailyRhythm.defaultFinanceCloseStatus)
+    ) {
+      throw new Error(
+        `Invalid ${fileLabel} field "dailyRhythm.defaultFinanceCloseStatus": "${rules.dailyRhythm.defaultFinanceCloseStatus}" is not in dailyRhythm.financeCloseStatuses.`
+      );
+    }
+    if (!isPlainObject(rules.dailyRhythm.rules)) {
+      throw new Error(`Missing or invalid "dailyRhythm.rules" object in ${fileLabel}.`);
+    }
+    for (const flagKey of [
+      'requireAllThreeResponsibilities',
+      'requireBothFaithPractices',
+      'requireCompletingAllTasks',
+      'emptyFinanceDayAutoQualifies',
+      'lockPastFaithAndTaskReview',
+      'preserveFinalizedHistoryOnLedgerCorrection',
+      'useEthiopiaDateConvention',
+    ]) {
+      assertFieldBoolean(
+        rules.dailyRhythm.rules[flagKey],
+        fileLabel,
+        `dailyRhythm.rules.${flagKey}`
+      );
+    }
+  }
+
   return rules;
 }
 
@@ -1045,6 +1111,21 @@ const DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS = [
   'dismissed',
 ];
 
+const DEFAULT_CANONICAL_DAILY_RHYTHM_DAY_STATUSES = [
+  'untouched',
+  'partial',
+  'complete',
+  'freeze_protected',
+  'missed',
+];
+
+const DEFAULT_CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES = [
+  'open',
+  'closed_with_transactions',
+  'closed_no_transactions',
+  'needs_reconfirmation',
+];
+
 export function buildTypeScriptFoundation({ tokens, rules, seedDb, contracts = null }) {
   const entryTypeEnum =
     contracts?.entities?.JournalEntry?.fields?.entryType?.enum ?? DEFAULT_CANONICAL_ENTRY_TYPES;
@@ -1065,6 +1146,12 @@ export function buildTypeScriptFoundation({ tokens, rules, seedDb, contracts = n
   const dailyPlanningActionEnum =
     contracts?.entities?.DailyPlanningEntry?.fields?.action?.enum ??
     DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS;
+  const dailyRhythmDayStatusEnum =
+    rules?.dailyRhythm?.dayStatuses ?? DEFAULT_CANONICAL_DAILY_RHYTHM_DAY_STATUSES;
+  const dailyRhythmFinanceCloseStatusEnum =
+    contracts?.entities?.DailyRhythmDay?.fields?.financeCloseStatus?.enum ??
+    rules?.dailyRhythm?.financeCloseStatuses ??
+    DEFAULT_CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES;
   const plannedV10TaskFields = Object.entries(contracts?.entities?.Task?.fields ?? {})
     .filter(([, def]) => def?.plannedDatabaseSchemaVersion === 10)
     .map(([fieldName]) => fieldName);
@@ -1100,6 +1187,16 @@ export type SharedTaskRecurrenceRepeatFrom =
 
 export const CANONICAL_DAILY_PLANNING_ACTIONS = ${JSON.stringify(dailyPlanningActionEnum)} as const;
 export type SharedDailyPlanningAction = (typeof CANONICAL_DAILY_PLANNING_ACTIONS)[number];
+
+export const CANONICAL_DAILY_RHYTHM_DAY_STATUSES = ${JSON.stringify(dailyRhythmDayStatusEnum)} as const;
+export type SharedDailyRhythmDayStatus =
+  (typeof CANONICAL_DAILY_RHYTHM_DAY_STATUSES)[number];
+
+export const CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES = ${JSON.stringify(
+    dailyRhythmFinanceCloseStatusEnum
+  )} as const;
+export type SharedDailyRhythmFinanceCloseStatus =
+  (typeof CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES)[number];
 
 export const PLANNED_TASK_V10_FIELDS = ${JSON.stringify(plannedV10TaskFields)} as const;
 
@@ -1173,6 +1270,27 @@ export interface SharedDailyPlanningEntry {
   action: SharedDailyPlanningAction;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface SharedDailyRhythmTaskReviewEvidence {
+  overdueCount: number;
+  todayCount: number;
+  plannedCount: number;
+  completedTodayCount: number;
+}
+
+export interface SharedDailyRhythmDay {
+  dateIso: string;
+  bibleStudyDone: boolean;
+  bibleStudyCompletedAt?: string;
+  prayerDone: boolean;
+  prayerCompletedAt?: string;
+  taskReviewConfirmed: boolean;
+  taskReviewedAt?: string;
+  taskReviewEvidence?: SharedDailyRhythmTaskReviewEvidence;
+  financeCloseStatus: SharedDailyRhythmFinanceCloseStatus;
+  financeClosedAt?: string;
+  updatedAt: string;
 }
 
 export interface SharedNote {
@@ -1812,6 +1930,13 @@ export function buildDartFoundationCore({ seedDb, rules, contracts = null }) {
   const dailyPlanningActionEnum =
     contracts?.entities?.DailyPlanningEntry?.fields?.action?.enum ??
     DEFAULT_CANONICAL_DAILY_PLANNING_ACTIONS;
+  const dailyRhythmDayStatusEnum =
+    rules?.dailyRhythm?.dayStatuses ?? DEFAULT_CANONICAL_DAILY_RHYTHM_DAY_STATUSES;
+  const dailyRhythmFinanceCloseStatusEnum =
+    contracts?.entities?.DailyRhythmDay?.fields?.financeCloseStatus?.enum ??
+    rules?.dailyRhythm?.financeCloseStatuses ??
+    DEFAULT_CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES;
+  const dailyRhythmRules = rules?.dailyRhythm?.rules ?? {};
   const subtaskCanonicalFields =
     rules?.tasks?.subtaskCanonicalFields ?? ['id', 'title', 'done'];
   const dailyPlanningUniqueKey =
@@ -2085,6 +2210,39 @@ class SharedProjectPackageSpec {
   static const int currentFormatVersion = ${rules.projectPackage.currentFormatVersion};
   static const int minSupportedFormatVersion = ${rules.projectPackage.minSupportedFormatVersion};
   static const String fileExtension = '${escapeDartString(rules.projectPackage.fileExtension)}';
+}
+
+class SharedDailyRhythmContracts {
+${renderDartEnumList('canonicalDayStatuses', dailyRhythmDayStatusEnum)}
+
+${renderDartEnumList('canonicalFinanceCloseStatuses', dailyRhythmFinanceCloseStatusEnum)}
+
+${formatDartConst('String', 'defaultFinanceCloseStatus', `'${escapeDartString(rules?.dailyRhythm?.defaultFinanceCloseStatus ?? 'open')}'`)}
+  static const int qualifyingDaysPerFreeze = ${rules?.dailyRhythm?.qualifyingDaysPerFreeze ?? 15};
+  static const int maxStreakFreezes = ${rules?.dailyRhythm?.maxStreakFreezes ?? 2};
+  static const int maxProtectedGapDays = ${rules?.dailyRhythm?.maxProtectedGapDays ?? 1};
+
+  static const bool requireAllThreeResponsibilities = ${
+    dailyRhythmRules.requireAllThreeResponsibilities !== false
+  };
+  static const bool requireBothFaithPractices = ${
+    dailyRhythmRules.requireBothFaithPractices !== false
+  };
+  static const bool requireCompletingAllTasks = ${
+    dailyRhythmRules.requireCompletingAllTasks === true
+  };
+  static const bool emptyFinanceDayAutoQualifies = ${
+    dailyRhythmRules.emptyFinanceDayAutoQualifies === true
+  };
+  static const bool lockPastFaithAndTaskReview = ${
+    dailyRhythmRules.lockPastFaithAndTaskReview !== false
+  };
+  static const bool preserveFinalizedHistoryOnLedgerCorrection = ${
+    dailyRhythmRules.preserveFinalizedHistoryOnLedgerCorrection !== false
+  };
+  static const bool useEthiopiaDateConvention = ${
+    dailyRhythmRules.useEthiopiaDateConvention !== false
+  };
 }
 
 class KnownSeedIds {

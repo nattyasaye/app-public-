@@ -91,5 +91,27 @@
     "currentFormatVersion": 1,
     "minSupportedFormatVersion": 1,
     "fileExtension": ".daywellproject"
+  },
+  "dailyRhythm": {
+    "qualifyingDaysPerFreeze": 15,
+    "maxStreakFreezes": 2,
+    "maxProtectedGapDays": 1,
+    "dayStatuses": ["untouched", "partial", "complete", "freeze_protected", "missed"],
+    "financeCloseStatuses": [
+      "open",
+      "closed_with_transactions",
+      "closed_no_transactions",
+      "needs_reconfirmation"
+    ],
+    "defaultFinanceCloseStatus": "open",
+    "rules": {
+      "requireAllThreeResponsibilities": true,
+      "requireBothFaithPractices": true,
+      "requireCompletingAllTasks": false,
+      "emptyFinanceDayAutoQualifies": false,
+      "lockPastFaithAndTaskReview": true,
+      "preserveFinalizedHistoryOnLedgerCorrection": true,
+      "useEthiopiaDateConvention": true
+    }
   }
 }

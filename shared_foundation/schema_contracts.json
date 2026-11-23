@@ -395,6 +395,41 @@
         "value": { "type": "string", "required": true },
         "updatedAt": { "type": "string", "format": "date-time", "required": false }
       }
+    },
+    "DailyRhythmDay": {
+      "plannedDatabaseSchemaVersion": 12,
+      "uniqueKey": ["dateIso"],
+      "fields": {
+        "dateIso": { "type": "string", "format": "date", "required": true },
+        "bibleStudyDone": { "type": "boolean", "default": false },
+        "bibleStudyCompletedAt": { "type": "string", "format": "date-time", "required": false },
+        "prayerDone": { "type": "boolean", "default": false },
+        "prayerCompletedAt": { "type": "string", "format": "date-time", "required": false },
+        "taskReviewConfirmed": { "type": "boolean", "default": false },
+        "taskReviewedAt": { "type": "string", "format": "date-time", "required": false },
+        "taskReviewEvidence": {
+          "type": "object",
+          "required": false,
+          "properties": {
+            "overdueCount": { "type": "integer", "minimum": 0, "default": 0 },
+            "todayCount": { "type": "integer", "minimum": 0, "default": 0 },
+            "plannedCount": { "type": "integer", "minimum": 0, "default": 0 },
+            "completedTodayCount": { "type": "integer", "minimum": 0, "default": 0 }
+          }
+        },
+        "financeCloseStatus": {
+          "type": "string",
+          "enum": [
+            "open",
+            "closed_with_transactions",
+            "closed_no_transactions",
+            "needs_reconfirmation"
+          ],
+          "default": "open"
+        },
+        "financeClosedAt": { "type": "string", "format": "date-time", "required": false },
+        "updatedAt": { "type": "string", "format": "date-time", "required": true }
+      }
     }
   }
 }
