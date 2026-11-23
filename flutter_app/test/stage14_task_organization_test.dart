@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -303,37 +302,76 @@ void main() {
       '3. TasksView renders shared DaywellSearchFilterBar, Active/Overdue chips, Filter controls, Manage Tags, and Clear filters',
       (WidgetTester tester) async {
         await tester.binding.setSurfaceSize(const Size(1000, 1400));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-        final h = await createHarness();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final tasksRepo = DriftTasksRepository(db);
+          final projectsRepo = DriftProjectsRepository(db);
+          final tasksCtrl = TasksController(repository: tasksRepo);
+          final projectsCtrl = ProjectsController(repository: projectsRepo);
+          await tasksCtrl.loadAll();
+          await projectsCtrl.loadAll();
+
+          final today = CalendarDate.today();
+          final yesterday = today.addDays(-1);
+          await tasksCtrl.createTask(
+            id: 'w14-1',
+            title: 'Review release notes',
+            description: 'Verify changelog',
+            priority: 'high',
+            dueDate: yesterday,
+            labels: const ['Launch'],
+          );
+          await tasksCtrl.createTask(
+            id: 'w14-2',
+            title: 'Buy groceries',
+            dueDate: today.addDays(2),
+            labels: const ['Errands'],
+          );
+          return (
+            db: db,
+            tasksCtrl: tasksCtrl,
+            projectsCtrl: projectsCtrl,
+          );
+        });
+
+        final db = fixture!.db;
+        final tasksCtrl = fixture.tasksCtrl;
+        final projectsCtrl = fixture.projectsCtrl;
+
         addTearDown(() async {
           await tester.pumpWidget(const SizedBox.shrink());
-          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 20));
+          tasksCtrl.dispose();
+          projectsCtrl.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
         });
-        final today = CalendarDate.today();
-        final yesterday = today.addDays(-1);
-
-        await h.tasksCtrl.createTask(
-          id: 'w14-1',
-          title: 'Review release notes',
-          description: 'Verify changelog',
-          priority: 'high',
-          dueDate: yesterday,
-          labels: const ['Launch'],
-        );
-        await h.tasksCtrl.createTask(
-          id: 'w14-2',
-          title: 'Buy groceries',
-          dueDate: today.addDays(2),
-          labels: const ['Errands'],
-        );
 
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
             home: TasksView(
-              controller: h.tasksCtrl,
-              projectsController: h.projectsCtrl,
+              controller: tasksCtrl,
+              projectsController: projectsCtrl,
             ),
           ),
         );
@@ -363,16 +401,13 @@ void main() {
         expect(find.text('Review release notes'), findsOneWidget);
         expect(find.text('Buy groceries'), findsOneWidget);
 
-        // Open Filters panel and filter by @Launch tag
+        // Open Filters panel and filter by @Launch tag (header controls are already visible;
+        // do not call ensureVisible here as their nearest Scrollable ancestor is TabBarView).
         final toggleFiltersBtn = find.byTooltip('Toggle Filters');
-        await tester.ensureVisible(toggleFiltersBtn);
-        await tester.pumpAndSettle();
         await tester.tap(toggleFiltersBtn);
         await tester.pumpAndSettle();
         expect(find.text('@Launch'), findsWidgets);
         final launchFilterChip = find.widgetWithText(FilterChip, '@Launch');
-        await tester.ensureVisible(launchFilterChip);
-        await tester.pumpAndSettle();
         await tester.tap(launchFilterChip);
         await tester.pumpAndSettle();
         expect(find.text('Review release notes'), findsOneWidget);
@@ -380,8 +415,6 @@ void main() {
 
         // Clear filters brings both tasks back
         final clearFiltersBtn = find.text('Clear filters').first;
-        await tester.ensureVisible(clearFiltersBtn);
-        await tester.pumpAndSettle();
         await tester.tap(clearFiltersBtn);
         await tester.pumpAndSettle();
         expect(find.text('Review release notes'), findsOneWidget);
@@ -389,8 +422,6 @@ void main() {
 
         // Open Manage Tags dialog
         final manageTagsBtn = find.byTooltip('Manage Tags');
-        await tester.ensureVisible(manageTagsBtn);
-        await tester.pumpAndSettle();
         await tester.tap(manageTagsBtn);
         await tester.pumpAndSettle();
         expect(find.text('Manage Tags'), findsOneWidget);

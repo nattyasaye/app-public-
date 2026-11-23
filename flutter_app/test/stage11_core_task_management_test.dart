@@ -125,19 +125,53 @@ void main() {
     testWidgets(
       'TasksView renders Create, Details, Edit, Complete/Reopen, Archive/Restore, and Safe Delete confirmation flows',
       (WidgetTester tester) async {
-        final harness = await createHarness();
-        final ctrl = harness.ctrl;
-        final today = CalendarDate.today();
+        await tester.binding.setSurfaceSize(const Size(1000, 1400));
 
-        await ctrl.createTask(
-          id: 'ui-task-1',
-          title: 'Review contract',
-          description: 'Check section 4 terms',
-          priority: 'high',
-          status: 'in_progress',
-          scheduledDate: today,
-          dueDate: today,
-        );
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final repo = DriftTasksRepository(db);
+          final ctrl = TasksController(repository: repo);
+          final today = CalendarDate.today();
+          await ctrl.createTask(
+            id: 'ui-task-1',
+            title: 'Review contract',
+            description: 'Check section 4 terms',
+            priority: 'high',
+            status: 'in_progress',
+            scheduledDate: today,
+            dueDate: today,
+          );
+          return (db: db, ctrl: ctrl);
+        });
+
+        final db = fixture!.db;
+        final ctrl = fixture.ctrl;
+
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          ctrl.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
+        });
 
         await tester.pumpWidget(
           MaterialApp(
@@ -161,6 +195,8 @@ void main() {
         expect(find.text('Delete'), findsOneWidget);
 
         // Open Edit sheet from Details
+        await tester.ensureVisible(find.text('Edit'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Edit'));
         await tester.pumpAndSettle();
         expect(find.text('Edit Task'), findsOneWidget);
@@ -171,6 +207,8 @@ void main() {
           find.widgetWithText(TextFormField, 'Review contract'),
           'Review updated contract',
         );
+        await tester.ensureVisible(find.text('Save Changes'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Save Changes'));
         await tester.pumpAndSettle();
         expect(find.text('Review updated contract'), findsOneWidget);
@@ -178,11 +216,15 @@ void main() {
         // Open Details and Archive task
         await tester.tap(find.text('Review updated contract'));
         await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Archive'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Archive'));
         await tester.pumpAndSettle();
 
         // Hidden from Today, visible in Archived chip
         expect(find.text('Review updated contract'), findsNothing);
+        await tester.ensureVisible(find.text('Archived'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Archived'));
         await tester.pumpAndSettle();
         expect(find.text('Review updated contract'), findsOneWidget);
@@ -190,14 +232,20 @@ void main() {
         // Restore via Details
         await tester.tap(find.text('Review updated contract'));
         await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Restore'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Restore'));
         await tester.pumpAndSettle();
         expect(ctrl.state.archivedCount, 0);
 
         // Switch back to All and test Safe Delete confirmation + Undo
+        await tester.ensureVisible(find.text('All'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('All'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Review updated contract'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Delete'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Delete'));
         await tester.pumpAndSettle();
