@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -36,6 +37,8 @@ void main() {
       final projectsRepo = DriftProjectsRepository(db);
       final tasksCtrl = TasksController(repository: tasksRepo);
       final projectsCtrl = ProjectsController(repository: projectsRepo);
+      addTearDown(tasksCtrl.dispose);
+      addTearDown(projectsCtrl.dispose);
       await tasksCtrl.loadAll();
       await projectsCtrl.loadAll();
 
@@ -179,7 +182,14 @@ void main() {
     testWidgets(
       '3. ProjectsWorkspaceTab and ProjectDetailScreen render derived progress, milestones, and sections without raw color literals',
       (tester) async {
+        await tester.binding.setSurfaceSize(const Size(900, 1400));
+        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
+
         final h = await createHarness();
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump();
+        });
         final project = await h.projectsCtrl.createProject(
           id: 'proj-ui-13',
           title: 'Stage 1.3 UI Check',
@@ -220,7 +230,9 @@ void main() {
         expect(find.text('Stage 1.3 UI Check'), findsOneWidget);
         expect(find.text('33%'), findsOneWidget);
         expect(
-            find.textContaining('1/2 tasks · 0/1 milestone'), findsOneWidget);
+          find.textContaining('1/2 tasks · 1 remaining · 0/1 milestone'),
+          findsOneWidget,
+        );
 
         await tester.pumpWidget(
           MaterialApp(

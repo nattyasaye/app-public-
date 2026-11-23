@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -201,7 +203,14 @@ void main() {
     testWidgets(
       '3. TasksView My Day workspace displays suggestions, plans tasks, reorders, removes without deleting, and reviews history',
       (WidgetTester tester) async {
+        await tester.binding.setSurfaceSize(const Size(1000, 1600));
+        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
+
         final harness = await createHarness();
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump();
+        });
         final ctrl = harness.ctrl;
         final today = CalendarDate.today();
         final yesterday = today.addDays(-1);
@@ -232,7 +241,10 @@ void main() {
         await tester.pumpAndSettle();
 
         // Switch to My Day filter chip
-        await tester.tap(find.text('My Day'));
+        final myDayChip = find.text('My Day');
+        await tester.ensureVisible(myDayChip);
+        await tester.pumpAndSettle();
+        await tester.tap(myDayChip);
         await tester.pumpAndSettle();
 
         expect(find.text('Remaining for This Day'), findsOneWidget);
@@ -242,7 +254,10 @@ void main() {
         expect(find.text('Scheduled review'), findsOneWidget);
 
         // Carry forward all unfinished tasks
-        await tester.tap(find.text('Carry forward all (1)'));
+        final carryForwardBtn = find.text('Carry forward all (1)');
+        await tester.ensureVisible(carryForwardBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(carryForwardBtn);
         await tester.pumpAndSettle();
 
         expect(
@@ -256,14 +271,19 @@ void main() {
         );
 
         // Remove from My Day keeps task in underlying Tasks store
-        await tester.tap(
-          find.byTooltip('Remove Yesterday carryover item from My Day'),
-        );
+        final removeFromDayBtn =
+            find.byTooltip('Remove Yesterday carryover item from My Day');
+        await tester.ensureVisible(removeFromDayBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(removeFromDayBtn);
         await tester.pumpAndSettle();
         expect(ctrl.state.findTaskById('ui-yesterday'), isNotNull);
 
         // Step to previous day and verify history review + carry-to-today banner
-        await tester.tap(find.byTooltip('Previous day'));
+        final previousDayBtn = find.byTooltip('Previous day');
+        await tester.ensureVisible(previousDayBtn);
+        await tester.pumpAndSettle();
+        await tester.tap(previousDayBtn);
         await tester.pumpAndSettle();
         expect(find.text('Past Day Review'), findsOneWidget);
         expect(find.text('Yesterday carryover item'), findsOneWidget);
