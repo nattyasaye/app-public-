@@ -137,16 +137,68 @@ void main() {
     testWidgets(
       'TasksView renders Task Details subtasks even when initially empty, supports add/toggle/edit/reorder/delete+Undo and progress readout',
       (WidgetTester tester) async {
-        final harness = await createHarness();
-        final ctrl = harness.ctrl;
-        final today = CalendarDate.today();
+        await tester.binding.setSurfaceSize(const Size(1000, 1400));
 
-        await ctrl.createTask(
-          id: 's12-ui-1',
-          title: 'Launch checklist',
-          scheduledDate: today,
-          dueDate: today,
-        );
+        final today = CalendarDate.today();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final repo = DriftTasksRepository(db);
+          final ctrl = TasksController(repository: repo);
+          await ctrl.loadAll();
+          await ctrl.createTask(
+            id: 's12-ui-1',
+            title: 'Launch checklist',
+            scheduledDate: today,
+            dueDate: today,
+          );
+          return (db: db, ctrl: ctrl);
+        });
+
+        final db = fixture!.db;
+        final ctrl = fixture.ctrl;
+
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          ctrl.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
+        });
+
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await tester.pumpAndSettle();
+        }
 
         await tester.pumpWidget(
           MaterialApp(
@@ -168,25 +220,41 @@ void main() {
           'First step',
         );
         await tester.tap(find.byTooltip('Add subtask'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              (ctrl.state.findTaskById('s12-ui-1')?.subtasks.length ?? 0) == 1,
+          reason: 'First subtask was not persisted.',
+        );
 
         await tester.enterText(
           find.widgetWithText(TextField, 'Add a subtask...'),
           'Second step',
         );
         await tester.tap(find.byTooltip('Add subtask'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              (ctrl.state.findTaskById('s12-ui-1')?.subtasks.length ?? 0) == 2,
+          reason: 'Second subtask was not persisted.',
+        );
 
         expect(find.text('0 of 2 done (0%)'), findsOneWidget);
 
         // Check first subtask complete -> 1 of 2 done (50%)
         await tester.tap(find.byType(Checkbox).at(1));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => ctrl.state.findTaskById('s12-ui-1')!.completedSubtaskCount == 1,
+          reason: 'Subtask completion toggle was not persisted.',
+        );
         expect(find.text('1 of 2 done (50%)'), findsOneWidget);
 
         // Move second subtask up
         await tester.tap(find.byTooltip('Move up').at(1));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              ctrl.state.findTaskById('s12-ui-1')!.subtasks.first.title ==
+              'Second step',
+          reason: 'Subtask reorder was not persisted.',
+        );
         expect(
           ctrl.state.findTaskById('s12-ui-1')!.subtasks.first.title,
           'Second step',
@@ -200,7 +268,12 @@ void main() {
           'Renamed first step',
         );
         await tester.tap(find.byTooltip('Save subtask'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              ctrl.state.findTaskById('s12-ui-1')!.subtasks.first.title ==
+              'Renamed first step',
+          reason: 'Subtask title edit was not persisted.',
+        );
         expect(
           ctrl.state.findTaskById('s12-ui-1')!.subtasks.first.title,
           'Renamed first step',
@@ -208,7 +281,10 @@ void main() {
 
         // Delete a subtask and verify Undo option appears
         await tester.tap(find.byTooltip('Delete subtask').first);
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => ctrl.state.findTaskById('s12-ui-1')!.subtasks.length == 1,
+          reason: 'Subtask deletion was not persisted.',
+        );
         expect(ctrl.state.findTaskById('s12-ui-1')!.subtasks.length, 1);
         expect(find.text('Undo'), findsOneWidget);
       },

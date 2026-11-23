@@ -311,34 +311,84 @@ void main() {
     testWidgets(
       '4. TasksView & NotesView UI workflows support creating/linking/opening/unlinking notes and bidirectional navigation',
       (WidgetTester tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        addTearDown(db.close);
+        await tester.binding.setSurfaceSize(const Size(1000, 1400));
 
-        final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
-        final notesCtrl = NotesController(repository: DriftNotesRepository(db));
-        addTearDown(() {
-          tasksCtrl.dispose();
-          notesCtrl.dispose();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final tasksCtrl =
+              TasksController(repository: DriftTasksRepository(db));
+          final notesCtrl =
+              NotesController(repository: DriftNotesRepository(db));
+          await tasksCtrl.loadAll();
+          await notesCtrl.loadNotes();
+
+          await tasksCtrl.createTask(
+            id: 'task-ui-1',
+            title: 'Inspect Pump',
+            description: 'Check pressure gauge',
+          );
+          await notesCtrl.createNote(
+            id: 'note-ui-existing',
+            title: 'Existing Pump Log',
+            content: 'Baseline reading 2.4 bar',
+          );
+          await notesCtrl.createNote(
+            id: 'note-ui-dangling',
+            title: 'Dangling Note',
+            content: 'Target removed externally',
+            linkedModule: NoteEntity.taskLinkModule,
+            linkedId: 'missing-task-id',
+          );
+          return (db: db, tasksCtrl: tasksCtrl, notesCtrl: notesCtrl);
         });
 
-        await tasksCtrl.createTask(
-          id: 'task-ui-1',
-          title: 'Inspect Pump',
-          description: 'Check pressure gauge',
-        );
-        await notesCtrl.createNote(
-          id: 'note-ui-existing',
-          title: 'Existing Pump Log',
-          content: 'Baseline reading 2.4 bar',
-        );
-        await notesCtrl.createNote(
-          id: 'note-ui-dangling',
-          title: 'Dangling Note',
-          content: 'Target removed externally',
-          linkedModule: NoteEntity.taskLinkModule,
-          linkedId: 'missing-task-id',
-        );
+        final db = fixture!.db;
+        final tasksCtrl = fixture.tasksCtrl;
+        final notesCtrl = fixture.notesCtrl;
+
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          tasksCtrl.dispose();
+          notesCtrl.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
+        });
+
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await tester.pumpAndSettle();
+        }
 
         String? openedNoteId;
         String? openedTaskId;
@@ -367,14 +417,25 @@ void main() {
         await tester.tap(find.text('Link Existing'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Existing Pump Log'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              notesCtrl.state.findById('note-ui-existing')?.linkedId ==
+                  'task-ui-1' &&
+              find.text('Linked Notes (1)').evaluate().isNotEmpty,
+          reason: 'Linking existing note did not persist.',
+        );
 
         expect(find.text('Linked Notes (1)'), findsOneWidget);
         expect(find.text('Existing Pump Log'), findsWidgets);
 
         // Create new note from Task Details
         await tester.tap(find.text('New Note'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              openedNoteId != null &&
+              notesCtrl.state.findById(openedNoteId!) != null,
+          reason: 'New Note did not persist and invoke onOpenNote.',
+        );
         expect(openedNoteId, isNotNull);
         final createdFromUi = notesCtrl.state.findById(openedNoteId!);
         expect(createdFromUi, isNotNull);
@@ -400,7 +461,12 @@ void main() {
         expect(find.text('Open'), findsOneWidget);
 
         await tester.tap(find.text('Open'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              openedTaskId == 'task-ui-1' &&
+              find.text('Linked task unavailable').evaluate().isNotEmpty,
+          reason: 'Open button did not save note, pop editor, and open task.',
+        );
         expect(openedTaskId, 'task-ui-1');
 
         // Card view shows linked task badge and safe dangling fallback

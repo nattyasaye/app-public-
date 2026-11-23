@@ -68,18 +68,26 @@ void main() {
         expect(task.subtasks.single.id, 'task-ctrl-1-sub-1');
         expect(task.subtasks.single.title, 'Check light theme');
 
-        // Upsert DailyPlanningEntry and verify query by date & taskId
+        // Verify controller completion synced the 2026-11-21 DailyPlanningEntry,
+        // then upsert an explicit entry on 2026-11-22 and verify query + cascade.
+        final syncedEntries = await repo.getDailyPlanningEntries(
+          planDate: CalendarDate(year: 2026, month: 11, day: 21),
+        );
+        expect(syncedEntries.length, 1);
+        expect(syncedEntries.single.id, 'dpe-2026-11-21-task-ctrl-1');
+        expect(syncedEntries.single.action, 'completed');
+
         final entry = DailyPlanningEntryEntity(
           id: 'dpe-1',
-          planDate: CalendarDate(year: 2026, month: 11, day: 21),
+          planDate: CalendarDate(year: 2026, month: 11, day: 22),
           taskId: 'task-ctrl-1',
           action: 'completed',
-          createdAt: DateTime.utc(2026, 11, 21, 6, 0),
-          updatedAt: DateTime.utc(2026, 11, 21, 10, 0),
+          createdAt: DateTime.utc(2026, 11, 22, 6, 0),
+          updatedAt: DateTime.utc(2026, 11, 22, 10, 0),
         );
         await repo.upsertDailyPlanningEntry(entry);
         final entries = await repo.getDailyPlanningEntries(
-          planDate: CalendarDate(year: 2026, month: 11, day: 21),
+          planDate: CalendarDate(year: 2026, month: 11, day: 22),
         );
         expect(entries.length, 1);
         expect(entries.single.id, 'dpe-1');

@@ -152,35 +152,89 @@ void main() {
     testWidgets(
       '3. QuickCaptureDialog & TasksView Inbox triage: edit capture, mark processed, and convert capture to Task without duplicate active Inbox entry',
       (WidgetTester tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        addTearDown(db.close);
+        await tester.binding.setSurfaceSize(const Size(1000, 1400));
 
-        final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
-        final projectsCtrl =
-            ProjectsController(repository: DriftProjectsRepository(db));
-        final inboxCtrl = InboxController(repository: DriftInboxRepository(db));
-        addTearDown(() async {
-          tasksCtrl.dispose();
-          projectsCtrl.dispose();
-          await inboxCtrl.disposeAsync();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final tasksCtrl =
+              TasksController(repository: DriftTasksRepository(db));
+          final projectsCtrl =
+              ProjectsController(repository: DriftProjectsRepository(db));
+          final inboxCtrl =
+              InboxController(repository: DriftInboxRepository(db));
+
+          await tasksCtrl.loadAll();
+          await projectsCtrl.loadAll();
+          await inboxCtrl.loadItems();
+
+          // Seed two unprocessed captures (via controller, zero premature Tasks)
+          await inboxCtrl.captureQuickThought(
+            'Draft client proposal\nAttach Q4 timeline',
+            category: 'task',
+            autoTriage: false,
+          );
+          await inboxCtrl.captureQuickThought(
+            'Old temporary thought',
+            category: 'idea',
+            autoTriage: false,
+          );
+          return (
+            db: db,
+            tasksCtrl: tasksCtrl,
+            projectsCtrl: projectsCtrl,
+            inboxCtrl: inboxCtrl,
+          );
         });
 
-        await tasksCtrl.loadAll();
-        await projectsCtrl.loadAll();
-        await inboxCtrl.loadItems();
+        final db = fixture!.db;
+        final tasksCtrl = fixture.tasksCtrl;
+        final projectsCtrl = fixture.projectsCtrl;
+        final inboxCtrl = fixture.inboxCtrl;
 
-        // Seed two unprocessed captures (via controller, zero premature Tasks)
-        await inboxCtrl.captureQuickThought(
-          'Draft client proposal\nAttach Q4 timeline',
-          category: 'task',
-          autoTriage: false,
-        );
-        await inboxCtrl.captureQuickThought(
-          'Old temporary thought',
-          category: 'idea',
-          autoTriage: false,
-        );
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          tasksCtrl.dispose();
+          projectsCtrl.dispose();
+          await tester.runAsync(() => inboxCtrl.disposeAsync());
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
+        });
+
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await tester.pumpAndSettle();
+        }
 
         await tester.pumpWidget(
           MaterialApp(
@@ -215,21 +269,28 @@ void main() {
         final markButtons = find.text('Mark Processed');
         expect(markButtons, findsNWidgets(2));
         await tester.tap(markButtons.first);
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => inboxCtrl.unprocessedCount == 1,
+          reason: 'Mark Processed did not update inboxCtrl.',
+        );
         expect(inboxCtrl.unprocessedCount, 1);
 
         // Convert remaining capture -> opens prefilled Task form & marks source Inbox item processed on save
-        await tester.tap(find.text('Convert to Task'));
+        final openConvertButton = find.text('Convert to Task');
+        await tester.ensureVisible(openConvertButton);
+        await tester.tap(openConvertButton);
         await tester.pumpAndSettle();
 
-        expect(find.text('Convert Inbox Capture to Task'), findsOneWidget);
-        await tester.tap(find
-                .widgetWithText(FilledButton, 'Convert to Task')
-                .evaluate()
-                .isNotEmpty
-            ? find.widgetWithText(FilledButton, 'Convert to Task')
-            : find.text('Convert to Task').last);
-        await tester.pumpAndSettle();
+        expect(find.text('Convert Inbox Item to Task'), findsOneWidget);
+        final submitConvertButton = find.text('Convert to Task').last;
+        await tester.ensureVisible(submitConvertButton);
+        await tester.tap(submitConvertButton);
+        await pumpUntil(
+          () =>
+              tasksCtrl.state.tasks.length == 1 &&
+              inboxCtrl.unprocessedCount == 0,
+          reason: 'Convert to Task did not persist new task and clear inbox.',
+        );
 
         expect(tasksCtrl.state.tasks.length, 1);
         expect(tasksCtrl.state.tasks.first.title, 'Draft client proposal');
@@ -262,7 +323,10 @@ void main() {
           'Captured via modal offline',
         );
         await tester.tap(find.text('Capture'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => inboxCtrl.unprocessedCount == 1,
+          reason: 'QuickCaptureDialog capture did not persist.',
+        );
 
         expect(inboxCtrl.unprocessedCount, 1);
         expect(
