@@ -6,11 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/tasks/tasks_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
-import 'package:personal_management_app/core/shared_foundation_core.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/database_persistence_coordinator.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
-import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/services/backup/encryption_backup_service.dart';
 
 import 'support/sqlite_test_helper.dart';

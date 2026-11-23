@@ -10,7 +10,6 @@ import 'package:personal_management_app/data/database/database_persistence_coord
 import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
 import 'package:personal_management_app/domain/projects/project_models.dart';
-import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/domain/tasks/task_recurrence_engine.dart';
 import 'package:personal_management_app/ui/screens/tasks_view.dart';
 
