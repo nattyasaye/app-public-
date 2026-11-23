@@ -455,6 +455,7 @@ class DebtsTable extends Table {
   // active, settled, written_off, voided
   TextColumn get status => text().withDefault(const Constant('active'))();
   // Schema v7 addition: explicit link to write-off journal entry
+  @ReferenceName('writtenOffDebts')
   TextColumn get writeOffEntryId => text()
       .nullable()
       .references(JournalEntriesTable, #id, onDelete: KeyAction.restrict)();
@@ -510,6 +511,7 @@ class RecurringRulesTable extends Table {
   TextColumn get accountId => text()
       .nullable()
       .references(AccountsTable, #id, onDelete: KeyAction.restrict)();
+  @ReferenceName('destinationRecurringRules')
   TextColumn get destinationAccountId => text()
       .nullable()
       .references(AccountsTable, #id, onDelete: KeyAction.restrict)();
