@@ -353,24 +353,70 @@ void main() {
     testWidgets(
       '4. TasksView renders recurrence summary & TaskRecurrenceDetailsSection controls (Skip, Reschedule, Edit, Stop)',
       (WidgetTester tester) async {
-        final h = await createHarness();
-        await h.tasksCtrl.createTask(
-          id: 'ui-rec-1',
-          title: 'Pay studio rent',
-          dueDate: CalendarDate.today(),
-          recurrenceConfig: const TaskRecurrenceConfig(
-            frequency: 'monthly',
-            interval: 1,
-            repeatFrom: 'due_date',
-          ),
-        );
+        await tester.binding.setSurfaceSize(const Size(1000, 1400));
+
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final tasksRepo = DriftTasksRepository(db);
+          final projectsRepo = DriftProjectsRepository(db);
+          final tasksCtrl = TasksController(repository: tasksRepo);
+          final projectsCtrl = ProjectsController(repository: projectsRepo);
+          await tasksCtrl.loadAll();
+          await projectsCtrl.loadAll();
+          await tasksCtrl.createTask(
+            id: 'ui-rec-1',
+            title: 'Pay studio rent',
+            dueDate: CalendarDate.today(),
+            recurrenceConfig: const TaskRecurrenceConfig(
+              frequency: 'monthly',
+              interval: 1,
+              repeatFrom: 'due_date',
+            ),
+          );
+          return (
+            db: db,
+            tasksCtrl: tasksCtrl,
+            projectsCtrl: projectsCtrl,
+          );
+        });
+
+        final db = fixture!.db;
+        final tasksCtrl = fixture.tasksCtrl;
+        final projectsCtrl = fixture.projectsCtrl;
+
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          tasksCtrl.dispose();
+          projectsCtrl.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
+        });
 
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
             home: TasksView(
-              controller: h.tasksCtrl,
-              projectsController: h.projectsCtrl,
+              controller: tasksCtrl,
+              projectsController: projectsCtrl,
             ),
           ),
         );
@@ -388,10 +434,12 @@ void main() {
         expect(find.text('Stop Recurrence'), findsOneWidget);
 
         // Skip occurrence from details sheet
+        await tester.ensureVisible(find.text('Skip Occurrence'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Skip Occurrence'));
         await tester.pumpAndSettle();
 
-        final afterSkip = h.tasksCtrl.state.findTaskById('ui-rec-1')!;
+        final afterSkip = tasksCtrl.state.findTaskById('ui-rec-1')!;
         expect(afterSkip.dueDate!.isAfter(CalendarDate.today()), isTrue);
       },
     );

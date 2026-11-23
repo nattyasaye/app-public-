@@ -207,10 +207,14 @@ void main() {
           find.widgetWithText(TextFormField, 'Review contract'),
           'Review updated contract',
         );
+        await tester.pumpAndSettle();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
         await tester.ensureVisible(find.text('Save Changes'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Save Changes'));
         await tester.pumpAndSettle();
+        expect(find.text('Edit Task'), findsNothing);
         expect(find.text('Review updated contract'), findsOneWidget);
 
         // Open Details and Archive task

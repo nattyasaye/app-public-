@@ -14,6 +14,7 @@ import 'package:personal_management_app/domain/tasks/task_calendar_engine.dart';
 import 'package:personal_management_app/domain/tasks/task_recurrence_engine.dart';
 import 'package:personal_management_app/ui/screens/calendar_view.dart';
 import 'package:personal_management_app/ui/screens/tasks_view.dart';
+import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
 
 import 'support/sqlite_test_helper.dart';
 
@@ -29,36 +30,77 @@ void main() {
           CalendarController calendarCtrl,
           TasksController tasksCtrl,
           ProjectsController projectsCtrl,
-        })> createHarness() async {
-      final db = AppDatabase(NativeDatabase.memory());
-      await db.ensureInitialized();
-      addTearDown(db.close);
+        })> createWidgetHarness(
+      WidgetTester tester, {
+      Future<void> Function(
+        CalendarController calendarCtrl,
+        TasksController tasksCtrl,
+        ProjectsController projectsCtrl,
+      )? seed,
+    }) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1400));
 
-      final calCtrl = CalendarController(
-        repository: DriftCalendarRepository(db),
-      );
-      final tasksCtrl = TasksController(
-        repository: DriftTasksRepository(db),
-      );
-      final projectsCtrl = ProjectsController(
-        repository: DriftProjectsRepository(db),
-      );
-      addTearDown(calCtrl.dispose);
-      addTearDown(tasksCtrl.dispose);
-      addTearDown(projectsCtrl.dispose);
+      final fixture = await tester.runAsync(() async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
 
-      await Future.wait([
-        calCtrl.loadAll(),
-        tasksCtrl.loadAll(),
-        projectsCtrl.loadAll(),
-      ]);
+        final calCtrl = CalendarController(
+          repository: DriftCalendarRepository(db),
+        );
+        final tasksCtrl = TasksController(
+          repository: DriftTasksRepository(db),
+        );
+        final projectsCtrl = ProjectsController(
+          repository: DriftProjectsRepository(db),
+        );
 
-      return (
-        db: db,
-        calendarCtrl: calCtrl,
-        tasksCtrl: tasksCtrl,
-        projectsCtrl: projectsCtrl,
-      );
+        await Future.wait([
+          calCtrl.loadAll(),
+          tasksCtrl.loadAll(),
+          projectsCtrl.loadAll(),
+        ]);
+
+        if (seed != null) {
+          await seed(calCtrl, tasksCtrl, projectsCtrl);
+        }
+
+        return (
+          db: db,
+          calendarCtrl: calCtrl,
+          tasksCtrl: tasksCtrl,
+          projectsCtrl: projectsCtrl,
+        );
+      });
+
+      final harness = fixture!;
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump(const Duration(milliseconds: 20));
+        harness.calendarCtrl.dispose();
+        harness.tasksCtrl.dispose();
+        harness.projectsCtrl.dispose();
+        var closed = false;
+        final closeFuture = harness.db.close().whenComplete(() {
+          closed = true;
+        });
+        final closeWatch = Stopwatch()..start();
+        while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+          );
+        }
+        if (closed) {
+          await closeFuture;
+        } else {
+          await tester.runAsync(
+            () => closeFuture.timeout(const Duration(seconds: 5)),
+          );
+        }
+        await tester.binding.setSurfaceSize(null);
+      });
+
+      return harness;
     }
 
     test(
@@ -159,29 +201,34 @@ void main() {
     testWidgets(
       '2. CalendarView integrates events with scheduled/due/recurring tasks, supports completion + recurrence Undo, opens Tasks, and persists event creation',
       (WidgetTester tester) async {
-        final h = await createHarness();
         final today = CalendarDate.today();
+        TaskEntity? recurringTask;
 
-        await h.calendarCtrl.createEvent(
-          title: 'Clinic Checkup',
-          dateIso: today.toIsoString(),
-          startTime: '10:00',
-          endTime: '11:00',
-          category: 'health',
-        );
+        final h = await createWidgetHarness(
+          tester,
+          seed: (calCtrl, tasksCtrl, _) async {
+            await calCtrl.createEvent(
+              title: 'Clinic Checkup',
+              dateIso: today.toIsoString(),
+              startTime: '10:00',
+              endTime: '11:00',
+              category: 'health',
+            );
 
-        final recurringTask = await h.tasksCtrl.createTask(
-          id: 'cal-ui-task-1',
-          title: 'Review weekly budget',
-          dueDate: today,
-          scheduledDate: today,
-          scheduledTime: '15:00',
-          estimatedDurationMinutes: 30,
-          recurrenceConfig: const TaskRecurrenceConfig(
-            frequency: 'daily',
-            interval: 3,
-            repeatFrom: 'due_date',
-          ),
+            recurringTask = await tasksCtrl.createTask(
+              id: 'cal-ui-task-1',
+              title: 'Review weekly budget',
+              dueDate: today,
+              scheduledDate: today,
+              scheduledTime: '15:00',
+              estimatedDurationMinutes: 30,
+              recurrenceConfig: const TaskRecurrenceConfig(
+                frequency: 'daily',
+                interval: 3,
+                repeatFrom: 'due_date',
+              ),
+            );
+          },
         );
         expect(recurringTask, isNotNull);
 
@@ -205,11 +252,17 @@ void main() {
         expect(find.text('Scheduled & Due'), findsOneWidget);
 
         // Tapping the task card invokes onOpenTask for Task details navigation
+        await tester.ensureVisible(find.text('Review weekly budget'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Review weekly budget'));
         await tester.pump();
         expect(openedTaskId, 'cal-ui-task-1');
 
         // Tapping checkbox completes task and spawns next recurring occurrence
+        await tester.ensureVisible(
+          find.byTooltip('Complete Review weekly budget'),
+        );
+        await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Complete Review weekly budget'));
         await tester.pumpAndSettle();
 
@@ -230,6 +283,8 @@ void main() {
         );
 
         // Switch to Agenda view -> verifies upcoming recurrence preview appears
+        await tester.ensureVisible(find.text('Agenda'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Agenda'));
         await tester.pumpAndSettle();
         expect(find.text('Upcoming Recurrence'), findsWidgets);
@@ -237,11 +292,18 @@ void main() {
         // Add Event modal creates and persists a CalendarEventEntity
         await tester.tap(find.byTooltip('Add Event'));
         await tester.pumpAndSettle();
-        await tester.enterText(
-          find.widgetWithText(TextFormField, 'Event Title'),
-          'Team Planning',
+        final titleField = find.descendant(
+          of: find.widgetWithText(DaywellTextField, 'Event Title *'),
+          matching: find.byType(TextFormField),
         );
-        await tester.tap(find.widgetWithText(ElevatedButton, 'Add Event'));
+        await tester.enterText(titleField, 'Team Planning');
+        await tester.pumpAndSettle();
+        FocusManager.instance.primaryFocus?.unfocus();
+        await tester.pumpAndSettle();
+        final submitButton = find.widgetWithText(FilledButton, 'Add Event');
+        await tester.ensureVisible(submitButton);
+        await tester.pumpAndSettle();
+        await tester.tap(submitButton);
         await tester.pumpAndSettle();
 
         expect(
@@ -254,15 +316,19 @@ void main() {
     testWidgets(
       '3. TasksView supports requestedTaskFocus into Task details and View in Calendar navigation using primary task date',
       (WidgetTester tester) async {
-        final h = await createHarness();
         final scheduledDate = CalendarDate(year: 2026, month: 11, day: 24);
         final dueDate = CalendarDate(year: 2026, month: 11, day: 28);
 
-        await h.tasksCtrl.createTask(
-          id: 'focus-task-1',
-          title: 'Submit tax filing',
-          scheduledDate: scheduledDate,
-          dueDate: dueDate,
+        final h = await createWidgetHarness(
+          tester,
+          seed: (_, tasksCtrl, __) async {
+            await tasksCtrl.createTask(
+              id: 'focus-task-1',
+              title: 'Submit tax filing',
+              scheduledDate: scheduledDate,
+              dueDate: dueDate,
+            );
+          },
         );
 
         CalendarDate? jumpedDate;
@@ -284,6 +350,8 @@ void main() {
         expect(find.text('Submit tax filing'), findsWidgets);
         expect(find.text('View in Calendar'), findsOneWidget);
 
+        await tester.ensureVisible(find.text('View in Calendar'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('View in Calendar'));
         await tester.pumpAndSettle();
 
