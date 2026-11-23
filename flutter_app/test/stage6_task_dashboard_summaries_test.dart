@@ -361,73 +361,114 @@ void main() {
       },
     );
 
+    Future<void> closeDbWithPump(
+      WidgetTester tester,
+      AppDatabase db, {
+      required VoidCallback disposeControllers,
+      bool resetSurface = false,
+    }) async {
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 20));
+      disposeControllers();
+      var closed = false;
+      final closeFuture = db.close().whenComplete(() {
+        closed = true;
+      });
+      final closeWatch = Stopwatch()..start();
+      while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
+      if (closed) {
+        await closeFuture;
+      } else {
+        await tester.runAsync(
+          () => closeFuture.timeout(const Duration(seconds: 5)),
+        );
+      }
+      if (resetSurface) {
+        await tester.binding.setSurfaceSize(null);
+      }
+    }
+
     testWidgets(
       '3. DashboardTasksSection and DashboardProjectProgressSection render counts, My Day summary, conditional milestones, and interactive navigation',
       (WidgetTester tester) async {
         await tester.binding.setSurfaceSize(const Size(900, 1400));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        final state = _Stage6WidgetState(db: db);
-        addTearDown(() async {
-          state.dispose();
-          await db.close();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final state = _Stage6WidgetState(db: db);
+
+          final today = CalendarDate.today();
+          final tasksRepo = DriftTasksRepository(db);
+          final projectsRepo = DriftProjectsRepository(db);
+
+          await projectsRepo.createProject(
+            ProjectEntity(
+              id: 'p-live',
+              title: 'Active Roadmap',
+              status: 'active',
+            ),
+          );
+          await projectsRepo.createProject(
+            ProjectEntity(
+              id: 'p-arch',
+              title: 'Hidden Archived Project',
+              status: 'active',
+              isArchived: true,
+            ),
+          );
+          await tasksRepo.createTask(
+            TaskEntity(
+              id: 't-over',
+              title: 'Overdue Task Item',
+              dueDate: today.addDays(-1),
+              projectId: 'p-live',
+            ),
+          );
+          await tasksRepo.createTask(
+            TaskEntity(
+              id: 't-today',
+              title: 'Today Task Item',
+              dueDate: today,
+              projectId: 'p-live',
+            ),
+          );
+          await tasksRepo.createTask(
+            TaskEntity(
+              id: 't-done',
+              title: 'Done Task Item',
+              status: 'completed',
+              projectId: 'p-live',
+            ),
+          );
+          await tasksRepo.upsertDailyPlanningEntry(
+            DailyPlanningEntryEntity(
+              id: 'dp-today',
+              planDate: today,
+              taskId: 't-today',
+              action: 'planned',
+            ),
+          );
+
+          await state.loadAllControllers();
+          return (db: db, state: state);
         });
 
-        final today = CalendarDate.today();
-        final tasksRepo = DriftTasksRepository(db);
-        final projectsRepo = DriftProjectsRepository(db);
-
-        await projectsRepo.createProject(
-          ProjectEntity(
-            id: 'p-live',
-            title: 'Active Roadmap',
-            status: 'active',
+        final db = fixture!.db;
+        final state = fixture.state;
+        addTearDown(
+          () => closeDbWithPump(
+            tester,
+            db,
+            disposeControllers: state.dispose,
+            resetSurface: true,
           ),
         );
-        await projectsRepo.createProject(
-          ProjectEntity(
-            id: 'p-arch',
-            title: 'Hidden Archived Project',
-            status: 'active',
-            isArchived: true,
-          ),
-        );
-        await tasksRepo.createTask(
-          TaskEntity(
-            id: 't-over',
-            title: 'Overdue Task Item',
-            dueDate: today.addDays(-1),
-            projectId: 'p-live',
-          ),
-        );
-        await tasksRepo.createTask(
-          TaskEntity(
-            id: 't-today',
-            title: 'Today Task Item',
-            dueDate: today,
-            projectId: 'p-live',
-          ),
-        );
-        await tasksRepo.createTask(
-          TaskEntity(
-            id: 't-done',
-            title: 'Done Task Item',
-            status: 'completed',
-            projectId: 'p-live',
-          ),
-        );
-        await tasksRepo.upsertDailyPlanningEntry(
-          DailyPlanningEntryEntity(
-            id: 'dp-today',
-            planDate: today,
-            taskId: 't-today',
-            action: 'planned',
-          ),
-        );
-
-        await state.loadAllControllers();
 
         var openTasksCalls = 0;
         var openProjectsCalls = 0;
@@ -499,21 +540,37 @@ void main() {
     testWidgets(
       '4. TasksView honors requestedSubTab nonce to switch cleanly between Tasks and Projects tabs',
       (WidgetTester tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        final tasksCtrl = TasksController(
-          repository: DriftTasksRepository(db),
-        );
-        final projectsCtrl = ProjectsController(
-          repository: DriftProjectsRepository(db),
-        );
-        addTearDown(() async {
-          tasksCtrl.dispose();
-          projectsCtrl.dispose();
-          await db.close();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final tasksCtrl = TasksController(
+            repository: DriftTasksRepository(db),
+          );
+          final projectsCtrl = ProjectsController(
+            repository: DriftProjectsRepository(db),
+          );
+          await tasksCtrl.loadAll();
+          await projectsCtrl.loadAll();
+          return (
+            db: db,
+            tasksCtrl: tasksCtrl,
+            projectsCtrl: projectsCtrl,
+          );
         });
-        await tasksCtrl.loadAll();
-        await projectsCtrl.loadAll();
+
+        final db = fixture!.db;
+        final tasksCtrl = fixture.tasksCtrl;
+        final projectsCtrl = fixture.projectsCtrl;
+        addTearDown(
+          () => closeDbWithPump(
+            tester,
+            db,
+            disposeControllers: () {
+              tasksCtrl.dispose();
+              projectsCtrl.dispose();
+            },
+          ),
+        );
 
         await tester.pumpWidget(
           MaterialApp(
@@ -534,23 +591,32 @@ void main() {
     testWidgets(
       '5. DashboardTasksSection offers View Archived for archived-only stores and TasksView surfaces Due Today active filter context',
       (WidgetTester tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        final state = _Stage6WidgetState(db: db);
-        addTearDown(() async {
-          state.dispose();
-          await db.close();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final state = _Stage6WidgetState(db: db);
+
+          final tasksRepo = DriftTasksRepository(db);
+          await tasksRepo.createTask(
+            TaskEntity(
+              id: 't-arch-only',
+              title: 'Archived Only Item',
+              isArchived: true,
+            ),
+          );
+          await state.loadAllControllers();
+          return (db: db, state: state);
         });
 
-        final tasksRepo = DriftTasksRepository(db);
-        await tasksRepo.createTask(
-          TaskEntity(
-            id: 't-arch-only',
-            title: 'Archived Only Item',
-            isArchived: true,
+        final db = fixture!.db;
+        final state = fixture.state;
+        addTearDown(
+          () => closeDbWithPump(
+            tester,
+            db,
+            disposeControllers: state.dispose,
           ),
         );
-        await state.loadAllControllers();
 
         var openedTasks = 0;
         await tester.pumpWidget(

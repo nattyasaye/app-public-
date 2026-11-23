@@ -204,33 +204,79 @@ void main() {
       '3. TasksView My Day workspace displays suggestions, plans tasks, reorders, removes without deleting, and reviews history',
       (WidgetTester tester) async {
         await tester.binding.setSurfaceSize(const Size(1000, 1600));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-        final harness = await createHarness();
-        addTearDown(() async {
-          await tester.pumpWidget(const SizedBox.shrink());
-          await tester.pump();
-        });
-        final ctrl = harness.ctrl;
         final today = CalendarDate.today();
         final yesterday = today.addDays(-1);
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final repo = DriftTasksRepository(db);
+          final ctrl = TasksController(repository: repo);
+          await ctrl.loadAll();
 
-        await ctrl.createTask(
-          id: 'ui-yesterday',
-          title: 'Yesterday carryover item',
-        );
-        await ctrl.planTaskForDate('ui-yesterday', date: yesterday);
+          await ctrl.createTask(
+            id: 'ui-yesterday',
+            title: 'Yesterday carryover item',
+          );
+          await ctrl.planTaskForDate('ui-yesterday', date: yesterday);
 
-        await ctrl.createTask(
-          id: 'ui-overdue',
-          title: 'Overdue filing',
-          dueDate: today.addDays(-3),
-        );
-        await ctrl.createTask(
-          id: 'ui-scheduled',
-          title: 'Scheduled review',
-          scheduledDate: today,
-        );
+          await ctrl.createTask(
+            id: 'ui-overdue',
+            title: 'Overdue filing',
+            dueDate: today.addDays(-3),
+          );
+          await ctrl.createTask(
+            id: 'ui-scheduled',
+            title: 'Scheduled review',
+            scheduledDate: today,
+          );
+          return (db: db, ctrl: ctrl);
+        });
+
+        final db = fixture!.db;
+        final ctrl = fixture.ctrl;
+
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
+          ctrl.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
+        });
+
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await tester.pumpAndSettle();
+        }
 
         await tester.pumpWidget(
           MaterialApp(
@@ -258,7 +304,15 @@ void main() {
         await tester.ensureVisible(carryForwardBtn);
         await tester.pumpAndSettle();
         await tester.tap(carryForwardBtn);
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => DailyPlanningEngine.isTaskPlannedForDate(
+            ctrl.state.findTaskById('ui-yesterday')!,
+            ctrl.state.dailyPlanningEntries,
+            today,
+            today: today,
+          ),
+          reason: 'Carry forward all button did not persist planned entry.',
+        );
 
         expect(
           DailyPlanningEngine.isTaskPlannedForDate(
@@ -276,7 +330,16 @@ void main() {
         await tester.ensureVisible(removeFromDayBtn);
         await tester.pumpAndSettle();
         await tester.tap(removeFromDayBtn);
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              DailyPlanningEngine.findEntry(
+                ctrl.state.dailyPlanningEntries,
+                'ui-yesterday',
+                today,
+              )?.action ==
+              DailyPlanningActions.dismissed,
+          reason: 'Remove from My Day did not persist dismissed entry.',
+        );
         expect(ctrl.state.findTaskById('ui-yesterday'), isNotNull);
 
         // Step to previous day and verify history review + carry-to-today banner
