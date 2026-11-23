@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -181,45 +180,88 @@ void main() {
 
     testWidgets(
       '3. ProjectsWorkspaceTab and ProjectDetailScreen render derived progress, milestones, and sections without raw color literals',
-      (tester) async {
+      (WidgetTester tester) async {
         await tester.binding.setSurfaceSize(const Size(900, 1400));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-        final h = await createHarness();
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized();
+          final tasksRepo = DriftTasksRepository(db);
+          final projectsRepo = DriftProjectsRepository(db);
+          final tasksCtrl = TasksController(repository: tasksRepo);
+          final projectsCtrl = ProjectsController(repository: projectsRepo);
+          await tasksCtrl.loadAll();
+          await projectsCtrl.loadAll();
+
+          final project = await projectsCtrl.createProject(
+            id: 'proj-ui-13',
+            title: 'Stage 1.3 UI Check',
+            description: 'Verify derived progress and sections',
+          );
+          await tasksCtrl.loadAll();
+          await tasksCtrl.createTask(
+            id: 'task-ui-done',
+            title: 'Complete milestone prep',
+            status: 'completed',
+            projectId: project!.id,
+          );
+          await tasksCtrl.createTask(
+            id: 'task-ui-open',
+            title: 'Write release summary',
+            projectId: project.id,
+          );
+          await tasksCtrl.addMilestone(
+            projectId: project.id,
+            title: 'Beta Sign-off',
+          );
+          await projectsCtrl.createProjectSection(project.id, 'Delivery');
+
+          return (
+            db: db,
+            tasksCtrl: tasksCtrl,
+            projectsCtrl: projectsCtrl,
+            project: project,
+          );
+        });
+
+        final db = fixture!.db;
+        final tasksCtrl = fixture.tasksCtrl;
+        final projectsCtrl = fixture.projectsCtrl;
+        final project = fixture.project;
+
         addTearDown(() async {
           await tester.pumpWidget(const SizedBox.shrink());
-          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 20));
+          tasksCtrl.dispose();
+          projectsCtrl.dispose();
+          var closed = false;
+          final closeFuture = db.close().whenComplete(() {
+            closed = true;
+          });
+          final closeWatch = Stopwatch()..start();
+          while (!closed && closeWatch.elapsed < const Duration(seconds: 10)) {
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          if (closed) {
+            await closeFuture;
+          } else {
+            await tester.runAsync(
+              () => closeFuture.timeout(const Duration(seconds: 5)),
+            );
+          }
+          await tester.binding.setSurfaceSize(null);
         });
-        final project = await h.projectsCtrl.createProject(
-          id: 'proj-ui-13',
-          title: 'Stage 1.3 UI Check',
-          description: 'Verify derived progress and sections',
-        );
-        await h.tasksCtrl.loadAll();
-        await h.tasksCtrl.createTask(
-          id: 'task-ui-done',
-          title: 'Complete milestone prep',
-          status: 'completed',
-          projectId: project!.id,
-        );
-        await h.tasksCtrl.createTask(
-          id: 'task-ui-open',
-          title: 'Write release summary',
-          projectId: project.id,
-        );
-        await h.tasksCtrl.addMilestone(
-          projectId: project.id,
-          title: 'Beta Sign-off',
-        );
-        await h.projectsCtrl.createProjectSection(project.id, 'Delivery');
 
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
             home: Scaffold(
               body: ProjectsWorkspaceTab(
-                projectsController: h.projectsCtrl,
-                tasksController: h.tasksCtrl,
+                projectsController: projectsCtrl,
+                tasksController: tasksCtrl,
               ),
             ),
           ),
@@ -234,13 +276,16 @@ void main() {
           findsOneWidget,
         );
 
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
             home: ProjectDetailScreen(
               projectId: project.id,
-              projectsController: h.projectsCtrl,
-              tasksController: h.tasksCtrl,
+              projectsController: projectsCtrl,
+              tasksController: tasksCtrl,
             ),
           ),
         );

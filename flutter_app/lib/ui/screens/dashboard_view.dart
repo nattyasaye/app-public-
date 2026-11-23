@@ -1651,33 +1651,74 @@ class DashboardTasksSection extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.wb_sunny_outlined,
-                                    size: 16,
-                                    color: semantic.warning,
-                                  ),
-                                  const SizedBox(
-                                    width: SharedDesignTokens.spacingXs,
-                                  ),
-                                  Expanded(
-                                    child: Text(
-                                      "Today's Plan (My Day)",
-                                      style: textTheme.labelLarge?.copyWith(
-                                        fontWeight: FontWeight.w700,
-                                        color: semantic.textPrimary,
+                              LayoutBuilder(
+                                builder: (
+                                  BuildContext context,
+                                  BoxConstraints constraints,
+                                ) {
+                                  final textScale =
+                                      MediaQuery.textScalerOf(context)
+                                          .scale(1.0);
+                                  final titleCluster = Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.wb_sunny_outlined,
+                                        size: 16,
+                                        color: semantic.warning,
                                       ),
-                                    ),
-                                  ),
-                                  Text(
+                                      const SizedBox(
+                                        width: SharedDesignTokens.spacingXs,
+                                      ),
+                                      Flexible(
+                                        child: Text(
+                                          "Today's Plan (My Day)",
+                                          style: textTheme.labelLarge?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            color: semantic.textPrimary,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  );
+                                  final actionText = Text(
                                     'Open My Day',
                                     style: textTheme.labelSmall?.copyWith(
                                       color: colorScheme.primary,
                                       fontWeight: FontWeight.w700,
                                     ),
-                                  ),
-                                ],
+                                  );
+                                  if (constraints.maxWidth < 280 ||
+                                      textScale >= 1.5) {
+                                    return Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        titleCluster,
+                                        const SizedBox(
+                                          height: SharedDesignTokens.spacingXs,
+                                        ),
+                                        Align(
+                                          alignment:
+                                              AlignmentDirectional.centerEnd,
+                                          child: actionText,
+                                        ),
+                                      ],
+                                    );
+                                  }
+                                  return Row(
+                                    children: [
+                                      Expanded(child: titleCluster),
+                                      const SizedBox(
+                                        width: SharedDesignTokens.spacingXs,
+                                      ),
+                                      Flexible(
+                                        flex: 0,
+                                        child: actionText,
+                                      ),
+                                    ],
+                                  );
+                                },
                               ),
                               const SizedBox(
                                 height: SharedDesignTokens.spacingXs,
@@ -2174,49 +2215,114 @@ class DashboardProjectProgressSection extends StatelessWidget {
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            item.project.title,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style:
-                                                textTheme.bodyMedium?.copyWith(
-                                              fontWeight: FontWeight.w700,
-                                              color: semantic.textPrimary,
-                                            ),
-                                          ),
-                                        ),
-                                        if (item.project.status !=
-                                            'active') ...[
-                                          const SizedBox(
-                                            width: SharedDesignTokens.spacingXs,
-                                          ),
-                                          DaywellStatusBadge(
-                                            label:
-                                                item.project.status == 'on_hold'
-                                                    ? 'On Hold'
-                                                    : 'Completed',
-                                            tone: item.project.status ==
-                                                    'completed'
-                                                ? DaywellStatusTone.success
-                                                : DaywellStatusTone.warning,
-                                            showIcon: false,
-                                          ),
-                                        ],
-                                        const SizedBox(
-                                          width: SharedDesignTokens.spacingXs,
-                                        ),
-                                        Text(
+                                    LayoutBuilder(
+                                      builder: (
+                                        BuildContext context,
+                                        BoxConstraints constraints,
+                                      ) {
+                                        final textScale =
+                                            MediaQuery.textScalerOf(context)
+                                                .scale(1.0);
+                                        final percentageText = Text(
                                           '${item.displayPercentage}%',
                                           style: DaywellTypography.numericBody(
                                             color: semantic.textPrimary,
                                           ).copyWith(
                                             fontWeight: FontWeight.w700,
                                           ),
-                                        ),
-                                      ],
+                                        );
+                                        final DaywellStatusBadge? statusBadge =
+                                            item.project.status != 'active'
+                                                ? DaywellStatusBadge(
+                                                    label:
+                                                        item.project.status ==
+                                                                'on_hold'
+                                                            ? 'On Hold'
+                                                            : 'Completed',
+                                                    tone: item.project.status ==
+                                                            'completed'
+                                                        ? DaywellStatusTone
+                                                            .success
+                                                        : DaywellStatusTone
+                                                            .warning,
+                                                    showIcon: false,
+                                                  )
+                                                : null;
+                                        if (constraints.maxWidth < 260 ||
+                                            textScale >= 1.5) {
+                                          return Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.stretch,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      item.project.title,
+                                                      maxLines: 2,
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                      style: textTheme
+                                                          .bodyMedium
+                                                          ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w700,
+                                                        color: semantic
+                                                            .textPrimary,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(
+                                                    width: SharedDesignTokens
+                                                        .spacingXs,
+                                                  ),
+                                                  percentageText,
+                                                ],
+                                              ),
+                                              if (statusBadge != null) ...[
+                                                const SizedBox(
+                                                  height: SharedDesignTokens
+                                                      .spacingXs,
+                                                ),
+                                                Align(
+                                                  alignment:
+                                                      AlignmentDirectional
+                                                          .centerStart,
+                                                  child: statusBadge,
+                                                ),
+                                              ],
+                                            ],
+                                          );
+                                        }
+                                        return Row(
+                                          children: [
+                                            Expanded(
+                                              child: Text(
+                                                item.project.title,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: textTheme.bodyMedium
+                                                    ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                  color: semantic.textPrimary,
+                                                ),
+                                              ),
+                                            ),
+                                            if (statusBadge != null) ...[
+                                              const SizedBox(
+                                                width: SharedDesignTokens
+                                                    .spacingXs,
+                                              ),
+                                              statusBadge,
+                                            ],
+                                            const SizedBox(
+                                              width:
+                                                  SharedDesignTokens.spacingXs,
+                                            ),
+                                            percentageText,
+                                          ],
+                                        );
+                                      },
                                     ),
                                     const SizedBox(
                                       height: SharedDesignTokens.spacingXs,
