@@ -580,9 +580,23 @@ void main() {
             ),
           ),
         );
+        // Fire ProjectsWorkspaceTab's post-frame loadAll, then let real-loop DB
+        // complete before settling animations.
+        await tester.pump();
+        final loadWatch = Stopwatch()..start();
+        while (projectsCtrl.state.isLoading) {
+          if (loadWatch.elapsed > const Duration(seconds: 10)) {
+            fail('ProjectsWorkspaceTab initial loadAll did not complete.');
+          }
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+          );
+        }
         await tester.pumpAndSettle();
 
         expect(find.text('Projects'), findsWidgets);
+        expect(find.text('Search projects...'), findsOneWidget);
       },
     );
 
