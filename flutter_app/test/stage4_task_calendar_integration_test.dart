@@ -103,6 +103,24 @@ void main() {
       return harness;
     }
 
+    Future<void> pumpUntil(
+      WidgetTester tester,
+      bool Function() condition, {
+      required String reason,
+    }) async {
+      final watch = Stopwatch()..start();
+      while (!condition()) {
+        if (watch.elapsed > const Duration(seconds: 10)) {
+          fail(reason);
+        }
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
+      await tester.pumpAndSettle();
+    }
+
     test(
       '1. TaskCalendarEngine projects scheduled vs due dates cleanly, separates recurring previews, and prevents duplicate entries after completion',
       () {
@@ -264,7 +282,13 @@ void main() {
         );
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Complete Review weekly budget'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          tester,
+          () =>
+              h.tasksCtrl.state.tasks.length == 2 &&
+              find.text('Undo').evaluate().isNotEmpty,
+          reason: 'Completing recurring task did not spawn next occurrence',
+        );
 
         expect(h.tasksCtrl.state.tasks.length, 2);
         expect(
@@ -275,7 +299,11 @@ void main() {
 
         // Undo restores single uncompleted task state cleanly
         await tester.tap(find.text('Undo'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          tester,
+          () => h.tasksCtrl.state.tasks.length == 1,
+          reason: 'Undo did not restore single uncompleted task state',
+        );
         expect(h.tasksCtrl.state.tasks.length, 1);
         expect(
           h.tasksCtrl.state.findTaskById('cal-ui-task-1')?.isCompleted,
@@ -304,7 +332,15 @@ void main() {
         await tester.ensureVisible(submitButton);
         await tester.pumpAndSettle();
         await tester.tap(submitButton);
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          tester,
+          () =>
+              h.calendarCtrl.state.events.any(
+                (e) => e.title == 'Team Planning',
+              ) &&
+              find.byType(TextFormField).evaluate().isEmpty,
+          reason: 'Add Event modal did not persist Team Planning',
+        );
 
         expect(
           h.calendarCtrl.state.events.any((e) => e.title == 'Team Planning'),

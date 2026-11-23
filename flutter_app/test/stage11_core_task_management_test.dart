@@ -173,6 +173,23 @@ void main() {
           await tester.binding.setSurfaceSize(null);
         });
 
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await tester.pumpAndSettle();
+        }
+
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
@@ -213,7 +230,10 @@ void main() {
         await tester.ensureVisible(find.text('Save Changes'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Save Changes'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => find.text('Edit Task').evaluate().isEmpty,
+          reason: 'Edit Task sheet did not close after Save Changes',
+        );
         expect(find.text('Edit Task'), findsNothing);
         expect(find.text('Review updated contract'), findsOneWidget);
 
@@ -223,7 +243,10 @@ void main() {
         await tester.ensureVisible(find.text('Archive'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Archive'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => ctrl.state.archivedCount == 1,
+          reason: 'Task was not archived',
+        );
 
         // Hidden from Today, visible in Archived chip
         expect(find.text('Review updated contract'), findsNothing);
@@ -239,7 +262,10 @@ void main() {
         await tester.ensureVisible(find.text('Restore'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Restore'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () => ctrl.state.archivedCount == 0,
+          reason: 'Task was not restored',
+        );
         expect(ctrl.state.archivedCount, 0);
 
         // Switch back to All and test Safe Delete confirmation + Undo
@@ -255,7 +281,12 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Delete task?'), findsOneWidget);
         await tester.tap(find.text('Delete Task'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              ctrl.state.tasks.isEmpty &&
+              find.text('Undo').evaluate().isNotEmpty,
+          reason: 'Task was not deleted or Undo snackbar did not appear',
+        );
         expect(ctrl.state.tasks, isEmpty);
         expect(find.text('Undo'), findsOneWidget);
       },

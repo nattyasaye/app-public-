@@ -411,6 +411,23 @@ void main() {
           await tester.binding.setSurfaceSize(null);
         });
 
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await tester.pumpAndSettle();
+        }
+
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
@@ -437,7 +454,15 @@ void main() {
         await tester.ensureVisible(find.text('Skip Occurrence'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Skip Occurrence'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              tasksCtrl.state
+                  .findTaskById('ui-rec-1')
+                  ?.dueDate
+                  ?.isAfter(CalendarDate.today()) ??
+              false,
+          reason: 'Skip Occurrence did not advance dueDate',
+        );
 
         final afterSkip = tasksCtrl.state.findTaskById('ui-rec-1')!;
         expect(afterSkip.dueDate!.isAfter(CalendarDate.today()), isTrue);
