@@ -340,6 +340,7 @@ void main() {
             linkedModule: NoteEntity.taskLinkModule,
             linkedId: 'missing-task-id',
           );
+          tasksCtrl.setViewFilter('all');
           return (db: db, tasksCtrl: tasksCtrl, notesCtrl: notesCtrl);
         });
 
@@ -414,6 +415,7 @@ void main() {
         expect(find.text('New Note'), findsOneWidget);
 
         // Link existing note from sheet
+        await tester.ensureVisible(find.text('Link Existing'));
         await tester.tap(find.text('Link Existing'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Existing Pump Log'));
@@ -429,6 +431,7 @@ void main() {
         expect(find.text('Existing Pump Log'), findsWidgets);
 
         // Create new note from Task Details
+        await tester.ensureVisible(find.text('New Note'));
         await tester.tap(find.text('New Note'));
         await pumpUntil(
           () =>
@@ -470,7 +473,7 @@ void main() {
         expect(openedTaskId, 'task-ui-1');
 
         // Card view shows linked task badge and safe dangling fallback
-        expect(find.text('Inspect Pump'), findsWidgets);
+        expect(find.text('Task: Inspect Pump'), findsWidgets);
         expect(find.text('Linked task unavailable'), findsOneWidget);
       },
     );

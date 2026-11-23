@@ -296,7 +296,13 @@ void main() {
         expect(tasksCtrl.state.tasks.first.title, 'Draft client proposal');
         expect(tasksCtrl.state.tasks.first.description, 'Attach Q4 timeline');
         expect(inboxCtrl.unprocessedCount, 0);
-        expect(find.text('Inbox is clear'), findsOneWidget);
+        expect(find.text('Captured Inbox Items (0)'), findsOneWidget);
+        expect(
+          find.text('No unprocessed Quick Capture items right now.'),
+          findsOneWidget,
+        );
+        expect(find.text('Unassigned Tasks (1)'), findsOneWidget);
+        expect(find.text('Draft client proposal'), findsOneWidget);
 
         // Verify QuickCaptureDialog still captures directly into shared InboxController
         await tester.pumpWidget(
