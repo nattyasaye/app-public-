@@ -167,8 +167,8 @@ void main() {
           forCompletion: true,
           nowUtc: DateTime.utc(2026, 11, 22, 22, 0), // 2026-11-23 01:00 UTC+3
         );
-        expect(nextDates?.dueDate,
-            CalendarDate(year: 2026, month: 11, day: 26));
+        expect(
+            nextDates?.dueDate, CalendarDate(year: 2026, month: 11, day: 26));
         expect(
           nextDates?.scheduledDate,
           CalendarDate(year: 2026, month: 11, day: 25),
@@ -211,8 +211,7 @@ void main() {
         expect(firstToggle.generatedNextTask, isNotNull);
         final spawned = firstToggle.generatedNextTask!;
         expect(spawned.isCompleted, isFalse);
-        expect(spawned.dueDate,
-            CalendarDate(year: 2026, month: 11, day: 29));
+        expect(spawned.dueDate, CalendarDate(year: 2026, month: 11, day: 29));
         expect(
           spawned.scheduledDate,
           CalendarDate(year: 2026, month: 11, day: 28),

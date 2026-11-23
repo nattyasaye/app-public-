@@ -1412,8 +1412,7 @@ class TasksController extends ChangeNotifier {
         TaskEntity? updatedTask,
         TaskEntity? generatedNextTask,
         bool seriesEnded,
-      })>
-      updateTaskWithRecurrence({
+      })> updateTaskWithRecurrence({
     required String id,
     required String title,
     String? description,
