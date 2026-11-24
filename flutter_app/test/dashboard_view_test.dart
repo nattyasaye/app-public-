@@ -1359,6 +1359,12 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Dashboard'), findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.text('AVAILABLE TO SPEND'),
+          240.0,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
         expect(find.text('AVAILABLE TO SPEND'), findsOneWidget);
         expect(
           find.text(
@@ -2116,6 +2122,13 @@ void main() {
           await tester.pumpWidget(_wrapDashboard(state: harness, theme: theme));
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
+          await tester.scrollUntilVisible(
+            find.text('AVAILABLE TO SPEND'),
+            240.0,
+            scrollable: find.byType(Scrollable).first,
+          );
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
           expect(find.text('AVAILABLE TO SPEND'), findsOneWidget);
           expect(find.text('Review budget'), findsOneWidget);
         }
@@ -2313,6 +2326,13 @@ void main() {
             .state<ScrollableState>(find.byType(Scrollable).first)
             .position
             .jumpTo(0.0);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        await tester.scrollUntilVisible(
+          find.byType(DashboardFinanceSection),
+          240.0,
+          scrollable: find.byType(Scrollable).first,
+        );
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(find.byType(DashboardFinanceSection), findsOneWidget);

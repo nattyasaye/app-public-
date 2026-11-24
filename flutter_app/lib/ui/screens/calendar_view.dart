@@ -1238,86 +1238,15 @@ class _CalendarViewState extends State<CalendarView> {
                                                   ),
                                                 ),
                                                 const SizedBox(height: 2),
-                                                FittedBox(
-                                                  fit: BoxFit.scaleDown,
-                                                  child: Row(
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .center,
-                                                    children: [
-                                                      if (cellRhythm !=
-                                                          null) ...[
-                                                        DailyRhythmCalendarCellMarker(
-                                                          inspection:
-                                                              cellRhythm,
-                                                          isSelected:
-                                                              isSelected,
-                                                        ),
-                                                        if (hasEvents ||
-                                                            hasStoredTasks ||
-                                                            hasProjectedTasks)
-                                                          const SizedBox(
-                                                              width: 2),
-                                                      ],
-                                                      if (hasEvents)
-                                                        Container(
-                                                          width: 5,
-                                                          height: 5,
-                                                          margin:
-                                                              const EdgeInsets
-                                                                  .symmetric(
-                                                            horizontal: 1,
-                                                          ),
-                                                          decoration:
-                                                              BoxDecoration(
-                                                            color: isSelected
-                                                                ? semantic
-                                                                    .warning
-                                                                : colorScheme
-                                                                    .primary,
-                                                            shape:
-                                                                BoxShape.circle,
-                                                          ),
-                                                        ),
-                                                      if (hasStoredTasks)
-                                                        Container(
-                                                          width: 5,
-                                                          height: 5,
-                                                          margin:
-                                                              const EdgeInsets
-                                                                  .symmetric(
-                                                            horizontal: 1,
-                                                          ),
-                                                          decoration:
-                                                              BoxDecoration(
-                                                            color: isSelected
-                                                                ? fgColor
-                                                                : semantic.info,
-                                                            shape:
-                                                                BoxShape.circle,
-                                                          ),
-                                                        )
-                                                      else if (hasProjectedTasks)
-                                                        Container(
-                                                          width: 5,
-                                                          height: 5,
-                                                          margin:
-                                                              const EdgeInsets
-                                                                  .symmetric(
-                                                            horizontal: 1,
-                                                          ),
-                                                          decoration:
-                                                              BoxDecoration(
-                                                            color: isSelected
-                                                                ? fgColor
-                                                                : semantic
-                                                                    .transfer,
-                                                            shape:
-                                                                BoxShape.circle,
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
+                                                _CalendarCellIndicators(
+                                                  cellRhythm: cellRhythm,
+                                                  isSelected: isSelected,
+                                                  hasEvents: hasEvents,
+                                                  hasStoredTasks:
+                                                      hasStoredTasks,
+                                                  hasProjectedTasks:
+                                                      hasProjectedTasks,
+                                                  fgColor: fgColor,
                                                 ),
                                               ],
                                             ),
@@ -1512,6 +1441,88 @@ class _CalendarViewState extends State<CalendarView> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _CalendarCellIndicators extends StatelessWidget {
+  final DailyRhythmCalendarDayInspection? cellRhythm;
+  final bool isSelected;
+  final bool hasEvents;
+  final bool hasStoredTasks;
+  final bool hasProjectedTasks;
+  final Color fgColor;
+
+  const _CalendarCellIndicators({
+    required this.cellRhythm,
+    required this.isSelected,
+    required this.hasEvents,
+    required this.hasStoredTasks,
+    required this.hasProjectedTasks,
+    required this.fgColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
+    final rhythm = cellRhythm;
+    DailyRhythmCalendarDayInspection? visibleRhythm;
+    if (rhythm != null &&
+        DailyRhythmCalendarCellMarker.shouldDisplay(rhythm)) {
+      visibleRhythm = rhythm;
+    }
+    final bool hasDots = hasEvents || hasStoredTasks || hasProjectedTasks;
+    final bool hasIndicators = visibleRhythm != null || hasDots;
+
+    if (!hasIndicators) {
+      return const SizedBox(height: 10);
+    }
+
+    return FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          if (visibleRhythm != null) ...[
+            DailyRhythmCalendarCellMarker(
+              inspection: visibleRhythm,
+              isSelected: isSelected,
+            ),
+            if (hasDots) const SizedBox(width: 2),
+          ],
+          if (hasEvents)
+            Container(
+              width: 5,
+              height: 5,
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              decoration: BoxDecoration(
+                color: isSelected ? semantic.warning : colorScheme.primary,
+                shape: BoxShape.circle,
+              ),
+            ),
+          if (hasStoredTasks)
+            Container(
+              width: 5,
+              height: 5,
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              decoration: BoxDecoration(
+                color: isSelected ? fgColor : semantic.info,
+                shape: BoxShape.circle,
+              ),
+            )
+          else if (hasProjectedTasks)
+            Container(
+              width: 5,
+              height: 5,
+              margin: const EdgeInsets.symmetric(horizontal: 1),
+              decoration: BoxDecoration(
+                color: isSelected ? fgColor : semantic.transfer,
+                shape: BoxShape.circle,
+              ),
+            ),
+        ],
       ),
     );
   }

@@ -735,23 +735,27 @@ void main() {
         ),
         findsWidgets,
       );
-      expect(
-        find.descendant(
-          of: find.byType(MoreView),
-          matching: find.byType(DaywellSectionHeader),
-        ),
-        findsWidgets,
+      final Finder moreScrollable = find
+          .descendant(
+            of: find.byType(MoreView),
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      final Finder moreSectionHeader = find.descendant(
+        of: find.byType(MoreView),
+        matching: find.byType(DaywellSectionHeader),
       );
+      await tester.scrollUntilVisible(
+        moreSectionHeader,
+        200.0,
+        scrollable: moreScrollable,
+      );
+      expect(moreSectionHeader, findsWidgets);
 
       await tester.scrollUntilVisible(
         find.text('Appearance'),
         200.0,
-        scrollable: find
-            .descendant(
-              of: find.byType(MoreView),
-              matching: find.byType(Scrollable),
-            )
-            .first,
+        scrollable: moreScrollable,
       );
       await tester.tap(find.text('Appearance'));
       await tester.pumpAndSettle();

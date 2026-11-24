@@ -655,11 +655,14 @@ class _ResponsibilityTile extends StatelessWidget {
                     color: colorScheme.primary,
                   ),
                   const SizedBox(width: 6),
-                  Text(
-                    title,
-                    style: textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: semantic.textPrimary,
+                  Flexible(
+                    child: Text(
+                      title,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: semantic.textPrimary,
+                      ),
                     ),
                   ),
                 ],
@@ -759,11 +762,15 @@ class _StreakStatPill extends StatelessWidget {
             children: [
               Icon(icon, size: DaywellIconSize.xs, color: iconColor),
               const SizedBox(width: 4),
-              Text(
-                label.toUpperCase(),
-                style: textTheme.labelSmall?.copyWith(
-                  color: semantic.textMuted,
-                  fontWeight: FontWeight.w700,
+              Flexible(
+                child: Text(
+                  label.toUpperCase(),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.labelSmall?.copyWith(
+                    color: semantic.textMuted,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
@@ -793,16 +800,20 @@ class DailyRhythmCalendarCellMarker extends StatelessWidget {
     required this.isSelected,
   });
 
+  static bool shouldDisplay(DailyRhythmCalendarDayInspection inspection) {
+    return inspection.shortMarkerGlyph.isNotEmpty &&
+        !(inspection.calendarStatus ==
+                DailyRhythmCalendarDisplayStatus.untouched &&
+            inspection.isToday);
+  }
+
   @override
   Widget build(BuildContext context) {
     final semantic = context.daywellColors;
     final onPrimary = Theme.of(context).colorScheme.onPrimary;
     final textTheme = Theme.of(context).textTheme;
 
-    if (inspection.shortMarkerGlyph.isEmpty ||
-        (inspection.calendarStatus ==
-                DailyRhythmCalendarDisplayStatus.untouched &&
-            inspection.isToday)) {
+    if (!shouldDisplay(inspection)) {
       return const SizedBox.shrink();
     }
 
@@ -946,11 +957,15 @@ class DailyRhythmCalendarDetailCard extends StatelessWidget {
                         color: colorScheme.primary,
                       ),
                       const SizedBox(width: 6),
-                      Text(
-                        'Daily Rhythm history',
-                        style: textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: semantic.textPrimary,
+                      Flexible(
+                        child: Text(
+                          'Daily Rhythm history',
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: semantic.textPrimary,
+                          ),
                         ),
                       ),
                     ],
@@ -1107,12 +1122,17 @@ class _HistoryRow extends StatelessWidget {
                   color: semantic.textPrimary,
                 ),
               ),
-              const Spacer(),
-              Text(
-                status,
-                style: textTheme.labelSmall?.copyWith(
-                  color: tone,
-                  fontWeight: FontWeight.w700,
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  status,
+                  textAlign: TextAlign.end,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: textTheme.labelSmall?.copyWith(
+                    color: tone,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
