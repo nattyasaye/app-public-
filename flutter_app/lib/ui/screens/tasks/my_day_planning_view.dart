@@ -3,9 +3,12 @@ import '../../../application/tasks/tasks_state.dart';
 import '../../../core/date/shared_date.dart';
 import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
+import '../../../domain/daily_rhythm/daily_rhythm_models.dart';
+import '../../../domain/daily_rhythm/daily_rhythm_workflows.dart';
 import '../../../domain/tasks/daily_planning_engine.dart';
 import '../../../domain/tasks/task_models.dart';
 import '../../../domain/tasks/task_recurrence_engine.dart';
+import '../../widgets/daily_rhythm_workflow_widgets.dart';
 import '../../widgets/shared_ui_widgets.dart';
 
 /// Stage 2 My Day & Daily Planning workspace for Flutter.
@@ -27,6 +30,8 @@ class MyDayPlanningView extends StatefulWidget {
   final VoidCallback onCarryForwardAll;
   final VoidCallback onCarryPastRemainingToToday;
   final VoidCallback onCreateTaskForDay;
+  final DailyRhythmDayEntity? dailyRhythmRecord;
+  final VoidCallback? onConfirmDailyReview;
 
   const MyDayPlanningView({
     super.key,
@@ -44,6 +49,8 @@ class MyDayPlanningView extends StatefulWidget {
     required this.onCarryForwardAll,
     required this.onCarryPastRemainingToToday,
     required this.onCreateTaskForDay,
+    this.dailyRhythmRecord,
+    this.onConfirmDailyReview,
   });
 
   @override
@@ -395,6 +402,22 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
             actionLabel:
                 'Carry forward all (${snapshot.carryForwardSuggestions.length})',
             onActionPressed: widget.onCarryForwardAll,
+          ),
+        ],
+
+        if (widget.onConfirmDailyReview != null) ...[
+          const SizedBox(height: SharedDesignTokens.spacingCompact),
+          DailyTaskReviewCard(
+            snapshot: DailyRhythmWorkflows.buildTaskReviewSnapshot(
+              tasks: widget.moduleState.tasks,
+              planningEntries: widget.moduleState.dailyPlanningEntries,
+              targetDateIso: snapshot.selectedDate.toIsoString(),
+              today: snapshot.todayDate,
+            ),
+            record: widget.dailyRhythmRecord ??
+                DailyRhythmDayEntity.empty(snapshot.selectedDate.toIsoString()),
+            isToday: snapshot.isToday,
+            onConfirmReview: widget.onConfirmDailyReview!,
           ),
         ],
 

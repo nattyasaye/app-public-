@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../application/calendar/calendar_controller.dart';
+import '../application/daily_rhythm/daily_rhythm_controller.dart';
 import '../application/finance/finance_controller.dart';
 import '../application/inbox/inbox_controller.dart';
 import '../application/notes/notes_controller.dart';
@@ -15,12 +16,14 @@ import '../data/database/app_database.dart';
 import '../data/database/database_persistence_coordinator.dart';
 import '../data/database/raw_database_recovery_exporter.dart';
 import '../data/repositories/calendar_repository.dart';
+import '../data/repositories/daily_rhythm_repository.dart';
 import '../data/repositories/finance_repository.dart';
 import '../data/repositories/inbox_repository.dart';
 import '../data/repositories/notes_repository.dart';
 import '../data/repositories/projects_repository.dart';
 import '../data/repositories/search_repository.dart';
 import '../data/repositories/tasks_repository.dart';
+import '../domain/finance/double_entry_engine.dart';
 import '../services/backup/encryption_backup_service.dart';
 import '../services/notifications/local_notification_service.dart';
 
@@ -238,12 +241,17 @@ class AppStateManager extends ChangeNotifier {
   final EncryptionBackupService _backupService = EncryptionBackupService();
 
   late FinanceController financeController;
+  late DailyRhythmController dailyRhythmController;
   late TasksController tasksController;
   late ProjectsController projectsController;
   late NotesController notesController;
   late InboxController inboxController;
   late CalendarController calendarController;
   late DriftSearchRepository searchRepository;
+
+  bool _hasFinanceLedgerBaseline = false;
+  List<JournalEntryModel> _lastObservedFinanceEntries = const [];
+  List<PostingModel> _lastObservedFinancePostings = const [];
 
   bool _isInitializing = false;
   bool _isInitialized = false;
@@ -289,6 +297,9 @@ class AppStateManager extends ChangeNotifier {
     financeController = FinanceController(
       repository: DriftFinanceRepository(db),
     );
+    dailyRhythmController = DailyRhythmController(
+      repository: DriftDailyRhythmRepository(db),
+    );
     tasksController = TasksController(
       repository: DriftTasksRepository(db),
       notificationService: _notificationService,
@@ -309,7 +320,12 @@ class AppStateManager extends ChangeNotifier {
     );
     searchRepository = DriftSearchRepository(db);
 
+    _hasFinanceLedgerBaseline = false;
+    _lastObservedFinanceEntries = const [];
+    _lastObservedFinancePostings = const [];
+
     financeController.addListener(_onFinanceStateChanged);
+    dailyRhythmController.addListener(notifyListeners);
     tasksController.addListener(notifyListeners);
     projectsController.addListener(notifyListeners);
     notesController.addListener(notifyListeners);
@@ -318,8 +334,37 @@ class AppStateManager extends ChangeNotifier {
     _controllersDisposed = false;
   }
 
+  void _syncObservedFinanceLedgerBaseline() {
+    _lastObservedFinanceEntries = List<JournalEntryModel>.unmodifiable(
+      financeController.state.journalEntries,
+    );
+    _lastObservedFinancePostings = List<PostingModel>.unmodifiable(
+      financeController.state.postings,
+    );
+    _hasFinanceLedgerBaseline = true;
+  }
+
   void _onFinanceStateChanged() {
     if (_isDisposed) return;
+    final financeState = financeController.state;
+    if (!financeState.isLoading && _hasFinanceLedgerBaseline) {
+      final nextEntries = financeState.journalEntries;
+      final nextPostings = financeState.postings;
+      if (!_isRestoreInProgress && !dailyRhythmController.state.isLoading) {
+        unawaited(
+          dailyRhythmController.handleFinanceLedgerMutation(
+            prevEntries: _lastObservedFinanceEntries,
+            prevPostings: _lastObservedFinancePostings,
+            nextEntries: nextEntries,
+            nextPostings: nextPostings,
+          ),
+        );
+      }
+      _lastObservedFinanceEntries =
+          List<JournalEntryModel>.unmodifiable(nextEntries);
+      _lastObservedFinancePostings =
+          List<PostingModel>.unmodifiable(nextPostings);
+    }
     if (_isInitialized) {
       unawaited(syncFinanceDueReminders());
     }
@@ -525,14 +570,17 @@ class AppStateManager extends ChangeNotifier {
   }
 
   Future<void> _rehydrateAllControllers() async {
+    _hasFinanceLedgerBaseline = false;
     await Future.wait([
       financeController.loadAll(),
+      dailyRhythmController.loadAll(),
       tasksController.loadAll(),
       projectsController.loadAll(),
       notesController.loadNotes(),
       inboxController.loadItems(includeProcessed: true),
       calendarController.loadAll(),
     ]);
+    _syncObservedFinanceLedgerBaseline();
   }
 
   Future<void> _rehydrateAllControllersStrict() async {
@@ -541,6 +589,9 @@ class AppStateManager extends ChangeNotifier {
       if (financeController.state.errorMessage != null &&
           financeController.state.errorMessage!.isNotEmpty)
         'finance: ${financeController.state.errorMessage}',
+      if (dailyRhythmController.state.errorMessage != null &&
+          dailyRhythmController.state.errorMessage!.isNotEmpty)
+        'daily_rhythm: ${dailyRhythmController.state.errorMessage}',
       if (tasksController.state.errorMessage != null &&
           tasksController.state.errorMessage!.isNotEmpty)
         'tasks: ${tasksController.state.errorMessage}',
@@ -719,6 +770,7 @@ class AppStateManager extends ChangeNotifier {
     _controllersDisposed = true;
 
     financeController.removeListener(_onFinanceStateChanged);
+    dailyRhythmController.removeListener(notifyListeners);
     tasksController.removeListener(notifyListeners);
     projectsController.removeListener(notifyListeners);
     notesController.removeListener(notifyListeners);
@@ -726,6 +778,7 @@ class AppStateManager extends ChangeNotifier {
     calendarController.removeListener(notifyListeners);
 
     financeController.dispose();
+    dailyRhythmController.dispose();
     tasksController.dispose();
     projectsController.dispose();
     notesController.dispose();

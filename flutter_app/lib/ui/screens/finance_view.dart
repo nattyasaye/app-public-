@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../application/daily_rhythm/daily_rhythm_controller.dart';
 import '../../application/finance/finance_controller.dart';
 import '../../core/shared_foundation.dart';
 import '../app_state.dart';
@@ -16,12 +17,14 @@ import 'finance/finance_transactions_tab.dart';
 class FinanceView extends StatefulWidget {
   final AppStateManager? state;
   final FinanceController? controller;
+  final DailyRhythmController? dailyRhythmController;
   final VoidCallback? onOpenQuickCapture;
 
   const FinanceView({
     super.key,
     this.state,
     this.controller,
+    this.dailyRhythmController,
     this.onOpenQuickCapture,
   }) : assert(
           state != null || controller != null,
@@ -30,6 +33,9 @@ class FinanceView extends StatefulWidget {
 
   FinanceController get effectiveController =>
       controller ?? state!.financeController;
+
+  DailyRhythmController? get effectiveDailyRhythmController =>
+      dailyRhythmController ?? state?.dailyRhythmController;
 
   @override
   State<FinanceView> createState() => _FinanceViewState();
@@ -154,7 +160,11 @@ class _FinanceViewState extends State<FinanceView>
                       onOpenPlan: () => _tabController.animateTo(2),
                       onOpenReports: () => _tabController.animateTo(3),
                     ),
-                    FinanceTransactionsTab(controller: ctrl),
+                    FinanceTransactionsTab(
+                      controller: ctrl,
+                      dailyRhythmController:
+                          widget.effectiveDailyRhythmController,
+                    ),
                     FinancePlanTab(controller: ctrl),
                     FinanceReportsTab(controller: ctrl),
                   ],

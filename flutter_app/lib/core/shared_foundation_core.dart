@@ -393,6 +393,36 @@ class SharedProjectPackageSpec {
   static const String fileExtension = '.daywellproject';
 }
 
+class SharedDailyRhythmContracts {
+  static const List<String> canonicalDayStatuses = [
+    'untouched',
+    'partial',
+    'complete',
+    'freeze_protected',
+    'missed',
+  ];
+
+  static const List<String> canonicalFinanceCloseStatuses = [
+    'open',
+    'closed_with_transactions',
+    'closed_no_transactions',
+    'needs_reconfirmation',
+  ];
+
+  static const String defaultFinanceCloseStatus = 'open';
+  static const int qualifyingDaysPerFreeze = 15;
+  static const int maxStreakFreezes = 2;
+  static const int maxProtectedGapDays = 1;
+
+  static const bool requireAllThreeResponsibilities = true;
+  static const bool requireBothFaithPractices = true;
+  static const bool requireCompletingAllTasks = false;
+  static const bool emptyFinanceDayAutoQualifies = false;
+  static const bool lockPastFaithAndTaskReview = true;
+  static const bool preserveFinalizedHistoryOnLedgerCorrection = true;
+  static const bool useEthiopiaDateConvention = true;
+}
+
 class KnownSeedIds {
   static const Set<String> accounts = {
     'acc-cbe',

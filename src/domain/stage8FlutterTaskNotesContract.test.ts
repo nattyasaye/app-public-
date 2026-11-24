@@ -12,7 +12,7 @@ function read(relPath: string): string {
 describe('Stage 8 — Flutter Task–Notes Integration & Schema v11 Contract', () => {
   it('1. Shared Foundation schema_contracts.json and generated artifacts define v11 Note linkedModule/linkedId', () => {
     const contracts = JSON.parse(read('shared_foundation/schema_contracts.json'));
-    assert.strictEqual(contracts.schemaVersion, 11);
+    assert.strictEqual(contracts.schemaVersion, 12);
 
     const noteFields = contracts.entities.Note.fields;
     assert.deepStrictEqual(noteFields.linkedModule, {
@@ -40,7 +40,7 @@ describe('Stage 8 — Flutter Task–Notes Integration & Schema v11 Contract', (
     assert.match(tables, /class Notes extends Table[\s\S]*TextColumn get linkedId => text\(\)\.nullable\(\)\(\);/);
 
     const appDb = read('flutter_app/lib/data/database/app_database.dart');
-    assert.match(appDb, /int get schemaVersion => 11;/);
+    assert.match(appDb, /int get schemaVersion => 12;/);
     assert.match(appDb, /if \(from < 11\)/);
     assert.match(appDb, /'linked_module'/);
     assert.match(appDb, /'linked_id'/);
@@ -49,7 +49,7 @@ describe('Stage 8 — Flutter Task–Notes Integration & Schema v11 Contract', (
     assert.match(appDb, /PRAGMA foreign_key_check/);
 
     const migBaseline = JSON.parse(read('scripts/migration_compatibility_baseline.json'));
-    assert.strictEqual(migBaseline.minimumSchemaVersion, 11);
+    assert.ok(migBaseline.minimumSchemaVersion >= 11);
     const step11 = migBaseline.releasedUpgradeSteps.find((s: { version: number }) => s.version === 11);
     assert.ok(step11, 'Baseline must track released v11 upgrade step');
     assert.deepStrictEqual(step11.requiredMarkers, ['notes.linkedModule', 'notes.linkedId']);
@@ -92,21 +92,21 @@ describe('Stage 8 — Flutter Task–Notes Integration & Schema v11 Contract', (
     assert.match(appState, /clearLinksForTarget/);
   });
 
-  it('4. Version policy, Backup coordinator, Encryption service, and Web bridge synchronize schema v11 & compat bounds', () => {
+  it('4. Version policy, Backup coordinator, Encryption service, and Web bridge synchronize schema v12 & compat bounds', () => {
     const policy = read('flutter_app/lib/core/snapshot_version_policy.dart');
-    assert.match(policy, /supportedDatabaseSchemaVersion = 11/);
-    assert.match(policy, /maxSupportedDatabaseSchemaVersion = 11/);
+    assert.match(policy, /supportedDatabaseSchemaVersion = 12/);
+    assert.match(policy, /maxSupportedDatabaseSchemaVersion = 12/);
     assert.match(
       policy,
-      /rawDbVersion != 9 &&[\s\S]*rawDbVersion != 10 &&[\s\S]*rawDbVersion != supportedDatabaseSchemaVersion/
+      /rawDbVersion != 9 &&[\s\S]*rawDbVersion != 10 &&[\s\S]*rawDbVersion != 11 &&[\s\S]*rawDbVersion != supportedDatabaseSchemaVersion/
     );
 
     const webPolicy = read('src/domain/snapshotVersionPolicy.ts');
-    assert.match(webPolicy, /supportedDatabaseSchemaVersion:\s*11/);
-    assert.match(webPolicy, /maxSupportedDatabaseSchemaVersion:\s*11/);
+    assert.match(webPolicy, /supportedDatabaseSchemaVersion:\s*12/);
+    assert.match(webPolicy, /maxSupportedDatabaseSchemaVersion:\s*12/);
     assert.match(
       webPolicy,
-      /dsv !== 9 &&[\s\S]*dsv !== 10 &&[\s\S]*dsv !== SNAPSHOT_VERSION_BOUNDS\.supportedDatabaseSchemaVersion/
+      /dsv !== 9 &&[\s\S]*dsv !== 10 &&[\s\S]*dsv !== 11 &&[\s\S]*dsv !== SNAPSHOT_VERSION_BOUNDS\.supportedDatabaseSchemaVersion/
     );
 
     const coordinator = read('flutter_app/lib/data/database/database_persistence_coordinator.dart');
@@ -115,7 +115,7 @@ describe('Stage 8 — Flutter Task–Notes Integration & Schema v11 Contract', (
     assert.match(coordinator, /ORPHANED_NOTE_TASK_CLEARED/);
 
     const encService = read('flutter_app/lib/services/backup/encryption_backup_service.dart');
-    assert.match(encService, /maxSupportedDatabaseSchemaVersion = 11/);
+    assert.match(encService, /maxSupportedDatabaseSchemaVersion = 12/);
   });
 
   it('5. Flutter TasksView, NotesView, and MainDaywellScreen implement bidirectional UI without raw colors or duplicate note editor', () => {

@@ -29,9 +29,15 @@ import {
   TASK_PRIORITY_LABELS,
 } from '../../domain/taskOperations';
 import {
+  createEmptyDailyRhythmDay,
+  DailyRhythmDayRecord,
+} from '../../domain/dailyRhythm';
+import { buildDailyRhythmTaskReviewSnapshot } from '../../domain/dailyRhythmWorkflows';
+import {
   formatRecurrenceSummary,
   resolveEffectiveRecurrenceConfig,
 } from '../../domain/taskRecurrence';
+import { DailyTaskReviewCard } from '../daily-rhythm';
 import {
   DaywellButton,
   DaywellCard,
@@ -65,6 +71,8 @@ interface MyDayPlanningViewProps {
   onCarryForwardAll: () => void;
   onCarryPastRemainingToToday: () => void;
   onCreateTaskForDay: () => void;
+  dailyRhythmRecord?: DailyRhythmDayRecord;
+  onConfirmDailyReview?: () => void;
 }
 
 function priorityTone(priority: DaywellTaskRecord['priority']): DaywellStatusTone {
@@ -109,8 +117,21 @@ export function MyDayPlanningView({
   onCarryForwardAll,
   onCarryPastRemainingToToday,
   onCreateTaskForDay,
+  dailyRhythmRecord,
+  onConfirmDailyReview,
 }: MyDayPlanningViewProps) {
   const [showOtherActive, setShowOtherActive] = useState(false);
+
+  const taskReviewSnapshot = useMemo(
+    () =>
+      buildDailyRhythmTaskReviewSnapshot({
+        tasks,
+        dailyPlanningEntries: entries,
+        targetDateIso: selectedDate,
+        todayIso: todayDate,
+      }),
+    [tasks, entries, selectedDate, todayDate]
+  );
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
   const parsedSelected =
@@ -512,6 +533,16 @@ export function MyDayPlanningView({
           message={`${snapshot.carryForwardSuggestions.length} unfinished task(s) from earlier planned days can be carried forward without duplicates.`}
           actionLabel={`Carry forward all (${snapshot.carryForwardSuggestions.length})`}
           onActionPressed={onCarryForwardAll}
+        />
+      )}
+
+      {onConfirmDailyReview && (
+        <DailyTaskReviewCard
+          snapshot={taskReviewSnapshot}
+          record={dailyRhythmRecord ?? createEmptyDailyRhythmDay(selectedDate)}
+          isToday={snapshot.isToday}
+          onConfirmReview={onConfirmDailyReview}
+          onOpenTask={onOpenTaskDetails}
         />
       )}
 

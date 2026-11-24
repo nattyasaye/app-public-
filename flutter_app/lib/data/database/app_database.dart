@@ -40,6 +40,7 @@ part 'app_database.g.dart';
   ProjectTrackingBlocks,
   ProjectTrackingRecords,
   DailyPlanningEntries,
+  DailyRhythmDays,
 ])
 class AppDatabase extends _$AppDatabase {
   static const String seedSentinelKey = 'initial_seed_completed';
@@ -49,7 +50,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 11;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration {
@@ -620,6 +621,23 @@ class AppDatabase extends _$AppDatabase {
             );
           }
         }
+        if (from < 12) {
+          // Schema v11 -> v12: Non-destructive Daily Rhythm persistence table
+          await _createTableIfMissing(
+            table: 'daily_rhythm_days',
+            createFn: () => m.createTable(dailyRhythmDays),
+          );
+          await _createV12DailyRhythmPerformanceIndices();
+
+          final fkViolations =
+              await customSelect('PRAGMA foreign_key_check').get();
+          if (fkViolations.isNotEmpty) {
+            throw LedgerMigrationException(
+              'Schema v12 upgrade aborted due to foreign key violations '
+              '(${fkViolations.length} row(s)).',
+            );
+          }
+        }
       },
       beforeOpen: (details) async {
         // Enforce foreign key constraints in SQLite
@@ -962,6 +980,13 @@ class AppDatabase extends _$AppDatabase {
     if (noteCols.contains('linked_module') && noteCols.contains('linked_id')) {
       await _createV11NotePerformanceIndices();
     }
+    final dailyRhythmTableRows = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' "
+      "AND name = 'daily_rhythm_days';",
+    ).get();
+    if (dailyRhythmTableRows.isNotEmpty) {
+      await _createV12DailyRhythmPerformanceIndices();
+    }
   }
 
   Future<void> _createV9ProjectPerformanceIndices() async {
@@ -1010,6 +1035,13 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_notes_linked '
       'ON notes(linked_module, linked_id);',
+    );
+  }
+
+  Future<void> _createV12DailyRhythmPerformanceIndices() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_daily_rhythm_days_updated_at '
+      'ON daily_rhythm_days(updated_at);',
     );
   }
 

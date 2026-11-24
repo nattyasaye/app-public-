@@ -195,10 +195,10 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
     });
   });
 
-  it('1b. SharedStateBridge validates separated snapshotFormatVersion (1..2, omitted->1) and optional databaseSchemaVersion (1..11) fail-closed before mutating localStorage', () => {
+  it('1b. SharedStateBridge validates separated snapshotFormatVersion (1..2, omitted->1) and optional databaseSchemaVersion (1..12) fail-closed before mutating localStorage', () => {
     withMockBrowserStorage((store) => {
       for (const fmtVersion of [1, 2]) {
-        for (const dbVersion of [9, 10, 11]) {
+        for (const dbVersion of [9, 10, 11, 12]) {
           const res = SharedStateBridge.importFromAndroidJson(
             JSON.stringify({
               schemaVersion: 5,
@@ -255,13 +255,13 @@ describe('Governance Stage 3.4.2: Web Fail-Closed Version Bounds & Backup Valida
           expectedKind: 'invalid_snapshot_version',
         },
         {
-          name: 'future databaseSchemaVersion 12 (format-2)',
-          overrides: { snapshotFormatVersion: 2, databaseSchemaVersion: 12 },
+          name: 'future databaseSchemaVersion 13 (format-2)',
+          overrides: { snapshotFormatVersion: 2, databaseSchemaVersion: 13 },
           expectedKind: 'unsupported_future_schema',
         },
         {
-          name: 'future databaseSchemaVersion 12 (format-1)',
-          overrides: { snapshotFormatVersion: 1, databaseSchemaVersion: 12 },
+          name: 'future databaseSchemaVersion 13 (format-1)',
+          overrides: { snapshotFormatVersion: 1, databaseSchemaVersion: 13 },
           expectedKind: 'unsupported_future_schema',
         },
         {

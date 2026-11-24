@@ -39,6 +39,7 @@ Daywell maintains two test harnesses (`npm` / `tsx` for Shared Foundation & Web 
 | **Shared Foundation, UI Governance & Portability Parity** | `src/domain/sharedFoundationParity.test.ts`, `src/domain/uiConsistencyGovernance.test.ts`, `src/domain/stage32FoundationGovernance.test.ts`, `src/domain/stage33GovernanceEnforcement.test.ts`, `src/domain/stage342BackupValidation.test.ts`, `src/domain/sharedStateBridge.test.ts`, `src/domain/coreModulesIntegration.test.ts` |
 | **Finance v6/v7 Double-Entry & Stage 2.2** | `src/domain/doubleEntryFinance.test.ts`, `src/domain/financeV7WebParity.test.ts`, `src/domain/stage22CurrencyIsolation.test.ts`, `src/domain/batch5FinanceFoundation.test.ts`, `src/domain/batch6FinanceIntegrity.test.ts`, `src/domain/batch7FinanceArchitecture.test.ts` |
 | **Navigation, Tasks, Projects, Notes & Inbox Architecture** | `src/domain/batch1NavigationFoundation.test.ts`, `src/domain/batch2FormsInputsNavigation.test.ts`, `src/domain/batch8TasksArchitecture.test.ts`, `src/domain/projectsStage1.test.ts`, `src/domain/projectsStage2Workspace.test.ts`, `src/domain/projectPackage.test.ts`, `src/domain/batch9NotesInboxArchitecture.test.ts`, `src/domain/batch10Stage2Consolidation.test.ts` |
+| **Daily Rhythm (Stage A Engine, Stage B Persistence/Backup & Stage C Workflows)** | `src/domain/dailyRhythm.test.ts`, `src/domain/stageBDailyRhythmPersistence.test.ts`, `src/domain/stageCDailyRhythmWorkflows.test.ts` |
 
 ---
 
@@ -62,6 +63,7 @@ Because Flutter/Dart is not installed in the local workspace container, Dart tes
 | **Database Migrations & Consolidation** | `database_migration_test.dart`, `stage2_consolidation_test.dart` |
 | **Finance v6 / v7 / Stage 4 / Stage 2.2** | `financial_engine_test.dart`, `double_entry_finance_test.dart`, `finance_contracts_v6_test.dart`, `finance_engine_v6_test.dart`, `finance_v6_migration_test.dart`, `finance_repository_test.dart`, `finance_controller_test.dart`, `finance_v7_domain_test.dart`, `finance_v7_migration_test.dart`, `finance_v7_stage416_test.dart`, `stage4_finance_test.dart` |
 | **Tasks, Projects, Notes, Inbox, Search, Notifications & Calendar** | `task_and_project_test.dart`, `projects_stage1_test.dart`, `project_package_test.dart`, `inbox_repository_test.dart`, `notes_inbox_architecture_test.dart`, `local_search_test.dart`, `stage5_notes_notifications_calendar_test.dart` |
+| **Daily Rhythm (Stage A Engine, Stage B Persistence/Backup & Stage C Workflows)** | `daily_rhythm_engine_test.dart`, `stageb_daily_rhythm_persistence_and_backup_test.dart`, `stagec_daily_rhythm_workflows_test.dart` |
 | **Encrypted Backup, Version Bounds & Restore** | `stage6_backup_restore_test.dart`, `stage342_backup_snapshot_validation_test.dart`, `stage344_snapshot_fidelity_restore_test.dart` |
 | **Test Helpers** | `flutter_app/test/support/` |
 

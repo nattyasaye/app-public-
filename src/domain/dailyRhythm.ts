@@ -284,6 +284,11 @@ function financeStatusRank(status: DailyRhythmFinanceCloseStatus): number {
   }
 }
 
+function compareCodeUnits(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 function compareRecordTieBreaker(
   candidate: DailyRhythmDayRecord,
   existing: DailyRhythmDayRecord
@@ -294,7 +299,7 @@ function compareRecordTieBreaker(
     return candidateUpdated - existingUpdated;
   }
   if (candidate.updatedAt !== existing.updatedAt) {
-    return candidate.updatedAt.localeCompare(existing.updatedAt);
+    return compareCodeUnits(candidate.updatedAt, existing.updatedAt);
   }
   const candidateScore =
     (candidate.bibleStudyDone ? 1 : 0) +
@@ -309,7 +314,7 @@ function compareRecordTieBreaker(
   if (candidateScore !== existingScore) {
     return candidateScore - existingScore;
   }
-  return JSON.stringify(candidate).localeCompare(JSON.stringify(existing));
+  return compareCodeUnits(JSON.stringify(candidate), JSON.stringify(existing));
 }
 
 export function normalizeDailyRhythmTimeline(

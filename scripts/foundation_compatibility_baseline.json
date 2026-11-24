@@ -462,6 +462,24 @@
         "value": { "type": "string", "required": true },
         "updatedAt": { "type": "string" }
       }
+    },
+    "DailyRhythmDay": {
+      "fields": {
+        "dateIso": { "type": "string", "required": true },
+        "bibleStudyDone": { "type": "boolean" },
+        "bibleStudyCompletedAt": { "type": "string" },
+        "prayerDone": { "type": "boolean" },
+        "prayerCompletedAt": { "type": "string" },
+        "taskReviewConfirmed": { "type": "boolean" },
+        "taskReviewedAt": { "type": "string" },
+        "taskReviewEvidence": { "type": "object" },
+        "financeCloseStatus": {
+          "type": "string",
+          "enum": ["open", "closed_with_transactions", "closed_no_transactions", "needs_reconfirmation"]
+        },
+        "financeClosedAt": { "type": "string" },
+        "updatedAt": { "type": "string", "required": true }
+      }
     }
   },
   "intentionalRemovals": [

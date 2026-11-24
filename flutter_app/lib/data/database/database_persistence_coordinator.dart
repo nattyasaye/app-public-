@@ -6,6 +6,7 @@ import '../../core/date/shared_date.dart';
 import '../../core/interfaces/platform_service_interfaces.dart';
 import '../../core/shared_foundation_core.dart';
 import '../../core/snapshot_version_policy.dart';
+import '../../domain/daily_rhythm/daily_rhythm_models.dart';
 import '../../domain/finance/double_entry_engine.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/projects/project_validation_service.dart';
@@ -31,6 +32,7 @@ class PreparedSnapshotImport {
   final List<MilestonesCompanion> milestones;
   final List<TasksCompanion> tasks;
   final List<DailyPlanningEntriesCompanion> dailyPlanningEntries;
+  final List<DailyRhythmDaysCompanion> dailyRhythmDays;
   final List<NotesCompanion> notes;
   final List<InboxItemsCompanion> inboxItems;
   final List<CalendarEventsCompanion> calendarEvents;
@@ -71,6 +73,7 @@ class PreparedSnapshotImport {
     required this.milestones,
     required this.tasks,
     this.dailyPlanningEntries = const <DailyPlanningEntriesCompanion>[],
+    this.dailyRhythmDays = const <DailyRhythmDaysCompanion>[],
     required this.notes,
     required this.inboxItems,
     required this.calendarEvents,
@@ -144,6 +147,9 @@ class DatabasePersistenceCoordinator {
     final tasks = await _db.select(_db.tasks).get();
     final dailyPlanningEntries =
         await _db.select(_db.dailyPlanningEntries).get();
+    final dailyRhythmDays = await (_db.select(_db.dailyRhythmDays)
+          ..orderBy([(tbl) => OrderingTerm.asc(tbl.dateIso)]))
+        .get();
     final notes = await _db.select(_db.notes).get();
     final inboxItems = await _db.select(_db.inboxItems).get();
     final calendarEvents = await _db.select(_db.calendarEvents).get();
@@ -463,6 +469,30 @@ class DatabasePersistenceCoordinator {
                     : null,
               })
           .toList(),
+      'dailyRhythmDays': dailyRhythmDays
+          .map((d) => {
+                'dateIso': d.dateIso,
+                'bibleStudyDone': d.bibleStudyDone,
+                'bibleStudyCompletedAt': d.bibleStudyCompletedAt != null
+                    ? EthiopiaClock.toUtcIsoString(d.bibleStudyCompletedAt!)
+                    : null,
+                'prayerDone': d.prayerDone,
+                'prayerCompletedAt': d.prayerCompletedAt != null
+                    ? EthiopiaClock.toUtcIsoString(d.prayerCompletedAt!)
+                    : null,
+                'taskReviewConfirmed': d.taskReviewConfirmed,
+                'taskReviewedAt': d.taskReviewedAt != null
+                    ? EthiopiaClock.toUtcIsoString(d.taskReviewedAt!)
+                    : null,
+                'taskReviewEvidence':
+                    _decodeNullableJsonMap(d.taskReviewEvidenceJson),
+                'financeCloseStatus': d.financeCloseStatus,
+                'financeClosedAt': d.financeClosedAt != null
+                    ? EthiopiaClock.toUtcIsoString(d.financeClosedAt!)
+                    : null,
+                'updatedAt': EthiopiaClock.toUtcIsoString(d.updatedAt),
+              })
+          .toList(),
       'notes': notes
           .map((n) => {
                 'id': n.id,
@@ -536,6 +566,7 @@ class DatabasePersistenceCoordinator {
   static const List<String> _nonFinanceSnapshotKeys = <String>[
     'tasks',
     'dailyPlanningEntries',
+    'dailyRhythmDays',
     'notes',
     'projects',
     'projectTrackingBlocks',
@@ -778,7 +809,7 @@ class DatabasePersistenceCoordinator {
   static const int legacyOmittedSnapshotFormatVersion = 1;
   static const int minSupportedSnapshotFormatVersion = 1;
   static const int maxSupportedSnapshotFormatVersion = 2;
-  static const int maxSupportedDatabaseSchemaVersion = 11;
+  static const int maxSupportedDatabaseSchemaVersion = 12;
   static const int minSupportedCanonicalSnapshotVersion = 4;
   static const int maxSupportedCanonicalSnapshotVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
@@ -804,6 +835,7 @@ class DatabasePersistenceCoordinator {
     'milestones',
     'tasks',
     'dailyPlanningEntries',
+    'dailyRhythmDays',
     'notes',
     'inboxItems',
     'calendarEvents',
@@ -887,6 +919,12 @@ class DatabasePersistenceCoordinator {
     'carried_forward',
     'completed',
     'dismissed',
+  };
+  static const Set<String> _dailyRhythmFinanceCloseStatuses = <String>{
+    DailyRhythmFinanceCloseStatuses.open,
+    DailyRhythmFinanceCloseStatuses.closedWithTransactions,
+    DailyRhythmFinanceCloseStatuses.closedNoTransactions,
+    DailyRhythmFinanceCloseStatuses.needsReconfirmation,
   };
   static const Set<String> _noteLinkedModules = <String>{
     'tasks',
@@ -1584,6 +1622,101 @@ class DatabasePersistenceCoordinator {
           action: Value(action),
           createdAt: createdAt,
           updatedAt: Value(updatedAt),
+        ),
+      );
+    }
+
+    // 7a-2. DailyRhythmDays (unique canonical dateIso)
+    final rawDailyRhythm = listOf('dailyRhythmDays');
+    final dailyRhythmSeenDates = <String>{};
+    final dailyRhythmCompanions = <DailyRhythmDaysCompanion>[];
+    for (var i = 0; i < rawDailyRhythm.length; i++) {
+      final r = rawDailyRhythm[i];
+      final ctx = 'dailyRhythmDays[$i]';
+      final dateIso = _reqCanonicalDate(r, 'dateIso', ctx);
+      if (!dailyRhythmSeenDates.add(dateIso)) {
+        throw BackupValidationException(
+          BackupFailureKind.invalidPayload,
+          'Duplicate dailyRhythmDays dateIso "$dateIso" at "$ctx".',
+        );
+      }
+      final bibleStudyDone = _optBool(r, 'bibleStudyDone', ctx) ?? false;
+      final bibleStudyCompletedAt =
+          _optInstantUtc(r, 'bibleStudyCompletedAt', ctx);
+      final prayerDone = _optBool(r, 'prayerDone', ctx) ?? false;
+      final prayerCompletedAt = _optInstantUtc(r, 'prayerCompletedAt', ctx);
+      final taskReviewConfirmed =
+          _optBool(r, 'taskReviewConfirmed', ctx) ?? false;
+      final taskReviewedAt = _optInstantUtc(r, 'taskReviewedAt', ctx);
+
+      String? taskReviewEvidenceJson;
+      final hasEvidenceObj = r.containsKey('taskReviewEvidence') &&
+          r['taskReviewEvidence'] != null;
+      final hasEvidenceJson = r.containsKey('taskReviewEvidenceJson') &&
+          r['taskReviewEvidenceJson'] != null;
+      if (hasEvidenceObj || hasEvidenceJson) {
+        if (hasEvidenceJson && !hasEvidenceObj) {
+          final rawStr = r['taskReviewEvidenceJson'];
+          if (rawStr is! String) {
+            throw BackupValidationException(
+              BackupFailureKind.invalidPayload,
+              'Invalid field "$ctx.taskReviewEvidenceJson": expected a JSON string.',
+            );
+          }
+        }
+        final rawEvidence = _optJsonMapFromKeys(
+          r,
+          const ['taskReviewEvidence', 'taskReviewEvidenceJson'],
+          ctx,
+          'taskReviewEvidence',
+        );
+        if (hasEvidenceObj ||
+            (hasEvidenceJson &&
+                (r['taskReviewEvidenceJson'] as String).trim().isNotEmpty)) {
+          final evCtx = '$ctx.taskReviewEvidence';
+          final evidence = DailyRhythmTaskReviewEvidence(
+            overdueCount:
+                _optInt(rawEvidence, 'overdueCount', evCtx, min: 0) ?? 0,
+            todayCount: _optInt(rawEvidence, 'todayCount', evCtx, min: 0) ?? 0,
+            plannedCount:
+                _optInt(rawEvidence, 'plannedCount', evCtx, min: 0) ?? 0,
+            completedTodayCount:
+                _optInt(rawEvidence, 'completedTodayCount', evCtx, min: 0) ?? 0,
+          );
+          if (taskReviewConfirmed) {
+            taskReviewEvidenceJson = jsonEncode(evidence.toJson());
+          }
+        }
+      }
+
+      final financeCloseStatus = _optEnum(
+            r,
+            'financeCloseStatus',
+            _dailyRhythmFinanceCloseStatuses,
+            ctx,
+          ) ??
+          DailyRhythmRules.defaultFinanceCloseStatus;
+      final financeClosedAt = _optInstantUtc(r, 'financeClosedAt', ctx);
+      final updatedAt = _optInstantUtc(r, 'updatedAt', ctx) ?? now;
+
+      dailyRhythmCompanions.add(
+        DailyRhythmDaysCompanion.insert(
+          dateIso: dateIso,
+          bibleStudyDone: Value(bibleStudyDone),
+          bibleStudyCompletedAt:
+              Value(bibleStudyDone ? bibleStudyCompletedAt : null),
+          prayerDone: Value(prayerDone),
+          prayerCompletedAt: Value(prayerDone ? prayerCompletedAt : null),
+          taskReviewConfirmed: Value(taskReviewConfirmed),
+          taskReviewedAt: Value(taskReviewConfirmed ? taskReviewedAt : null),
+          taskReviewEvidenceJson: Value(taskReviewEvidenceJson),
+          financeCloseStatus: Value(financeCloseStatus),
+          financeClosedAt: Value(
+            DailyRhythmFinanceCloseStatuses.isClosed(financeCloseStatus)
+                ? financeClosedAt
+                : null,
+          ),
+          updatedAt: updatedAt,
         ),
       );
     }
@@ -3357,6 +3490,7 @@ class DatabasePersistenceCoordinator {
       'milestones': milestoneCompanions.length,
       'tasks': taskCompanions.length,
       'dailyPlanningEntries': dailyPlanningCompanions.length,
+      'dailyRhythmDays': dailyRhythmCompanions.length,
       'notes': noteCompanions.length,
       'inboxItems': inboxCompanions.length,
       'calendarEvents': eventCompanions.length,
@@ -3390,6 +3524,7 @@ class DatabasePersistenceCoordinator {
       milestones: milestoneCompanions,
       tasks: taskCompanions,
       dailyPlanningEntries: dailyPlanningCompanions,
+      dailyRhythmDays: dailyRhythmCompanions,
       notes: noteCompanions,
       inboxItems: inboxCompanions,
       calendarEvents: eventCompanions,
@@ -3617,6 +3752,7 @@ class DatabasePersistenceCoordinator {
         await _db.delete(_db.projectTrackingRecords).go();
         await _db.delete(_db.projectTrackingBlocks).go();
         await _db.delete(_db.dailyPlanningEntries).go();
+        await _db.delete(_db.dailyRhythmDays).go();
         await _db.delete(_db.tasks).go();
         await _db.delete(_db.milestones).go();
         await _db.delete(_db.notes).go();
@@ -3680,6 +3816,9 @@ class DatabasePersistenceCoordinator {
       }
       for (final row in plan.dailyPlanningEntries) {
         await _db.into(_db.dailyPlanningEntries).insertOnConflictUpdate(row);
+      }
+      for (final row in plan.dailyRhythmDays) {
+        await _db.into(_db.dailyRhythmDays).insertOnConflictUpdate(row);
       }
       for (final row in plan.projectTrackingRecords) {
         await _db.into(_db.projectTrackingRecords).insertOnConflictUpdate(row);

@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
 import '../app_state.dart';
 import '../shell/daywell_shell_routes.dart';
 import '../shell/daywell_theme_controller.dart';
+import '../widgets/daily_rhythm_workflow_widgets.dart';
 import '../widgets/shared_ui_widgets.dart';
 
 class MoreView extends StatelessWidget {
@@ -277,6 +279,33 @@ class MoreView extends StatelessWidget {
                     ),
                   ],
                 ),
+              ),
+
+              const SizedBox(height: SharedDesignTokens.spacingLg),
+
+              Builder(
+                builder: (BuildContext context) {
+                  final todayIso = CalendarDate.today().toIsoString();
+                  final drCtrl = state.dailyRhythmController;
+                  final todayRecord = drCtrl.state.dayFor(todayIso);
+                  return DailyFaithCheckInCard(
+                    dateIso: todayIso,
+                    record: todayRecord,
+                    isToday: true,
+                    onToggleBibleStudy: (val) => unawaited(
+                      drCtrl.updateFaith(
+                        dateIso: todayIso,
+                        bibleStudyDone: val,
+                      ),
+                    ),
+                    onTogglePrayer: (val) => unawaited(
+                      drCtrl.updateFaith(
+                        dateIso: todayIso,
+                        prayerDone: val,
+                      ),
+                    ),
+                  );
+                },
               ),
 
               const SizedBox(height: SharedDesignTokens.spacingLg),

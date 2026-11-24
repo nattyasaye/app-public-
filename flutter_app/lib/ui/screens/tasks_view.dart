@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../application/daily_rhythm/daily_rhythm_controller.dart';
 import '../../application/inbox/inbox_controller.dart';
 import '../../application/notes/notes_controller.dart';
 import '../../application/projects/projects_controller.dart';
@@ -9,6 +10,7 @@ import '../../application/tasks/tasks_state.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
+import '../../domain/daily_rhythm/daily_rhythm_workflows.dart';
 import '../../domain/inbox/inbox_models.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/notes/task_notes_helpers.dart';
@@ -19,6 +21,7 @@ import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_recurrence_engine.dart';
 import '../../domain/tasks/task_reminder_engine.dart';
 import '../app_state.dart';
+import '../widgets/daily_rhythm_workflow_widgets.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'projects/project_form_sheet.dart';
 import 'projects/projects_workspace_tab.dart';
@@ -32,6 +35,7 @@ class TasksView extends StatefulWidget {
   final ProjectsController? projectsController;
   final InboxController? inboxController;
   final NotesController? notesController;
+  final DailyRhythmController? dailyRhythmController;
   final ({String taskId, int nonce})? requestedTaskFocus;
   final ({int tabIndex, int nonce})? requestedSubTab;
   final void Function(CalendarDate date)? onOpenCalendarDate;
@@ -44,6 +48,7 @@ class TasksView extends StatefulWidget {
     this.projectsController,
     this.inboxController,
     this.notesController,
+    this.dailyRhythmController,
     this.requestedTaskFocus,
     this.requestedSubTab,
     this.onOpenCalendarDate,
@@ -64,6 +69,9 @@ class TasksView extends StatefulWidget {
 
   NotesController? get effectiveNotesController =>
       notesController ?? state?.notesController;
+
+  DailyRhythmController? get effectiveDailyRhythmController =>
+      dailyRhythmController ?? state?.dailyRhythmController;
 
   @override
   State<TasksView> createState() => _TasksViewState();
@@ -2758,11 +2766,13 @@ class _TasksViewState extends State<TasksView>
     final controller = widget.effectiveController;
     final projectsCtrl = widget.effectiveProjectsController;
     final inboxCtrl = widget.effectiveInboxController;
+    final drCtrl = widget.effectiveDailyRhythmController;
     final colorScheme = Theme.of(context).colorScheme;
     final listenables = <Listenable>[
       controller,
       if (projectsCtrl != null) projectsCtrl,
       if (inboxCtrl != null) inboxCtrl,
+      if (drCtrl != null) drCtrl,
     ];
     final Listenable listenable =
         listenables.length == 1 ? controller : Listenable.merge(listenables);
@@ -3080,6 +3090,23 @@ class _TasksViewState extends State<TasksView>
                               );
                             },
                             onCreateTaskForDay: _showQuickAddModal,
+                            dailyRhythmRecord: drCtrl?.state.dayFor(
+                              moduleState.effectivePlanDate.toIsoString(),
+                            ),
+                            onConfirmDailyReview: drCtrl == null
+                                ? null
+                                : () {
+                                    final todayIso =
+                                        CalendarDate.today().toIsoString();
+                                    unawaited(
+                                      drCtrl.confirmTaskReview(
+                                        dateIso: todayIso,
+                                        tasks: moduleState.tasks,
+                                        planningEntries:
+                                            moduleState.dailyPlanningEntries,
+                                      ),
+                                    );
+                                  },
                           )
                         : moduleState.viewFilter == 'inbox' && inboxCtrl != null
                             ? (unprocessedInbox.isEmpty && tasks.isEmpty)
@@ -3137,37 +3164,50 @@ class _TasksViewState extends State<TasksView>
                                       ],
                                     ],
                                   )
-                            : tasks.isEmpty
-                                ? DaywellEmptyState(
-                                    icon: Icons.check_circle_outline,
-                                    message: moduleState.hasActiveFilters
-                                        ? 'No tasks match active filters'
-                                        : moduleState.viewFilter == 'archived'
-                                            ? 'No archived tasks'
-                                            : 'No tasks in ${moduleState.viewFilter}',
-                                    actionLabel: moduleState.hasActiveFilters
-                                        ? 'Clear filters'
-                                        : moduleState.viewFilter == 'archived'
-                                            ? null
-                                            : 'Add Task',
-                                    onActionPressed: moduleState
-                                            .hasActiveFilters
-                                        ? () {
-                                            _searchController.clear();
-                                            controller.clearFilters(
-                                              resetView: false,
-                                            );
-                                          }
-                                        : moduleState.viewFilter == 'archived'
-                                            ? null
-                                            : () => _showQuickAddModal(),
+                            : moduleState.viewFilter == 'today' &&
+                                    drCtrl != null
+                                ? _buildTodayTasksBody(
+                                    context,
+                                    tasks: tasks,
+                                    controller: controller,
+                                    moduleState: moduleState,
+                                    drCtrl: drCtrl,
                                   )
-                                : ListView.builder(
-                                    padding: const EdgeInsets.all(12),
-                                    itemCount: tasks.length,
-                                    itemBuilder: (_, i) => _buildTaskTile(
-                                        tasks[i], controller, moduleState),
-                                  ),
+                                : tasks.isEmpty
+                                    ? DaywellEmptyState(
+                                        icon: Icons.check_circle_outline,
+                                        message: moduleState.hasActiveFilters
+                                            ? 'No tasks match active filters'
+                                            : moduleState.viewFilter ==
+                                                    'archived'
+                                                ? 'No archived tasks'
+                                                : 'No tasks in ${moduleState.viewFilter}',
+                                        actionLabel: moduleState
+                                                .hasActiveFilters
+                                            ? 'Clear filters'
+                                            : moduleState.viewFilter ==
+                                                    'archived'
+                                                ? null
+                                                : 'Add Task',
+                                        onActionPressed: moduleState
+                                                .hasActiveFilters
+                                            ? () {
+                                                _searchController.clear();
+                                                controller.clearFilters(
+                                                  resetView: false,
+                                                );
+                                              }
+                                            : moduleState.viewFilter ==
+                                                    'archived'
+                                                ? null
+                                                : () => _showQuickAddModal(),
+                                      )
+                                    : ListView.builder(
+                                        padding: const EdgeInsets.all(12),
+                                        itemCount: tasks.length,
+                                        itemBuilder: (_, i) => _buildTaskTile(
+                                            tasks[i], controller, moduleState),
+                                      ),
                   ),
                 ],
               ),
@@ -3178,6 +3218,79 @@ class _TasksViewState extends State<TasksView>
             ],
           ),
         );
+      },
+    );
+  }
+
+  Widget _buildTodayTasksBody(
+    BuildContext context, {
+    required List<TaskEntity> tasks,
+    required TasksController controller,
+    required TasksModuleState moduleState,
+    required DailyRhythmController drCtrl,
+  }) {
+    final today = CalendarDate.today();
+    final todayIso = today.toIsoString();
+    final reviewSnapshot = DailyRhythmWorkflows.buildTaskReviewSnapshot(
+      tasks: moduleState.tasks,
+      planningEntries: moduleState.dailyPlanningEntries,
+      targetDateIso: todayIso,
+      today: today,
+    );
+    final reviewCard = DailyTaskReviewCard(
+      snapshot: reviewSnapshot,
+      record: drCtrl.state.dayFor(todayIso),
+      isToday: true,
+      onConfirmReview: () => unawaited(
+        drCtrl.confirmTaskReview(
+          dateIso: todayIso,
+          tasks: moduleState.tasks,
+          planningEntries: moduleState.dailyPlanningEntries,
+          today: today,
+        ),
+      ),
+    );
+
+    if (tasks.isEmpty) {
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            reviewCard,
+            const SizedBox(height: SharedDesignTokens.spacingMd),
+            DaywellEmptyState(
+              icon: Icons.check_circle_outline,
+              message: moduleState.hasActiveFilters
+                  ? 'No tasks match active filters'
+                  : 'No tasks in today',
+              actionLabel:
+                  moduleState.hasActiveFilters ? 'Clear filters' : 'Add Task',
+              onActionPressed: moduleState.hasActiveFilters
+                  ? () {
+                      _searchController.clear();
+                      controller.clearFilters(resetView: false);
+                    }
+                  : () => _showQuickAddModal(),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(12),
+      itemCount: tasks.length + 1,
+      itemBuilder: (_, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.only(
+              bottom: SharedDesignTokens.spacingCompact,
+            ),
+            child: reviewCard,
+          );
+        }
+        return _buildTaskTile(tasks[i - 1], controller, moduleState);
       },
     );
   }

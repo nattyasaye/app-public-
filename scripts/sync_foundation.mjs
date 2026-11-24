@@ -1589,6 +1589,7 @@ export interface SharedDatabaseState {
   projectTrackingBlocks?: SharedProjectTrackingBlock[];
   projectTrackingRecords?: SharedProjectTrackingRecord[];
   dailyPlanningEntries?: SharedDailyPlanningEntry[];
+  dailyRhythmDays?: SharedDailyRhythmDay[];
   goals: SharedGoal[];
   inboxItems: SharedInboxItem[];
   calendarEvents?: SharedCalendarEvent[];

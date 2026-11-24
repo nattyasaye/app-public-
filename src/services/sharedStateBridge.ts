@@ -9,6 +9,10 @@ import {
   SharedTaskRecurrenceRepeatFrom,
   SharedDailyPlanningEntry,
   SharedDailyPlanningAction,
+  SharedDailyRhythmDay,
+  SharedDailyRhythmFinanceCloseStatus,
+  SharedDailyRhythmTaskReviewEvidence,
+  CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES,
   SharedNote,
   SharedCalendarEvent,
   SharedProject,
@@ -63,6 +67,7 @@ import {
 } from '../domain/financeV7Engine';
 import { EthiopiaClock, LocalDateTime, SharedDateFormatter } from '../domain/date';
 import { BackupFailureKind, BackupValidationError } from '../domain/backupTypes';
+import { normalizeDailyRhythmTimeline } from '../domain/dailyRhythm';
 import { interpretSnapshotVersions } from '../domain/snapshotVersionPolicy';
 
 export interface SharedMilestone {
@@ -133,6 +138,8 @@ export class SharedStateBridge {
   public static readonly SYNC_EVENT_NAME = 'daywell:canonical-synced';
   public static readonly DAILY_PLANNING_STORAGE_KEY =
     'daywell_daily_planning_entries';
+  public static readonly DAILY_RHYTHM_STORAGE_KEY =
+    'daywell_daily_rhythm_days';
   public static readonly PROJECTS_STORAGE_KEY = 'daywell_projects';
   public static readonly PROJECT_TRACKING_BLOCKS_STORAGE_KEY =
     'daywell_project_tracking_blocks';
@@ -202,6 +209,11 @@ export class SharedStateBridge {
       'completed',
       'dismissed',
     ]);
+
+  private static readonly VALID_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES =
+    new Set<SharedDailyRhythmFinanceCloseStatus>(
+      CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES
+    );
 
   private static readonly SCHEDULED_TIME_HHMM_REGEX =
     /^(?:[01]\d|2[0-3]):[0-5]\d$/;
@@ -1291,6 +1303,7 @@ export class SharedStateBridge {
         snapshotFormatVersion: this.SUPPORTED_SNAPSHOT_FORMAT_VERSION,
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         milestones: [],
+        dailyRhythmDays: [],
         projectTrackingBlocks: [],
         projectTrackingRecords: [],
       };
@@ -1378,6 +1391,16 @@ export class SharedStateBridge {
                 canonicalStored.dailyPlanningEntries
               )
             : [];
+
+      // 7c. Daily Rhythm Days (explicit [] stays [])
+      const explicitDailyRhythm = this.readExplicitJsonArray(
+        this.DAILY_RHYTHM_STORAGE_KEY
+      );
+      const dailyRhythmDays: SharedDailyRhythmDay[] = explicitDailyRhythm.exists
+        ? normalizeDailyRhythmTimeline(explicitDailyRhythm.items)
+        : Array.isArray(canonicalStored?.dailyRhythmDays)
+          ? normalizeDailyRhythmTimeline(canonicalStored.dailyRhythmDays)
+          : [];
 
       // 8. v7 Finance collections (live store overrides canonical if present)
       const readCollectionWithCanonicalFallback = <T>(
@@ -1562,6 +1585,7 @@ export class SharedStateBridge {
         milestones,
         tasks,
         dailyPlanningEntries,
+        dailyRhythmDays,
         notes,
         projects,
         projectTrackingBlocks,
@@ -1581,6 +1605,7 @@ export class SharedStateBridge {
         financeSchemaVersion: this.SUPPORTED_FINANCE_SCHEMA_VERSION,
         milestones: [],
         dailyPlanningEntries: [],
+        dailyRhythmDays: [],
         projectTrackingBlocks: [],
         projectTrackingRecords: [],
       };
@@ -1628,6 +1653,9 @@ export class SharedStateBridge {
       const dailyPlanningEntries = this.normalizeDailyPlanningEntries(
         Array.isArray(state.dailyPlanningEntries) ? state.dailyPlanningEntries : []
       );
+      const dailyRhythmDays = normalizeDailyRhythmTimeline(
+        Array.isArray(state.dailyRhythmDays) ? state.dailyRhythmDays : []
+      );
       const inboxItems = this.normalizeInboxItems(
         Array.isArray(state.inboxItems) ? state.inboxItems : []
       );
@@ -1654,6 +1682,7 @@ export class SharedStateBridge {
         transactions,
         tasks,
         dailyPlanningEntries,
+        dailyRhythmDays,
         notes,
         projects,
         projectTrackingBlocks,
@@ -1758,6 +1787,10 @@ export class SharedStateBridge {
       localStorage.setItem(
         this.DAILY_PLANNING_STORAGE_KEY,
         JSON.stringify(dailyPlanningEntries)
+      );
+      localStorage.setItem(
+        this.DAILY_RHYTHM_STORAGE_KEY,
+        JSON.stringify(dailyRhythmDays)
       );
 
       // Synchronize notes with BOTH UI (DaywellNote) and canonical/Flutter metadata preserved
@@ -2180,8 +2213,8 @@ export class SharedStateBridge {
   public static readonly LEGACY_OMITTED_SNAPSHOT_FORMAT_VERSION = 1;
   public static readonly MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 1;
   public static readonly MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 2;
-  public static readonly SUPPORTED_DATABASE_SCHEMA_VERSION = 11;
-  public static readonly MAX_SUPPORTED_DATABASE_SCHEMA_VERSION = 11;
+  public static readonly SUPPORTED_DATABASE_SCHEMA_VERSION = 12;
+  public static readonly MAX_SUPPORTED_DATABASE_SCHEMA_VERSION = 12;
   public static readonly MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION = 4;
   public static readonly MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION = 9;
   public static readonly SUPPORTED_FINANCE_SCHEMA_VERSION = 7;
@@ -2201,6 +2234,7 @@ export class SharedStateBridge {
     'settlementAllocations',
     'tasks',
     'dailyPlanningEntries',
+    'dailyRhythmDays',
     'notes',
     'projects',
     'projectTrackingBlocks',
@@ -2229,6 +2263,7 @@ export class SharedStateBridge {
   private static readonly NON_FINANCE_MODULE_KEYS = [
     'tasks',
     'dailyPlanningEntries',
+    'dailyRhythmDays',
     'notes',
     'projects',
     'projectTrackingBlocks',
@@ -3022,6 +3057,121 @@ export class SharedStateBridge {
           ...(updatedAt !== undefined ? { updatedAt } : {}),
         };
       });
+
+      // 7a-2. DailyRhythmDays (unique canonical dateIso)
+      const dailyRhythmSeenDates = new Set<string>();
+      const validatedDailyRhythmDays: SharedDailyRhythmDay[] = (
+        (parsed.dailyRhythmDays || []) as Record<string, any>[]
+      )
+        .map((entry, idx) => {
+          const ctx = `dailyRhythmDays[${idx}]`;
+          const dateIso = normalizeRequiredDate(entry.dateIso, `${ctx}.dateIso`);
+          if (dailyRhythmSeenDates.has(dateIso)) {
+            throw new BackupValidationError(
+              'invalid_payload',
+              `Duplicate dailyRhythmDays dateIso "${dateIso}" at ${ctx}.`
+            );
+          }
+          dailyRhythmSeenDates.add(dateIso);
+
+          const bibleStudyDone = this.optionalBool(entry, 'bibleStudyDone', ctx) ?? false;
+          const bibleStudyCompletedAt = normalizeOptionalInstant(
+            entry.bibleStudyCompletedAt,
+            `${ctx}.bibleStudyCompletedAt`
+          );
+          const prayerDone = this.optionalBool(entry, 'prayerDone', ctx) ?? false;
+          const prayerCompletedAt = normalizeOptionalInstant(
+            entry.prayerCompletedAt,
+            `${ctx}.prayerCompletedAt`
+          );
+          const taskReviewConfirmed =
+            this.optionalBool(entry, 'taskReviewConfirmed', ctx) ?? false;
+          const taskReviewedAt = normalizeOptionalInstant(
+            entry.taskReviewedAt,
+            `${ctx}.taskReviewedAt`
+          );
+
+          let taskReviewEvidence: SharedDailyRhythmTaskReviewEvidence | undefined;
+          const hasEvidenceObj =
+            Object.prototype.hasOwnProperty.call(entry, 'taskReviewEvidence') &&
+            entry.taskReviewEvidence !== undefined &&
+            entry.taskReviewEvidence !== null;
+          const hasEvidenceJson =
+            Object.prototype.hasOwnProperty.call(entry, 'taskReviewEvidenceJson') &&
+            entry.taskReviewEvidenceJson !== undefined &&
+            entry.taskReviewEvidenceJson !== null;
+          if (hasEvidenceObj || hasEvidenceJson) {
+            if (hasEvidenceJson && !hasEvidenceObj) {
+              if (typeof entry.taskReviewEvidenceJson !== 'string') {
+                throw new BackupValidationError(
+                  'invalid_payload',
+                  `Invalid field "${ctx}.taskReviewEvidenceJson": expected a JSON string.`
+                );
+              }
+            }
+            const rawEvidence = this.parseStrictJsonObject(
+              entry,
+              ['taskReviewEvidence', 'taskReviewEvidenceJson'],
+              ctx
+            );
+            if (rawEvidence !== undefined && taskReviewConfirmed) {
+              const evCtx = `${ctx}.taskReviewEvidence`;
+              taskReviewEvidence = {
+                overdueCount:
+                  this.optionalIntMin(rawEvidence, 'overdueCount', evCtx, 0) ?? 0,
+                todayCount:
+                  this.optionalIntMin(rawEvidence, 'todayCount', evCtx, 0) ?? 0,
+                plannedCount:
+                  this.optionalIntMin(rawEvidence, 'plannedCount', evCtx, 0) ?? 0,
+                completedTodayCount:
+                  this.optionalIntMin(rawEvidence, 'completedTodayCount', evCtx, 0) ?? 0,
+              };
+            }
+          }
+
+          const financeCloseStatus =
+            this.optionalEnum<SharedDailyRhythmFinanceCloseStatus>(
+              entry,
+              'financeCloseStatus',
+              this.VALID_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES,
+              ctx
+            ) ?? 'open';
+          const financeClosedAt = normalizeOptionalInstant(
+            entry.financeClosedAt,
+            `${ctx}.financeClosedAt`
+          );
+          const updatedAt =
+            normalizeOptionalInstant(entry.updatedAt, `${ctx}.updatedAt`) ?? nowIso;
+
+          const isFinanceClosed =
+            financeCloseStatus === 'closed_with_transactions' ||
+            financeCloseStatus === 'closed_no_transactions';
+
+          return {
+            dateIso,
+            bibleStudyDone,
+            ...(bibleStudyDone && bibleStudyCompletedAt !== undefined
+              ? { bibleStudyCompletedAt }
+              : {}),
+            prayerDone,
+            ...(prayerDone && prayerCompletedAt !== undefined
+              ? { prayerCompletedAt }
+              : {}),
+            taskReviewConfirmed,
+            ...(taskReviewConfirmed && taskReviewedAt !== undefined
+              ? { taskReviewedAt }
+              : {}),
+            ...(taskReviewConfirmed && taskReviewEvidence !== undefined
+              ? { taskReviewEvidence }
+              : {}),
+            financeCloseStatus,
+            ...(isFinanceClosed && financeClosedAt !== undefined
+              ? { financeClosedAt }
+              : {}),
+            updatedAt,
+          };
+        })
+        .sort((a, b) => (a.dateIso < b.dateIso ? -1 : a.dateIso > b.dateIso ? 1 : 0));
 
       // 7b. Project Tracking Blocks (two-pass validation: non-rollup first, then rollup counters)
       const optionalNumberMin = (
@@ -4279,6 +4429,7 @@ export class SharedStateBridge {
         milestones: validatedMilestones,
         tasks: validatedTasks,
         dailyPlanningEntries: validatedDailyPlanningEntries,
+        dailyRhythmDays: validatedDailyRhythmDays,
         notes: validatedNotes,
         projects: validatedProjects,
         projectTrackingBlocks: validatedProjectTrackingBlocks,

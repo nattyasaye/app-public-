@@ -20,6 +20,11 @@ import {
   TransactionCategory,
 } from '../../domain/financeV7Engine';
 import { CalendarDate } from '../../domain/date';
+import {
+  createEmptyDailyRhythmDay,
+  DailyRhythmDayRecord,
+} from '../../domain/dailyRhythm';
+import { inspectDailyRhythmFinanceDay } from '../../domain/dailyRhythmWorkflows';
 import { SYSTEM_CONTROL_ACCOUNT_IDS } from '../../domain/sharedFoundation';
 import {
   centsToInputText,
@@ -28,6 +33,7 @@ import {
   formatDualDateLabel,
   tryParseStrictDecimalToCents,
 } from './financeV7Types';
+import { DailyFinanceCloseCard } from '../daily-rhythm';
 import {
   DaywellButton,
   DaywellCard,
@@ -68,6 +74,8 @@ interface FinanceTransactionsTabProps {
     tone: 'danger' | 'primary',
     onConfirm: () => void
   ) => void;
+  dailyRhythmRecord?: DailyRhythmDayRecord;
+  onConfirmFinanceClose?: () => void;
 }
 
 export function FinanceTransactionsTab({
@@ -84,6 +92,8 @@ export function FinanceTransactionsTab({
   onRestoreEntry,
   onRefundExpense,
   onRequestConfirm,
+  dailyRhythmRecord,
+  onConfirmFinanceClose,
 }: FinanceTransactionsTabProps) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -115,6 +125,11 @@ export function FinanceTransactionsTab({
         );
       }),
     [accounts]
+  );
+
+  const financeDaySummary = useMemo(
+    () => inspectDailyRhythmFinanceDay({ entries }),
+    [entries]
   );
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
@@ -450,6 +465,19 @@ export function FinanceTransactionsTab({
 
   return (
     <div className="space-y-4">
+      {onConfirmFinanceClose && (
+        <DailyFinanceCloseCard
+          summary={financeDaySummary}
+          record={
+            dailyRhythmRecord ??
+            createEmptyDailyRhythmDay(financeDaySummary.targetDateIso)
+          }
+          isShowingTodayFilter={datePreset === 'today'}
+          onConfirmClose={onConfirmFinanceClose}
+          onFilterToday={() => setDatePreset('today')}
+        />
+      )}
+
       {/* Search & Filter Toolbar */}
       <DaywellCard padding="md" radius="lg" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

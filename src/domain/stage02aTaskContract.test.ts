@@ -25,13 +25,13 @@ import { validateBusinessRules, validateSchemaContracts } from '../../scripts/sy
 const REPO_ROOT = process.cwd();
 
 describe('STAGE 0.2A — CANONICAL TASK DATA CONTRACT ALIGNMENT', () => {
-  it('1. schema_contracts.json declares schemaVersion 11 and keeps separated v9 baseline vs v10 Task/DailyPlanningEntry contracts', () => {
+  it('1. schema_contracts.json declares schemaVersion 12 and keeps separated v9 baseline vs v10 Task/DailyPlanningEntry contracts', () => {
     const contracts = JSON.parse(
       fs.readFileSync(path.join(REPO_ROOT, 'shared_foundation', 'schema_contracts.json'), 'utf8')
     );
 
     assert.strictEqual(contracts.version, '2.0.0');
-    assert.strictEqual(contracts.schemaVersion, 11);
+    assert.strictEqual(contracts.schemaVersion, 12);
     assert.strictEqual(contracts.timeConvention.id, 'Africa/Addis_Ababa');
     assert.strictEqual(contracts.timeConvention.fixedUtcOffsetMinutes, 180);
 

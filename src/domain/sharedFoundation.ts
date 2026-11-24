@@ -352,6 +352,34 @@ export const SHARED_BUSINESS_RULES = {
     "currentFormatVersion": 1,
     "minSupportedFormatVersion": 1,
     "fileExtension": ".daywellproject"
+  },
+  "dailyRhythm": {
+    "qualifyingDaysPerFreeze": 15,
+    "maxStreakFreezes": 2,
+    "maxProtectedGapDays": 1,
+    "dayStatuses": [
+      "untouched",
+      "partial",
+      "complete",
+      "freeze_protected",
+      "missed"
+    ],
+    "financeCloseStatuses": [
+      "open",
+      "closed_with_transactions",
+      "closed_no_transactions",
+      "needs_reconfirmation"
+    ],
+    "defaultFinanceCloseStatus": "open",
+    "rules": {
+      "requireAllThreeResponsibilities": true,
+      "requireBothFaithPractices": true,
+      "requireCompletingAllTasks": false,
+      "emptyFinanceDayAutoQualifies": false,
+      "lockPastFaithAndTaskReview": true,
+      "preserveFinalizedHistoryOnLedgerCorrection": true,
+      "useEthiopiaDateConvention": true
+    }
   }
 } as const;
 
@@ -480,6 +508,14 @@ export type SharedTaskRecurrenceRepeatFrom =
 export const CANONICAL_DAILY_PLANNING_ACTIONS = ["planned","carried_forward","completed","dismissed"] as const;
 export type SharedDailyPlanningAction = (typeof CANONICAL_DAILY_PLANNING_ACTIONS)[number];
 
+export const CANONICAL_DAILY_RHYTHM_DAY_STATUSES = ["untouched","partial","complete","freeze_protected","missed"] as const;
+export type SharedDailyRhythmDayStatus =
+  (typeof CANONICAL_DAILY_RHYTHM_DAY_STATUSES)[number];
+
+export const CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES = ["open","closed_with_transactions","closed_no_transactions","needs_reconfirmation"] as const;
+export type SharedDailyRhythmFinanceCloseStatus =
+  (typeof CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES)[number];
+
 export const PLANNED_TASK_V10_FIELDS = ["completedAt","scheduledTime","myDayDate","recurrenceConfig","isArchived","sortOrder"] as const;
 
 export interface SharedCanonicalTaskSubtask {
@@ -552,6 +588,27 @@ export interface SharedDailyPlanningEntry {
   action: SharedDailyPlanningAction;
   createdAt: string;
   updatedAt?: string;
+}
+
+export interface SharedDailyRhythmTaskReviewEvidence {
+  overdueCount: number;
+  todayCount: number;
+  plannedCount: number;
+  completedTodayCount: number;
+}
+
+export interface SharedDailyRhythmDay {
+  dateIso: string;
+  bibleStudyDone: boolean;
+  bibleStudyCompletedAt?: string;
+  prayerDone: boolean;
+  prayerCompletedAt?: string;
+  taskReviewConfirmed: boolean;
+  taskReviewedAt?: string;
+  taskReviewEvidence?: SharedDailyRhythmTaskReviewEvidence;
+  financeCloseStatus: SharedDailyRhythmFinanceCloseStatus;
+  financeClosedAt?: string;
+  updatedAt: string;
 }
 
 export interface SharedNote {
@@ -850,6 +907,7 @@ export interface SharedDatabaseState {
   projectTrackingBlocks?: SharedProjectTrackingBlock[];
   projectTrackingRecords?: SharedProjectTrackingRecord[];
   dailyPlanningEntries?: SharedDailyPlanningEntry[];
+  dailyRhythmDays?: SharedDailyRhythmDay[];
   goals: SharedGoal[];
   inboxItems: SharedInboxItem[];
   calendarEvents?: SharedCalendarEvent[];

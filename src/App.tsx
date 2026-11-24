@@ -83,10 +83,16 @@ import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWi
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { SharedStateBridge } from './services/sharedStateBridge';
 import { dailyPlanningService } from './services/dailyPlanningService';
+import { dailyRhythmService } from './services/dailyRhythmService';
+import { dailyRhythmWorkflowService } from './services/dailyRhythmWorkflowService';
 import { inboxService } from './services/inboxService';
 import { notesService } from './services/notesService';
 import { projectsService } from './services/projectsService';
 import { buildBoundedTaskNoteTitle } from './domain/taskNotes';
+import {
+  createEmptyDailyRhythmDay,
+  DailyRhythmDayRecord,
+} from './domain/dailyRhythm';
 import {
   taskRemindersService,
   WebNotificationSupportStatus,
@@ -117,6 +123,7 @@ import {
   SharedInboxItem,
   SHARED_DESIGN_TOKENS,
 } from './domain/sharedFoundation';
+import { DailyFaithCheckInCard } from './components/daily-rhythm';
 import {
   DaywellButton,
   DaywellCard,
@@ -314,6 +321,10 @@ export default function App() {
     notesService.loadNotes()
   );
 
+  const [dailyRhythmDays, setDailyRhythmDays] = useState<DailyRhythmDayRecord[]>(
+    () => dailyRhythmService.loadDays()
+  );
+
   const handleUpdateInboxItems = (next: SharedInboxItem[]) => {
     const saved = inboxService.saveInboxItems(next);
     setInboxItems(saved);
@@ -406,8 +417,17 @@ export default function App() {
         detail !== null &&
         'notes' in detail &&
         !('tasks' in detail);
+      const isDailyRhythmOnly =
+        detail !== null &&
+        'dailyRhythmDays' in detail &&
+        !('tasks' in detail);
 
-      if (!isDailyPlanningOnly && !isInboxOnly && !isNotesOnly) {
+      if (
+        !isDailyPlanningOnly &&
+        !isInboxOnly &&
+        !isNotesOnly &&
+        !isDailyRhythmOnly
+      ) {
         try {
           const saved = localStorage.getItem('daywell_tasks');
           if (saved) {
@@ -421,14 +441,17 @@ export default function App() {
         }
         setFinanceSyncTick((n) => n + 1);
       }
-      if (!isDailyPlanningOnly && !isNotesOnly) {
+      if (!isDailyPlanningOnly && !isNotesOnly && !isDailyRhythmOnly) {
         setInboxItems(inboxService.loadInboxItems());
       }
-      if (!isInboxOnly && !isNotesOnly) {
+      if (!isInboxOnly && !isNotesOnly && !isDailyRhythmOnly) {
         setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
       }
-      if (!isDailyPlanningOnly && !isInboxOnly) {
+      if (!isDailyPlanningOnly && !isInboxOnly && !isDailyRhythmOnly) {
         setNotes(notesService.loadNotes());
+      }
+      if (!isDailyPlanningOnly && !isInboxOnly && !isNotesOnly) {
+        setDailyRhythmDays(dailyRhythmService.loadDays());
       }
       setActiveTaskReminderCount(
         taskRemindersService.loadTaskReminders().filter((r) => r.isActive).length
@@ -837,13 +860,23 @@ export default function App() {
       }
 
       try {
+        const prevEntries = (canonical.journalEntries || []) as JournalEntry[];
+        const prevPostings = (canonical.postings || []) as Posting[];
+        const nextEntries = [built.entry, ...prevEntries];
+        const nextPostings = [...built.postings, ...prevPostings];
         SharedStateBridge.saveCanonicalState({
           ...canonical,
           isFinanceSetupCompleted: true,
           accounts: (built.accountsWithControls || canonical.accounts) as any,
-          journalEntries: [built.entry, ...(canonical.journalEntries || [])],
-          postings: [...built.postings, ...(canonical.postings || [])],
+          journalEntries: nextEntries,
+          postings: nextPostings,
           transactions: [built.simpleTransaction as any, ...(canonical.transactions || [])],
+        });
+        dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+          prevEntries,
+          prevPostings,
+          nextEntries,
+          nextPostings,
         });
       } catch (err) {
         console.error(err);
@@ -2221,6 +2254,37 @@ export default function App() {
                       </div>
                     )}
                   </DaywellCard>
+
+                  {/* Built-in Daily Faith Check-In (Bible study & Prayer) */}
+                  {(() => {
+                    const todayIso = CalendarDate.today().toIsoString();
+                    const todayFaithRecord =
+                      dailyRhythmDays.find((d) => d.dateIso === todayIso) ??
+                      createEmptyDailyRhythmDay(todayIso);
+                    return (
+                      <DailyFaithCheckInCard
+                        dateIso={todayIso}
+                        record={todayFaithRecord}
+                        isToday={true}
+                        onToggleBibleStudy={(nextValue) => {
+                          dailyRhythmWorkflowService.updateFaith({
+                            dateIso: todayIso,
+                            bibleStudyDone: nextValue,
+                            todayIso,
+                          });
+                          setDailyRhythmDays(dailyRhythmService.loadDays());
+                        }}
+                        onTogglePrayer={(nextValue) => {
+                          dailyRhythmWorkflowService.updateFaith({
+                            dateIso: todayIso,
+                            prayerDone: nextValue,
+                            todayIso,
+                          });
+                          setDailyRhythmDays(dailyRhythmService.loadDays());
+                        }}
+                      />
+                    );
+                  })()}
 
                   {/* All Areas Grid */}
                   <div className="space-y-2 pt-1">

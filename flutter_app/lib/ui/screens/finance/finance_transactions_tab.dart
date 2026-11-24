@@ -1,11 +1,15 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../../../application/daily_rhythm/daily_rhythm_controller.dart';
 import '../../../application/finance/finance_controller.dart';
 import '../../../core/date/shared_date.dart';
 import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
+import '../../../domain/daily_rhythm/daily_rhythm_workflows.dart';
 import '../../../domain/finance/double_entry_engine.dart';
 import '../../../domain/finance/finance_models.dart';
+import '../../widgets/daily_rhythm_workflow_widgets.dart';
 import '../../widgets/shared_ui_widgets.dart';
 import 'finance_composer_sheet.dart';
 import 'finance_formatters.dart';
@@ -15,10 +19,12 @@ import 'finance_formatters.dart';
 /// audit detail inspection, correction/reversal, and void/unvoid.
 class FinanceTransactionsTab extends StatefulWidget {
   final FinanceController controller;
+  final DailyRhythmController? dailyRhythmController;
 
   const FinanceTransactionsTab({
     super.key,
     required this.controller,
+    this.dailyRhythmController,
   });
 
   @override
@@ -115,69 +121,142 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
           ],
         ),
         Expanded(
-          child: visibleEntries.isEmpty
-              ? DaywellEmptyState(
-                  icon: Icons.receipt_long_outlined,
-                  message: (state.isAnyFilterActive ||
-                          _showVoided ||
-                          _statusFilter != 'all')
-                      ? 'No ledger entries match these filters'
-                      : 'No ledger entries recorded yet',
-                  subtitle:
-                      'Record expenses, income, transfers, split expenses, or settlements.',
-                  actionLabel: (state.isAnyFilterActive ||
-                          _showVoided ||
-                          _statusFilter != 'all')
-                      ? 'Clear Filters'
-                      : 'Record Entry',
-                  onActionPressed: (state.isAnyFilterActive ||
-                          _showVoided ||
-                          _statusFilter != 'all')
-                      ? () {
-                          _searchCtrl.clear();
-                          setState(() {
-                            _showVoided = false;
-                            _statusFilter = 'all';
-                          });
-                          widget.controller.clearAllFilters();
-                        }
-                      : () => FinanceComposerSheet.show(
-                            context,
-                            controller: widget.controller,
-                          ),
-                )
-              : ListView.separated(
-                  padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
-                  itemCount: visibleEntries.length +
-                      (filtered.length > visibleCount ? 1 : 0),
-                  separatorBuilder: (_, __) =>
-                      const SizedBox(height: SharedDesignTokens.spacingSm),
-                  itemBuilder: (context, index) {
-                    if (index >= visibleEntries.length) {
-                      return Center(
-                        child: DaywellButton(
-                          label:
-                              'Load More (${filtered.length - visibleCount} remaining)',
-                          variant: DaywellButtonVariant.outlined,
-                          onPressed: () => widget.controller
-                              .setTxDisplayLimit(state.txDisplayLimit + 25),
-                        ),
-                      );
-                    }
-                    final entry = visibleEntries[index];
-                    final entryPostings =
-                        postingsByEntry[entry.id] ?? const <PostingModel>[];
-                    return _buildEntryCard(
-                      context,
-                      entry: entry,
-                      postings: entryPostings,
-                      categoryById: categoryById,
-                      accountById: accountById,
-                    );
-                  },
-                ),
+          child: _buildTransactionsBody(
+            context,
+            state: state,
+            filtered: filtered,
+            visibleEntries: visibleEntries,
+            visibleCount: visibleCount,
+            postingsByEntry: postingsByEntry,
+            categoryById: categoryById,
+            accountById: accountById,
+          ),
         ),
       ],
+    );
+  }
+
+  Widget _buildFinanceCloseCard(BuildContext context) {
+    final drCtrl = widget.dailyRhythmController!;
+    final state = widget.controller.state;
+    return ListenableBuilder(
+      listenable: drCtrl,
+      builder: (context, _) {
+        final today = CalendarDate.today();
+        final todayIso = today.toIsoString();
+        final summary = DailyRhythmWorkflows.inspectFinanceDay(
+          entries: state.journalEntries,
+          targetDateIso: todayIso,
+          today: today,
+        );
+        return DailyFinanceCloseCard(
+          summary: summary,
+          record: drCtrl.state.dayFor(todayIso),
+          isShowingTodayFilter: state.datePresetFilter == 'today',
+          onFilterToday: () => widget.controller.setDatePresetFilter('today'),
+          onConfirmClose: () => unawaited(
+            drCtrl.confirmFinanceClose(
+              dateIso: todayIso,
+              entries: state.journalEntries,
+              today: today,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTransactionsBody(
+    BuildContext context, {
+    required dynamic state,
+    required List<JournalEntryModel> filtered,
+    required List<JournalEntryModel> visibleEntries,
+    required int visibleCount,
+    required Map<String, List<PostingModel>> postingsByEntry,
+    required Map<String, TransactionCategoryModel> categoryById,
+    required Map<String, AccountModel> accountById,
+  }) {
+    final hasCloseCard = widget.dailyRhythmController != null;
+
+    if (visibleEntries.isEmpty) {
+      final emptyState = DaywellEmptyState(
+        icon: Icons.receipt_long_outlined,
+        message: (state.isAnyFilterActive ||
+                _showVoided ||
+                _statusFilter != 'all')
+            ? 'No ledger entries match these filters'
+            : 'No ledger entries recorded yet',
+        subtitle:
+            'Record expenses, income, transfers, split expenses, or settlements.',
+        actionLabel: (state.isAnyFilterActive ||
+                _showVoided ||
+                _statusFilter != 'all')
+            ? 'Clear Filters'
+            : 'Record Entry',
+        onActionPressed: (state.isAnyFilterActive ||
+                _showVoided ||
+                _statusFilter != 'all')
+            ? () {
+                _searchCtrl.clear();
+                setState(() {
+                  _showVoided = false;
+                  _statusFilter = 'all';
+                });
+                widget.controller.clearAllFilters();
+              }
+            : () => FinanceComposerSheet.show(
+                  context,
+                  controller: widget.controller,
+                ),
+      );
+      if (!hasCloseCard) return emptyState;
+      return SingleChildScrollView(
+        padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _buildFinanceCloseCard(context),
+            const SizedBox(height: SharedDesignTokens.spacingMd),
+            emptyState,
+          ],
+        ),
+      );
+    }
+
+    final headerOffset = hasCloseCard ? 1 : 0;
+    final hasMoreButton = filtered.length > visibleCount;
+    return ListView.separated(
+      padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
+      itemCount:
+          headerOffset + visibleEntries.length + (hasMoreButton ? 1 : 0),
+      separatorBuilder: (_, __) =>
+          const SizedBox(height: SharedDesignTokens.spacingSm),
+      itemBuilder: (context, index) {
+        if (hasCloseCard && index == 0) {
+          return _buildFinanceCloseCard(context);
+        }
+        final entryIndex = index - headerOffset;
+        if (entryIndex >= visibleEntries.length) {
+          return Center(
+            child: DaywellButton(
+              label: 'Load More (${filtered.length - visibleCount} remaining)',
+              variant: DaywellButtonVariant.outlined,
+              onPressed: () => widget.controller
+                  .setTxDisplayLimit(state.txDisplayLimit + 25),
+            ),
+          );
+        }
+        final entry = visibleEntries[entryIndex];
+        final entryPostings =
+            postingsByEntry[entry.id] ?? const <PostingModel>[];
+        return _buildEntryCard(
+          context,
+          entry: entry,
+          postings: entryPostings,
+          categoryById: categoryById,
+          accountById: accountById,
+        );
+      },
     );
   }
 

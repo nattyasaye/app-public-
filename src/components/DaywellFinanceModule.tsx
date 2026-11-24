@@ -68,7 +68,9 @@ import {
 } from '../domain/doubleEntryFinance';
 import { SYSTEM_CONTROL_ACCOUNT_IDS } from '../domain/sharedFoundation';
 import { CalendarDate, EthiopiaClock } from '../domain/date';
+import { DailyRhythmDayRecord } from '../domain/dailyRhythm';
 import { formatBirr, parseDecimalToCentsStrict } from '../domain/financialEngine';
+import { dailyRhythmWorkflowService } from '../services/dailyRhythmWorkflowService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { FinanceOverviewTab } from './finance/FinanceOverviewTab';
 import { FinanceTransactionsTab } from './finance/FinanceTransactionsTab';
@@ -207,6 +209,10 @@ export function DaywellFinanceModule({
       return null;
     }
   });
+  const [dailyRhythmTodayRecord, setDailyRhythmTodayRecord] =
+    useState<DailyRhythmDayRecord>(() =>
+      dailyRhythmWorkflowService.getDayOrEmpty(todayStr, { todayIso: todayStr })
+    );
 
   // UI Overlays: Composer, Confirm Modal, Status Toast
   const [composerOpen, setComposerOpen] = useState(false);
@@ -289,7 +295,19 @@ export function DaywellFinanceModule({
     planningPeriodEnd,
   ]);
 
-  const reloadFromStorage = useCallback(() => {
+  const reloadFromStorage = useCallback((event?: Event) => {
+    setDailyRhythmTodayRecord(
+      dailyRhythmWorkflowService.getDayOrEmpty(todayStr, { todayIso: todayStr })
+    );
+    const detail =
+      event instanceof CustomEvent &&
+      event.detail &&
+      typeof event.detail === 'object'
+        ? (event.detail as Record<string, unknown>)
+        : null;
+    if (detail && 'dailyRhythmDays' in detail && !('accounts' in detail)) {
+      return;
+    }
     isApplyingExternalSyncRef.current = true;
     try {
       const canonical = SharedStateBridge.loadCanonicalState();
@@ -334,7 +352,7 @@ export function DaywellFinanceModule({
         isApplyingExternalSyncRef.current = false;
       }, 0);
     }
-  }, []);
+  }, [todayStr]);
 
   // Listen for canonical sync from Backup/Restore or Quick Capture
   useEffect(() => {
@@ -617,6 +635,13 @@ export function DaywellFinanceModule({
               savingsGoals: prev,
             })
           );
+          dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+            prevEntries: entries,
+            prevPostings: postings,
+            nextEntries: rev.updatedEntries,
+            nextPostings: rev.updatedPostings,
+            todayIso: todayStr,
+          });
           showToast(`Revised opening balance for ${payload.name} (:rev provenance updated).`);
         } catch (err: unknown) {
           return {
@@ -682,6 +707,13 @@ export function DaywellFinanceModule({
             savingsGoals: prev,
           })
         );
+        dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+          prevEntries: entries,
+          prevPostings: postings,
+          nextEntries,
+          nextPostings,
+          todayIso: todayStr,
+        });
       }
       showToast(`Created account ${payload.name}.`);
     }
@@ -1099,6 +1131,13 @@ export function DaywellFinanceModule({
         setCommitments(res.updatedCommitments);
         setSavingsGoals(res.updatedSavingsGoals);
         setSimpleTransactions(res.updatedSimpleTransactions);
+        dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+          prevEntries: entries,
+          prevPostings: postings,
+          nextEntries: res.updatedEntries,
+          nextPostings: res.updatedPostings,
+          todayIso: todayStr,
+        });
       } else {
         const nextEntries = [newEntry, ...entries];
         const nextPostings = [...newPostings, ...postings];
@@ -1118,6 +1157,13 @@ export function DaywellFinanceModule({
             savingsGoals: prev,
           })
         );
+        dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+          prevEntries: entries,
+          prevPostings: postings,
+          nextEntries,
+          nextPostings,
+          todayIso: todayStr,
+        });
       }
 
       showToast(
@@ -1156,6 +1202,13 @@ export function DaywellFinanceModule({
       setCommitments(res.updatedCommitments);
       setSavingsGoals(res.updatedSavingsGoals);
       setSimpleTransactions(res.updatedSimpleTransactions);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries: res.updatedEntries,
+        nextPostings: postings,
+        todayIso: todayStr,
+      });
       showToast('Journal entry voided.');
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1185,6 +1238,13 @@ export function DaywellFinanceModule({
       setCommitments(res.updatedCommitments);
       setSavingsGoals(res.updatedSavingsGoals);
       setSimpleTransactions(res.updatedSimpleTransactions);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries: res.updatedEntries,
+        nextPostings: postings,
+        todayIso: todayStr,
+      });
       showToast('Journal entry restored.');
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1227,6 +1287,13 @@ export function DaywellFinanceModule({
           savingsGoals: prev,
         })
       );
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries,
+        nextPostings,
+        todayIso: todayStr,
+      });
       showToast(`Recorded refund: ${res.entry.description}`);
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1335,11 +1402,20 @@ export function DaywellFinanceModule({
         allocations,
         recurringRules,
       });
+      const nextEntries = [res.entry, ...entries];
+      const nextPostings = [...res.postings, ...postings];
       setCommitments((prev) => prev.map((c) => (c.id === target.id ? res.updatedCommitment : c)));
       setCommitmentSettlements((prev) => [res.settlement, ...prev]);
-      setEntries((prev) => [res.entry, ...prev]);
-      setPostings((prev) => [...res.postings, ...prev]);
+      setEntries(nextEntries);
+      setPostings(nextPostings);
       setSimpleTransactions((prev) => [res.simpleTransaction, ...prev]);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries,
+        nextPostings,
+        todayIso: todayStr,
+      });
       showToast(`Recorded settlement for "${target.title}".`);
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1376,6 +1452,13 @@ export function DaywellFinanceModule({
       setCommitments(res.updatedCommitments);
       setSavingsGoals(res.updatedSavingsGoals);
       setSimpleTransactions(res.updatedSimpleTransactions);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries: res.updatedEntries,
+        nextPostings: postings,
+        todayIso: todayStr,
+      });
       showToast(`Voided installment for "${target.title}".`);
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1454,9 +1537,18 @@ export function DaywellFinanceModule({
             : d
         )
       );
+      const nextEntries = [res.entry, ...entries];
+      const nextPostings = [...res.postings, ...postings];
       setAllocations((prev) => [res.allocation, ...prev]);
-      setEntries((prev) => [res.entry, ...prev]);
-      setPostings((prev) => [...res.postings, ...prev]);
+      setEntries(nextEntries);
+      setPostings(nextPostings);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries,
+        nextPostings,
+        todayIso: todayStr,
+      });
       showToast('Debt settlement posted to ledger.');
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1492,6 +1584,8 @@ export function DaywellFinanceModule({
         date: todayStr,
         reason,
       });
+      const nextEntries = [res.entry, ...entries];
+      const nextPostings = [...res.postings, ...postings];
       setDebts((prev) =>
         prev.map((d) =>
           d.id === debtId
@@ -1504,8 +1598,15 @@ export function DaywellFinanceModule({
             : d
         )
       );
-      setEntries((prev) => [res.entry, ...prev]);
-      setPostings((prev) => [...res.postings, ...prev]);
+      setEntries(nextEntries);
+      setPostings(nextPostings);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries,
+        nextPostings,
+        todayIso: todayStr,
+      });
       showToast('Debt written off with balanced adjustment entry.');
       setTimeout(notifyCanonicalSynced, 0);
     } catch (err) {
@@ -1537,6 +1638,13 @@ export function DaywellFinanceModule({
       setDebts(nextDebts);
       setEntries(res.updatedEntries);
       setSavingsGoals(nextGoals);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries: res.updatedEntries,
+        nextPostings: postings,
+        todayIso: todayStr,
+      });
       showToast('Write-off voided and outstanding balance restored.');
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1569,6 +1677,13 @@ export function DaywellFinanceModule({
       setCommitments(res.updatedCommitments);
       setSavingsGoals(res.updatedSavingsGoals);
       setSimpleTransactions(res.updatedSimpleTransactions);
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries: res.updatedEntries,
+        nextPostings: postings,
+        todayIso: todayStr,
+      });
       showToast('Debt voided cleanly. You can re-issue via Composer.');
       setTimeout(notifyCanonicalSynced, 0);
       return { ok: true };
@@ -1655,6 +1770,13 @@ export function DaywellFinanceModule({
       if (res.entry && res.postings) {
         setEntries(nextEntries);
         setPostings(nextPostings);
+        dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+          prevEntries: entries,
+          prevPostings: postings,
+          nextEntries,
+          nextPostings,
+          todayIso: todayStr,
+        });
       }
       if (res.simpleTransaction) {
         setSimpleTransactions((prev) => [res.simpleTransaction!, ...prev]);
@@ -1875,6 +1997,13 @@ export function DaywellFinanceModule({
           savingsGoals: prev,
         })
       );
+      dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+        prevEntries: entries,
+        prevPostings: postings,
+        nextEntries,
+        nextPostings,
+        todayIso: todayStr,
+      });
     }
     if (res.createdCommitments.length > 0) {
       setCommitments((prev) => [...res.createdCommitments, ...prev]);
@@ -2192,6 +2321,20 @@ export function DaywellFinanceModule({
           onRestoreEntry={handleRestoreEntry}
           onRefundExpense={handleExpenseRefund}
           onRequestConfirm={requestConfirm}
+          dailyRhythmRecord={dailyRhythmTodayRecord}
+          onConfirmFinanceClose={() => {
+            const res = dailyRhythmWorkflowService.confirmFinanceClose({
+              entries,
+              dateIso: todayStr,
+              todayIso: todayStr,
+            });
+            setDailyRhythmTodayRecord(res.mutation.record);
+            showToast(
+              res.summary.hasTransactions
+                ? "Today's Finance transactions confirmed."
+                : 'Confirmed no transactions today.'
+            );
+          }}
         />
       )}
 

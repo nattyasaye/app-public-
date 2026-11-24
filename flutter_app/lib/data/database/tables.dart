@@ -528,3 +528,24 @@ class RecurringRulesTable extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+/// Daily Rhythm Daily Check-In Records (Schema v12; one record per canonical dateIso)
+class DailyRhythmDays extends Table {
+  TextColumn get dateIso => text()(); // Canonical YYYY-MM-DD (UTC+3)
+  BoolColumn get bibleStudyDone =>
+      boolean().withDefault(const Constant(false))();
+  DateTimeColumn get bibleStudyCompletedAt => dateTime().nullable()();
+  BoolColumn get prayerDone => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get prayerCompletedAt => dateTime().nullable()();
+  BoolColumn get taskReviewConfirmed =>
+      boolean().withDefault(const Constant(false))();
+  DateTimeColumn get taskReviewedAt => dateTime().nullable()();
+  TextColumn get taskReviewEvidenceJson => text().nullable()();
+  TextColumn get financeCloseStatus =>
+      text().withDefault(const Constant('open'))();
+  DateTimeColumn get financeClosedAt => dateTime().nullable()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {dateIso};
+}

@@ -126,12 +126,20 @@ import {
   unlinkNoteFromTask,
   unlinkNotesForDeletedTask,
 } from '../domain/taskNotes';
+import {
+  createEmptyDailyRhythmDay,
+  DailyRhythmDayRecord,
+} from '../domain/dailyRhythm';
+import { buildDailyRhythmTaskReviewSnapshot } from '../domain/dailyRhythmWorkflows';
 import { dailyPlanningService } from '../services/dailyPlanningService';
+import { dailyRhythmService } from '../services/dailyRhythmService';
+import { dailyRhythmWorkflowService } from '../services/dailyRhythmWorkflowService';
 import { inboxService } from '../services/inboxService';
 import { notesService } from '../services/notesService';
 import { projectsService } from '../services/projectsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { taskRemindersService } from '../services/taskRemindersService';
+import { DailyTaskReviewCard } from './daily-rhythm';
 import type { DaywellNote } from './DaywellNotesModule';
 import { ProjectsWorkspaceView } from './projects';
 import { MyDayPlanningView } from './tasks/MyDayPlanningView';
@@ -333,6 +341,9 @@ export function DaywellTasksModule({
   const [reminders, setReminders] = useState<SharedReminder[]>(() =>
     taskRemindersService.loadAllReminders()
   );
+  const [dailyRhythmDays, setDailyRhythmDays] = useState<DailyRhythmDayRecord[]>(
+    () => dailyRhythmService.loadDays()
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -351,6 +362,7 @@ export function DaywellTasksModule({
         );
       }
       setReminders(taskRemindersService.loadAllReminders());
+      setDailyRhythmDays(dailyRhythmService.loadDays());
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
@@ -2764,9 +2776,47 @@ export function DaywellTasksModule({
           onCarryForwardAll={handleCarryForwardAll}
           onCarryPastRemainingToToday={handleCarryPastRemainingToToday}
           onCreateTaskForDay={handleOpenCreate}
+          dailyRhythmRecord={
+            dailyRhythmDays.find((d) => d.dateIso === selectedPlanDate) ??
+            createEmptyDailyRhythmDay(selectedPlanDate)
+          }
+          onConfirmDailyReview={() => {
+            dailyRhythmWorkflowService.confirmTaskReview({
+              tasks,
+              dailyPlanningEntries: effectiveDailyPlanningEntries,
+              dateIso: todayStr,
+              todayIso: todayStr,
+            });
+            setDailyRhythmDays(dailyRhythmService.loadDays());
+          }}
         />
       ) : (
         <>
+      {activeFilter === 'today' && (
+        <DailyTaskReviewCard
+          snapshot={buildDailyRhythmTaskReviewSnapshot({
+            tasks,
+            dailyPlanningEntries: effectiveDailyPlanningEntries,
+            targetDateIso: todayStr,
+            todayIso: todayStr,
+          })}
+          record={
+            dailyRhythmDays.find((d) => d.dateIso === todayStr) ??
+            createEmptyDailyRhythmDay(todayStr)
+          }
+          isToday={true}
+          onConfirmReview={() => {
+            dailyRhythmWorkflowService.confirmTaskReview({
+              tasks,
+              dailyPlanningEntries: effectiveDailyPlanningEntries,
+              dateIso: todayStr,
+              todayIso: todayStr,
+            });
+            setDailyRhythmDays(dailyRhythmService.loadDays());
+          }}
+          onOpenTask={(id) => setDetailTaskId(id)}
+        />
+      )}
       {/* Task List */}
       <div className="space-y-2 pt-1">
         {activeFilter === 'inbox' && (filteredTasks.length > 0 || unprocessedInboxItems.length > 0) && (

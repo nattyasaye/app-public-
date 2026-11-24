@@ -47,8 +47,8 @@ class SnapshotVersionPolicy {
   static const int minSupportedSnapshotFormatVersion = 1;
   static const int maxSupportedSnapshotFormatVersion = 2;
   static const int supportedFinanceSchemaVersion = 7;
-  static const int supportedDatabaseSchemaVersion = 11;
-  static const int maxSupportedDatabaseSchemaVersion = 11;
+  static const int supportedDatabaseSchemaVersion = 12;
+  static const int maxSupportedDatabaseSchemaVersion = 12;
   static const int minSupportedCanonicalSchemaVersion = 4;
   static const int maxSupportedCanonicalSchemaVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;
@@ -58,10 +58,10 @@ class SnapshotVersionPolicy {
   /// Rules:
   /// - Legacy format-1 snapshots (`snapshotFormatVersion == 1` or omitted)
   ///   accept `schemaVersion` `4..9` (or omitted -> `5`), optional
-  ///   `databaseSchemaVersion` `1..11`, and optional `financeSchemaVersion == 7`.
+  ///   `databaseSchemaVersion` `1..12`, and optional `financeSchemaVersion == 7`.
   /// - Format-2 snapshots (`snapshotFormatVersion == 2`) require explicit
   ///   canonical exchange `schemaVersion == 5`, optional `databaseSchemaVersion`
-  ///   `9`, `10`, or `11` (when present, per ADR-007 backward compatibility),
+  ///   `9`, `10`, `11`, or `12` (when present, per ADR-007 backward compatibility),
   ///   and optional `financeSchemaVersion == 7` (when present).
   /// - When [expectedHeaderVersion] is provided (for `.daywell` envelopes), the
   ///   resolved exchange schemaVersion must match it exactly.
@@ -213,10 +213,11 @@ class SnapshotVersionPolicy {
       if (resolvedSnapshotFormatVersion >= supportedSnapshotFormatVersion &&
           rawDbVersion != 9 &&
           rawDbVersion != 10 &&
+          rawDbVersion != 11 &&
           rawDbVersion != supportedDatabaseSchemaVersion) {
         throw BackupValidationException(
           BackupFailureKind.invalidSnapshotVersion,
-          'Snapshot format v2 requires databaseSchemaVersion 9, 10, or '
+          'Snapshot format v2 requires databaseSchemaVersion 9, 10, 11, or '
           '$supportedDatabaseSchemaVersion when specified (got $rawDbVersion).',
         );
       }

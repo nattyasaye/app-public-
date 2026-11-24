@@ -103,6 +103,7 @@ If an artifact at a lower or parallel level contradicts a higher canonical level
 | **Inputs** | `DaywellTextField`, `DaywellSearchField`, `DaywellDropdownField` | Uniform filled inputs (`radiusMd`) with error/helper hierarchy |
 | **Selection** | `daywell_selection_controls.dart` (`DaywellRadioTile`, etc.) | Canonical radio/checkbox selection controls |
 | **Composed Patterns** | `DaywellContentState`, `DaywellSectionContainer`, `DaywellSearchFilterBar`, `DaywellConfirmationDialog` | Standardized loading/empty/error/ready switching, titled card containers, search + filter bars, destructive confirmations |
+| **Daily Rhythm Workflows (Stage C)** | `DailyFaithCheckInCard`, `DailyTaskReviewCard`, `DailyFinanceCloseCard` (`daily_rhythm_workflow_widgets.dart` ↔ `src/components/daily-rhythm/`) | Module-hosted Daily Rhythm check-in cards inside More, Tasks (`Today` & `My Day`), and Finance (`Transactions`) using `DaywellTheme` / `--dw-*` tokens and `Daywell*` primitives with zero raw hex or `Colors.*` literals |
 | **Showcase / Quick Capture** | `QuickCaptureDialog`, `daywell_theme_showcase.dart` | Global 1-tap Quick Capture dialog and internal design showcase |
 
 ### 4.2 Adaptive Shell Navigation (`flutter_app/lib/ui/shell/`)
