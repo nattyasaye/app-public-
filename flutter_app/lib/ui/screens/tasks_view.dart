@@ -2156,15 +2156,13 @@ class _TasksViewState extends State<TasksView>
                                                   });
                                                   return;
                                                 }
+                                                final prev = controller.state;
                                                 final prevTasks =
-                                                    List<TaskEntity>.from(
-                                                        controller.state.tasks);
+                                                    [...prev.tasks];
                                                 final prevCustom =
-                                                    List<String>.from(controller
-                                                        .state.customTags);
+                                                    [...prev.customTags];
                                                 final prevFilters =
-                                                    Set<String>.from(controller
-                                                        .state.tagFilters);
+                                                    {...prev.tagFilters};
                                                 final ok =
                                                     await controller.renameTag(
                                                   lbl,
@@ -2274,15 +2272,12 @@ class _TasksViewState extends State<TasksView>
                                           ),
                                           tooltip: 'Delete tag $lbl',
                                           onPressed: () async {
-                                            final prevTasks =
-                                                List<TaskEntity>.from(
-                                                    controller.state.tasks);
+                                            final prev = controller.state;
+                                            final prevTasks = [...prev.tasks];
                                             final prevCustom =
-                                                List<String>.from(controller
-                                                    .state.customTags);
+                                                [...prev.customTags];
                                             final prevFilters =
-                                                Set<String>.from(controller
-                                                    .state.tagFilters);
+                                                {...prev.tagFilters};
                                             await controller.deleteTag(lbl);
                                             if (!mounted) return;
                                             ScaffoldMessenger.of(context)

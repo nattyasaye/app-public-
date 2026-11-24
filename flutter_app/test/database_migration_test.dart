@@ -2958,8 +2958,7 @@ void main() {
     );
   });
 
-  group(
-      'Stage B Schema v11 -> v12 Real Migration & Daily Rhythm Persistence',
+  group('Stage B Schema v11 -> v12 Real Migration & Daily Rhythm Persistence',
       () {
     late Directory tempDir;
 
@@ -3055,8 +3054,8 @@ void main() {
               .read<int>('user_version'),
           12,
         );
-        final persisted = await DriftDailyRhythmRepository(reopened)
-            .getByDate('2026-11-22');
+        final persisted =
+            await DriftDailyRhythmRepository(reopened).getByDate('2026-11-22');
         expect(persisted, isNotNull);
         expect(persisted!.bibleStudyDone, isTrue);
         expect(persisted.prayerDone, isTrue);
