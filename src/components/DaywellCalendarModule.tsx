@@ -32,6 +32,15 @@ import {
 } from '../domain/taskCalendar';
 import { TaskStatus } from '../domain/taskOperations';
 import { validateCalendarEventForm, isFormDirty } from '../domain/formValidationAndNavigation';
+import {
+  DailyRhythmDayRecord,
+  evaluateDailyRhythmTimeline,
+} from '../domain/dailyRhythm';
+import {
+  DailyRhythmCalendarDayInspection,
+  describeDailyRhythmCalendarDay,
+} from '../domain/dailyRhythmWorkflows';
+import { DailyRhythmCalendarDetailCard } from './daily-rhythm';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
 import {
   DaywellButton,
@@ -84,6 +93,7 @@ interface DaywellCalendarModuleProps {
   onToggleTask?: (taskId: string) => void;
   onNavigateToTask?: (taskId: string) => void;
   requestedFocusDate?: { dateStr: string; nonce: number } | null;
+  dailyRhythmDays?: DailyRhythmDayRecord[];
   onRequestQuickCapture?: () => void;
 }
 
@@ -110,11 +120,66 @@ const CATEGORY_COLORS: Record<CalendarEvent['category'], { label: string; badgeC
   },
 };
 
+function getRhythmCellIndicator(
+  inspection: DailyRhythmCalendarDayInspection,
+  isSelected: boolean
+): { glyph: string; className: string; label: string } | null {
+  switch (inspection.calendarStatus) {
+    case 'complete':
+      return {
+        glyph: '✓',
+        className: isSelected
+          ? 'text-[var(--dw-on-primary)]'
+          : 'text-[var(--dw-income)]',
+        label: 'Complete',
+      };
+    case 'partial':
+      return {
+        glyph: '◐',
+        className: isSelected
+          ? 'text-[var(--dw-on-primary)]'
+          : 'text-[var(--dw-warning)]',
+        label: 'In progress',
+      };
+    case 'freeze_protected':
+      return {
+        glyph: inspection.isProvisionalFreeze ? '❄?' : '❄',
+        className: isSelected
+          ? 'text-[var(--dw-on-primary)]'
+          : 'text-[var(--dw-info)]',
+        label: inspection.isProvisionalFreeze
+          ? 'Freeze provisional'
+          : 'Freeze protected',
+      };
+    case 'missed':
+      return {
+        glyph: '✕',
+        className: isSelected
+          ? 'text-[var(--dw-on-primary)]'
+          : 'text-[var(--dw-expense)]',
+        label: 'Missed',
+      };
+    case 'untouched':
+      if (inspection.isToday) return null;
+      return {
+        glyph: '✕',
+        className: isSelected
+          ? 'text-[var(--dw-on-primary)]'
+          : 'text-[var(--dw-expense)]',
+        label: 'Untouched',
+      };
+    case 'unrecorded':
+    default:
+      return null;
+  }
+}
+
 export function DaywellCalendarModule({
   tasks = [],
   onToggleTask,
   onNavigateToTask,
   requestedFocusDate,
+  dailyRhythmDays = [],
 }: DaywellCalendarModuleProps) {
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [currentDate, setCurrentDate] = useState<CalendarDate>(() => CalendarDate.today());
@@ -188,6 +253,19 @@ export function DaywellCalendarModule({
     [selectedDateStr]
   );
 
+  const dailyRhythmSummary = useMemo(
+    () => evaluateDailyRhythmTimeline(dailyRhythmDays),
+    [dailyRhythmDays]
+  );
+  const selectedDailyRhythm = useMemo(
+    () =>
+      describeDailyRhythmCalendarDay({
+        dateIso: selectedCalendarDate.toIsoString(),
+        timelineSummary: dailyRhythmSummary,
+      }),
+    [selectedCalendarDate, dailyRhythmSummary]
+  );
+
   const navigateMonth = (direction: number) => {
     setCurrentDate((prev) =>
       direction < 0 ? prev.previousGregorianMonth() : prev.nextGregorianMonth()
@@ -247,6 +325,10 @@ export function DaywellCalendarModule({
       const dayTasks = monthTaskOccurrences.filter((t) => t.occurrenceDate === dateStr);
       const hasStoredTasks = dayTasks.some((t) => !t.isProjectedOccurrence);
       const hasProjectedTasks = dayTasks.some((t) => t.isProjectedOccurrence);
+      const rhythm = describeDailyRhythmCalendarDay({
+        dateIso: dateStr,
+        timelineSummary: dailyRhythmSummary,
+      });
       return {
         dateStr,
         dayNumber: date.day,
@@ -257,9 +339,10 @@ export function DaywellCalendarModule({
         hasStoredTasks,
         hasProjectedTasks,
         eventCount: dayEvents.length + dayTasks.length,
+        rhythm,
       };
     });
-  }, [monthGridDates, events, monthTaskOccurrences]);
+  }, [monthGridDates, events, monthTaskOccurrences, dailyRhythmSummary]);
 
   const selectedDayItems = useMemo(() => {
     let dayEvents = events.filter((e) => eventOccursOnDate(e, selectedCalendarDate));
@@ -694,13 +777,18 @@ export function DaywellCalendarModule({
             {monthDays.map((d) => {
               const currentSelected = isSelected(d.dateStr);
               const todayCell = isToday(d.dateStr);
+              const rhythmMarker = getRhythmCellIndicator(
+                d.rhythm,
+                currentSelected
+              );
 
               return (
                 <button
                   key={d.dateStr}
                   type="button"
+                  aria-label={`${d.dateStr}, Daily Rhythm: ${d.rhythm.statusLabel}`}
                   onClick={() => setSelectedDateStr(d.dateStr)}
-                  className={`min-h-[52px] p-1 rounded-[var(--dw-radius-md)] flex flex-col items-center justify-between transition-all relative cursor-pointer ${
+                  className={`min-h-[54px] p-1 rounded-[var(--dw-radius-md)] flex flex-col items-center justify-between transition-all relative cursor-pointer ${
                     currentSelected
                       ? 'bg-[var(--dw-primary)] text-[var(--dw-on-primary)] shadow-sm ring-2 ring-[var(--dw-primary)]/30'
                       : todayCell
@@ -710,9 +798,19 @@ export function DaywellCalendarModule({
                       : 'text-[var(--dw-text-disabled)]'
                   }`}
                 >
-                  <span className="text-xs font-bold">
-                    {d.dayNumber}
-                  </span>
+                  <div className="w-full flex items-center justify-between px-0.5">
+                    <span className="text-xs font-bold leading-none">
+                      {d.dayNumber}
+                    </span>
+                    {rhythmMarker && (
+                      <span
+                        title={`Daily Rhythm: ${rhythmMarker.label}`}
+                        className={`text-[9px] font-extrabold leading-none ${rhythmMarker.className}`}
+                      >
+                        {rhythmMarker.glyph}
+                      </span>
+                    )}
+                  </div>
 
                   <span
                     className={`text-[9px] font-medium leading-none ${
@@ -749,12 +847,38 @@ export function DaywellCalendarModule({
               );
             })}
           </div>
+
+          <div
+            aria-label="Daily Rhythm calendar legend"
+            className="pt-2 border-t border-[var(--dw-divider)] flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-[var(--dw-text-muted)]"
+          >
+            <span className="font-semibold text-[var(--dw-text-secondary)]">
+              Rhythm:
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <strong className="text-[var(--dw-income)]">✓</strong> Complete
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <strong className="text-[var(--dw-warning)]">◐</strong> In progress
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <strong className="text-[var(--dw-info)]">❄?</strong> Provisional freeze
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <strong className="text-[var(--dw-info)]">❄</strong> Freeze protected
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <strong className="text-[var(--dw-expense)]">✕</strong> Missed
+            </span>
+          </div>
         </DaywellCard>
       )}
 
       {/* DAY VIEW & SELECTED AGENDA DETAILS */}
       {(viewMode === 'month' || viewMode === 'day') && (
         <div className="space-y-3 pt-1">
+          <DailyRhythmCalendarDetailCard inspection={selectedDailyRhythm} />
+
           <div className="flex items-center justify-between gap-2">
             <h3 className="dw-type-label text-[var(--dw-text-primary)] uppercase tracking-wider flex items-center gap-1.5">
               <CalendarDays className="w-3.5 h-3.5 text-[var(--dw-primary)]" />

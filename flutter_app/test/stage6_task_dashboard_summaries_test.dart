@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/calendar/calendar_controller.dart';
+import 'package:personal_management_app/application/daily_rhythm/daily_rhythm_controller.dart';
 import 'package:personal_management_app/application/finance/finance_controller.dart';
 import 'package:personal_management_app/application/inbox/inbox_controller.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
@@ -11,6 +12,7 @@ import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/calendar_repository.dart';
+import 'package:personal_management_app/data/repositories/daily_rhythm_repository.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
 import 'package:personal_management_app/data/repositories/inbox_repository.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
@@ -39,6 +41,8 @@ class _Stage6WidgetState extends ChangeNotifier implements AppStateManager {
   final NotesController notesController;
   @override
   final InboxController inboxController;
+  @override
+  final DailyRhythmController dailyRhythmController;
 
   _Stage6WidgetState({required AppDatabase db})
       : financeController = FinanceController(
@@ -58,6 +62,9 @@ class _Stage6WidgetState extends ChangeNotifier implements AppStateManager {
         ),
         inboxController = InboxController(
           repository: DriftInboxRepository(db),
+        ),
+        dailyRhythmController = DailyRhythmController(
+          repository: DriftDailyRhythmRepository(db),
         );
 
   Future<void> loadAllControllers() async {
@@ -68,6 +75,7 @@ class _Stage6WidgetState extends ChangeNotifier implements AppStateManager {
       calendarController.loadAll(),
       notesController.loadNotes(),
       inboxController.loadItems(includeProcessed: true),
+      dailyRhythmController.loadAll(),
     ]);
   }
 
@@ -79,6 +87,7 @@ class _Stage6WidgetState extends ChangeNotifier implements AppStateManager {
     calendarController.dispose();
     notesController.dispose();
     inboxController.dispose();
+    dailyRhythmController.dispose();
     super.dispose();
   }
 

@@ -14,6 +14,8 @@ export interface DailyTaskReviewCardProps {
   snapshot: DailyRhythmTaskReviewSnapshot;
   record: DailyRhythmDayRecord;
   isToday?: boolean;
+  statusFeedback?: string | null;
+  errorMessage?: string | null;
   onConfirmReview: () => void;
   onOpenTask?: (taskId: string) => void;
 }
@@ -28,6 +30,8 @@ export function DailyTaskReviewCard({
   snapshot,
   record,
   isToday = true,
+  statusFeedback,
+  errorMessage,
   onConfirmReview,
   onOpenTask,
 }: DailyTaskReviewCardProps) {
@@ -106,6 +110,14 @@ export function DailyTaskReviewCard({
           icon={<Lock className="w-4 h-4" />}
           message="Past and future daily task reviews are locked. Switch back to Today to confirm today's review."
         />
+      )}
+
+      {errorMessage && (
+        <DaywellStatusBanner tone="error" message={errorMessage} />
+      )}
+
+      {statusFeedback && !errorMessage && (
+        <DaywellStatusBanner tone="success" message={statusFeedback} />
       )}
 
       {isToday && snapshot.attentionTasks.length > 0 && (

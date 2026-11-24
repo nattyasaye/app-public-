@@ -7,6 +7,7 @@ import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
 import '../../domain/calendar/calendar_models.dart';
+import '../../domain/daily_rhythm/daily_rhythm_workflows.dart';
 import '../../domain/finance/double_entry_engine.dart';
 import '../../domain/finance/financial_engine.dart';
 import '../../domain/inbox/inbox_models.dart';
@@ -16,6 +17,7 @@ import '../../domain/tasks/task_recurrence_engine.dart';
 import '../../domain/tasks/task_summary_engine.dart';
 import '../app_state.dart';
 import '../shell/daywell_shell_routes.dart';
+import '../widgets/daily_rhythm_dashboard_widgets.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'finance/finance_formatters.dart';
 import 'projects/project_detail_screen.dart';
@@ -28,6 +30,7 @@ class DashboardView extends StatefulWidget {
   final void Function(int)? onNavigateTab;
   final void Function(DaywellTabId tab)? onSelectTab;
   final void Function(int tabIndex)? onOpenTasksSubTab;
+  final void Function(int tabIndex)? onOpenFinanceTab;
   final VoidCallback? onOpenBackup;
 
   const DashboardView({
@@ -37,6 +40,7 @@ class DashboardView extends StatefulWidget {
     this.onNavigateTab,
     this.onSelectTab,
     this.onOpenTasksSubTab,
+    this.onOpenFinanceTab,
     this.onOpenBackup,
   });
 
@@ -68,6 +72,14 @@ class _DashboardViewState extends State<DashboardView> {
     _goToTab(DaywellTabId.tasks);
   }
 
+  void _openFinanceTab([int tabIndex = 0]) {
+    if (widget.onOpenFinanceTab != null) {
+      widget.onOpenFinanceTab!(tabIndex);
+      return;
+    }
+    _goToTab(DaywellTabId.finance);
+  }
+
   void _goToBackup() {
     widget.onOpenBackup?.call();
   }
@@ -90,6 +102,7 @@ class _DashboardViewState extends State<DashboardView> {
         widget.state.calendarController.loadAll(),
         widget.state.notesController.loadNotes(),
         widget.state.inboxController.loadItems(includeProcessed: true),
+        widget.state.dailyRhythmController.loadAll(),
       ]);
     } finally {
       _activeRefreshFuture = null;
@@ -183,6 +196,24 @@ class _DashboardViewState extends State<DashboardView> {
                   financeSpec: _destinationFor(DaywellTabId.finance),
                   onSelectTab: _goToTab,
                   onOpenQuickCapture: widget.onOpenQuickCapture,
+                ),
+                const SizedBox(height: SharedDesignTokens.spacingLg),
+                DashboardDailyRhythmSection(
+                  state: widget.state,
+                  onOpenFaith: () => _goToTab(DaywellTabId.more),
+                  onOpenTasksReview: () {
+                    widget.state.tasksController.openDashboardFilter(
+                      viewFilter: 'active',
+                      dueDateFilter: 'today',
+                    );
+                    _openTasksTab(0);
+                  },
+                  onOpenFinanceReview: () => _openFinanceTab(1),
+                  onOpenCalendarHistory: () {
+                    widget.state.calendarController
+                        .setSelectedCalendarDate(CalendarDate.today());
+                    _goToTab(DaywellTabId.calendar);
+                  },
                 ),
                 const SizedBox(height: SharedDesignTokens.spacingLg),
                 if (isWide)
@@ -2822,3 +2853,81 @@ class DashboardInboxSection extends StatelessWidget {
     );
   }
 }
+
+/// Scoped Daily Rhythm Dashboard overview section subscribing exclusively to
+/// [DailyRhythmController], [TasksController], and [FinanceController].
+class DashboardDailyRhythmSection extends StatelessWidget {
+  final AppStateManager state;
+  final VoidCallback onOpenFaith;
+  final VoidCallback onOpenTasksReview;
+  final VoidCallback onOpenFinanceReview;
+  final VoidCallback onOpenCalendarHistory;
+
+  const DashboardDailyRhythmSection({
+    super.key,
+    required this.state,
+    required this.onOpenFaith,
+    required this.onOpenTasksReview,
+    required this.onOpenFinanceReview,
+    required this.onOpenCalendarHistory,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final mergeListenable = Listenable.merge(<Listenable>[
+      state.dailyRhythmController,
+      state.tasksController,
+      state.financeController,
+    ]);
+
+    return ListenableBuilder(
+      listenable: mergeListenable,
+      builder: (BuildContext context, Widget? _) {
+        final rhythmState = state.dailyRhythmController.state;
+        final tasksState = state.tasksController.state;
+        final financeState = state.financeController.state;
+        final todayIso = rhythmState.summary.todayIso;
+
+        final taskSnapshot = DailyRhythmWorkflows.buildTaskReviewSnapshot(
+          tasks: tasksState.tasks,
+          planningEntries: tasksState.dailyPlanningEntries,
+          targetDateIso: todayIso,
+          todayIso: todayIso,
+        );
+        final financeSummary = DailyRhythmWorkflows.inspectFinanceDay(
+          entries: financeState.entries,
+          targetDateIso: todayIso,
+          todayIso: todayIso,
+        );
+        final overview = DailyRhythmWorkflows.buildDashboardOverview(
+          timelineSummary: rhythmState.summary,
+          taskSnapshot: taskSnapshot,
+          financeSummary: financeSummary,
+        );
+
+        return DailyRhythmDashboardCard(
+          overview: overview,
+          isLoading: rhythmState.isLoading,
+          isSaving: rhythmState.isSaving,
+          errorMessage: rhythmState.errorMessage,
+          onRetry: () => unawaited(state.dailyRhythmController.loadAll()),
+          onCompleteFaithStep: (DailyRhythmFaithStep step) {
+            unawaited(
+              state.dailyRhythmController.updateFaith(
+                dateIso: todayIso,
+                bibleStudyDone:
+                    step == DailyRhythmFaithStep.bibleStudy ? true : null,
+                prayerDone: step == DailyRhythmFaithStep.prayer ? true : null,
+              ),
+            );
+          },
+          onOpenFaith: onOpenFaith,
+          onOpenTasksReview: onOpenTasksReview,
+          onOpenFinanceReview: onOpenFinanceReview,
+          onOpenCalendarHistory: onOpenCalendarHistory,
+        );
+      },
+    );
+  }
+}
+

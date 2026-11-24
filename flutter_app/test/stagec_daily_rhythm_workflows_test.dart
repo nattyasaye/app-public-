@@ -221,20 +221,37 @@ void main() {
           today: fixedToday,
         );
         expect(pastLock.applied, isFalse);
-        expect(pastLock.reason, DailyRhythmMutationReason.lockedNonToday);
+        expect(pastLock.reason, DailyRhythmMutationReason.pastDayLocked);
 
+        final futureLock = await ctrl.updateFaith(
+          dateIso: '2026-11-24',
+          bibleStudyDone: true,
+          today: fixedToday,
+        );
+        expect(futureLock.applied, isFalse);
+        expect(futureLock.reason, DailyRhythmMutationReason.futureDayLocked);
+
+        final seededTask = TaskEntity(
+          id: 't-keep-open',
+          title: 'Pending item',
+          dueDate: fixedToday,
+          createdAt: DateTime.utc(2026, 11, 23, 3, 0),
+        );
         final taskRes = await ctrl.confirmTaskReview(
           dateIso: fixedTodayIso,
-          tasks: const [],
+          tasks: [seededTask],
           planningEntries: const [],
           today: fixedToday,
           nowIso: '2026-11-23T17:00:00.000Z',
         );
         expect(taskRes.applied, isTrue);
+        expect(seededTask.isCompleted, isFalse);
         expect(ctrl.state.dayFor(fixedTodayIso).taskReviewConfirmed, isTrue);
+        expect(ctrl.state.dayFor(fixedTodayIso).bibleStudyDone, isTrue);
+        expect(ctrl.state.dayFor(fixedTodayIso).prayerDone, isTrue);
 
         // Day still partial until Finance closes
-        expect(ctrl.state.summary.todayRecord.qualifies, isFalse);
+        expect(ctrl.state.summary.byDate[fixedTodayIso]!.qualifies, isFalse);
 
         final finClose = await ctrl.confirmFinanceClose(
           dateIso: fixedTodayIso,
@@ -247,13 +264,15 @@ void main() {
           ctrl.state.dayFor(fixedTodayIso).financeCloseStatus,
           DailyRhythmFinanceCloseStatuses.closedNoTransactions,
         );
-        expect(ctrl.state.summary.todayRecord.qualifies, isTrue);
+        expect(ctrl.state.dayFor(fixedTodayIso).taskReviewConfirmed, isTrue);
+        expect(ctrl.state.dayFor(fixedTodayIso).isFaithComplete, isTrue);
+        expect(ctrl.state.summary.byDate[fixedTodayIso]!.qualifies, isTrue);
 
         // Reloading from SQLite preserves check-ins
         final reloaded = DailyRhythmController(repository: repo);
         addTearDown(reloaded.dispose);
         await reloaded.loadAll(today: fixedToday);
-        expect(reloaded.state.dayFor(fixedTodayIso).qualifies, isTrue);
+        expect(reloaded.state.summary.byDate[fixedTodayIso]!.qualifies, isTrue);
       },
     );
 

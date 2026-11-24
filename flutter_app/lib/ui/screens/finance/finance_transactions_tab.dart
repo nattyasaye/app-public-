@@ -153,14 +153,28 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
           summary: summary,
           record: drCtrl.state.dayFor(todayIso),
           isShowingTodayFilter: state.datePresetFilter == 'today',
+          isSaving: drCtrl.state.isSaving,
+          errorMessage: drCtrl.state.errorMessage,
           onFilterToday: () => widget.controller.setDatePresetFilter('today'),
-          onConfirmClose: () => unawaited(
-            drCtrl.confirmFinanceClose(
+          onConfirmClose: () async {
+            final res = await drCtrl.confirmFinanceClose(
               dateIso: todayIso,
               entries: state.journalEntries,
               today: today,
-            ),
-          ),
+            );
+            if (!context.mounted || !res.applied) return;
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                  summary.hasTransactions
+                      ? "Today's Finance transactions confirmed."
+                      : 'Confirmed no transactions today.',
+                ),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
         );
       },
     );

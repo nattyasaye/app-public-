@@ -20,6 +20,8 @@ class DailyFaithCheckInCard extends StatelessWidget {
   final String dateIso;
   final DailyRhythmDayEntity record;
   final bool isToday;
+  final bool isSaving;
+  final String? errorMessage;
   final ValueChanged<bool> onToggleBibleStudy;
   final ValueChanged<bool> onTogglePrayer;
 
@@ -28,6 +30,8 @@ class DailyFaithCheckInCard extends StatelessWidget {
     required this.dateIso,
     required this.record,
     this.isToday = true,
+    this.isSaving = false,
+    this.errorMessage,
     required this.onToggleBibleStudy,
     required this.onTogglePrayer,
   });
@@ -94,6 +98,13 @@ class DailyFaithCheckInCard extends StatelessWidget {
                   'Past and future Faith check-ins are locked. Only today can be updated.',
             ),
           ],
+          if (errorMessage != null && errorMessage!.trim().isNotEmpty) ...[
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            DaywellStatusBanner(
+              tone: DaywellStatusTone.error,
+              message: errorMessage!,
+            ),
+          ],
           const SizedBox(height: SharedDesignTokens.spacingSm),
           DaywellCheckboxTile(
             title: 'Bible study',
@@ -103,7 +114,7 @@ class DailyFaithCheckInCard extends StatelessWidget {
                     : 'Completed today')
                 : 'Mark Bible study complete',
             value: record.bibleStudyDone,
-            enabled: isToday,
+            enabled: isToday && !isSaving,
             secondary: Icon(
               Icons.menu_book_outlined,
               size: DaywellIconSize.md,
@@ -111,7 +122,7 @@ class DailyFaithCheckInCard extends StatelessWidget {
                   ? semantic.success
                   : Theme.of(context).colorScheme.primary,
             ),
-            onChanged: isToday
+            onChanged: isToday && !isSaving
                 ? (val) {
                     if (val != null) onToggleBibleStudy(val);
                   }
@@ -126,7 +137,7 @@ class DailyFaithCheckInCard extends StatelessWidget {
                     : 'Completed today')
                 : 'Mark prayer complete',
             value: record.prayerDone,
-            enabled: isToday,
+            enabled: isToday && !isSaving,
             secondary: Icon(
               Icons.volunteer_activism_outlined,
               size: DaywellIconSize.md,
@@ -134,7 +145,7 @@ class DailyFaithCheckInCard extends StatelessWidget {
                   ? semantic.success
                   : Theme.of(context).colorScheme.primary,
             ),
-            onChanged: isToday
+            onChanged: isToday && !isSaving
                 ? (val) {
                     if (val != null) onTogglePrayer(val);
                   }
@@ -161,6 +172,8 @@ class DailyTaskReviewCard extends StatelessWidget {
   final DailyRhythmTaskReviewSnapshot snapshot;
   final DailyRhythmDayEntity record;
   final bool isToday;
+  final bool isSaving;
+  final String? errorMessage;
   final VoidCallback onConfirmReview;
 
   const DailyTaskReviewCard({
@@ -168,6 +181,8 @@ class DailyTaskReviewCard extends StatelessWidget {
     required this.snapshot,
     required this.record,
     this.isToday = true,
+    this.isSaving = false,
+    this.errorMessage,
     required this.onConfirmReview,
   });
 
@@ -277,6 +292,13 @@ class DailyTaskReviewCard extends StatelessWidget {
               ),
             ],
           ),
+          if (errorMessage != null && errorMessage!.trim().isNotEmpty) ...[
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            DaywellStatusBanner(
+              tone: DaywellStatusTone.error,
+              message: errorMessage!,
+            ),
+          ],
           const SizedBox(height: SharedDesignTokens.spacingSm),
           if (!isToday)
             const DaywellStatusBanner(
@@ -287,15 +309,16 @@ class DailyTaskReviewCard extends StatelessWidget {
             )
           else
             DaywellButton(
-              label:
-                  confirmed ? 'Reconfirm review' : snapshot.confirmActionLabel,
+              label: isSaving
+                  ? 'Saving...'
+                  : (confirmed ? 'Reconfirm review' : snapshot.confirmActionLabel),
               variant: confirmed
                   ? DaywellButtonVariant.outlined
                   : DaywellButtonVariant.primary,
               size: DaywellButtonSize.compact,
               leadingIcon: Icons.check_circle_outline,
               fullWidth: true,
-              onPressed: onConfirmReview,
+              onPressed: isSaving ? null : onConfirmReview,
             ),
         ],
       ),
@@ -308,6 +331,8 @@ class DailyFinanceCloseCard extends StatelessWidget {
   final DailyRhythmFinanceDaySummary summary;
   final DailyRhythmDayEntity record;
   final bool isShowingTodayFilter;
+  final bool isSaving;
+  final String? errorMessage;
   final VoidCallback onConfirmClose;
   final VoidCallback? onFilterToday;
 
@@ -316,6 +341,8 @@ class DailyFinanceCloseCard extends StatelessWidget {
     required this.summary,
     required this.record,
     this.isShowingTodayFilter = false,
+    this.isSaving = false,
+    this.errorMessage,
     required this.onConfirmClose,
     this.onFilterToday,
   });
@@ -430,6 +457,13 @@ class DailyFinanceCloseCard extends StatelessWidget {
               ),
             ),
           ],
+          if (errorMessage != null && errorMessage!.trim().isNotEmpty) ...[
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            DaywellStatusBanner(
+              tone: DaywellStatusTone.error,
+              message: errorMessage!,
+            ),
+          ],
           const SizedBox(height: SharedDesignTokens.spacingSm),
           Wrap(
             spacing: SharedDesignTokens.spacingSm,
@@ -444,13 +478,15 @@ class DailyFinanceCloseCard extends StatelessWidget {
                   onPressed: onFilterToday,
                 ),
               DaywellButton(
-                label: isClosed ? 'Reconfirm review' : confirmLabel,
+                label: isSaving
+                    ? 'Saving...'
+                    : (isClosed ? 'Reconfirm review' : confirmLabel),
                 variant: isClosed
                     ? DaywellButtonVariant.outlined
                     : DaywellButtonVariant.primary,
                 size: DaywellButtonSize.compact,
                 leadingIcon: Icons.check_circle_outline,
-                onPressed: onConfirmClose,
+                onPressed: isSaving ? null : onConfirmClose,
               ),
             ],
           ),

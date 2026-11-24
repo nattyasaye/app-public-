@@ -3093,17 +3093,32 @@ class _TasksViewState extends State<TasksView>
                             dailyRhythmRecord: drCtrl?.state.dayFor(
                               moduleState.effectivePlanDate.toIsoString(),
                             ),
+                            dailyRhythmSaving: drCtrl?.state.isSaving ?? false,
+                            dailyRhythmError: drCtrl?.state.errorMessage,
                             onConfirmDailyReview: drCtrl == null
                                 ? null
-                                : () {
-                                    final todayIso =
-                                        CalendarDate.today().toIsoString();
-                                    unawaited(
-                                      drCtrl.confirmTaskReview(
-                                        dateIso: todayIso,
-                                        tasks: moduleState.tasks,
-                                        planningEntries:
-                                            moduleState.dailyPlanningEntries,
+                                : () async {
+                                    final targetIso = moduleState
+                                        .effectivePlanDate
+                                        .toIsoString();
+                                    final res = await drCtrl.confirmTaskReview(
+                                      dateIso: targetIso,
+                                      tasks: moduleState.tasks,
+                                      planningEntries:
+                                          moduleState.dailyPlanningEntries,
+                                      today: CalendarDate.today(),
+                                    );
+                                    if (!context.mounted || !res.applied) {
+                                      return;
+                                    }
+                                    ScaffoldMessenger.of(context)
+                                        .clearSnackBars();
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text(
+                                          'Daily task review confirmed for today.',
+                                        ),
+                                        duration: Duration(seconds: 2),
                                       ),
                                     );
                                   },
@@ -3241,14 +3256,28 @@ class _TasksViewState extends State<TasksView>
       snapshot: reviewSnapshot,
       record: drCtrl.state.dayFor(todayIso),
       isToday: true,
-      onConfirmReview: () => unawaited(
-        drCtrl.confirmTaskReview(
+      isSaving: drCtrl.state.isSaving,
+      errorMessage: drCtrl.state.errorMessage,
+      onConfirmReview: () async {
+        final res = await drCtrl.confirmTaskReview(
           dateIso: todayIso,
           tasks: moduleState.tasks,
           planningEntries: moduleState.dailyPlanningEntries,
           today: today,
-        ),
-      ),
+        );
+        if (!context.mounted || !res.applied) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              reviewSnapshot.hasRelevantTasks
+                  ? 'Daily task review confirmed for today.'
+                  : 'Clear day confirmed for today.',
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      },
     );
 
     if (tasks.isEmpty) {

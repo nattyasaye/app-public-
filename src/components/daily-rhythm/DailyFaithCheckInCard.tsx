@@ -15,6 +15,8 @@ export interface DailyFaithCheckInCardProps {
   dateIso: string;
   record: DailyRhythmDayRecord;
   isToday?: boolean;
+  statusFeedback?: string | null;
+  errorMessage?: string | null;
   onToggleBibleStudy: (nextValue: boolean) => void;
   onTogglePrayer: (nextValue: boolean) => void;
 }
@@ -29,6 +31,8 @@ export function DailyFaithCheckInCard({
   dateIso,
   record,
   isToday = true,
+  statusFeedback,
+  errorMessage,
   onToggleBibleStudy,
   onTogglePrayer,
 }: DailyFaithCheckInCardProps) {
@@ -73,6 +77,14 @@ export function DailyFaithCheckInCard({
           icon={<Lock className="w-4 h-4" />}
           message="Past and future Faith check-ins are locked. Only today can be updated."
         />
+      )}
+
+      {errorMessage && (
+        <DaywellStatusBanner tone="error" message={errorMessage} />
+      )}
+
+      {statusFeedback && !errorMessage && (
+        <DaywellStatusBanner tone="success" message={statusFeedback} />
       )}
 
       <div className="space-y-2">

@@ -92,6 +92,7 @@ import { buildBoundedTaskNoteTitle } from './domain/taskNotes';
 import {
   createEmptyDailyRhythmDay,
   DailyRhythmDayRecord,
+  evaluateDailyRhythmTimeline,
 } from './domain/dailyRhythm';
 import {
   taskRemindersService,
@@ -123,7 +124,16 @@ import {
   SharedInboxItem,
   SHARED_DESIGN_TOKENS,
 } from './domain/sharedFoundation';
-import { DailyFaithCheckInCard } from './components/daily-rhythm';
+import {
+  buildDailyRhythmDashboardOverview,
+  buildDailyRhythmTaskReviewSnapshot,
+  DailyRhythmFaithStep,
+  inspectDailyRhythmFinanceDay,
+} from './domain/dailyRhythmWorkflows';
+import {
+  DailyFaithCheckInCard,
+  DailyRhythmDashboardCard,
+} from './components/daily-rhythm';
 import {
   DaywellButton,
   DaywellCard,
@@ -229,6 +239,10 @@ export default function App() {
     noteId: string;
     nonce: number;
   } | null>(null);
+  const [requestedFinanceTab, setRequestedFinanceTab] = useState<{
+    tab: 'overview' | 'transactions' | 'plan' | 'reports';
+    nonce: number;
+  } | null>(null);
   const [dueReminderAlerts, setDueReminderAlerts] = useState<WebTaskReminderAlert[]>([]);
   const [isNotificationStatusModalOpen, setIsNotificationStatusModalOpen] = useState(false);
   const [notificationSupportStatus, setNotificationSupportStatus] =
@@ -324,6 +338,8 @@ export default function App() {
   const [dailyRhythmDays, setDailyRhythmDays] = useState<DailyRhythmDayRecord[]>(
     () => dailyRhythmService.loadDays()
   );
+  const [faithFeedback, setFaithFeedback] = useState<string | null>(null);
+  const [faithError, setFaithError] = useState<string | null>(null);
 
   const handleUpdateInboxItems = (next: SharedInboxItem[]) => {
     const saved = inboxService.saveInboxItems(next);
@@ -560,7 +576,7 @@ export default function App() {
               );
         return { entry, cls, formattedAmount };
       });
-    return { breakdown, recentEntries };
+    return { breakdown, recentEntries, entries: hydrated.entries };
   }, [financeSyncTick, activeScreen]);
   const todaySafeHarbor = todayFinanceSummary.breakdown;
 
@@ -600,6 +616,53 @@ export default function App() {
       }),
     [tasks, dailyPlanningEntries, todayCal]
   );
+
+  const dailyRhythmOverview = useMemo(() => {
+    const timelineSummary = evaluateDailyRhythmTimeline(dailyRhythmDays, {
+      today: todayCal,
+    });
+    const taskSnapshot = buildDailyRhythmTaskReviewSnapshot({
+      tasks,
+      dailyPlanningEntries,
+      targetDateIso: todayCal.toIsoString(),
+      today: todayCal,
+    });
+    const financeSummary = inspectDailyRhythmFinanceDay({
+      entries: todayFinanceSummary.entries,
+      targetDateIso: todayCal.toIsoString(),
+      today: todayCal,
+    });
+    return buildDailyRhythmDashboardOverview({
+      timelineSummary,
+      taskSnapshot,
+      financeSummary,
+    });
+  }, [dailyRhythmDays, tasks, dailyPlanningEntries, todayFinanceSummary.entries, todayCal]);
+
+  const handleCompleteDailyFaithStep = (step: DailyRhythmFaithStep) => {
+    const todayIso = todayCal.toIsoString();
+    const res = dailyRhythmWorkflowService.updateFaith({
+      dateIso: todayIso,
+      bibleStudyDone: step === 'bibleStudy' ? true : undefined,
+      prayerDone: step === 'prayer' ? true : undefined,
+      todayIso,
+    });
+    setDailyRhythmDays(dailyRhythmService.loadDays());
+    if (!res.applied && res.reason !== 'unchanged') {
+      setFaithFeedback(null);
+      setFaithError("Only today's Faith check-in can be updated.");
+      return;
+    }
+    setFaithError(null);
+    const msg =
+      res.record.bibleStudyDone && res.record.prayerDone
+        ? 'Faith check-in complete for today (2/2).'
+        : step === 'bibleStudy'
+        ? 'Bible study saved.'
+        : 'Prayer saved.';
+    setFaithFeedback(msg);
+    setTimeout(() => setFaithFeedback((cur) => (cur === msg ? null : cur)), 3000);
+  };
 
   const projectsOverview = useMemo(() => {
     const activeProjects = projectsService.listProjects({ includeArchived: false });
@@ -1328,6 +1391,26 @@ export default function App() {
                     </button>
                   </div>
 
+                  {/* Central Daily Rhythm Overview */}
+                  <DailyRhythmDashboardCard
+                    overview={dailyRhythmOverview}
+                    errorMessage={faithError}
+                    onCompleteFaithStep={handleCompleteDailyFaithStep}
+                    onOpenFaith={() => navigateTo('more')}
+                    onOpenTasksReview={() => openTasksFromDashboard('active', 'today')}
+                    onOpenFinanceReview={() => {
+                      setRequestedFinanceTab({ tab: 'transactions', nonce: Date.now() });
+                      navigateTo('finance');
+                    }}
+                    onOpenCalendarHistory={() => {
+                      setRequestedCalendarFocus({
+                        dateStr: todayCal.toIsoString(),
+                        nonce: Date.now(),
+                      });
+                      navigateTo('calendar');
+                    }}
+                  />
+
                   <div
                     className={
                       viewMode === 'desktop'
@@ -1775,46 +1858,9 @@ export default function App() {
                           )}
                         </DaywellCard>
                       </div>
-
-                      {/* A Little Later (Deprecated Sample Card) */}
-                      <div className="space-y-2 pt-1">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <h3 className="dw-type-title text-[var(--dw-text-primary)]">
-                              A little later
-                            </h3>
-                            <DaywellStatusBadge
-                              tone="warning"
-                              showIcon={false}
-                              label="Deprecated Prototype"
-                            />
-                          </div>
-                          <DaywellButton
-                            label="Open tasks"
-                            variant="text"
-                            size="compact"
-                            onClick={() => navigateTo('tasks')}
-                          />
-                        </div>
-
-                        <DaywellCard padding="compact" className="flex items-center gap-3">
-                          <span className="dw-type-mono font-bold text-[var(--dw-text-muted)]">
-                            21:00
-                          </span>
-                          <div className="flex-1">
-                            <p className="text-xs font-semibold text-[var(--dw-text-primary)]">
-                              Read 20 pages
-                            </p>
-                            <p className="text-[11px] text-[var(--dw-text-muted)]">
-                              Sample habit card · Not backed by live schedule persistence
-                            </p>
-                          </div>
-                          <Repeat2 className="w-4 h-4 text-[var(--dw-text-muted)]" />
-                        </DaywellCard>
-                      </div>
                     </div>
 
-                    {/* Finance, Prototype Focus & Storage Column */}
+                    {/* Finance & Storage Column */}
                     <div
                       className={
                         viewMode === 'desktop'
@@ -1936,39 +1982,6 @@ export default function App() {
                         )}
                       </DaywellCard>
 
-                      {/* "YOUR NEXT RIGHT THING" Deprecated Prototype Hero Card */}
-                      <div
-                        onClick={() => navigateTo('project_detail')}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            navigateTo('project_detail');
-                          }
-                        }}
-                        className="bg-[var(--dw-primary-brand)] text-white rounded-[var(--dw-radius-xl)] p-5 shadow-sm cursor-pointer hover:opacity-95 transition-all relative overflow-hidden"
-                      >
-                        <div className="flex items-center justify-between gap-2 text-xs font-bold tracking-wider text-white/85 uppercase">
-                          <span>YOUR NEXT RIGHT THING</span>
-                          <div className="flex items-center gap-1.5">
-                            <DaywellStatusBadge
-                              tone="warning"
-                              showIcon={false}
-                              label="Deprecated Prototype"
-                            />
-                            <ArrowUpRight className="w-4 h-4 text-white/85" />
-                          </div>
-                        </div>
-                        <h3 className="text-xl font-bold text-white mt-3 leading-snug">
-                          Review portfolio case study
-                        </h3>
-                        <div className="flex items-center gap-2 text-xs text-white/85 mt-3">
-                          <Clock3 className="w-3.5 h-3.5" />
-                          <span>Sample focus card · Portfolio refresh prototype</span>
-                        </div>
-                      </div>
-
                       {/* Device Storage & Local Export Link */}
                       <DaywellCard
                         padding="compact"
@@ -2055,6 +2068,7 @@ export default function App() {
                     navigateTo('tasks');
                   }}
                   requestedFocusDate={requestedCalendarFocus}
+                  dailyRhythmDays={dailyRhythmDays}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                 />
               </div>
@@ -2152,6 +2166,7 @@ export default function App() {
                   onOpenQuickCapture={() => setIsQuickCaptureOpen(true)}
                   composerPrefill={financeComposerPrefill}
                   onClearComposerPrefill={() => setFinanceComposerPrefill(null)}
+                  requestedTab={requestedFinanceTab}
                 />
               </div>
 
@@ -2266,21 +2281,49 @@ export default function App() {
                         dateIso={todayIso}
                         record={todayFaithRecord}
                         isToday={true}
+                        statusFeedback={faithFeedback}
+                        errorMessage={faithError}
                         onToggleBibleStudy={(nextValue) => {
-                          dailyRhythmWorkflowService.updateFaith({
+                          const res = dailyRhythmWorkflowService.updateFaith({
                             dateIso: todayIso,
                             bibleStudyDone: nextValue,
                             todayIso,
                           });
                           setDailyRhythmDays(dailyRhythmService.loadDays());
+                          if (!res.applied && res.reason !== 'unchanged') {
+                            setFaithFeedback(null);
+                            setFaithError('Only today\'s Faith check-in can be updated.');
+                            return;
+                          }
+                          setFaithError(null);
+                          const msg = nextValue
+                            ? res.record.prayerDone
+                              ? 'Faith check-in complete for today (2/2).'
+                              : 'Bible study saved.'
+                            : 'Bible study unchecked.';
+                          setFaithFeedback(msg);
+                          setTimeout(() => setFaithFeedback((cur) => (cur === msg ? null : cur)), 3000);
                         }}
                         onTogglePrayer={(nextValue) => {
-                          dailyRhythmWorkflowService.updateFaith({
+                          const res = dailyRhythmWorkflowService.updateFaith({
                             dateIso: todayIso,
                             prayerDone: nextValue,
                             todayIso,
                           });
                           setDailyRhythmDays(dailyRhythmService.loadDays());
+                          if (!res.applied && res.reason !== 'unchanged') {
+                            setFaithFeedback(null);
+                            setFaithError('Only today\'s Faith check-in can be updated.');
+                            return;
+                          }
+                          setFaithError(null);
+                          const msg = nextValue
+                            ? res.record.bibleStudyDone
+                              ? 'Faith check-in complete for today (2/2).'
+                              : 'Prayer saved.'
+                            : 'Prayer unchecked.';
+                          setFaithFeedback(msg);
+                          setTimeout(() => setFaithFeedback((cur) => (cur === msg ? null : cur)), 3000);
                         }}
                       />
                     );

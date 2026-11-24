@@ -31,6 +31,8 @@ class MyDayPlanningView extends StatefulWidget {
   final VoidCallback onCarryPastRemainingToToday;
   final VoidCallback onCreateTaskForDay;
   final DailyRhythmDayEntity? dailyRhythmRecord;
+  final bool dailyRhythmSaving;
+  final String? dailyRhythmError;
   final VoidCallback? onConfirmDailyReview;
 
   const MyDayPlanningView({
@@ -50,6 +52,8 @@ class MyDayPlanningView extends StatefulWidget {
     required this.onCarryPastRemainingToToday,
     required this.onCreateTaskForDay,
     this.dailyRhythmRecord,
+    this.dailyRhythmSaving = false,
+    this.dailyRhythmError,
     this.onConfirmDailyReview,
   });
 
@@ -417,6 +421,8 @@ class _MyDayPlanningViewState extends State<MyDayPlanningView> {
             record: widget.dailyRhythmRecord ??
                 DailyRhythmDayEntity.empty(snapshot.selectedDate.toIsoString()),
             isToday: snapshot.isToday,
+            isSaving: widget.dailyRhythmSaving,
+            errorMessage: widget.dailyRhythmError,
             onConfirmReview: widget.onConfirmDailyReview!,
           ),
         ],

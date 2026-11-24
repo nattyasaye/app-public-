@@ -19,6 +19,7 @@ class FinanceView extends StatefulWidget {
   final FinanceController? controller;
   final DailyRhythmController? dailyRhythmController;
   final VoidCallback? onOpenQuickCapture;
+  final ({int tabIndex, int nonce})? requestedTab;
 
   const FinanceView({
     super.key,
@@ -26,6 +27,7 @@ class FinanceView extends StatefulWidget {
     this.controller,
     this.dailyRhythmController,
     this.onOpenQuickCapture,
+    this.requestedTab,
   }) : assert(
           state != null || controller != null,
           'Either state or controller must be provided to FinanceView',
@@ -48,7 +50,13 @@ class _FinanceViewState extends State<FinanceView>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    final initialIndex =
+        (widget.requestedTab?.tabIndex ?? 0).clamp(0, 3);
+    _tabController = TabController(
+      length: 4,
+      initialIndex: initialIndex,
+      vsync: this,
+    );
     widget.effectiveController.addListener(_onControllerChanged);
   }
 
@@ -62,6 +70,13 @@ class _FinanceViewState extends State<FinanceView>
     if (oldWidget.effectiveController != widget.effectiveController) {
       oldWidget.effectiveController.removeListener(_onControllerChanged);
       widget.effectiveController.addListener(_onControllerChanged);
+    }
+    if (widget.requestedTab != null &&
+        widget.requestedTab != oldWidget.requestedTab) {
+      final targetIndex = widget.requestedTab!.tabIndex.clamp(0, 3);
+      if (_tabController.index != targetIndex) {
+        _tabController.animateTo(targetIndex);
+      }
     }
   }
 

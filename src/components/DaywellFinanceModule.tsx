@@ -97,6 +97,7 @@ interface DaywellFinanceModuleProps {
   onOpenQuickCapture?: () => void;
   composerPrefill?: FinanceComposerPrefill | null;
   onClearComposerPrefill?: () => void;
+  requestedTab?: { tab: FinanceV7Tab; nonce: number } | null;
 }
 
 function readStoredArray<T>(key: string, fallback: T[] = []): T[] {
@@ -113,10 +114,16 @@ function readStoredArray<T>(key: string, fallback: T[] = []): T[] {
 export function DaywellFinanceModule({
   composerPrefill,
   onClearComposerPrefill,
+  requestedTab,
 }: DaywellFinanceModuleProps) {
   const todayStr = useMemo(() => CalendarDate.today().toIsoString(), []);
   const [activeTab, setActiveTab] = useState<FinanceV7Tab>('overview');
   const isApplyingExternalSyncRef = useRef(false);
+
+  useEffect(() => {
+    if (!requestedTab?.tab) return;
+    setActiveTab(requestedTab.tab);
+  }, [requestedTab?.nonce, requestedTab?.tab]);
 
   // 1. Setup State
   const [isSetupCompleted, setIsSetupCompleted] = useState<boolean>(() => {

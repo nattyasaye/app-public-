@@ -48,7 +48,9 @@ export const dailyRhythmWorkflowService = {
       bibleStudyDone: params.bibleStudyDone,
       prayerDone: params.prayerDone,
       nowIso: params.nowIso,
-      ...params,
+      todayIso: params.todayIso,
+      today: params.today,
+      todayInstant: params.todayInstant,
     });
     if (result.applied) {
       dailyRhythmService.upsertDay(result.record);
@@ -69,7 +71,9 @@ export const dailyRhythmWorkflowService = {
       tasks: params.tasks,
       dailyPlanningEntries: params.dailyPlanningEntries,
       targetDateIso: params.dateIso,
-      ...params,
+      todayIso: params.todayIso,
+      today: params.today,
+      todayInstant: params.todayInstant,
     });
     const existing = dailyRhythmService.getDay(snapshot.targetDateIso);
     const mutation = confirmDailyRhythmTaskReview({
@@ -77,7 +81,9 @@ export const dailyRhythmWorkflowService = {
       dateIso: snapshot.targetDateIso,
       evidence: snapshot.evidence,
       nowIso: params.nowIso,
-      ...params,
+      todayIso: params.todayIso,
+      today: params.today,
+      todayInstant: params.todayInstant,
     });
     if (mutation.applied) {
       dailyRhythmService.upsertDay(mutation.record);
@@ -96,7 +102,9 @@ export const dailyRhythmWorkflowService = {
     const summary = inspectDailyRhythmFinanceDay({
       entries: params.entries,
       targetDateIso: params.dateIso,
-      ...params,
+      todayIso: params.todayIso,
+      today: params.today,
+      todayInstant: params.todayInstant,
     });
     const existing = dailyRhythmService.getDay(summary.targetDateIso);
     const mutation = confirmDailyRhythmFinanceClose({
@@ -104,7 +112,9 @@ export const dailyRhythmWorkflowService = {
       dateIso: summary.targetDateIso,
       hasTransactions: summary.hasTransactions,
       nowIso: params.nowIso,
-      ...params,
+      todayIso: params.todayIso,
+      today: params.today,
+      todayInstant: params.todayInstant,
     });
     if (mutation.applied) {
       dailyRhythmService.upsertDay(mutation.record);
@@ -126,7 +136,9 @@ export const dailyRhythmWorkflowService = {
       nextEntries: params.nextEntries,
       nextPostings: params.nextPostings,
       targetDateIso: todayIso,
-      ...params,
+      todayIso: params.todayIso,
+      today: params.today,
+      todayInstant: params.todayInstant,
     });
     if (!affectedToday) return null;
 
@@ -137,7 +149,9 @@ export const dailyRhythmWorkflowService = {
       record: existing,
       dateIso: todayIso,
       nowIso: params.nowIso,
-      ...params,
+      todayIso: params.todayIso,
+      today: params.today,
+      todayInstant: params.todayInstant,
     });
     if (mutation.applied) {
       dailyRhythmService.upsertDay(mutation.record);

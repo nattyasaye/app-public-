@@ -292,6 +292,8 @@ class MoreView extends StatelessWidget {
                     dateIso: todayIso,
                     record: todayRecord,
                     isToday: true,
+                    isSaving: drCtrl.state.isSaving,
+                    errorMessage: drCtrl.state.errorMessage,
                     onToggleBibleStudy: (val) => unawaited(
                       drCtrl.updateFaith(
                         dateIso: todayIso,

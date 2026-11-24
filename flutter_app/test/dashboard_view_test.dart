@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/calendar/calendar_controller.dart';
+import 'package:personal_management_app/application/daily_rhythm/daily_rhythm_controller.dart';
 import 'package:personal_management_app/application/finance/finance_controller.dart';
 import 'package:personal_management_app/application/inbox/inbox_controller.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
@@ -14,6 +15,8 @@ import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/domain/calendar/calendar_contracts.dart';
 import 'package:personal_management_app/domain/calendar/calendar_models.dart';
+import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_contracts.dart';
+import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_models.dart';
 import 'package:personal_management_app/domain/finance/finance_contracts.dart';
 import 'package:personal_management_app/domain/inbox/inbox_contracts.dart';
 import 'package:personal_management_app/domain/inbox/inbox_models.dart';
@@ -1075,6 +1078,33 @@ class _FakeProjectsRepository implements IProjectsRepository {
       throw UnimplementedError();
 }
 
+class _FakeDailyRhythmRepository implements IDailyRhythmRepository {
+  final Map<String, DailyRhythmDayEntity> _days =
+      <String, DailyRhythmDayEntity>{};
+
+  @override
+  Future<DailyRhythmDayEntity?> getByDate(String dateIso) async =>
+      _days[dateIso];
+
+  @override
+  Future<List<DailyRhythmDayEntity>> listDays({
+    String? fromDateIso,
+    String? toDateIso,
+  }) async =>
+      _days.values.toList(growable: false);
+
+  @override
+  Future<DailyRhythmDayEntity> upsertDay(DailyRhythmDayEntity day) async {
+    _days[day.dateIso] = day;
+    return day;
+  }
+
+  @override
+  Future<void> deleteByDate(String dateIso) async {
+    _days.remove(dateIso);
+  }
+}
+
 class _HarnessAppStateManager extends ChangeNotifier
     implements AppStateManager {
   @override
@@ -1089,6 +1119,8 @@ class _HarnessAppStateManager extends ChangeNotifier
   final NotesController notesController;
   @override
   final InboxController inboxController;
+  @override
+  final DailyRhythmController dailyRhythmController;
 
   _HarnessAppStateManager({
     required _FakeFinanceRepository financeRepo,
@@ -1097,6 +1129,7 @@ class _HarnessAppStateManager extends ChangeNotifier
     required _FakeCalendarRepository calendarRepo,
     required _FakeNotesRepository notesRepo,
     required _FakeInboxRepository inboxRepo,
+    _FakeDailyRhythmRepository? dailyRhythmRepo,
   })  : financeController = FinanceController(repository: financeRepo),
         tasksController = TasksController(repository: tasksRepo),
         projectsController = ProjectsController(
@@ -1104,7 +1137,10 @@ class _HarnessAppStateManager extends ChangeNotifier
         ),
         calendarController = CalendarController(repository: calendarRepo),
         notesController = NotesController(repository: notesRepo),
-        inboxController = InboxController(repository: inboxRepo);
+        inboxController = InboxController(repository: inboxRepo),
+        dailyRhythmController = DailyRhythmController(
+          repository: dailyRhythmRepo ?? _FakeDailyRhythmRepository(),
+        );
 
   void emitRootNotification() => notifyListeners();
 
@@ -1116,6 +1152,7 @@ class _HarnessAppStateManager extends ChangeNotifier
       calendarController.loadAll(),
       notesController.loadNotes(),
       inboxController.loadItems(includeProcessed: true),
+      dailyRhythmController.loadAll(),
     ]);
   }
 
@@ -1127,6 +1164,7 @@ class _HarnessAppStateManager extends ChangeNotifier
     calendarController.dispose();
     notesController.dispose();
     inboxController.dispose();
+    dailyRhythmController.dispose();
     super.dispose();
   }
 

@@ -164,6 +164,8 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
   int _noteFocusNonce = 0;
   ({int tabIndex, int nonce})? _requestedTasksSubTab;
   int _tasksSubTabNonce = 0;
+  ({int tabIndex, int nonce})? _requestedFinanceTab;
+  int _financeTabNonce = 0;
 
   @override
   void initState() {
@@ -399,6 +401,15 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
             });
             _shellController.selectTab(DaywellTabId.tasks);
           },
+          onOpenFinanceTab: (int tabIndex) {
+            setState(() {
+              _requestedFinanceTab = (
+                tabIndex: tabIndex,
+                nonce: ++_financeTabNonce,
+              );
+            });
+            _shellController.selectTab(DaywellTabId.finance);
+          },
           onOpenBackup: () =>
               _shellController.openSecondaryRoute(DaywellSecondaryRoute.backup),
         );
@@ -427,6 +438,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           calendarController: _state.calendarController,
           tasksController: _state.tasksController,
           projectsController: _state.projectsController,
+          dailyRhythmController: _state.dailyRhythmController,
           onOpenTasks: () => _shellController.selectTab(DaywellTabId.tasks),
           onOpenTask: (String taskId) {
             setState(() {
@@ -452,6 +464,8 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
         return FinanceView(
           state: _state,
           controller: _state.financeController,
+          dailyRhythmController: _state.dailyRhythmController,
+          requestedTab: _requestedFinanceTab,
           onOpenQuickCapture: () => _openQuickCapture(),
         );
       case DaywellTabId.more:

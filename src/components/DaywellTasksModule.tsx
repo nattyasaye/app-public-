@@ -344,6 +344,8 @@ export function DaywellTasksModule({
   const [dailyRhythmDays, setDailyRhythmDays] = useState<DailyRhythmDayRecord[]>(
     () => dailyRhythmService.loadDays()
   );
+  const [taskReviewFeedback, setTaskReviewFeedback] = useState<string | null>(null);
+  const [taskReviewError, setTaskReviewError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -2781,13 +2783,24 @@ export function DaywellTasksModule({
             createEmptyDailyRhythmDay(selectedPlanDate)
           }
           onConfirmDailyReview={() => {
-            dailyRhythmWorkflowService.confirmTaskReview({
+            const res = dailyRhythmWorkflowService.confirmTaskReview({
               tasks,
               dailyPlanningEntries: effectiveDailyPlanningEntries,
-              dateIso: todayStr,
+              dateIso: selectedPlanDate,
               todayIso: todayStr,
             });
             setDailyRhythmDays(dailyRhythmService.loadDays());
+            if (!res.mutation.applied) {
+              setTaskReviewFeedback(null);
+              setTaskReviewError('Only today can be confirmed for daily task review.');
+              return;
+            }
+            setTaskReviewError(null);
+            const msg = res.snapshot.hasRelevantTasks
+              ? 'Daily task review confirmed for today.'
+              : 'Clear day confirmed for today.';
+            setTaskReviewFeedback(msg);
+            setTimeout(() => setTaskReviewFeedback((cur) => (cur === msg ? null : cur)), 3000);
           }}
         />
       ) : (
@@ -2805,14 +2818,27 @@ export function DaywellTasksModule({
             createEmptyDailyRhythmDay(todayStr)
           }
           isToday={true}
+          statusFeedback={taskReviewFeedback}
+          errorMessage={taskReviewError}
           onConfirmReview={() => {
-            dailyRhythmWorkflowService.confirmTaskReview({
+            const res = dailyRhythmWorkflowService.confirmTaskReview({
               tasks,
               dailyPlanningEntries: effectiveDailyPlanningEntries,
               dateIso: todayStr,
               todayIso: todayStr,
             });
             setDailyRhythmDays(dailyRhythmService.loadDays());
+            if (!res.mutation.applied) {
+              setTaskReviewFeedback(null);
+              setTaskReviewError('Could not confirm today\'s task review.');
+              return;
+            }
+            setTaskReviewError(null);
+            const msg = res.snapshot.hasRelevantTasks
+              ? 'Daily task review confirmed for today.'
+              : 'Clear day confirmed for today.';
+            setTaskReviewFeedback(msg);
+            setTimeout(() => setTaskReviewFeedback((cur) => (cur === msg ? null : cur)), 3000);
           }}
           onOpenTask={(id) => setDetailTaskId(id)}
         />

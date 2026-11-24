@@ -17,6 +17,7 @@ export interface DailyFinanceCloseCardProps {
   summary: DailyRhythmFinanceDaySummary;
   record: DailyRhythmDayRecord;
   isShowingTodayFilter?: boolean;
+  errorMessage?: string | null;
   onConfirmClose: () => void;
   onFilterToday?: () => void;
 }
@@ -31,6 +32,7 @@ export function DailyFinanceCloseCard({
   summary,
   record,
   isShowingTodayFilter = false,
+  errorMessage,
   onConfirmClose,
   onFilterToday,
 }: DailyFinanceCloseCardProps) {
@@ -104,6 +106,10 @@ export function DailyFinanceCloseCard({
           />
         </div>
       </div>
+
+      {errorMessage && (
+        <DaywellStatusBanner tone="error" message={errorMessage} />
+      )}
 
       {needsReconfirmation && (
         <DaywellStatusBanner
