@@ -7,6 +7,7 @@ import {
   isNotePinnedActive,
   isNoteTrashed,
   isReservedNoteFolderName,
+  matchesNoteSearchQuery,
   normalizeFolderComparisonKey,
   normalizeNoteLinkPair,
   normalizeNoteTags,
@@ -608,12 +609,7 @@ export function filterAndSortWebNotes<T extends TaskNoteRecord>(
     }
 
     if (!query) return true;
-    return (
-      note.title.toLowerCase().includes(query) ||
-      note.content.toLowerCase().includes(query) ||
-      note.notebook.toLowerCase().includes(query) ||
-      note.tags.some((tag) => tag.toLowerCase().includes(query))
-    );
+    return matchesNoteSearchQuery(note, query);
   });
 
   return sortNotes(filtered, {

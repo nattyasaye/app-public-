@@ -87,12 +87,13 @@ class NoteEntity {
   String get displayTitle => title.trim().isEmpty ? 'Untitled Note' : title;
 
   bool matchesQuery(String rawQuery) {
-    final query = rawQuery.trim().toLowerCase();
-    if (query.isEmpty) return true;
-    return title.toLowerCase().contains(query) ||
-        content.toLowerCase().contains(query) ||
-        category.toLowerCase().contains(query) ||
-        tags.any((t) => t.toLowerCase().contains(query));
+    return NoteDomainHelpers.matchesNoteSearchQuery(
+      title: title,
+      content: content,
+      category: category,
+      tags: tags,
+      rawQuery: rawQuery,
+    );
   }
 
   NoteEntity copyWith({

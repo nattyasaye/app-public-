@@ -50,10 +50,14 @@ import {
   isNoteActive,
   isNoteArchived,
   isNoteTrashed,
+  matchesNoteSearchQuery,
   normalizeFolderComparisonKey,
   normalizeNoteTags,
+  noteMatchesDateFilter,
+  noteMatchesTagFilter,
   NoteDateFilterMode,
   NoteSortMode,
+  parseNoteDateFilterMode,
   resolveReusableNoteTag,
 } from '../domain/noteHelpers';
 import {
@@ -133,6 +137,7 @@ interface DaywellNotesModuleProps {
     nonce: number;
   } | null;
   layoutMode?: 'auto' | 'compact';
+  isActive?: boolean;
   onNavigateToTask?: (taskId: string) => void;
   onRequestQuickCapture?: () => void;
   onNavigateToModule?: (module: string) => void;
@@ -180,6 +185,7 @@ export function DaywellNotesModule({
   tasks: controlledTasks,
   requestedNoteFocus,
   layoutMode = 'auto',
+  isActive = true,
   onNavigateToTask,
 }: DaywellNotesModuleProps) {
   const moduleContainerRef = useRef<HTMLDivElement | null>(null);
@@ -738,14 +744,26 @@ export function DaywellNotesModule({
     setIsEditorOpen(false);
   };
 
+  const prevIsActiveRef = useRef<boolean>(isActive);
+  useEffect(() => {
+    const wasActive = prevIsActiveRef.current;
+    prevIsActiveRef.current = isActive;
+    if (wasActive && !isActive && isEditorOpen) {
+      commitEditorDraftToNote();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isActive]);
+
   useEffect(() => {
     if (!requestedNoteFocus?.noteId) return;
     const target = notesRef.current.find((n) => n.id === requestedNoteFocus.noteId);
-    if (!target) return;
+    if (!target) {
+      triggerFeedback('This note is no longer available.', undefined, true);
+      return;
+    }
     if (isEditorOpen && selectedNoteIdRef.current !== target.id) {
       commitEditorDraftToNote();
     }
-    setSearchQuery('');
     if (isNoteTrashed(target)) {
       clearAutosaveTimer();
       selectedNoteIdRef.current = null;
@@ -755,7 +773,33 @@ export function DaywellNotesModule({
       triggerFeedback('This note is in Trash. Restore it to edit.');
       return;
     }
-    setActiveTab(isNoteArchived(target) ? 'archived' : 'all');
+    const targetArchived = isNoteArchived(target);
+    if (targetArchived) {
+      setActiveTab('archived');
+    } else if (
+      activeTab === 'archived' ||
+      activeTab === 'trash' ||
+      (activeTab === 'pinned' && !target.isPinned) ||
+      (activeTab === 'favorites' && !Boolean(target.isFavorite))
+    ) {
+      setActiveTab('all');
+    }
+    if (
+      notebookFilter !== 'all' &&
+      normalizeFolderComparisonKey(target.notebook) !==
+        normalizeFolderComparisonKey(notebookFilter)
+    ) {
+      setNotebookFilter('all');
+    }
+    if (!noteMatchesTagFilter(target.tags, tagFilter)) {
+      setTagFilter('all');
+    }
+    if (!noteMatchesDateFilter(target, parseNoteDateFilterMode(dateFilter))) {
+      setDateFilter('all');
+    }
+    if (searchQuery.trim() && !matchesNoteSearchQuery(target, searchQuery)) {
+      setSearchQuery('');
+    }
     openEditor(target, { skipFlush: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedNoteFocus?.nonce]);
@@ -1450,7 +1494,16 @@ export function DaywellNotesModule({
           {/* Search */}
           <DaywellSearchField
             value={searchQuery}
-            onChange={setSearchQuery}
+            onChange={(val) => {
+              if (
+                isEditorOpen &&
+                autosaveTimeoutRef.current !== null &&
+                !isCurrentNewDraftBlank
+              ) {
+                commitEditorDraftToNote();
+              }
+              setSearchQuery(val);
+            }}
             placeholder="Search notes, collections, or tags..."
             ariaLabel="Search notes, collections, or tags"
           />

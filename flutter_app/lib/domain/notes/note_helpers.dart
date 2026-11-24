@@ -1,5 +1,6 @@
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation_core.dart';
+import 'note_markdown.dart';
 import 'note_models.dart';
 
 /// Pure domain helpers for Daywell Notes rules.
@@ -398,5 +399,69 @@ class NoteDomainHelpers {
       ),
     );
     return List<NoteEntity>.unmodifiable(sorted);
+  }
+
+  static String formatFolderLabel(String rawFolder) {
+    final trimmed = rawFolder.trim();
+    if (trimmed.toLowerCase() == 'all') return 'All Folders';
+    final parts = trimmed
+        .split(RegExp(r'[\s_-]+'))
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return 'General';
+    return parts
+        .map(
+          (p) =>
+              '${p[0].toUpperCase()}${p.length > 1 ? p.substring(1) : ''}',
+        )
+        .join(' ');
+  }
+
+  static bool matchesFolderSearchQuery(
+    String rawFolder,
+    String cleanQuery,
+  ) {
+    final folderLower = rawFolder.trim().toLowerCase();
+    if (folderLower.isEmpty) return false;
+    if (folderLower.contains(cleanQuery)) return true;
+    final spaceNormalized = folderLower
+        .replaceAll(RegExp(r'[_-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return spaceNormalized.contains(cleanQuery);
+  }
+
+  static bool matchesTagsSearchQuery(
+    Iterable<String> tags,
+    String cleanQuery,
+  ) {
+    for (final rawTag in tags) {
+      final lowerTag = rawTag.trim().toLowerCase();
+      if (lowerTag.isEmpty) continue;
+      if (lowerTag.contains(cleanQuery) || '#$lowerTag'.contains(cleanQuery)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static bool matchesNoteSearchQuery({
+    required String title,
+    required String content,
+    required String category,
+    required Iterable<String> tags,
+    required String rawQuery,
+  }) {
+    final query = rawQuery.trim().toLowerCase();
+    if (query.isEmpty) return true;
+    if (title.toLowerCase().contains(query)) return true;
+    if (content.toLowerCase().contains(query)) return true;
+    final plainContent = NoteMarkdownParser.toPlainText(content)
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim()
+        .toLowerCase();
+    if (plainContent.contains(query)) return true;
+    if (matchesFolderSearchQuery(category, query)) return true;
+    return matchesTagsSearchQuery(tags, query);
   }
 }

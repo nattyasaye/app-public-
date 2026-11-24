@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'package:drift/drift.dart';
+import '../../domain/notes/note_helpers.dart';
+import '../../domain/notes/note_markdown.dart';
 import '../database/app_database.dart';
 
 /// Unified search result item across all entities
@@ -102,18 +104,30 @@ class DriftSearchRepository implements ISearchRepository {
           .get();
       for (final note in nonTrashedNotes) {
         final tags = _decodeNoteTags(note.tagsJson);
-        final matches = note.title.toLowerCase().contains(cleanQuery) ||
-            note.content.toLowerCase().contains(cleanQuery) ||
-            note.category.toLowerCase().contains(cleanQuery) ||
-            tags.any((t) => t.toLowerCase().contains(cleanQuery));
+        final matches = NoteDomainHelpers.matchesNoteSearchQuery(
+          title: note.title,
+          content: note.content,
+          category: note.category,
+          tags: tags,
+          rawQuery: cleanQuery,
+        );
         if (!matches) continue;
-        final snippet = note.content.length > 80
-            ? '${note.content.substring(0, 80)}...'
-            : note.content;
+        final displayTitle = NoteDomainHelpers.normalizeTitle(note.title);
+        final folderLabel = NoteDomainHelpers.formatFolderLabel(note.category);
+        final plainBody = NoteMarkdownParser.toPlainText(note.content)
+            .replaceAll(RegExp(r'\s+'), ' ')
+            .trim();
+        final compactBody = plainBody.length > 80
+            ? '${plainBody.substring(0, 80)}...'
+            : plainBody;
+        final metaPrefix =
+            'Note • $folderLabel${note.isArchived ? ' (Archived)' : ''}';
+        final snippet =
+            compactBody.isNotEmpty ? '$metaPrefix • $compactBody' : metaPrefix;
         results.add(
           SearchResultItem(
             id: note.id,
-            title: note.title,
+            title: displayTitle,
             snippet: snippet,
             entityType: 'note',
             timestampUtc: note.updatedAt,

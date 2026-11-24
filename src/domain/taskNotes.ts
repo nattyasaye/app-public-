@@ -2,6 +2,7 @@ import { EthiopiaClock } from './date';
 import {
   compareNotes,
   isNoteTrashed,
+  matchesNoteSearchQuery,
   MAX_NOTE_TITLE_LENGTH,
   normalizeNoteFolder,
   normalizeNoteLinkPair,
@@ -192,12 +193,7 @@ export function getAvailableNotesToLink<T extends TaskNoteRecord>(
       if (isNoteTrashed(note)) return false;
       if (isNoteLinkedToTask(note, cleanTaskId)) return false;
       if (!q) return true;
-      return (
-        note.title.toLowerCase().includes(q) ||
-        note.content.toLowerCase().includes(q) ||
-        note.notebook.toLowerCase().includes(q) ||
-        note.tags.some((tag) => tag.toLowerCase().includes(q))
-      );
+      return matchesNoteSearchQuery(note, q);
     })
     .slice()
     .sort((a, b) => {

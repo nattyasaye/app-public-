@@ -28,16 +28,7 @@ typedef _NoteDraftSnapshot = ({
 });
 
 String _formatFolderLabel(String category) {
-  if (category == 'all') return 'All Folders';
-  final parts = category
-      .trim()
-      .split(RegExp(r'[\s_-]+'))
-      .where((p) => p.isNotEmpty)
-      .toList();
-  if (parts.isEmpty) return 'General';
-  return parts
-      .map((p) => '${p[0].toUpperCase()}${p.length > 1 ? p.substring(1) : ''}')
-      .join(' ');
+  return NoteDomainHelpers.formatFolderLabel(category);
 }
 
 Future<String?> _showNotesFolderNameDialog(
@@ -122,6 +113,8 @@ class NotesView extends StatefulWidget {
   final TasksController? tasksController;
   final ({String noteId, int nonce})? requestedNoteFocus;
   final void Function(String taskId)? onOpenTask;
+  final void Function(Future<bool> Function()? flushHandler)?
+      onRegisterPendingSaveFlush;
 
   const NotesView({
     super.key,
@@ -130,6 +123,7 @@ class NotesView extends StatefulWidget {
     this.tasksController,
     this.requestedNoteFocus,
     this.onOpenTask,
+    this.onRegisterPendingSaveFlush,
   }) : assert(state != null || controller != null,
             'Either state or controller must be provided to NotesView');
 
@@ -156,6 +150,8 @@ class _NotesViewState extends State<NotesView> {
   bool _isWideLayout = false;
   final GlobalKey<_NoteEditorSurfaceState> _editorSurfaceKey =
       GlobalKey<_NoteEditorSurfaceState>();
+  GlobalKey<_NoteEditorSurfaceState>? _activeNarrowEditorKey;
+  ModalRoute<void>? _activeNarrowRoute;
 
   @override
   void initState() {
@@ -163,13 +159,173 @@ class _NotesViewState extends State<NotesView> {
     _searchController = TextEditingController(
       text: widget.effectiveController.state.searchQuery,
     );
+    widget.onRegisterPendingSaveFlush?.call(_flushActiveEditorEdits);
     _scheduleNoteFocusIfNeeded();
   }
 
   @override
   void didUpdateWidget(covariant NotesView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.onRegisterPendingSaveFlush !=
+        oldWidget.onRegisterPendingSaveFlush) {
+      oldWidget.onRegisterPendingSaveFlush?.call(null);
+      widget.onRegisterPendingSaveFlush?.call(_flushActiveEditorEdits);
+    }
     _scheduleNoteFocusIfNeeded();
+  }
+
+  Future<bool> _flushActiveEditorEdits() async {
+    var wideOk = true;
+    final wideSurface = _editorSurfaceKey.currentState;
+    if (wideSurface != null) {
+      wideOk = await wideSurface.flushPendingSaves();
+    }
+    var narrowOk = true;
+    final narrowSurface = _activeNarrowEditorKey?.currentState;
+    if (narrowSurface != null && !identical(narrowSurface, wideSurface)) {
+      narrowOk = await narrowSurface.flushPendingSaves();
+    }
+    return wideOk && narrowOk;
+  }
+
+  void _alignFiltersForNote(NoteEntity note) {
+    final controller = widget.effectiveController;
+    final state = controller.state;
+    if (note.isArchived) {
+      if (state.sectionFilter != 'archive') {
+        controller.setSectionFilter('archive');
+      }
+    } else {
+      final excludedBySection = state.sectionFilter == 'archive' ||
+          state.sectionFilter == 'trash' ||
+          (state.sectionFilter == 'pinned' && !note.isPinned) ||
+          (state.sectionFilter == 'favorites' && !note.isFavorite);
+      if (excludedBySection) {
+        controller.setSectionFilter('active');
+      }
+    }
+
+    if (state.categoryFilter != 'all' &&
+        note.category !=
+            NoteDomainHelpers.normalizeFlutterCategory(state.categoryFilter)) {
+      controller.setCategoryFilter('all');
+    }
+
+    if (!NoteDomainHelpers.matchesTagFilter(note.tags, state.tagFilter)) {
+      controller.setTagFilter('all');
+    }
+
+    if (!NoteDomainHelpers.matchesDateFilter(
+      note,
+      NoteDomainHelpers.parseDateFilterMode(state.dateFilter),
+    )) {
+      controller.setDateFilter('all');
+    }
+
+    if (state.searchQuery.trim().isNotEmpty &&
+        !note.matchesQuery(state.searchQuery)) {
+      _searchController.clear();
+      controller.setSearchQuery('');
+    }
+  }
+
+  Future<void> _handleRequestedNoteFocus(String noteId) async {
+    if (!mounted) return;
+    final note = widget.effectiveController.state.findById(noteId);
+    if (note == null) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This note is no longer available.'),
+        ),
+      );
+      return;
+    }
+    if (note.isTrashed) {
+      _promptRestoreTrashedNote(note);
+      return;
+    }
+
+    if (_isWideLayout) {
+      if (!_isNewDraftSelected && _selectedNoteId == note.id) {
+        _alignFiltersForNote(note);
+        return;
+      }
+      final wideSurface = _editorSurfaceKey.currentState;
+      if (wideSurface != null) {
+        final flushed = await wideSurface.flushPendingSaves();
+        if (!mounted) return;
+        if (!flushed) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Could not save current note changes. Retry before switching notes.',
+              ),
+            ),
+          );
+          return;
+        }
+      }
+      final latest = widget.effectiveController.state.findById(note.id);
+      if (latest == null) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('This note is no longer available.'),
+          ),
+        );
+        return;
+      }
+      if (latest.isTrashed) {
+        _promptRestoreTrashedNote(latest);
+        return;
+      }
+      _alignFiltersForNote(latest);
+      await _selectWideDetailTarget(existingNote: latest);
+      return;
+    }
+
+    final narrowRoute = _activeNarrowRoute;
+    final narrowSurface = _activeNarrowEditorKey?.currentState;
+    if (narrowRoute != null &&
+        narrowRoute.isActive &&
+        narrowSurface != null) {
+      if (narrowSurface.noteId == note.id) {
+        _alignFiltersForNote(note);
+        return;
+      }
+      final flushed = await narrowSurface.flushPendingSaves();
+      if (!mounted) return;
+      if (!flushed) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not save current note changes. Retry before switching notes.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
+    final latest = widget.effectiveController.state.findById(note.id);
+    if (latest == null) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('This note is no longer available.'),
+        ),
+      );
+      return;
+    }
+    if (latest.isTrashed) {
+      _promptRestoreTrashedNote(latest);
+      return;
+    }
+    _alignFiltersForNote(latest);
+    _openNarrowNoteEditor(latest, replaceActiveRoute: true);
   }
 
   void _scheduleNoteFocusIfNeeded() {
@@ -178,14 +334,13 @@ class _NotesViewState extends State<NotesView> {
     _lastHandledNoteFocusNonce = focus.nonce;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final note = widget.effectiveController.state.findById(focus.noteId);
-      if (note == null || note.isTrashed) return;
-      _openNoteEditor(note);
+      unawaited(_handleRequestedNoteFocus(focus.noteId));
     });
   }
 
   @override
   void dispose() {
+    widget.onRegisterPendingSaveFlush?.call(null);
     _searchController.dispose();
     super.dispose();
   }
@@ -306,6 +461,45 @@ class _NotesViewState extends State<NotesView> {
     return completer.future;
   }
 
+  void _openNarrowNoteEditor(
+    NoteEntity? existingNote, {
+    bool replaceActiveRoute = false,
+  }) {
+    final activeCategoryFilter = widget.effectiveController.state.categoryFilter;
+    final defaultNewCategory =
+        activeCategoryFilter != 'all' ? activeCategoryFilter : 'reflection';
+    final surfaceKey = GlobalKey<_NoteEditorSurfaceState>();
+    final route = MaterialPageRoute<void>(
+      builder: (_) => _NoteEditorScreen(
+        controller: widget.effectiveController,
+        tasksController: widget.effectiveTasksController,
+        onOpenTask: widget.onOpenTask,
+        existingNote: existingNote,
+        initialCategory: defaultNewCategory,
+        editorSurfaceKey: surfaceKey,
+      ),
+    );
+    final previousRoute = _activeNarrowRoute;
+    _activeNarrowEditorKey = surfaceKey;
+    _activeNarrowRoute = route;
+
+    final navigator = Navigator.of(context);
+    final Future<void> routeFuture = (replaceActiveRoute &&
+            previousRoute != null &&
+            previousRoute.isCurrent)
+        ? navigator.pushReplacement<void, void>(route)
+        : navigator.push<void>(route);
+
+    unawaited(
+      routeFuture.whenComplete(() {
+        if (identical(_activeNarrowRoute, route)) {
+          _activeNarrowRoute = null;
+          _activeNarrowEditorKey = null;
+        }
+      }),
+    );
+  }
+
   void _openNoteEditor([NoteEntity? existingNote]) {
     if (existingNote != null && existingNote.isTrashed) {
       return;
@@ -319,22 +513,7 @@ class _NotesViewState extends State<NotesView> {
       );
       return;
     }
-    final activeCategoryFilter = widget.effectiveController.state.categoryFilter;
-    final defaultNewCategory =
-        activeCategoryFilter != 'all' ? activeCategoryFilter : 'reflection';
-    unawaited(
-      Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => _NoteEditorScreen(
-            controller: widget.effectiveController,
-            tasksController: widget.effectiveTasksController,
-            onOpenTask: widget.onOpenTask,
-            existingNote: existingNote,
-            initialCategory: defaultNewCategory,
-          ),
-        ),
-      ),
-    );
+    _openNarrowNoteEditor(existingNote);
   }
 
   void _promptRestoreTrashedNote(NoteEntity note) {
@@ -881,7 +1060,16 @@ class _NotesViewState extends State<NotesView> {
                 searchController: _searchController,
                 searchHintText: 'Search notes, tags, or folders...',
                 searchSemanticLabel: 'Search notes, tags, or folders',
-                onSearchChanged: controller.setSearchQuery,
+                onSearchChanged: (value) {
+                  final wideSurface = _editorSurfaceKey.currentState;
+                  if (_isWideLayout &&
+                      wideSurface != null &&
+                      wideSurface.hasPendingChanges &&
+                      !wideSurface.isNewBlankDraft) {
+                    unawaited(wideSurface.flushPendingSaves());
+                  }
+                  controller.setSearchQuery(value);
+                },
                 onSearchCleared: () {
                   _searchController.clear();
                   controller.setSearchQuery('');
@@ -925,8 +1113,16 @@ class _NotesViewState extends State<NotesView> {
                           ),
                         ),
                         selected: moduleState.sectionFilter == sec.$1,
-                        onSelected: (_) =>
-                            controller.setSectionFilter(sec.$1),
+                        onSelected: (_) {
+                          final wideSurface = _editorSurfaceKey.currentState;
+                          if (_isWideLayout &&
+                              wideSurface != null &&
+                              wideSurface.hasPendingChanges &&
+                              !wideSurface.isNewBlankDraft) {
+                            unawaited(wideSurface.flushPendingSaves());
+                          }
+                          controller.setSectionFilter(sec.$1);
+                        },
                       ),
                       const SizedBox(width: SharedDesignTokens.spacingSm),
                     ],
@@ -1876,6 +2072,7 @@ class _NoteEditorScreen extends StatelessWidget {
   final NoteEntity? existingNote;
   final bool initialPreviewMode;
   final String initialCategory;
+  final Key? editorSurfaceKey;
 
   const _NoteEditorScreen({
     required this.controller,
@@ -1884,11 +2081,13 @@ class _NoteEditorScreen extends StatelessWidget {
     required this.existingNote,
     this.initialPreviewMode = false,
     this.initialCategory = 'reflection',
+    this.editorSurfaceKey,
   });
 
   @override
   Widget build(BuildContext context) {
     return _NoteEditorSurface(
+      key: editorSurfaceKey,
       controller: controller,
       tasksController: tasksController,
       onOpenTask: onOpenTask,

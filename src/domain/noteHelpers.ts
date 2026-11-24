@@ -1,4 +1,5 @@
 import { CalendarDate, EthiopiaClock, SharedDateFormatter } from './date';
+import { markdownToPlainText } from './noteMarkdown';
 import {
   CANONICAL_NOTE_LINKED_MODULES,
   SHARED_BUSINESS_RULES,
@@ -149,6 +150,59 @@ export function isReservedNoteFolderName(
 ): boolean {
   const key = normalizeFolderComparisonKey(rawFolder);
   return key.length > 0 && RESERVED_NOTE_FOLDER_NAMES.has(key);
+}
+
+export function matchesFolderSearchQuery(
+  rawFolder: string | null | undefined,
+  cleanQuery: string
+): boolean {
+  const folderLower =
+    typeof rawFolder === 'string' ? rawFolder.trim().toLowerCase() : '';
+  if (!folderLower) return false;
+  if (folderLower.includes(cleanQuery)) return true;
+  const spaceNormalized = folderLower
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return spaceNormalized.includes(cleanQuery);
+}
+
+export function matchesNoteTagsSearchQuery(
+  tags: readonly string[] | null | undefined,
+  cleanQuery: string
+): boolean {
+  if (!tags || tags.length === 0) return false;
+  for (const rawTag of tags) {
+    const lowerTag =
+      typeof rawTag === 'string' ? rawTag.trim().toLowerCase() : '';
+    if (!lowerTag) continue;
+    if (lowerTag.includes(cleanQuery) || `#${lowerTag}`.includes(cleanQuery)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function matchesNoteSearchQuery(
+  note: {
+    title: string;
+    content: string;
+    notebook: string;
+    tags?: readonly string[];
+  },
+  rawQuery: string
+): boolean {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query) return true;
+  if (note.title.toLowerCase().includes(query)) return true;
+  if (note.content.toLowerCase().includes(query)) return true;
+  const plainContent = markdownToPlainText(note.content)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (plainContent.includes(query)) return true;
+  if (matchesFolderSearchQuery(note.notebook, query)) return true;
+  return matchesNoteTagsSearchQuery(note.tags, query);
 }
 
 /**

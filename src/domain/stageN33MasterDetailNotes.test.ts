@@ -113,7 +113,9 @@ describe('STAGE N3.3 — RESPONSIVE MASTER-DETAIL NOTES EXPERIENCE', () => {
         })
       );
       assert.ok(html.includes('Notes &amp; knowledge'));
-      assert.ok(html.includes(DEFAULT_SAMPLE_NOTES[0].title));
+      assert.ok(
+        html.includes(DEFAULT_SAMPLE_NOTES[0].title.replaceAll('&', '&amp;'))
+      );
     }
   });
 
@@ -159,7 +161,11 @@ describe('STAGE N3.3 — RESPONSIVE MASTER-DETAIL NOTES EXPERIENCE', () => {
     assert.ok(dartTest.includes('Size(840, 720)'));
     assert.ok(dartTest.includes('BackButton'));
     assert.ok(dartTest.includes('Select a note to read or edit'));
-    assert.ok(dartTest.includes('TextScaler.linear(1.6)'));
+    assert.ok(
+      dartTest.includes('TextScaler.linear(1.6)') ||
+        (dartTest.includes('TextScaler.linear(textScale)') &&
+          dartTest.includes('textScale: 1.6'))
+    );
     assert.ok(dartTest.includes('DaywellTheme.dark()'));
     assert.ok(dartTest.includes('requestedNoteFocus'));
   });

@@ -166,6 +166,9 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
   int _tasksSubTabNonce = 0;
   ({int tabIndex, int nonce})? _requestedFinanceTab;
   int _financeTabNonce = 0;
+  Future<bool> Function()? _flushNotesPendingEdits;
+  DaywellTabId _lastShellTab = DaywellTabId.today;
+  bool _lastShellHasSecondary = false;
 
   @override
   void initState() {
@@ -178,6 +181,9 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
 
     _ownsShellController = widget.shellController == null;
     _shellController = widget.shellController ?? DaywellShellController();
+    _lastShellTab = _shellController.currentTab;
+    _lastShellHasSecondary = _shellController.hasSecondaryRoute;
+    _shellController.addListener(_onShellNavigationChanged);
 
     _ownsThemeController = widget.themeController == null;
     _themeController = widget.themeController ?? DaywellThemeController();
@@ -207,11 +213,15 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
     }
 
     if (widget.shellController != oldWidget.shellController) {
+      _shellController.removeListener(_onShellNavigationChanged);
       if (_ownsShellController) {
         _shellController.dispose();
       }
       _ownsShellController = widget.shellController == null;
       _shellController = widget.shellController ?? DaywellShellController();
+      _lastShellTab = _shellController.currentTab;
+      _lastShellHasSecondary = _shellController.hasSecondaryRoute;
+      _shellController.addListener(_onShellNavigationChanged);
     }
 
     if (widget.themeController != oldWidget.themeController) {
@@ -223,10 +233,27 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
     }
   }
 
+  void _onShellNavigationChanged() {
+    final nextTab = _shellController.currentTab;
+    final nextHasSecondary = _shellController.hasSecondaryRoute;
+    final leftNotesTab = _lastShellTab == DaywellTabId.notes &&
+        (nextTab != DaywellTabId.notes ||
+            (!_lastShellHasSecondary && nextHasSecondary));
+    _lastShellTab = nextTab;
+    _lastShellHasSecondary = nextHasSecondary;
+    if (leftNotesTab) {
+      final flush = _flushNotesPendingEdits;
+      if (flush != null) {
+        unawaited(flush());
+      }
+    }
+  }
+
   @override
   void dispose() {
     _quickCaptureChannel.setMethodCallHandler(null);
     _state.removeListener(_onInitializationStateChanged);
+    _shellController.removeListener(_onShellNavigationChanged);
     if (_ownsState) {
       _state.dispose();
     }
@@ -453,6 +480,9 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           controller: _state.notesController,
           tasksController: _state.tasksController,
           requestedNoteFocus: _requestedNoteFocus,
+          onRegisterPendingSaveFlush: (handler) {
+            _flushNotesPendingEdits = handler;
+          },
           onOpenTask: (String taskId) {
             setState(() {
               _requestedTaskFocus = (taskId: taskId, nonce: ++_taskFocusNonce);
