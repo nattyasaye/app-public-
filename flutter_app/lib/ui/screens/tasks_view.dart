@@ -3098,9 +3098,9 @@ class _TasksViewState extends State<TasksView>
                             onConfirmDailyReview: drCtrl == null
                                 ? null
                                 : () async {
-                                    final targetIso = moduleState
-                                        .effectivePlanDate
-                                        .toIsoString();
+                                    final planDate =
+                                        moduleState.effectivePlanDate;
+                                    final targetIso = planDate.toIsoString();
                                     final res = await drCtrl.confirmTaskReview(
                                       dateIso: targetIso,
                                       tasks: moduleState.tasks,

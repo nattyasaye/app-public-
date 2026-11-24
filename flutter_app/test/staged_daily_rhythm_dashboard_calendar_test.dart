@@ -21,7 +21,6 @@ import 'package:personal_management_app/data/repositories/tasks_repository.dart'
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_engine.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_models.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_workflows.dart';
-import 'package:personal_management_app/domain/finance/finance_models.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 import 'package:personal_management_app/ui/screens/calendar_view.dart';
 import 'package:personal_management_app/ui/screens/dashboard_view.dart';
@@ -189,7 +188,8 @@ void main() {
     testWidgets(
       '2. DashboardDailyRhythmSection completes next Faith step via DailyRhythmController, preserves layout seam, and routes to Tasks/Finance/Calendar',
       (WidgetTester tester) async {
-        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
         final state = _StageDWidgetState(db: db);
         addTearDown(() async {
           state.dispose();
@@ -231,7 +231,8 @@ void main() {
         // Tap direct Faith action -> Prayer completes without creating tasks
         await tester.tap(find.text('Complete prayer').first);
         await tester.pumpAndSettle();
-        expect(state.dailyRhythmController.state.todayRecord.prayerDone, isTrue);
+        final todayRecord = state.dailyRhythmController.state.todayRecord;
+        expect(todayRecord.prayerDone, isTrue);
         expect(find.text('2/2'), findsOneWidget);
 
         // Route to Tasks daily review
@@ -255,7 +256,8 @@ void main() {
     testWidgets(
       '3. CalendarView renders non-color-only Daily Rhythm markers, legend, and strictly read-only inspection for historical & unrecorded dates',
       (WidgetTester tester) async {
-        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
         final state = _StageDWidgetState(db: db);
         addTearDown(() async {
           state.dispose();
@@ -314,7 +316,8 @@ void main() {
     testWidgets(
       '4. FinanceView requestedTab opens Transactions tab and Stage D cards adapt cleanly on dark 320px large-text screens',
       (WidgetTester tester) async {
-        final db = AppDatabase.forTesting(NativeDatabase.memory());
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
         final state = _StageDWidgetState(db: db);
         addTearDown(() async {
           state.dispose();
@@ -387,10 +390,10 @@ void main() {
         await tester.tap(find.text('How streak freezes work'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(
-          find.textContaining('Multiple consecutive missed days cannot be protected.'),
-          findsOneWidget,
+        final multipleMissedFinder = find.textContaining(
+          'Multiple consecutive missed days cannot be protected.',
         );
+        expect(multipleMissedFinder, findsOneWidget);
 
         // Verify FinanceView supports requestedTab(tabIndex: 1)
         await state.loadAllControllers();

@@ -552,9 +552,14 @@ class DailyRhythmWorkflows {
 
     final faithCompletedCount =
         (todayRecord.bibleStudyDone ? 1 : 0) + (todayRecord.prayerDone ? 1 : 0);
-    final DailyRhythmFaithStep? nextFaithStep = !todayRecord.bibleStudyDone
-        ? DailyRhythmFaithStep.bibleStudy
-        : (!todayRecord.prayerDone ? DailyRhythmFaithStep.prayer : null);
+    final DailyRhythmFaithStep? nextFaithStep;
+    if (!todayRecord.bibleStudyDone) {
+      nextFaithStep = DailyRhythmFaithStep.bibleStudy;
+    } else if (!todayRecord.prayerDone) {
+      nextFaithStep = DailyRhythmFaithStep.prayer;
+    } else {
+      nextFaithStep = null;
+    }
 
     final faithStatusLabel = timelineSummary.todayFaithComplete
         ? '2/2 Complete'
@@ -579,13 +584,17 @@ class DailyRhythmWorkflows {
     if (ev.plannedCount > 0) {
       tasksContextParts.add('${ev.plannedCount} My Day');
     }
-    final tasksContextLabel = tasksContextParts.isNotEmpty
-        ? tasksContextParts.join(' · ')
-        : (ev.completedTodayCount > 0
-            ? '${ev.completedTodayCount} completed today'
-            : 'Clear day · no urgent tasks');
-    final tasksActionLabel =
-        timelineSummary.todayTasksComplete ? 'View review' : 'Open daily review';
+    final String tasksContextLabel;
+    if (tasksContextParts.isNotEmpty) {
+      tasksContextLabel = tasksContextParts.join(' · ');
+    } else if (ev.completedTodayCount > 0) {
+      tasksContextLabel = '${ev.completedTodayCount} completed today';
+    } else {
+      tasksContextLabel = 'Clear day · no urgent tasks';
+    }
+    final tasksActionLabel = timelineSummary.todayTasksComplete
+        ? 'View review'
+        : 'Open daily review';
 
     final financeNeedsReconfirmation = todayRecord.financeCloseStatus ==
         DailyRhythmFinanceCloseStatuses.needsReconfirmation;
@@ -594,20 +603,25 @@ class DailyRhythmWorkflows {
     final financeContextLabel = financeSummary.hasTransactions
         ? '${financeSummary.transactionCount} active entry(s) today'
         : 'No active transactions today';
-    final financeActionLabel = financeNeedsReconfirmation
-        ? 'Reconfirm review'
-        : (timelineSummary.todayFinanceComplete
-            ? 'View Finance'
-            : 'Review & close');
+    final String financeActionLabel;
+    if (financeNeedsReconfirmation) {
+      financeActionLabel = 'Reconfirm review';
+    } else if (timelineSummary.todayFinanceComplete) {
+      financeActionLabel = 'View Finance';
+    } else {
+      financeActionLabel = 'Review & close';
+    }
 
-    final DailyRhythmResponsibility? nextIncompleteResponsibility =
-        !timelineSummary.todayFaithComplete
-            ? DailyRhythmResponsibility.faith
-            : (!timelineSummary.todayTasksComplete
-                ? DailyRhythmResponsibility.tasks
-                : (!timelineSummary.todayFinanceComplete
-                    ? DailyRhythmResponsibility.finance
-                    : null));
+    final DailyRhythmResponsibility? nextIncompleteResponsibility;
+    if (!timelineSummary.todayFaithComplete) {
+      nextIncompleteResponsibility = DailyRhythmResponsibility.faith;
+    } else if (!timelineSummary.todayTasksComplete) {
+      nextIncompleteResponsibility = DailyRhythmResponsibility.tasks;
+    } else if (!timelineSummary.todayFinanceComplete) {
+      nextIncompleteResponsibility = DailyRhythmResponsibility.finance;
+    } else {
+      nextIncompleteResponsibility = null;
+    }
 
     final String overallStatusLabel;
     final String overallStatusDescription;
@@ -694,6 +708,10 @@ class DailyRhythmWorkflows {
           '${timelineSummary.daysTowardNextFreeze}/${DailyRhythmRules.qualifyingDaysPerFreeze} qualifying days toward your first freeze (max ${DailyRhythmRules.maxStreakFreezes}).';
     }
 
+    final freezeRatio = timelineSummary.daysTowardNextFreeze /
+        DailyRhythmRules.qualifyingDaysPerFreeze;
+    final nextFreezeProgressFraction = freezeRatio.clamp(0.0, 1.0);
+
     return DailyRhythmDashboardOverview(
       todayIso: timelineSummary.todayIso,
       todayEthiopianIso: timelineSummary.todayEthiopianIso,
@@ -741,9 +759,7 @@ class DailyRhythmWorkflows {
       qualifyingDaysPerFreeze: DailyRhythmRules.qualifyingDaysPerFreeze,
       daysTowardNextFreeze: timelineSummary.daysTowardNextFreeze,
       daysUntilNextFreeze: timelineSummary.daysUntilNextFreeze,
-      nextFreezeProgressFraction: (timelineSummary.daysTowardNextFreeze /
-              DailyRhythmRules.qualifyingDaysPerFreeze)
-          .clamp(0.0, 1.0),
+      nextFreezeProgressFraction: nextFreezeProgressFraction,
       provisionalFreezeActive: timelineSummary.provisionalFreezeActive,
       provisionalFreezeDateIso: provisionalDay?.dateIso,
       finalizedFreezesUsed: finalizedFreezesUsed,
@@ -773,11 +789,16 @@ class DailyRhythmWorkflows {
 
     if (evaluated == null) {
       final empty = DailyRhythmDayEntity.empty(canonicalIso);
-      final detailSummary = isFuture
-          ? 'Future date — Daily Rhythm check-ins open when this day arrives.'
-          : timelineSummary.startDateIso != null
-              ? 'No Daily Rhythm activity recorded prior to ${timelineSummary.startDateIso}.'
-              : 'No Daily Rhythm history recorded yet.';
+      final String detailSummary;
+      if (isFuture) {
+        detailSummary =
+            'Future date — Daily Rhythm check-ins open when this day arrives.';
+      } else if (timelineSummary.startDateIso != null) {
+        detailSummary =
+            'No Daily Rhythm activity recorded prior to ${timelineSummary.startDateIso}.';
+      } else {
+        detailSummary = 'No Daily Rhythm history recorded yet.';
+      }
       return DailyRhythmCalendarDayInspection(
         dateIso: canonicalIso,
         ethiopianDateIso: ethiopianDateIso,
@@ -875,6 +896,9 @@ class DailyRhythmWorkflows {
         break;
     }
 
+    final lockNotice =
+        isToday ? null : 'Past Daily Rhythm history is read-only and locked.';
+
     return DailyRhythmCalendarDayInspection(
       dateIso: canonicalIso,
       ethiopianDateIso: ethiopianDateIso,
@@ -903,8 +927,7 @@ class DailyRhythmWorkflows {
       financeClosedAt: rec.financeClosedAt,
       financeStatusLabel: formatFinanceCloseLabel(rec.financeCloseStatus),
       freezeExplanation: freezeExplanation,
-      lockNotice:
-          !isToday ? 'Past Daily Rhythm history is read-only and locked.' : null,
+      lockNotice: lockNotice,
     );
   }
 }

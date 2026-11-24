@@ -191,25 +191,19 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     required Map<String, AccountModel> accountById,
   }) {
     final hasCloseCard = widget.dailyRhythmController != null;
+    final hasActiveFilters =
+        state.isAnyFilterActive || _showVoided || _statusFilter != 'all';
 
     if (visibleEntries.isEmpty) {
       final emptyState = DaywellEmptyState(
         icon: Icons.receipt_long_outlined,
-        message: (state.isAnyFilterActive ||
-                _showVoided ||
-                _statusFilter != 'all')
+        message: hasActiveFilters
             ? 'No ledger entries match these filters'
             : 'No ledger entries recorded yet',
         subtitle:
             'Record expenses, income, transfers, split expenses, or settlements.',
-        actionLabel: (state.isAnyFilterActive ||
-                _showVoided ||
-                _statusFilter != 'all')
-            ? 'Clear Filters'
-            : 'Record Entry',
-        onActionPressed: (state.isAnyFilterActive ||
-                _showVoided ||
-                _statusFilter != 'all')
+        actionLabel: hasActiveFilters ? 'Clear Filters' : 'Record Entry',
+        onActionPressed: hasActiveFilters
             ? () {
                 _searchCtrl.clear();
                 setState(() {

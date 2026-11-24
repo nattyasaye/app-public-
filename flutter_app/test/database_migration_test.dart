@@ -18,7 +18,6 @@ import 'package:personal_management_app/data/repositories/inbox_repository.dart'
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
-import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_contracts.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_models.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 
@@ -2958,7 +2957,9 @@ void main() {
     );
   });
 
-  group('Stage B Schema v11 -> v12 Real Migration & Daily Rhythm Persistence', () {
+  group(
+    'Stage B Schema v11 -> v12 Real Migration & Daily Rhythm Persistence',
+    () {
     late Directory tempDir;
 
     setUp(() {
@@ -3021,24 +3022,25 @@ void main() {
         expect(await rhythmRepo.listDays(), isEmpty);
 
         // Repository CRUD works cleanly and survives reopen
+        const closedNoTx = DailyRhythmFinanceCloseStatuses.closedNoTransactions;
         await rhythmRepo.upsertDay(
-          DailyRhythmDayRecord(
+          const DailyRhythmDayEntity(
             dateIso: '2026-11-22',
             bibleStudyDone: true,
-            bibleStudyCompletedAt: DateTime.utc(2026, 11, 22, 6, 0),
+            bibleStudyCompletedAt: '2026-11-22T06:00:00.000Z',
             prayerDone: true,
-            prayerCompletedAt: DateTime.utc(2026, 11, 22, 6, 30),
+            prayerCompletedAt: '2026-11-22T06:30:00.000Z',
             taskReviewConfirmed: true,
-            taskReviewedAt: DateTime.utc(2026, 11, 22, 18, 0),
-            taskReviewEvidence: const DailyRhythmTaskReviewEvidence(
+            taskReviewedAt: '2026-11-22T18:00:00.000Z',
+            taskReviewEvidence: DailyRhythmTaskReviewEvidence(
               overdueCount: 0,
               todayCount: 2,
               plannedCount: 2,
               completedTodayCount: 1,
             ),
-            financeCloseStatus: DailyRhythmFinanceCloseStatuses.closedNoTransactions,
-            financeClosedAt: DateTime.utc(2026, 11, 22, 19, 0),
-            updatedAt: DateTime.utc(2026, 11, 22, 19, 0),
+            financeCloseStatus: closedNoTx,
+            financeClosedAt: '2026-11-22T19:00:00.000Z',
+            updatedAt: '2026-11-22T19:00:00.000Z',
           ),
         );
         await migratedDb.close();

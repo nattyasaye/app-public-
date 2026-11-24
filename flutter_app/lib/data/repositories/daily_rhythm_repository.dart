@@ -80,9 +80,9 @@ class DriftDailyRhythmRepository implements IDailyRhythmRepository {
   @override
   Future<DailyRhythmDayEntity?> getByDate(String dateIso) async {
     final canonicalDate = _requireCanonicalDateIso(dateIso);
-    final row = await (_db.select(_db.dailyRhythmDays)
-          ..where((tbl) => tbl.dateIso.equals(canonicalDate)))
-        .getSingleOrNull();
+    final query = _db.select(_db.dailyRhythmDays)
+      ..where((tbl) => tbl.dateIso.equals(canonicalDate));
+    final row = await query.getSingleOrNull();
     return row == null ? null : _mapRowToEntity(row);
   }
 
@@ -113,8 +113,8 @@ class DriftDailyRhythmRepository implements IDailyRhythmRepository {
   @override
   Future<DailyRhythmDayEntity> upsertDay(DailyRhythmDayEntity day) async {
     final canonicalDate = _requireCanonicalDateIso(day.dateIso);
-    if (!DailyRhythmFinanceCloseStatuses.canonical
-        .contains(day.financeCloseStatus)) {
+    final canonicalStatuses = DailyRhythmFinanceCloseStatuses.canonical;
+    if (!canonicalStatuses.contains(day.financeCloseStatus)) {
       throw ArgumentError.value(
         day.financeCloseStatus,
         'financeCloseStatus',
@@ -164,25 +164,23 @@ class DriftDailyRhythmRepository implements IDailyRhythmRepository {
               )
             : null;
 
-    await _db.into(_db.dailyRhythmDays).insertOnConflictUpdate(
-          DailyRhythmDaysCompanion(
-            dateIso: Value(canonicalDate),
-            bibleStudyDone: Value(day.bibleStudyDone),
-            bibleStudyCompletedAt: Value(bibleStudyCompletedAt),
-            prayerDone: Value(day.prayerDone),
-            prayerCompletedAt: Value(prayerCompletedAt),
-            taskReviewConfirmed: Value(day.taskReviewConfirmed),
-            taskReviewedAt: Value(taskReviewedAt),
-            taskReviewEvidenceJson: Value(
-              normalizedEvidence == null
-                  ? null
-                  : jsonEncode(normalizedEvidence.toJson()),
-            ),
-            financeCloseStatus: Value(day.financeCloseStatus),
-            financeClosedAt: Value(financeClosedAt),
-            updatedAt: Value(updatedAt),
-          ),
-        );
+    final encodedEvidence = normalizedEvidence == null
+        ? null
+        : jsonEncode(normalizedEvidence.toJson());
+    final companion = DailyRhythmDaysCompanion(
+      dateIso: Value(canonicalDate),
+      bibleStudyDone: Value(day.bibleStudyDone),
+      bibleStudyCompletedAt: Value(bibleStudyCompletedAt),
+      prayerDone: Value(day.prayerDone),
+      prayerCompletedAt: Value(prayerCompletedAt),
+      taskReviewConfirmed: Value(day.taskReviewConfirmed),
+      taskReviewedAt: Value(taskReviewedAt),
+      taskReviewEvidenceJson: Value(encodedEvidence),
+      financeCloseStatus: Value(day.financeCloseStatus),
+      financeClosedAt: Value(financeClosedAt),
+      updatedAt: Value(updatedAt),
+    );
+    await _db.into(_db.dailyRhythmDays).insertOnConflictUpdate(companion);
 
     return DailyRhythmDayEntity(
       dateIso: canonicalDate,
@@ -210,8 +208,8 @@ class DriftDailyRhythmRepository implements IDailyRhythmRepository {
   @override
   Future<void> deleteByDate(String dateIso) async {
     final canonicalDate = _requireCanonicalDateIso(dateIso);
-    await (_db.delete(_db.dailyRhythmDays)
-          ..where((tbl) => tbl.dateIso.equals(canonicalDate)))
-        .go();
+    final deleteQuery = _db.delete(_db.dailyRhythmDays)
+      ..where((tbl) => tbl.dateIso.equals(canonicalDate));
+    await deleteQuery.go();
   }
 }

@@ -50,8 +50,7 @@ class _FinanceViewState extends State<FinanceView>
   @override
   void initState() {
     super.initState();
-    final initialIndex =
-        (widget.requestedTab?.tabIndex ?? 0).clamp(0, 3);
+    final initialIndex = (widget.requestedTab?.tabIndex ?? 0).clamp(0, 3);
     _tabController = TabController(
       length: 4,
       initialIndex: initialIndex,

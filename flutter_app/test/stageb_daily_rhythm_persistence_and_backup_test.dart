@@ -11,7 +11,6 @@ import 'package:personal_management_app/data/repositories/finance_repository.dar
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_contracts.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_engine.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_models.dart';
-import 'package:personal_management_app/domain/finance/finance_models.dart';
 import 'package:personal_management_app/services/backup/encryption_backup_service.dart';
 
 DailyRhythmDayEntity _qualifyingDay(
@@ -70,7 +69,10 @@ void main() {
         await repo.upsertDay(_qualifyingDay('2026-11-22'));
 
         final rows = await repo.listDays();
-        expect(rows.map((r) => r.dateIso).toList(), ['2026-11-20', '2026-11-22']);
+        expect(
+          rows.map((r) => r.dateIso).toList(),
+          ['2026-11-20', '2026-11-22'],
+        );
         final nov22 = await repo.getByDate('2026-11-22');
         expect(nov22?.qualifies, isTrue);
         expect(nov22?.taskReviewEvidence?.plannedCount, 3);
@@ -183,7 +185,8 @@ void main() {
         expect(report.diagnostics, isEmpty);
         expect(report.restoredRecordCounts['dailyRhythmDays'], 17);
 
-        final restoredDays = await DriftDailyRhythmRepository(targetDb).listDays();
+        final targetRepo = DriftDailyRhythmRepository(targetDb);
+        final restoredDays = await targetRepo.listDays();
         expect(restoredDays, equals(beforeDays));
         final afterSummary = DailyRhythmEngine.evaluateTimeline(
           restoredDays,
@@ -191,7 +194,10 @@ void main() {
         );
         expect(afterSummary.currentStreak, beforeSummary.currentStreak);
         expect(afterSummary.bestStreak, beforeSummary.bestStreak);
-        expect(afterSummary.totalQualifyingDays, beforeSummary.totalQualifyingDays);
+        expect(
+          afterSummary.totalQualifyingDays,
+          beforeSummary.totalQualifyingDays,
+        );
         expect(afterSummary.availableFreezes, beforeSummary.availableFreezes);
         expect(afterSummary.freezesUsedTotal, beforeSummary.freezesUsedTotal);
       },
@@ -247,7 +253,8 @@ void main() {
         final coordinator = DatabasePersistenceCoordinator(db);
 
         // Duplicate dateIso, bad date, bad financeCloseStatus, future v13 fail closed
-        final invalidSnapshots = <({Map<String, dynamic> snap, BackupFailureKind kind})>[
+        final invalidSnapshots =
+            <({Map<String, dynamic> snap, BackupFailureKind kind})>[
           (
             snap: {
               'schemaVersion': 5,

@@ -87,7 +87,9 @@ class DailyRhythmEngine {
     return DailyRhythmDayEntity.fromJson(raw);
   }
 
-  static List<DailyRhythmDayEntity> normalizeTimeline(Iterable<Object?> records) {
+  static List<DailyRhythmDayEntity> normalizeTimeline(
+    Iterable<Object?> records,
+  ) {
     final byDate = <String, DailyRhythmDayEntity>{};
     for (final raw in records) {
       final normalized = _coerceRecord(raw);
@@ -135,11 +137,15 @@ class DailyRhythmEngine {
     }
 
     final targetIso = targetDate.toIsoString();
-    final baseRecord = (existingRecord != null &&
-            existingRecord.dateIso == targetIso)
-        ? (DailyRhythmDayEntity.fromJson(existingRecord.toJson()) ??
-            DailyRhythmDayEntity.empty(targetIso))
-        : DailyRhythmDayEntity.empty(targetIso);
+    final hasMatchingRecord =
+        existingRecord != null && existingRecord.dateIso == targetIso;
+    final DailyRhythmDayEntity baseRecord;
+    if (hasMatchingRecord) {
+      baseRecord = DailyRhythmDayEntity.fromJson(existingRecord.toJson()) ??
+          DailyRhythmDayEntity.empty(targetIso);
+    } else {
+      baseRecord = DailyRhythmDayEntity.empty(targetIso);
+    }
 
     if (targetDate.isBefore(resolvedToday)) {
       return (
@@ -200,20 +206,30 @@ class DailyRhythmEngine {
       );
     }
 
+    final String? nextBibleCompletedAt;
+    if (!nextBible) {
+      nextBibleCompletedAt = null;
+    } else if (baseRecord.bibleStudyDone) {
+      nextBibleCompletedAt = baseRecord.bibleStudyCompletedAt ?? now;
+    } else {
+      nextBibleCompletedAt = now;
+    }
+
+    final String? nextPrayerCompletedAt;
+    if (!nextPrayer) {
+      nextPrayerCompletedAt = null;
+    } else if (baseRecord.prayerDone) {
+      nextPrayerCompletedAt = baseRecord.prayerCompletedAt ?? now;
+    } else {
+      nextPrayerCompletedAt = now;
+    }
+
     final updated = baseRecord.copyWith(
       bibleStudyDone: nextBible,
-      bibleStudyCompletedAt: nextBible
-          ? (baseRecord.bibleStudyDone
-              ? (baseRecord.bibleStudyCompletedAt ?? now)
-              : now)
-          : null,
+      bibleStudyCompletedAt: nextBibleCompletedAt,
       clearBibleStudyCompletedAt: !nextBible,
       prayerDone: nextPrayer,
-      prayerCompletedAt: nextPrayer
-          ? (baseRecord.prayerDone
-              ? (baseRecord.prayerCompletedAt ?? now)
-              : now)
-          : null,
+      prayerCompletedAt: nextPrayerCompletedAt,
       clearPrayerCompletedAt: !nextPrayer,
       updatedAt: now,
     );
@@ -367,8 +383,8 @@ class DailyRhythmEngine {
     if (!check.ok) return check.failureResult!;
 
     final baseRecord = check.baseRecord!;
-    if (!DailyRhythmFinanceCloseStatuses.isClosed(
-        baseRecord.financeCloseStatus)) {
+    final currentFinanceStatus = baseRecord.financeCloseStatus;
+    if (!DailyRhythmFinanceCloseStatuses.isClosed(currentFinanceStatus)) {
       return DailyRhythmMutationResult(
         applied: false,
         reason: DailyRhythmMutationReason.unchanged,
@@ -527,8 +543,8 @@ class DailyRhythmEngine {
         if (currentStreak > bestStreak) {
           bestStreak = currentStreak;
         }
-        if (totalQualifyingDays % DailyRhythmRules.qualifyingDaysPerFreeze ==
-            0) {
+        const perFreeze = DailyRhythmRules.qualifyingDaysPerFreeze;
+        if (totalQualifyingDays % perFreeze == 0) {
           if (availableFreezes < DailyRhythmRules.maxStreakFreezes) {
             availableFreezes += 1;
             freezesEarnedTotal += 1;
@@ -598,6 +614,11 @@ class DailyRhythmEngine {
     final daysUntilNextFreeze =
         DailyRhythmRules.qualifyingDaysPerFreeze - daysTowardNextFreeze;
 
+    final unmodifiableDays =
+        List<DailyRhythmEvaluatedDay>.unmodifiable(evaluatedDays);
+    final unmodifiableByDate =
+        Map<String, DailyRhythmEvaluatedDay>.unmodifiable(evaluatedByDate);
+
     return DailyRhythmTimelineSummary(
       todayIso: resolvedTodayIso,
       todayEthiopianIso: todayEthiopianIso,
@@ -618,8 +639,8 @@ class DailyRhythmEngine {
       freezesUsedTotal: freezesUsedTotal,
       provisionalFreezeActive: provisionalFreezeActive,
       startDateIso: startDate.toIsoString(),
-      days: List<DailyRhythmEvaluatedDay>.unmodifiable(evaluatedDays),
-      byDate: Map<String, DailyRhythmEvaluatedDay>.unmodifiable(evaluatedByDate),
+      days: unmodifiableDays,
+      byDate: unmodifiableByDate,
     );
   }
 }

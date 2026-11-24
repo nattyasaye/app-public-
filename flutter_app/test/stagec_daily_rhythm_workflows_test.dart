@@ -6,10 +6,9 @@ import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/daily_rhythm_repository.dart';
-import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_engine.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_models.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_workflows.dart';
-import 'package:personal_management_app/domain/finance/finance_models.dart';
+import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
 import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 import 'package:personal_management_app/ui/widgets/daily_rhythm_workflow_widgets.dart';
@@ -301,13 +300,14 @@ void main() {
         final expCat = appState.financeController.state.activeCategories
             .firstWhere((c) => c.type == 'expense');
 
-        await appState.dailyRhythmController.confirmFinanceClose(
+        final rhythmCtrl = appState.dailyRhythmController;
+        await rhythmCtrl.confirmFinanceClose(
           dateIso: todayIso,
           entries: appState.financeController.state.journalEntries,
           today: today,
         );
         expect(
-          appState.dailyRhythmController.state.dayFor(todayIso).financeCloseStatus,
+          rhythmCtrl.state.dayFor(todayIso).financeCloseStatus,
           DailyRhythmFinanceCloseStatuses.closedNoTransactions,
         );
 
@@ -321,7 +321,7 @@ void main() {
         );
         await Future<void>.delayed(const Duration(milliseconds: 50));
         expect(
-          appState.dailyRhythmController.state.dayFor(todayIso).financeCloseStatus,
+          rhythmCtrl.state.dayFor(todayIso).financeCloseStatus,
           DailyRhythmFinanceCloseStatuses.closedNoTransactions,
         );
 
@@ -335,7 +335,7 @@ void main() {
         );
         await Future<void>.delayed(const Duration(milliseconds: 50));
         expect(
-          appState.dailyRhythmController.state.dayFor(todayIso).financeCloseStatus,
+          rhythmCtrl.state.dayFor(todayIso).financeCloseStatus,
           DailyRhythmFinanceCloseStatuses.needsReconfirmation,
         );
       },

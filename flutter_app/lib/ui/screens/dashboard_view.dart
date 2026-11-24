@@ -2895,7 +2895,7 @@ class DashboardDailyRhythmSection extends StatelessWidget {
           todayIso: todayIso,
         );
         final financeSummary = DailyRhythmWorkflows.inspectFinanceDay(
-          entries: financeState.entries,
+          entries: financeState.journalEntries,
           targetDateIso: todayIso,
           todayIso: todayIso,
         );
@@ -2930,4 +2930,3 @@ class DashboardDailyRhythmSection extends StatelessWidget {
     );
   }
 }
-

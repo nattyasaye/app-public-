@@ -110,12 +110,21 @@ class _DailyRhythmDashboardCardState extends State<DailyRhythmDashboardCard> {
             ? DaywellStatusTone.warning
             : DaywellStatusTone.info;
 
-    final nextActionIcon = switch (overview.nextIncompleteResponsibility) {
-      DailyRhythmResponsibility.faith => Icons.menu_book_outlined,
-      DailyRhythmResponsibility.tasks => Icons.fact_check_outlined,
-      DailyRhythmResponsibility.finance => Icons.account_balance_wallet_outlined,
-      null => Icons.verified_outlined,
-    };
+    final IconData nextActionIcon;
+    switch (overview.nextIncompleteResponsibility) {
+      case DailyRhythmResponsibility.faith:
+        nextActionIcon = Icons.menu_book_outlined;
+        break;
+      case DailyRhythmResponsibility.tasks:
+        nextActionIcon = Icons.fact_check_outlined;
+        break;
+      case DailyRhythmResponsibility.finance:
+        nextActionIcon = Icons.account_balance_wallet_outlined;
+        break;
+      case null:
+        nextActionIcon = Icons.verified_outlined;
+        break;
+    }
 
     return DaywellCard(
       borderRadius: SharedDesignTokens.radiusXl,
@@ -988,7 +997,8 @@ class DailyRhythmCalendarDetailCard extends StatelessWidget {
             _HistoryRow(
               icon: Icons.menu_book_outlined,
               label: 'Faith',
-              status: inspection.faithComplete ? 'Complete (2/2)' : 'Incomplete',
+              status:
+                  inspection.faithComplete ? 'Complete (2/2)' : 'Incomplete',
               tone: inspection.faithComplete
                   ? semantic.success
                   : semantic.textMuted,

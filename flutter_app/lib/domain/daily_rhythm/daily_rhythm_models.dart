@@ -152,10 +152,12 @@ class DailyRhythmDayEntity {
   }) {
     final parsed = CalendarDate.parse(dateIso);
     final trimmedUpdated = updatedAt.trim();
+    final effectiveUpdatedAt =
+        trimmedUpdated.isNotEmpty ? trimmedUpdated : deterministicEpochIso;
     return DailyRhythmDayEntity(
       dateIso: parsed.toIsoString(),
       financeCloseStatus: DailyRhythmRules.defaultFinanceCloseStatus,
-      updatedAt: trimmedUpdated.isNotEmpty ? trimmedUpdated : deterministicEpochIso,
+      updatedAt: effectiveUpdatedAt,
     );
   }
 
@@ -175,10 +177,9 @@ class DailyRhythmDayEntity {
     final bibleStudyDone = raw['bibleStudyDone'] == true;
     final prayerDone = raw['prayerDone'] == true;
     final taskReviewConfirmed = raw['taskReviewConfirmed'] == true;
+    final rawFinanceStatus = raw['financeCloseStatus'];
     final financeStatus = DailyRhythmFinanceCloseStatuses.normalize(
-      raw['financeCloseStatus'] is String
-          ? raw['financeCloseStatus'] as String
-          : null,
+      rawFinanceStatus is String ? rawFinanceStatus : null,
     );
 
     return DailyRhythmDayEntity(

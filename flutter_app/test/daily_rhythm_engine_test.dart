@@ -266,7 +266,10 @@ void main() {
             morningCheck.byDate['2026-09-16']?.status,
             DailyRhythmDayStatuses.freezeProtected,
           );
-          expect(morningCheck.byDate['2026-09-16']?.isProvisionalFreeze, isTrue);
+          expect(
+            morningCheck.byDate['2026-09-16']?.isProvisionalFreeze,
+            isTrue,
+          );
           expect(morningCheck.provisionalFreezeActive, isTrue);
           expect(morningCheck.currentStreak, 15);
           expect(morningCheck.availableFreezes, 0);
@@ -466,18 +469,18 @@ void main() {
             DailyRhythmFinanceCloseStatuses.closedWithTransactions,
           );
 
-          final replayedAfterHistoricalEdit = DailyRhythmEngine.evaluateTimeline(
+          final replayed = DailyRhythmEngine.evaluateTimeline(
             timeline.map(
               (d) => d.dateIso == '2026-09-05' ? pastFinanceEdit.record : d,
             ),
             todayIso: todayIso,
           );
           expect(
-            replayedAfterHistoricalEdit.byDate['2026-09-16']?.status,
+            replayed.byDate['2026-09-16']?.status,
             DailyRhythmDayStatuses.freezeProtected,
           );
-          expect(replayedAfterHistoricalEdit.freezesUsedTotal, 1);
-          expect(replayedAfterHistoricalEdit.currentStreak, 19);
+          expect(replayed.freezesUsedTotal, 1);
+          expect(replayed.currentStreak, 19);
 
           final sameDayEdit = DailyRhythmEngine.applyFinanceLedgerChange(
             record: day20,

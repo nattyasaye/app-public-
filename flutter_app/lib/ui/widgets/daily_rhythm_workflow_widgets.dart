@@ -46,6 +46,8 @@ class DailyFaithCheckInCard extends StatelessWidget {
     final bibleTime = _formatEthiopiaTime(record.bibleStudyCompletedAt);
     final prayerTime = _formatEthiopiaTime(record.prayerCompletedAt);
 
+    final showTodayFilter = onFilterToday != null && !isShowingTodayFilter;
+
     return DaywellCard(
       borderRadius: SharedDesignTokens.radiusLg,
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
@@ -194,6 +196,14 @@ class DailyTaskReviewCard extends StatelessWidget {
     final confirmed = record.taskReviewConfirmed;
     final reviewedTime = _formatEthiopiaTime(record.taskReviewedAt);
     final evidence = snapshot.evidence;
+    final String reviewButtonLabel;
+    if (isSaving) {
+      reviewButtonLabel = 'Saving...';
+    } else if (confirmed) {
+      reviewButtonLabel = 'Reconfirm review';
+    } else {
+      reviewButtonLabel = snapshot.confirmActionLabel;
+    }
 
     return DaywellCard(
       borderRadius: SharedDesignTokens.radiusLg,
@@ -309,9 +319,7 @@ class DailyTaskReviewCard extends StatelessWidget {
             )
           else
             DaywellButton(
-              label: isSaving
-                  ? 'Saving...'
-                  : (confirmed ? 'Reconfirm review' : snapshot.confirmActionLabel),
+              label: reviewButtonLabel,
               variant: confirmed
                   ? DaywellButtonVariant.outlined
                   : DaywellButtonVariant.primary,
@@ -469,7 +477,7 @@ class DailyFinanceCloseCard extends StatelessWidget {
             spacing: SharedDesignTokens.spacingSm,
             runSpacing: SharedDesignTokens.spacingSm,
             children: [
-              if (onFilterToday != null && !isShowingTodayFilter)
+              if (showTodayFilter)
                 DaywellButton(
                   label: 'View Today',
                   variant: DaywellButtonVariant.outlined,
