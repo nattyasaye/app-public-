@@ -46,8 +46,6 @@ class DailyFaithCheckInCard extends StatelessWidget {
     final bibleTime = _formatEthiopiaTime(record.bibleStudyCompletedAt);
     final prayerTime = _formatEthiopiaTime(record.prayerCompletedAt);
 
-    final showTodayFilter = onFilterToday != null && !isShowingTodayFilter;
-
     return DaywellCard(
       borderRadius: SharedDesignTokens.radiusLg,
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
@@ -364,6 +362,7 @@ class DailyFinanceCloseCard extends StatelessWidget {
     final needsReconfirmation = record.financeCloseStatus ==
         DailyRhythmFinanceCloseStatuses.needsReconfirmation;
     final closedTime = _formatEthiopiaTime(record.financeClosedAt);
+    final showTodayFilter = onFilterToday != null && !isShowingTodayFilter;
 
     final String badgeLabel;
     if (needsReconfirmation) {

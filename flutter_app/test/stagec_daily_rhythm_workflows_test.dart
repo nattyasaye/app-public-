@@ -9,6 +9,7 @@ import 'package:personal_management_app/data/repositories/daily_rhythm_repositor
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_models.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_workflows.dart';
 import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
+import 'package:personal_management_app/domain/tasks/daily_planning_engine.dart';
 import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 import 'package:personal_management_app/ui/widgets/daily_rhythm_workflow_widgets.dart';
@@ -72,7 +73,6 @@ void main() {
             taskId: 't-today',
             planDate: fixedToday,
             action: DailyPlanningActions.planned,
-            sortOrder: 0,
             createdAt: DateTime.utc(2026, 11, 23, 4, 0),
             updatedAt: DateTime.utc(2026, 11, 23, 4, 0),
           ),
@@ -103,14 +103,14 @@ void main() {
         final entries = [
           JournalEntryModel(
             id: 'je-today',
-            entryType: EntryType.expense,
+            entryType: EntryType.standard,
             description: 'Coffee',
             occurrenceDate: fixedTodayIso,
             createdAt: DateTime.utc(2026, 11, 23, 7, 0),
           ),
           JournalEntryModel(
             id: 'je-void',
-            entryType: EntryType.expense,
+            entryType: EntryType.standard,
             description: 'Cancelled',
             occurrenceDate: fixedTodayIso,
             isVoided: true,
@@ -132,7 +132,7 @@ void main() {
         final offDayEntries = [
           JournalEntryModel(
             id: 'je-old',
-            entryType: EntryType.expense,
+            entryType: EntryType.standard,
             description: 'Old',
             occurrenceDate: '2026-11-20',
             createdAt: DateTime.utc(2026, 11, 20, 7, 0),
@@ -407,7 +407,9 @@ void main() {
         await tester.tap(find.text('Bible study'));
         await tester.tap(find.text('Prayer'));
         await tester.tap(find.text('Confirm clear day'));
+        await tester.ensureVisible(find.text('View Today'));
         await tester.tap(find.text('View Today'));
+        await tester.ensureVisible(find.text('Confirm no transactions today'));
         await tester.tap(find.text('Confirm no transactions today'));
         await tester.pump();
 

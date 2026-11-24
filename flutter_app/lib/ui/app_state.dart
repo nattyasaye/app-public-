@@ -23,7 +23,6 @@ import '../data/repositories/notes_repository.dart';
 import '../data/repositories/projects_repository.dart';
 import '../data/repositories/search_repository.dart';
 import '../data/repositories/tasks_repository.dart';
-import '../domain/finance/double_entry_engine.dart';
 import '../services/backup/encryption_backup_service.dart';
 import '../services/notifications/local_notification_service.dart';
 

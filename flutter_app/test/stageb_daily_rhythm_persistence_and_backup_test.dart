@@ -1,9 +1,9 @@
 import 'dart:convert';
 
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
+import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/database_persistence_coordinator.dart';
 import 'package:personal_management_app/data/repositories/daily_rhythm_repository.dart';
@@ -401,9 +401,10 @@ void main() {
         // Clean Finance-only import + historical voiding correction leaves Daily Rhythm & spent freeze intact
         await coordinator.importFinanceOnlySnapshot(finExport);
         final entries = await finRepo.getJournalEntries();
+        final lunch = entries.firstWhere((e) => e.description == 'Lunch');
         await finRepo.voidJournalEntry(
-          entryId: entries.first.id,
-          reason: 'Historical accounting fix',
+          entryId: lunch.id,
+          voidReason: 'Historical accounting fix',
         );
 
         final daysAfter = await rhythmRepo.listDays();

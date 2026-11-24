@@ -1335,11 +1335,11 @@ void main() {
     });
 
     test(
-      '1. Baseline v11 database opens cleanly with PRAGMA foreign_keys = ON '
+      '1. Baseline v12 database opens cleanly with PRAGMA foreign_keys = ON '
       'and preserves seeded relational user data',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'baseline_v11.sqlite'));
-        await _seedRealisticV11Database(dbFile);
+        final dbFile = File(p.join(tempDir.path, 'baseline_v12.sqlite'));
+        await _seedRealisticV12Database(dbFile);
 
         final reopened = AppDatabase(NativeDatabase(dbFile));
         await reopened.ensureInitialized();

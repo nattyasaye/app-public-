@@ -229,25 +229,33 @@ void main() {
         expect(find.text('Complete prayer'), findsWidgets);
 
         // Tap direct Faith action -> Prayer completes without creating tasks
-        await tester.tap(find.text('Complete prayer').first);
+        final prayerBtn = find.text('Complete prayer').first;
+        await tester.ensureVisible(prayerBtn);
+        await tester.tap(prayerBtn);
         await tester.pumpAndSettle();
         final todayRecord = state.dailyRhythmController.state.todayRecord;
         expect(todayRecord.prayerDone, isTrue);
         expect(find.text('2/2'), findsOneWidget);
 
         // Route to Tasks daily review
-        await tester.tap(find.text('Open daily review').first);
+        final tasksBtn = find.text('Open daily review').first;
+        await tester.ensureVisible(tasksBtn);
+        await tester.tap(tasksBtn);
         await tester.pumpAndSettle();
         expect(openedTasksSubTab, 0);
         expect(state.tasksController.state.dueDateFilter, 'today');
 
         // Route to Finance Transactions tab
-        await tester.tap(find.text('Review & close').first);
+        final financeBtn = find.text('Review & close').first;
+        await tester.ensureVisible(financeBtn);
+        await tester.tap(financeBtn);
         await tester.pumpAndSettle();
         expect(openedFinanceTab, 1);
 
         // Route to Calendar history
-        await tester.tap(find.text('Calendar history'));
+        final historyBtn = find.text('Calendar history');
+        await tester.ensureVisible(historyBtn);
+        await tester.tap(historyBtn);
         await tester.pumpAndSettle();
         expect(selectedTab, DaywellTabId.calendar);
       },
