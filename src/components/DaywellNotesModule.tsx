@@ -4,6 +4,7 @@ import {
   Plus,
   Search,
   Pin,
+  Star,
   Archive,
   Trash2,
   X,
@@ -22,6 +23,11 @@ import {
   Unlink,
 } from 'lucide-react';
 import { EthiopiaClock, SharedDateFormatter } from '../domain/date';
+import {
+  isNoteArchived,
+  isNoteTrashed,
+  normalizeNoteTags,
+} from '../domain/noteHelpers';
 import { DaywellTaskRecord } from '../domain/taskOperations';
 import {
   getLinkedTaskForNote,
@@ -29,6 +35,22 @@ import {
   MAX_NOTE_TITLE_LENGTH,
   unlinkNoteFromTask,
 } from '../domain/taskNotes';
+import {
+  emptyWebNotesTrash,
+  filterAndSortWebNotes,
+  getAvailableWebNotebooks,
+  getDisplayNoteTitle,
+  getWebNoteCounts,
+  isNoteDraftBlank,
+  moveWebNoteToTrash,
+  permanentlyDeleteWebNote,
+  resolveDefaultNotebookForTab,
+  restoreWebNoteFromTrash,
+  saveWebNoteDraft,
+  toggleWebNoteArchive,
+  toggleWebNoteFavorite,
+  toggleWebNotePin,
+} from '../domain/webNotesLifecycle';
 import { notesService } from '../services/notesService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import {
@@ -39,6 +61,7 @@ import {
   DaywellIconButton,
   DaywellSearchField,
   DaywellStatusBadge,
+  DaywellStatusBanner,
 } from './ui';
 
 export interface DaywellNote {
@@ -160,6 +183,7 @@ export function DaywellNotesModule({
   const [searchQuery, setSearchQuery] = useState('');
 
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const selectedNoteIdRef = useRef<string | null>(null);
   const [isEditorOpen, setIsEditorOpen] = useState(false);
 
   const [editTitle, setEditTitle] = useState('');
@@ -169,10 +193,31 @@ export function DaywellNotesModule({
   const [tagInput, setTagInput] = useState('');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
 
-  const [feedbackToast, setFeedbackToast] = useState<{ message: string; undoAction?: () => void; isError?: boolean } | null>(null);
+  const draftFieldsRef = useRef({
+    title: editTitle,
+    content: editContent,
+    notebook: editNotebook,
+    tags: editTags,
+  });
+  draftFieldsRef.current = {
+    title: editTitle,
+    content: editContent,
+    notebook: editNotebook,
+    tags: editTags,
+  };
+
+  const [feedbackToast, setFeedbackToast] = useState<{
+    message: string;
+    undoAction?: () => void;
+    isError?: boolean;
+  } | null>(null);
   const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const triggerFeedback = (message: string, undoAction?: () => void, isError?: boolean) => {
+  const triggerFeedback = (
+    message: string,
+    undoAction?: () => void,
+    isError?: boolean
+  ) => {
     if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
     setFeedbackToast({ message, undoAction, isError });
     feedbackTimerRef.current = setTimeout(() => {
@@ -180,46 +225,29 @@ export function DaywellNotesModule({
     }, 4500);
   };
 
-  const [confirmDeleteNote, setConfirmDeleteNote] = useState<DaywellNote | null>(null);
+  const [confirmPermanentDeleteNote, setConfirmPermanentDeleteNote] =
+    useState<DaywellNote | null>(null);
+  const [isConfirmEmptyTrashOpen, setIsConfirmEmptyTrashOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const notebooks = useMemo(() => {
-    const set = new Set<string>(['Personal', 'Work', 'Reflections', 'Finances']);
-    notes.forEach((n) => set.add(n.notebook));
-    return Array.from(set);
-  }, [notes]);
+  const noteCounts = useMemo(() => getWebNoteCounts(notes), [notes]);
 
-  const filteredNotes = useMemo(() => {
-    let list = [...notes];
+  const notebooks = useMemo(() => getAvailableWebNotebooks(notes), [notes]);
 
-    if (activeTab === 'pinned') {
-      list = list.filter((n) => n.isPinned && !n.isArchived);
-    } else if (activeTab === 'archived') {
-      list = list.filter((n) => n.isArchived);
-    } else if (activeTab === 'all') {
-      list = list.filter((n) => !n.isArchived);
-    } else {
-      list = list.filter((n) => n.notebook === activeTab && !n.isArchived);
-    }
+  const editorNotebooks = useMemo(() => {
+    if (!editNotebook || notebooks.includes(editNotebook)) return notebooks;
+    return [...notebooks, editNotebook];
+  }, [notebooks, editNotebook]);
 
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (n) =>
-          n.title.toLowerCase().includes(q) ||
-          n.content.toLowerCase().includes(q) ||
-          n.tags.some((t) => t.toLowerCase().includes(q))
-      );
-    }
-
-    list.sort((a, b) => {
-      if (a.isPinned && !b.isPinned) return -1;
-      if (!a.isPinned && b.isPinned) return 1;
-      return b.updatedAt.localeCompare(a.updatedAt);
-    });
-
-    return list;
-  }, [notes, activeTab, searchQuery]);
+  const filteredNotes = useMemo(
+    () =>
+      filterAndSortWebNotes(notes, {
+        activeTab,
+        searchQuery,
+        sortBy: 'recent',
+      }),
+    [notes, activeTab, searchQuery]
+  );
 
   const currentEditorNote = useMemo(
     () =>
@@ -229,116 +257,163 @@ export function DaywellNotesModule({
     [notes, selectedNoteId]
   );
 
+  const isCurrentNewDraftBlank =
+    selectedNoteId === null &&
+    isNoteDraftBlank({
+      title: editTitle,
+      content: editContent,
+      tags: editTags,
+    });
+
+  const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearAutosaveTimer = () => {
+    if (autosaveTimeoutRef.current) {
+      clearTimeout(autosaveTimeoutRef.current);
+      autosaveTimeoutRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      clearAutosaveTimer();
+      if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    };
+  }, []);
+
   const openEditor = (note: DaywellNote) => {
+    if (isNoteTrashed(note)) {
+      setActiveTab('trash');
+      triggerFeedback('Restore note from Trash before editing.');
+      return;
+    }
+    clearAutosaveTimer();
+    selectedNoteIdRef.current = note.id;
     setSelectedNoteId(note.id);
     setEditTitle(note.title);
     setEditContent(note.content);
     setEditNotebook(note.notebook);
     setEditTags([...note.tags]);
+    setTagInput('');
     setSaveStatus('saved');
     setIsEditorOpen(true);
   };
 
   const handleCreateNote = () => {
-    const existingIds = new Set(notesRef.current.map((n) => n.id));
-    let nextId = `note-${Date.now()}`;
-    while (existingIds.has(nextId)) {
-      nextId = `${nextId}-2`;
-    }
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
-    const newNote: DaywellNote = {
-      id: nextId,
-      title: 'Untitled Note',
-      content: '',
-      notebook: activeTab !== 'all' && activeTab !== 'pinned' && activeTab !== 'archived' ? activeTab : 'Personal',
-      tags: [],
-      isPinned: false,
-      isArchived: false,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    };
-
-    const prev = [...notesRef.current];
-    applyNotesUpdate([newNote, ...notesRef.current]);
-    openEditor(newNote);
-    triggerFeedback('Note created', () => {
-      applyNotesUpdate(prev);
-      setIsEditorOpen(false);
-    });
+    clearAutosaveTimer();
+    selectedNoteIdRef.current = null;
+    setSelectedNoteId(null);
+    setEditTitle('');
+    setEditContent('');
+    setEditNotebook(resolveDefaultNotebookForTab(activeTab));
+    setEditTags([]);
+    setTagInput('');
+    setSaveStatus('saved');
+    setIsEditorOpen(true);
   };
 
-  const autosaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const commitEditorDraftToNote = (
+    overrideTags?: string[]
+  ): { noteId: string | null; status: string } => {
+    clearAutosaveTimer();
+    const fields = draftFieldsRef.current;
+    const effectiveTags = overrideTags ?? fields.tags;
+    const startingNoteId = selectedNoteIdRef.current;
 
-  const commitEditorDraftToNote = (noteId: string) => {
-    const target = notesRef.current.find((n) => n.id === noteId);
-    if (!target) return;
-    const nextTitle = (editTitle.trim() || 'Untitled Note').slice(
-      0,
-      MAX_NOTE_TITLE_LENGTH
-    );
-    const hasFieldChanges =
-      nextTitle !== target.title ||
-      editContent !== target.content ||
-      editNotebook !== target.notebook ||
-      JSON.stringify(editTags) !== JSON.stringify(target.tags);
-    if (!hasFieldChanges) {
+    const preview = saveWebNoteDraft({
+      notes: notesRef.current,
+      noteId: startingNoteId,
+      title: fields.title,
+      content: fields.content,
+      notebook: fields.notebook,
+      tags: effectiveTags,
+    });
+
+    if (preview.status === 'discarded_empty') {
       setSaveStatus('saved');
-      return;
+      return { noteId: null, status: 'discarded_empty' };
     }
-    const nowIso = EthiopiaClock.nowUtc().toISOString();
-    applyNotesUpdate((prevNotes) =>
-      prevNotes.map((n) =>
-        n.id === noteId
-          ? {
-              ...n,
-              title: nextTitle,
-              content: editContent,
-              notebook: editNotebook,
-              tags: editTags,
-              updatedAt: nowIso,
-            }
-          : n
-      )
-    );
+
+    if (preview.status === 'unchanged') {
+      setSaveStatus('saved');
+      return { noteId: startingNoteId, status: 'unchanged' };
+    }
+
+    const assignedId =
+      startingNoteId ?? preview.note?.id ?? undefined;
+    if (assignedId && startingNoteId === null) {
+      selectedNoteIdRef.current = assignedId;
+      setSelectedNoteId(assignedId);
+    }
+
+    applyNotesUpdate((prevNotes) => {
+      const res = saveWebNoteDraft({
+        notes: prevNotes,
+        noteId: startingNoteId,
+        newNoteId: assignedId,
+        title: fields.title,
+        content: fields.content,
+        notebook: fields.notebook,
+        tags: effectiveTags,
+      });
+      return res.notes;
+    });
+
     setSaveStatus('saved');
+    return {
+      noteId: assignedId ?? startingNoteId,
+      status: preview.status,
+    };
   };
 
   useEffect(() => {
-    if (!selectedNoteId || !isEditorOpen) return;
-    const target = notesRef.current.find((n) => n.id === selectedNoteId);
-    if (!target) return;
-    const nextTitle = (editTitle.trim() || 'Untitled Note').slice(
-      0,
-      MAX_NOTE_TITLE_LENGTH
-    );
-    const hasFieldChanges =
-      nextTitle !== target.title ||
-      editContent !== target.content ||
-      editNotebook !== target.notebook ||
-      JSON.stringify(editTags) !== JSON.stringify(target.tags);
-    if (!hasFieldChanges) {
-      setSaveStatus('saved');
-      return;
+    if (!isEditorOpen) return;
+    const currentId = selectedNoteIdRef.current;
+    if (currentId === null) {
+      if (
+        isNoteDraftBlank({
+          title: editTitle,
+          content: editContent,
+          tags: editTags,
+        })
+      ) {
+        setSaveStatus('saved');
+        return;
+      }
+    } else {
+      const target = notesRef.current.find((n) => n.id === currentId);
+      if (!target || isNoteTrashed(target)) return;
+      const preview = saveWebNoteDraft({
+        notes: notesRef.current,
+        noteId: currentId,
+        title: editTitle,
+        content: editContent,
+        notebook: editNotebook,
+        tags: editTags,
+      });
+      if (preview.status === 'unchanged') {
+        setSaveStatus('saved');
+        return;
+      }
     }
 
     setSaveStatus('saving');
-    if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+    clearAutosaveTimer();
 
     autosaveTimeoutRef.current = setTimeout(() => {
-      commitEditorDraftToNote(selectedNoteId);
+      commitEditorDraftToNote();
     }, 600);
 
     return () => {
-      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
+      clearAutosaveTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editTitle, editContent, editNotebook, editTags, selectedNoteId, isEditorOpen]);
 
   const flushAutosaveAndClose = () => {
-    if (selectedNoteId) {
-      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
-      commitEditorDraftToNote(selectedNoteId);
-    }
+    commitEditorDraftToNote();
+    selectedNoteIdRef.current = null;
+    setSelectedNoteId(null);
     setIsEditorOpen(false);
   };
 
@@ -346,104 +421,286 @@ export function DaywellNotesModule({
     if (!requestedNoteFocus?.noteId) return;
     const target = notesRef.current.find((n) => n.id === requestedNoteFocus.noteId);
     if (!target) return;
-    if (isEditorOpen && selectedNoteId && selectedNoteId !== target.id) {
-      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
-      commitEditorDraftToNote(selectedNoteId);
+    if (isEditorOpen && selectedNoteIdRef.current !== target.id) {
+      commitEditorDraftToNote();
     }
     setSearchQuery('');
-    setActiveTab(target.isArchived ? 'archived' : 'all');
+    if (isNoteTrashed(target)) {
+      clearAutosaveTimer();
+      selectedNoteIdRef.current = null;
+      setSelectedNoteId(null);
+      setIsEditorOpen(false);
+      setActiveTab('trash');
+      triggerFeedback('This note is in Trash. Restore it to edit.');
+      return;
+    }
+    setActiveTab(isNoteArchived(target) ? 'archived' : 'all');
     openEditor(target);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedNoteFocus?.nonce]);
 
-  const togglePin = (noteId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    const target = notesRef.current.find((n) => n.id === noteId);
-    if (!target) return;
-    const nextPinned = !target.isPinned;
-    const prev = [...notesRef.current];
-    applyNotesUpdate((prevNotes) =>
-      prevNotes.map((n) => (n.id === noteId ? { ...n, isPinned: nextPinned, updatedAt: EthiopiaClock.nowUtc().toISOString() } : n))
-    );
-    triggerFeedback(nextPinned ? 'Note pinned' : 'Note unpinned', () => applyNotesUpdate(prev));
-  };
+  const applyEditorAwareMutation = (
+    noteId: string | null,
+    mutator: (
+      notesList: DaywellNote[],
+      targetId: string
+    ) => { ok: boolean; notes: DaywellNote[]; updatedNote?: DaywellNote; error?: string },
+    onSuccess: (updatedNote?: DaywellNote) => void
+  ) => {
+    const isEditingTarget =
+      isEditorOpen &&
+      (noteId === null || selectedNoteIdRef.current === noteId);
+    if (isEditingTarget) {
+      clearAutosaveTimer();
+    }
 
-  const toggleArchive = (noteId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    const target = notesRef.current.find((n) => n.id === noteId);
-    if (!target) return;
-    const nextArchived = !target.isArchived;
-    const prev = [...notesRef.current];
+    const prevSnapshot = [...notesRef.current];
+    const fields = draftFieldsRef.current;
+    const startingEditorNoteId = selectedNoteIdRef.current;
 
-    applyNotesUpdate((prevNotes) =>
-      prevNotes.map((n) => (n.id === noteId ? { ...n, isArchived: nextArchived, updatedAt: EthiopiaClock.nowUtc().toISOString() } : n))
-    );
+    let previewNotes = prevSnapshot;
+    let targetId = noteId ?? startingEditorNoteId;
+    let assignedDraftId: string | undefined;
 
-    triggerFeedback(nextArchived ? 'Note moved to archive' : 'Note restored from archive', () => {
-      applyNotesUpdate(prev);
+    if (isEditingTarget) {
+      const draftPreview = saveWebNoteDraft({
+        notes: prevSnapshot,
+        noteId: startingEditorNoteId,
+        title: fields.title,
+        content: fields.content,
+        notebook: fields.notebook,
+        tags: fields.tags,
+      });
+      if (draftPreview.status === 'discarded_empty') {
+        return prevSnapshot;
+      }
+      previewNotes = draftPreview.notes;
+      if (draftPreview.note) {
+        targetId = draftPreview.note.id;
+        if (startingEditorNoteId === null) {
+          assignedDraftId = draftPreview.note.id;
+        }
+      }
+    }
+
+    if (!targetId) return prevSnapshot;
+    const previewRes = mutator(previewNotes, targetId);
+    if (!previewRes.ok) {
+      triggerFeedback(previewRes.error || 'Could not update note.', undefined, true);
+      return prevSnapshot;
+    }
+
+    if (assignedDraftId) {
+      selectedNoteIdRef.current = assignedDraftId;
+      setSelectedNoteId(assignedDraftId);
+    }
+
+    applyNotesUpdate((prevNotes) => {
+      let workingNotes = prevNotes;
+      let resolvedId = noteId ?? startingEditorNoteId;
+
+      if (isEditingTarget) {
+        const draftRes = saveWebNoteDraft({
+          notes: prevNotes,
+          noteId: startingEditorNoteId,
+          newNoteId: assignedDraftId,
+          title: fields.title,
+          content: fields.content,
+          notebook: fields.notebook,
+          tags: fields.tags,
+        });
+        if (draftRes.status === 'discarded_empty') {
+          return prevNotes;
+        }
+        workingNotes = draftRes.notes;
+        if (draftRes.note) {
+          resolvedId = draftRes.note.id;
+        }
+      }
+
+      if (!resolvedId) return prevNotes;
+      const res = mutator(workingNotes, resolvedId);
+      return res.ok ? res.notes : workingNotes;
     });
 
-    if (isEditorOpen && selectedNoteId === noteId) {
-      setIsEditorOpen(false);
-    }
+    setSaveStatus('saved');
+    onSuccess(previewRes.updatedNote);
+    return prevSnapshot;
   };
 
-  const handleLinkTaskToNote = (noteId: string, taskId: string) => {
-    const cleanTaskId = taskId.trim();
-    if (!cleanTaskId) return;
-    if (isEditorOpen && selectedNoteId === noteId) {
-      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
-      commitEditorDraftToNote(noteId);
-    }
-    const prev = [...notesRef.current];
-    const targetTask = effectiveTasks.find((t) => t.id === cleanTaskId);
+  const togglePin = (noteId: string | null, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const prevSnapshot = [...notesRef.current];
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => toggleWebNotePin(list, id),
+      (updated) => {
+        if (!updated) return;
+        triggerFeedback(
+          updated.isPinned ? 'Note pinned' : 'Note unpinned',
+          () => applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
+  };
+
+  const toggleFavorite = (noteId: string | null, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const prevSnapshot = [...notesRef.current];
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => toggleWebNoteFavorite(list, id),
+      (updated) => {
+        if (!updated) return;
+        triggerFeedback(
+          updated.isFavorite ? 'Added to favorites' : 'Removed from favorites',
+          () => applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
+  };
+
+  const toggleArchive = (noteId: string | null, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const prevSnapshot = [...notesRef.current];
+    const shouldCloseEditor =
+      isEditorOpen && (noteId === null || selectedNoteIdRef.current === noteId);
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => toggleWebNoteArchive(list, id),
+      (updated) => {
+        if (!updated) return;
+        if (shouldCloseEditor) {
+          selectedNoteIdRef.current = null;
+          setSelectedNoteId(null);
+          setIsEditorOpen(false);
+        }
+        triggerFeedback(
+          updated.isArchived
+            ? 'Note moved to archive'
+            : 'Note restored from archive',
+          () => applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
+  };
+
+  const handleMoveToTrash = (noteId: string | null, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const prevSnapshot = [...notesRef.current];
+    const shouldCloseEditor =
+      isEditorOpen && (noteId === null || selectedNoteIdRef.current === noteId);
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => moveWebNoteToTrash(list, id),
+      (updated) => {
+        if (!updated) return;
+        if (shouldCloseEditor) {
+          selectedNoteIdRef.current = null;
+          setSelectedNoteId(null);
+          setIsEditorOpen(false);
+        }
+        triggerFeedback(
+          `Moved "${getDisplayNoteTitle(updated.title)}" to Trash`,
+          () => applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
+  };
+
+  const handleRestoreFromTrash = (noteId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    const prevSnapshot = [...notesRef.current];
+    const target = notesRef.current.find((n) => n.id === noteId);
+    if (!target || !isNoteTrashed(target)) return;
     applyNotesUpdate((prevNotes) => {
-      const res = linkNoteToTask(prevNotes, noteId, cleanTaskId);
+      const res = restoreWebNoteFromTrash(prevNotes, noteId);
       return res.ok ? res.notes : prevNotes;
     });
     triggerFeedback(
-      targetTask ? `Linked note to "${targetTask.title}"` : 'Linked note to task',
-      () => applyNotesUpdate(prev)
+      `Restored "${getDisplayNoteTitle(target.title)}" to ${
+        target.isArchived ? 'Archive' : 'Notes'
+      }`,
+      () => applyNotesUpdate(prevSnapshot)
+    );
+  };
+
+  const handleRequestPermanentDelete = (
+    noteId: string,
+    e?: React.MouseEvent
+  ) => {
+    e?.stopPropagation();
+    const target = notesRef.current.find((n) => n.id === noteId);
+    if (target && isNoteTrashed(target)) {
+      setConfirmPermanentDeleteNote(target);
+    }
+  };
+
+  const handleConfirmPermanentDeleteNote = () => {
+    if (!confirmPermanentDeleteNote || isDeleting) return;
+    setIsDeleting(true);
+    const target = confirmPermanentDeleteNote;
+    applyNotesUpdate((prevNotes) => {
+      const res = permanentlyDeleteWebNote(prevNotes, target.id);
+      return res.ok ? res.notes : prevNotes;
+    });
+    setConfirmPermanentDeleteNote(null);
+    setIsDeleting(false);
+    triggerFeedback(
+      `Permanently deleted "${getDisplayNoteTitle(target.title)}"`
+    );
+  };
+
+  const handleConfirmEmptyTrash = () => {
+    if (isDeleting) return;
+    setIsDeleting(true);
+    const { deletedCount } = emptyWebNotesTrash(notesRef.current);
+    applyNotesUpdate((prevNotes) => emptyWebNotesTrash(prevNotes).notes);
+    setIsConfirmEmptyTrashOpen(false);
+    setIsDeleting(false);
+    if (deletedCount > 0) {
+      triggerFeedback(
+        `Emptied ${deletedCount} ${deletedCount === 1 ? 'note' : 'notes'} from Trash`
+      );
+    }
+  };
+
+  const handleLinkTaskToNote = (noteId: string | null, taskId: string) => {
+    const cleanTaskId = taskId.trim();
+    if (!cleanTaskId) return;
+    const prevSnapshot = [...notesRef.current];
+    const targetTask = effectiveTasks.find((t) => t.id === cleanTaskId);
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => linkNoteToTask(list, id, cleanTaskId),
+      () => {
+        triggerFeedback(
+          targetTask
+            ? `Linked note to "${targetTask.title}"`
+            : 'Linked note to task',
+          () => applyNotesUpdate(prevSnapshot)
+        );
+      }
     );
   };
 
   const handleUnlinkTaskFromNote = (noteId: string) => {
-    if (isEditorOpen && selectedNoteId === noteId) {
-      if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
-      commitEditorDraftToNote(noteId);
-    }
-    const prev = [...notesRef.current];
-    applyNotesUpdate((prevNotes) => {
-      const res = unlinkNoteFromTask(prevNotes, noteId);
-      return res.ok ? res.notes : prevNotes;
-    });
-    triggerFeedback('Unlinked task from note', () => applyNotesUpdate(prev));
-  };
-
-  const handleRequestDeleteNote = (noteId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    const target = notesRef.current.find((n) => n.id === noteId);
-    if (target) {
-      setConfirmDeleteNote(target);
-    }
-  };
-
-  const handleConfirmDeleteNote = () => {
-    if (!confirmDeleteNote || isDeleting) return;
-    setIsDeleting(true);
-    const target = confirmDeleteNote;
-    const prev = [...notesRef.current];
-    applyNotesUpdate((prevNotes) => prevNotes.filter((n) => n.id !== target.id));
-    if (isEditorOpen && selectedNoteId === target.id) {
-      setIsEditorOpen(false);
-    }
-    setConfirmDeleteNote(null);
-    setIsDeleting(false);
-    triggerFeedback(`Deleted "${target.title || 'note'}"`, () => applyNotesUpdate(prev));
+    const prevSnapshot = [...notesRef.current];
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => unlinkNoteFromTask(list, id),
+      () => {
+        triggerFeedback('Unlinked task from note', () =>
+          applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
   };
 
   const insertFormatting = (prefix: string, suffix: string = '') => {
-    const textarea = document.getElementById('note-content-editor') as HTMLTextAreaElement | null;
+    const textarea = document.getElementById(
+      'note-content-editor'
+    ) as HTMLTextAreaElement | null;
     if (!textarea) return;
 
     const start = textarea.selectionStart;
@@ -451,21 +708,29 @@ export function DaywellNotesModule({
     const selected = textarea.value.substring(start, end) || 'text';
     const replacement = `${prefix}${selected}${suffix}`;
 
-    const newContent = textarea.value.substring(0, start) + replacement + textarea.value.substring(end);
+    const newContent =
+      textarea.value.substring(0, start) +
+      replacement +
+      textarea.value.substring(end);
     setEditContent(newContent);
 
     setTimeout(() => {
       textarea.focus();
-      textarea.setSelectionRange(start + prefix.length, start + prefix.length + selected.length);
+      textarea.setSelectionRange(
+        start + prefix.length,
+        start + prefix.length + selected.length
+      );
     }, 50);
   };
 
   const handleAddTag = () => {
-    if (!tagInput.trim()) return;
     const clean = tagInput.trim().replace(/^#/, '');
-    if (!editTags.includes(clean)) {
-      setEditTags([...editTags, clean]);
+    if (!clean) {
+      setTagInput('');
+      return;
     }
+    const nextTags = normalizeNoteTags([...editTags, clean]);
+    setEditTags(nextTags);
     setTagInput('');
   };
 
@@ -556,7 +821,7 @@ export function DaywellNotesModule({
                   : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
               }`}
             >
-              All Notes ({notes.filter((n) => !n.isArchived).length})
+              All Notes ({noteCounts.active})
             </button>
             <button
               type="button"
@@ -570,7 +835,21 @@ export function DaywellNotesModule({
               }`}
             >
               <Pin className="w-3 h-3" />
-              Pinned
+              Pinned{noteCounts.pinned > 0 ? ` (${noteCounts.pinned})` : ''}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'favorites'}
+              onClick={() => setActiveTab('favorites')}
+              className={`min-h-[36px] text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'favorites'
+                  ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
+                  : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+              }`}
+            >
+              <Star className="w-3 h-3" />
+              Favorites{noteCounts.favorites > 0 ? ` (${noteCounts.favorites})` : ''}
             </button>
             {notebooks.map((nb) => (
               <button
@@ -600,9 +879,40 @@ export function DaywellNotesModule({
               }`}
             >
               <Archive className="w-3 h-3" />
-              Archived
+              Archived{noteCounts.archived > 0 ? ` (${noteCounts.archived})` : ''}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeTab === 'trash'}
+              onClick={() => setActiveTab('trash')}
+              className={`min-h-[36px] text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 flex items-center gap-1 cursor-pointer ${
+                activeTab === 'trash'
+                  ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
+                  : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+              }`}
+            >
+              <Trash2 className="w-3 h-3" />
+              Trash{noteCounts.trash > 0 ? ` (${noteCounts.trash})` : ''}
             </button>
           </div>
+
+          {activeTab === 'trash' && noteCounts.trash > 0 && (
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <DaywellStatusBanner
+                tone="warning"
+                message="Notes in Trash stay excluded from active notes, favorites, and search until restored or permanently deleted."
+                className="flex-1 min-w-[220px]"
+              />
+              <DaywellButton
+                label="Empty Trash"
+                variant="outlined"
+                size="compact"
+                leadingIcon={<Trash2 className="w-3.5 h-3.5" />}
+                onClick={() => setIsConfirmEmptyTrashOpen(true)}
+              />
+            </div>
+          )}
 
           {/* Notes List */}
           <div className="space-y-3 pt-1">
@@ -611,7 +921,7 @@ export function DaywellNotesModule({
                 <DaywellEmptyState
                   icon={<Search className="w-8 h-8" />}
                   message={`No notes matching "${searchQuery}"`}
-                  subtitle="Check your search term or search within a specific notebook."
+                  subtitle="Check your search term or switch to another collection."
                   actionLabel="Clear Search"
                   onActionPressed={() => setSearchQuery('')}
                 />
@@ -623,11 +933,27 @@ export function DaywellNotesModule({
                   actionLabel="View All Notes"
                   onActionPressed={() => setActiveTab('all')}
                 />
+              ) : activeTab === 'favorites' ? (
+                <DaywellEmptyState
+                  icon={<Star className="w-8 h-8" />}
+                  message="No favorite notes"
+                  subtitle="Star notes you return to often to find them quickly here."
+                  actionLabel="View All Notes"
+                  onActionPressed={() => setActiveTab('all')}
+                />
               ) : activeTab === 'archived' ? (
                 <DaywellEmptyState
                   icon={<Archive className="w-8 h-8" />}
                   message="Archive is empty"
                   subtitle="Archived notes are stored here safely when you no longer need them on your main board."
+                  actionLabel="View All Notes"
+                  onActionPressed={() => setActiveTab('all')}
+                />
+              ) : activeTab === 'trash' ? (
+                <DaywellEmptyState
+                  icon={<Trash2 className="w-8 h-8" />}
+                  message="Trash is empty"
+                  subtitle="Notes moved to Trash can be restored or permanently deleted here."
                   actionLabel="View All Notes"
                   onActionPressed={() => setActiveTab('all')}
                 />
@@ -641,33 +967,78 @@ export function DaywellNotesModule({
                 />
               )
             ) : (
-              filteredNotes.map((note) => (
+              filteredNotes.map((note) => {
+                const trashed = isNoteTrashed(note);
+                const displayTitle = getDisplayNoteTitle(note.title);
+                return (
                 <DaywellCard
                   key={note.id}
                   radius="lg"
                   padding="md"
-                  onClick={() => openEditor(note)}
-                  className="hover:border-[var(--dw-primary)]/40 space-y-2 group"
+                  onClick={trashed ? undefined : () => openEditor(note)}
+                  className={
+                    trashed
+                      ? 'space-y-2'
+                      : 'hover:border-[var(--dw-primary)]/40 space-y-2 group'
+                  }
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      {note.isPinned && (
+                      {note.isPinned && !trashed && (
                         <Pin className="w-3.5 h-3.5 text-[var(--dw-warning)] fill-current shrink-0" />
                       )}
+                      {note.isFavorite && !trashed && (
+                        <Star className="w-3.5 h-3.5 text-[var(--dw-warning)] fill-current shrink-0" />
+                      )}
                       <h4 className="text-sm font-bold text-[var(--dw-text-primary)] group-hover:text-[var(--dw-primary)] transition-colors line-clamp-1">
-                        {note.title}
+                        {displayTitle}
                       </h4>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <DaywellIconButton
-                        label={note.isPinned ? 'Unpin note' : 'Pin note to top'}
-                        size="compact"
-                        tone={note.isPinned ? 'primary' : 'muted'}
-                        onClick={(e) => togglePin(note.id, e)}
-                        icon={<Pin className="w-3.5 h-3.5" />}
-                      />
-                      <ArrowUpRight className="w-4 h-4 text-[var(--dw-text-muted)] group-hover:text-[var(--dw-primary)]" />
-                    </div>
+                    {trashed ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <DaywellButton
+                          label="Restore"
+                          variant="tonal"
+                          size="compact"
+                          leadingIcon={<RotateCcw className="w-3.5 h-3.5" />}
+                          onClick={(e) => handleRestoreFromTrash(note.id, e)}
+                        />
+                        <DaywellIconButton
+                          label={`Delete ${displayTitle} permanently`}
+                          size="compact"
+                          tone="danger"
+                          onClick={(e) => handleRequestPermanentDelete(note.id, e)}
+                          icon={<Trash2 className="w-3.5 h-3.5" />}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <DaywellIconButton
+                          label={note.isFavorite ? 'Remove favorite' : 'Favorite note'}
+                          aria-pressed={Boolean(note.isFavorite)}
+                          size="compact"
+                          tone={note.isFavorite ? 'default' : 'muted'}
+                          className={note.isFavorite ? 'text-[var(--dw-warning)]' : undefined}
+                          onClick={(e) => toggleFavorite(note.id, e)}
+                          icon={
+                            <Star
+                              className={`w-3.5 h-3.5 ${
+                                note.isFavorite ? 'fill-current' : ''
+                              }`}
+                            />
+                          }
+                        />
+                        <DaywellIconButton
+                          label={note.isPinned ? 'Unpin note' : 'Pin note to top'}
+                          aria-pressed={Boolean(note.isPinned)}
+                          size="compact"
+                          tone={note.isPinned ? 'primary' : 'muted'}
+                          onClick={(e) => togglePin(note.id, e)}
+                          icon={<Pin className="w-3.5 h-3.5" />}
+                        />
+                        <ArrowUpRight className="w-4 h-4 text-[var(--dw-text-muted)] group-hover:text-[var(--dw-primary)]" />
+                      </div>
+                    )}
                   </div>
 
                   {note.content && (
@@ -718,8 +1089,14 @@ export function DaywellNotesModule({
                   })()}
 
                   <div className="flex items-center justify-between text-[10px] text-[var(--dw-text-muted)] pt-1.5 border-t border-[var(--dw-divider)]">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <DaywellStatusBadge label={note.notebook} tone="neutral" showIcon={false} />
+                      {trashed && (
+                        <DaywellStatusBadge label="In Trash" tone="warning" showIcon={false} />
+                      )}
+                      {note.isArchived && (
+                        <DaywellStatusBadge label="Archived" tone="neutral" showIcon={false} />
+                      )}
                       {note.tags.length > 0 && (
                         <span>
                           #{note.tags.slice(0, 2).join(' #')}
@@ -734,7 +1111,8 @@ export function DaywellNotesModule({
                     </span>
                   </div>
                 </DaywellCard>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -754,6 +1132,9 @@ export function DaywellNotesModule({
               {currentEditorNote?.isArchived && (
                 <DaywellStatusBadge label="Archived" tone="neutral" showIcon={false} />
               )}
+              {selectedNoteId === null && (
+                <DaywellStatusBadge label="Draft" tone="info" showIcon={false} />
+              )}
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -763,6 +1144,8 @@ export function DaywellNotesModule({
                     <RotateCcw className="w-3 h-3 animate-spin text-[var(--dw-warning)]" />
                     <span>Autosaving...</span>
                   </>
+                ) : selectedNoteId === null ? (
+                  <span>New draft</span>
                 ) : (
                   <>
                     <Check className="w-3 h-3 text-[var(--dw-success)]" />
@@ -771,27 +1154,52 @@ export function DaywellNotesModule({
                 )}
               </span>
 
-              {selectedNoteId && (
+              {!isCurrentNewDraftBlank && (
                 <>
                   <DaywellIconButton
-                    label="Toggle Pin"
+                    label={currentEditorNote?.isPinned ? 'Unpin Note' : 'Pin Note'}
+                    aria-pressed={Boolean(currentEditorNote?.isPinned)}
                     size="compact"
-                    tone="muted"
+                    tone={currentEditorNote?.isPinned ? 'primary' : 'muted'}
                     onClick={() => togglePin(selectedNoteId)}
                     icon={<Pin className="w-4 h-4" />}
                   />
                   <DaywellIconButton
-                    label={currentEditorNote?.isArchived ? 'Restore Note' : 'Archive Note'}
+                    label={
+                      currentEditorNote?.isFavorite
+                        ? 'Remove Favorite'
+                        : 'Favorite Note'
+                    }
+                    aria-pressed={Boolean(currentEditorNote?.isFavorite)}
                     size="compact"
-                    tone="muted"
+                    tone={currentEditorNote?.isFavorite ? 'default' : 'muted'}
+                    className={
+                      currentEditorNote?.isFavorite
+                        ? 'text-[var(--dw-warning)]'
+                        : undefined
+                    }
+                    onClick={() => toggleFavorite(selectedNoteId)}
+                    icon={
+                      <Star
+                        className={`w-4 h-4 ${
+                          currentEditorNote?.isFavorite ? 'fill-current' : ''
+                        }`}
+                      />
+                    }
+                  />
+                  <DaywellIconButton
+                    label={currentEditorNote?.isArchived ? 'Restore from Archive' : 'Archive Note'}
+                    aria-pressed={Boolean(currentEditorNote?.isArchived)}
+                    size="compact"
+                    tone={currentEditorNote?.isArchived ? 'primary' : 'muted'}
                     onClick={() => toggleArchive(selectedNoteId)}
                     icon={<Archive className="w-4 h-4" />}
                   />
                   <DaywellIconButton
-                    label="Delete Note"
+                    label="Move Note to Trash"
                     size="compact"
                     tone="danger"
-                    onClick={() => handleRequestDeleteNote(selectedNoteId)}
+                    onClick={() => handleMoveToTrash(selectedNoteId)}
                     icon={<Trash2 className="w-4 h-4" />}
                   />
                 </>
@@ -809,7 +1217,7 @@ export function DaywellNotesModule({
                 onChange={(e) => setEditNotebook(e.target.value)}
                 className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none"
               >
-                {notebooks.map((nb) => (
+                {editorNotebooks.map((nb) => (
                   <option key={nb} value={nb}>
                     {nb}
                   </option>
@@ -851,8 +1259,8 @@ export function DaywellNotesModule({
           </div>
 
           {/* Linked Task Bar */}
-          {currentEditorNote && (
-            currentEditorNote.linkedModule === 'tasks' && currentEditorNote.linkedId ? (() => {
+          {!isCurrentNewDraftBlank && (
+            currentEditorNote?.linkedModule === 'tasks' && currentEditorNote.linkedId ? (() => {
               const linkedTask = getLinkedTaskForNote(currentEditorNote, effectiveTasks);
               return (
                 <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
@@ -883,10 +1291,7 @@ export function DaywellNotesModule({
                         size="compact"
                         trailingIcon={<ArrowUpRight className="w-3.5 h-3.5" />}
                         onClick={() => {
-                          if (selectedNoteId) {
-                            if (autosaveTimeoutRef.current) clearTimeout(autosaveTimeoutRef.current);
-                            commitEditorDraftToNote(selectedNoteId);
-                          }
+                          commitEditorDraftToNote();
                           onNavigateToTask(linkedTask.id);
                         }}
                       />
@@ -912,7 +1317,7 @@ export function DaywellNotesModule({
                   value=""
                   onChange={(e) => {
                     if (e.target.value) {
-                      handleLinkTaskToNote(currentEditorNote.id, e.target.value);
+                      handleLinkTaskToNote(selectedNoteId, e.target.value);
                     }
                   }}
                   className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none max-w-[230px] cursor-pointer"
@@ -992,6 +1397,7 @@ export function DaywellNotesModule({
           <input
             type="text"
             value={editTitle}
+            maxLength={MAX_NOTE_TITLE_LENGTH}
             onChange={(e) => setEditTitle(e.target.value)}
             placeholder="Note Title"
             className="w-full dw-type-heading bg-transparent border-none outline-none text-[var(--dw-text-primary)] placeholder:text-[var(--dw-text-muted)]"
@@ -1009,20 +1415,34 @@ export function DaywellNotesModule({
         </DaywellCard>
       )}
 
-      {/* Destructive Action Confirmation Modal */}
+      {/* Permanent Delete Confirmation Modal (Trash Only) */}
       <DaywellConfirmationDialog
-        isOpen={Boolean(confirmDeleteNote)}
-        title="Delete Note?"
+        isOpen={Boolean(confirmPermanentDeleteNote)}
+        title="Delete Note Permanently?"
         description={
-          confirmDeleteNote
-            ? `Are you sure you want to delete "${confirmDeleteNote.title}"? You can also undo this action right after.`
+          confirmPermanentDeleteNote
+            ? `Permanently delete "${getDisplayNoteTitle(confirmPermanentDeleteNote.title)}"? This cannot be undone.`
             : ''
         }
         cancelLabel="Cancel"
-        confirmLabel={isDeleting ? 'Deleting...' : 'Delete Note'}
+        confirmLabel={isDeleting ? 'Deleting...' : 'Delete Forever'}
         destructive
-        onCancel={() => setConfirmDeleteNote(null)}
-        onConfirm={handleConfirmDeleteNote}
+        onCancel={() => setConfirmPermanentDeleteNote(null)}
+        onConfirm={handleConfirmPermanentDeleteNote}
+      />
+
+      {/* Empty Trash Confirmation Modal */}
+      <DaywellConfirmationDialog
+        isOpen={isConfirmEmptyTrashOpen}
+        title="Empty Trash?"
+        description={`Permanently delete all ${noteCounts.trash} ${
+          noteCounts.trash === 1 ? 'note' : 'notes'
+        } in Trash? This cannot be undone.`}
+        cancelLabel="Cancel"
+        confirmLabel={isDeleting ? 'Emptying...' : 'Empty Trash'}
+        destructive
+        onCancel={() => setIsConfirmEmptyTrashOpen(false)}
+        onConfirm={handleConfirmEmptyTrash}
       />
     </div>
   );

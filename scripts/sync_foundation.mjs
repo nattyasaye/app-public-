@@ -713,6 +713,80 @@ export function validateBusinessRules(rules) {
     }
   }
 
+  if (rules.notes !== undefined) {
+    if (!isPlainObject(rules.notes)) {
+      throw new Error(`Missing or invalid "notes" object in ${fileLabel}.`);
+    }
+    assertFieldInteger(rules.notes.maxTitleLength, fileLabel, 'notes.maxTitleLength', {
+      min: 1,
+    });
+    for (const listKey of ['linkedModules', 'flutterDefaultCategories']) {
+      if (!Array.isArray(rules.notes[listKey]) || rules.notes[listKey].length === 0) {
+        throw new Error(`Missing or empty "${fileLabel}" array "notes.${listKey}".`);
+      }
+      for (let i = 0; i < rules.notes[listKey].length; i += 1) {
+        assertFieldNonEmptyString(
+          rules.notes[listKey][i],
+          fileLabel,
+          `notes.${listKey}[${i}]`
+        );
+      }
+    }
+    for (const strKey of [
+      'defaultExchangeFolder',
+      'defaultFlutterCategory',
+      'defaultWebNotebook',
+    ]) {
+      assertFieldNonEmptyString(rules.notes[strKey], fileLabel, `notes.${strKey}`);
+    }
+    if (rules.notes.canonicalExchangeFieldMappings !== undefined) {
+      const mappings = rules.notes.canonicalExchangeFieldMappings;
+      if (!isPlainObject(mappings)) {
+        throw new Error(
+          `Invalid "${fileLabel}" object "notes.canonicalExchangeFieldMappings".`
+        );
+      }
+      for (const aliasListKey of ['bodyFrom', 'folderFrom']) {
+        if (!Array.isArray(mappings[aliasListKey]) || mappings[aliasListKey].length === 0) {
+          throw new Error(
+            `Missing or empty "${fileLabel}" array "notes.canonicalExchangeFieldMappings.${aliasListKey}".`
+          );
+        }
+        for (let i = 0; i < mappings[aliasListKey].length; i += 1) {
+          assertFieldNonEmptyString(
+            mappings[aliasListKey][i],
+            fileLabel,
+            `notes.canonicalExchangeFieldMappings.${aliasListKey}[${i}]`
+          );
+        }
+      }
+      for (const aliasStrKey of ['linkedTaskLegacyAlias', 'legacyCreatedAtAlias']) {
+        assertFieldNonEmptyString(
+          mappings[aliasStrKey],
+          fileLabel,
+          `notes.canonicalExchangeFieldMappings.${aliasStrKey}`
+        );
+      }
+    }
+    if (rules.notes.rules !== undefined) {
+      if (!isPlainObject(rules.notes.rules)) {
+        throw new Error(`Missing or invalid "notes.rules" object in ${fileLabel}.`);
+      }
+      for (const flagKey of [
+        'preserveAllNoteStatesAcrossExchange',
+        'unlinkOnTargetDeleteWithoutDeletingNote',
+        'clearOrphanedProjectAndGoalLinksOnImport',
+        'preserveTimestampsAsUtcIso8601',
+      ]) {
+        assertFieldBoolean(
+          rules.notes.rules[flagKey],
+          fileLabel,
+          `notes.rules.${flagKey}`
+        );
+      }
+    }
+  }
+
   return rules;
 }
 
@@ -1126,6 +1200,19 @@ const DEFAULT_CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES = [
   'needs_reconfirmation',
 ];
 
+const DEFAULT_CANONICAL_NOTE_LINKED_MODULES = [
+  'tasks',
+  'finance',
+  'calendar',
+];
+
+const DEFAULT_FLUTTER_NOTE_CATEGORIES = [
+  'general',
+  'reference',
+  'reflection',
+  'learning',
+];
+
 export function buildTypeScriptFoundation({ tokens, rules, seedDb, contracts = null }) {
   const entryTypeEnum =
     contracts?.entities?.JournalEntry?.fields?.entryType?.enum ?? DEFAULT_CANONICAL_ENTRY_TYPES;
@@ -1152,6 +1239,10 @@ export function buildTypeScriptFoundation({ tokens, rules, seedDb, contracts = n
     contracts?.entities?.DailyRhythmDay?.fields?.financeCloseStatus?.enum ??
     rules?.dailyRhythm?.financeCloseStatuses ??
     DEFAULT_CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES;
+  const noteLinkedModuleEnum =
+    contracts?.entities?.Note?.fields?.linkedModule?.enum ??
+    rules?.notes?.linkedModules ??
+    DEFAULT_CANONICAL_NOTE_LINKED_MODULES;
   const plannedV10TaskFields = Object.entries(contracts?.entities?.Task?.fields ?? {})
     .filter(([, def]) => def?.plannedDatabaseSchemaVersion === 10)
     .map(([fieldName]) => fieldName);
@@ -1293,6 +1384,9 @@ export interface SharedDailyRhythmDay {
   updatedAt: string;
 }
 
+export const CANONICAL_NOTE_LINKED_MODULES = ${JSON.stringify(noteLinkedModuleEnum)} as const;
+export type SharedNoteLinkedModule = (typeof CANONICAL_NOTE_LINKED_MODULES)[number];
+
 export interface SharedNote {
   id: string;
   title: string;
@@ -1303,6 +1397,8 @@ export interface SharedNote {
   isFavorite?: boolean;
   isArchived: boolean;
   isTrashed?: boolean;
+  projectId?: string;
+  goalId?: string;
   linkedModule?: 'tasks' | 'finance' | 'calendar';
   linkedId?: string;
   createdAt: string;
@@ -1938,6 +2034,13 @@ export function buildDartFoundationCore({ seedDb, rules, contracts = null }) {
     rules?.dailyRhythm?.financeCloseStatuses ??
     DEFAULT_CANONICAL_DAILY_RHYTHM_FINANCE_CLOSE_STATUSES;
   const dailyRhythmRules = rules?.dailyRhythm?.rules ?? {};
+  const noteLinkedModuleEnum =
+    contracts?.entities?.Note?.fields?.linkedModule?.enum ??
+    rules?.notes?.linkedModules ??
+    DEFAULT_CANONICAL_NOTE_LINKED_MODULES;
+  const noteDefaultCategories =
+    rules?.notes?.flutterDefaultCategories ?? DEFAULT_FLUTTER_NOTE_CATEGORIES;
+  const noteRules = rules?.notes?.rules ?? {};
   const subtaskCanonicalFields =
     rules?.tasks?.subtaskCanonicalFields ?? ['id', 'title', 'done'];
   const dailyPlanningUniqueKey =
@@ -2243,6 +2346,42 @@ ${formatDartConst('String', 'defaultFinanceCloseStatus', `'${escapeDartString(ru
   };
   static const bool useEthiopiaDateConvention = ${
     dailyRhythmRules.useEthiopiaDateConvention !== false
+  };
+}
+
+class SharedNoteContracts {
+  static const int maxTitleLength = ${
+    contracts?.entities?.Note?.fields?.title?.maxLength ??
+    rules?.notes?.maxTitleLength ??
+    250
+  };
+
+${renderDartEnumList('canonicalLinkedModules', noteLinkedModuleEnum)}
+
+${renderDartEnumList('flutterDefaultCategories', noteDefaultCategories)}
+
+${formatDartConst('String', 'defaultExchangeFolder', `'${escapeDartString(contracts?.entities?.Note?.fields?.folder?.default ?? rules?.notes?.defaultExchangeFolder ?? 'General')}'`)}
+${formatDartConst('String', 'defaultFlutterCategory', `'${escapeDartString(rules?.notes?.defaultFlutterCategory ?? 'general')}'`)}
+${formatDartConst('String', 'defaultWebNotebook', `'${escapeDartString(rules?.notes?.defaultWebNotebook ?? 'Personal')}'`)}
+${formatDartConst('String', 'canonicalBodyField', `'body'`)}
+${formatDartConst('String', 'runtimeContentField', `'content'`)}
+${formatDartConst('String', 'canonicalFolderField', `'folder'`)}
+${formatDartConst('String', 'runtimeCategoryField', `'category'`)}
+${formatDartConst('String', 'webNotebookField', `'notebook'`)}
+${formatDartConst('String', 'legacyTaskIdAlias', `'${escapeDartString(rules?.notes?.canonicalExchangeFieldMappings?.linkedTaskLegacyAlias ?? 'taskId')}'`)}
+${formatDartConst('String', 'legacyCreatedAtAlias', `'${escapeDartString(rules?.notes?.canonicalExchangeFieldMappings?.legacyCreatedAtAlias ?? 'createdAtUtc')}'`)}
+
+  static const bool preserveAllNoteStatesAcrossExchange = ${
+    noteRules.preserveAllNoteStatesAcrossExchange !== false
+  };
+  static const bool unlinkOnTargetDeleteWithoutDeletingNote = ${
+    noteRules.unlinkOnTargetDeleteWithoutDeletingNote !== false
+  };
+  static const bool clearOrphanedProjectAndGoalLinksOnImport = ${
+    noteRules.clearOrphanedProjectAndGoalLinksOnImport !== false
+  };
+  static const bool preserveTimestampsAsUtcIso8601 = ${
+    noteRules.preserveTimestampsAsUtcIso8601 !== false
   };
 }
 

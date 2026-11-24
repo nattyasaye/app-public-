@@ -113,5 +113,25 @@
       "preserveFinalizedHistoryOnLedgerCorrection": true,
       "useEthiopiaDateConvention": true
     }
+  },
+  "notes": {
+    "maxTitleLength": 250,
+    "linkedModules": ["tasks", "finance", "calendar"],
+    "defaultExchangeFolder": "General",
+    "defaultFlutterCategory": "general",
+    "flutterDefaultCategories": ["general", "reference", "reflection", "learning"],
+    "defaultWebNotebook": "Personal",
+    "canonicalExchangeFieldMappings": {
+      "bodyFrom": ["content"],
+      "folderFrom": ["category", "notebook"],
+      "linkedTaskLegacyAlias": "taskId",
+      "legacyCreatedAtAlias": "createdAtUtc"
+    },
+    "rules": {
+      "preserveAllNoteStatesAcrossExchange": true,
+      "unlinkOnTargetDeleteWithoutDeletingNote": true,
+      "clearOrphanedProjectAndGoalLinksOnImport": true,
+      "preserveTimestampsAsUtcIso8601": true
+    }
   }
 }

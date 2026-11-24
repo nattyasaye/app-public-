@@ -1,3 +1,4 @@
+import '../../domain/notes/note_helpers.dart';
 import '../../domain/notes/note_models.dart';
 
 /// Immutable state container for the Daywell Notes & Knowledge module.
@@ -61,16 +62,18 @@ class NotesModuleState {
   List<NoteEntity> get filteredNotes {
     final list = notes.where((note) {
       if (sectionFilter == 'trash') {
-        if (!note.isTrashed) return false;
+        if (!NoteDomainHelpers.isTrashed(note)) return false;
       } else if (sectionFilter == 'archive') {
-        if (!note.isArchived || note.isTrashed) return false;
+        if (!NoteDomainHelpers.isArchived(note)) return false;
       } else {
-        if (note.isTrashed || note.isArchived) return false;
+        if (!NoteDomainHelpers.isActive(note)) return false;
         if (sectionFilter == 'pinned' && !note.isPinned) return false;
         if (sectionFilter == 'favorites' && !note.isFavorite) return false;
       }
 
-      if (categoryFilter != 'all' && note.category != categoryFilter) {
+      if (categoryFilter != 'all' &&
+          note.category !=
+              NoteDomainHelpers.normalizeFlutterCategory(categoryFilter)) {
         return false;
       }
 
@@ -79,43 +82,41 @@ class NotesModuleState {
       }
 
       return true;
-    }).toList();
-
-    list.sort((a, b) {
-      // Pinned notes bubble to top if not in trash/archive
-      if (sectionFilter != 'trash' && sectionFilter != 'archive') {
-        final aPin = a.isPinned ? 0 : 1;
-        final bPin = b.isPinned ? 0 : 1;
-        if (aPin != bPin) return aPin.compareTo(bPin);
-      }
-
-      if (sortBy == 'alpha') {
-        return a.displayTitle
-            .toLowerCase()
-            .compareTo(b.displayTitle.toLowerCase());
-      } else if (sortBy == 'oldest') {
-        return a.createdAt.compareTo(b.createdAt);
-      }
-      return b.updatedAt.compareTo(a.updatedAt);
     });
 
-    return list;
+    return NoteDomainHelpers.sortNotes(
+      list,
+      sortBy: NoteDomainHelpers.parseSortMode(sortBy),
+      pinFirst: sectionFilter != 'trash' && sectionFilter != 'archive',
+    );
   }
 
   int get activeNotesCount =>
-      notes.where((n) => !n.isTrashed && !n.isArchived).length;
+      notes.where(NoteDomainHelpers.isActive).length;
   int get pinnedNotesCount =>
-      notes.where((n) => n.isPinned && !n.isTrashed && !n.isArchived).length;
+      notes.where(NoteDomainHelpers.isPinnedActive).length;
   int get favoriteNotesCount =>
-      notes.where((n) => n.isFavorite && !n.isTrashed && !n.isArchived).length;
+      notes.where(NoteDomainHelpers.isFavoriteActive).length;
   int get archivedNotesCount =>
-      notes.where((n) => n.isArchived && !n.isTrashed).length;
-  int get trashedNotesCount => notes.where((n) => n.isTrashed).length;
+      notes.where(NoteDomainHelpers.isArchived).length;
+  int get trashedNotesCount => notes.where(NoteDomainHelpers.isTrashed).length;
 
   Set<String> get availableCategories {
     final cats = Set<String>.from(NoteEntity.defaultCategories);
     for (final n in notes) {
-      if (n.category.isNotEmpty) cats.add(n.category);
+      if (!n.isTrashed && n.category.isNotEmpty) {
+        cats.add(n.category);
+      }
+    }
+    return cats;
+  }
+
+  Set<String> get availableAllCategories {
+    final cats = Set<String>.from(NoteEntity.defaultCategories);
+    for (final n in notes) {
+      if (n.category.isNotEmpty) {
+        cats.add(n.category);
+      }
     }
     return cats;
   }

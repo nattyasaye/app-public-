@@ -91,9 +91,41 @@
       }
     },
     "Note": {
+      "fieldMappings": {
+        "body": {
+          "canonicalField": "body",
+          "runtimeAliases": ["content"],
+          "notes": "Canonical exchange field is 'body'; Flutter NoteEntity, Drift notes.content, Web DaywellNote/TaskNoteRecord, and legacy LocalNote store 'content'. Read paths accept both 'body' and 'content'."
+        },
+        "folder": {
+          "canonicalField": "folder",
+          "runtimeAliases": ["category", "notebook"],
+          "defaultCanonical": "General",
+          "notes": "Canonical exchange field is 'folder' (default 'General'); Flutter NoteEntity and Drift notes.category store normalized lowercase 'category' (default 'general'); Web DaywellNote/TaskNoteRecord store 'notebook' (default 'Personal'). Web SharedStateBridge accepts folder/category/notebook; Flutter NoteEntity.fromJson and DatabasePersistenceCoordinator accept category/folder."
+        },
+        "linkedPair": {
+          "canonicalFields": ["linkedModule", "linkedId"],
+          "legacyAliases": {
+            "taskId": {
+              "linkedModule": "tasks",
+              "linkedIdFrom": "taskId",
+              "supportedIn": [
+                "Flutter NoteEntity.fromJson",
+                "Flutter DatabasePersistenceCoordinator"
+              ]
+            }
+          }
+        },
+        "timestamps": {
+          "canonicalFields": ["createdAt", "updatedAt"],
+          "legacyAliases": {
+            "createdAtUtc": "createdAt"
+          }
+        }
+      },
       "fields": {
         "id": { "type": "string", "required": true },
-        "title": { "type": "string", "required": true },
+        "title": { "type": "string", "required": true, "maxLength": 250 },
         "body": { "type": "string", "required": true },
         "folder": { "type": "string", "required": false, "default": "General" },
         "tags": { "type": "array", "items": { "type": "string" }, "default": [] },
@@ -101,6 +133,8 @@
         "isFavorite": { "type": "boolean", "default": false },
         "isArchived": { "type": "boolean", "default": false },
         "isTrashed": { "type": "boolean", "default": false },
+        "projectId": { "type": "string", "required": false },
+        "goalId": { "type": "string", "required": false },
         "linkedModule": { "type": "string", "enum": ["tasks", "finance", "calendar"], "required": false },
         "linkedId": { "type": "string", "required": false },
         "createdAt": { "type": "string", "format": "date-time", "required": true },

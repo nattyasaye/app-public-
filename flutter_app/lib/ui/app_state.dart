@@ -637,15 +637,21 @@ class AppStateManager extends ChangeNotifier {
     if (_isDisposed) return;
     try {
       if (captured.category == 'note') {
-        final title = captured.rawText.length > 40
-            ? captured.rawText.substring(0, 40)
-            : captured.rawText;
-        await notesController.createNote(
+        final firstLine = captured.rawText
+            .split('\n')
+            .map((line) => line.trim())
+            .firstWhere((line) => line.isNotEmpty, orElse: () => '');
+        final title =
+            firstLine.length > 40 ? firstLine.substring(0, 40) : firstLine;
+        final created = await notesController.createNote(
           title: title,
           content: captured.rawText,
           category: 'general',
         );
-        await inboxController.markProcessed(captured.id);
+        if (notesController.state.errorMessage == null &&
+            notesController.state.findById(created.id) != null) {
+          await inboxController.markProcessed(captured.id);
+        }
       } else if (captured.category == 'expense') {
         await _triageExpenseCapture(captured);
       }

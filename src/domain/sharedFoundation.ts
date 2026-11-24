@@ -380,6 +380,40 @@ export const SHARED_BUSINESS_RULES = {
       "preserveFinalizedHistoryOnLedgerCorrection": true,
       "useEthiopiaDateConvention": true
     }
+  },
+  "notes": {
+    "maxTitleLength": 250,
+    "linkedModules": [
+      "tasks",
+      "finance",
+      "calendar"
+    ],
+    "defaultExchangeFolder": "General",
+    "defaultFlutterCategory": "general",
+    "flutterDefaultCategories": [
+      "general",
+      "reference",
+      "reflection",
+      "learning"
+    ],
+    "defaultWebNotebook": "Personal",
+    "canonicalExchangeFieldMappings": {
+      "bodyFrom": [
+        "content"
+      ],
+      "folderFrom": [
+        "category",
+        "notebook"
+      ],
+      "linkedTaskLegacyAlias": "taskId",
+      "legacyCreatedAtAlias": "createdAtUtc"
+    },
+    "rules": {
+      "preserveAllNoteStatesAcrossExchange": true,
+      "unlinkOnTargetDeleteWithoutDeletingNote": true,
+      "clearOrphanedProjectAndGoalLinksOnImport": true,
+      "preserveTimestampsAsUtcIso8601": true
+    }
   }
 } as const;
 
@@ -611,6 +645,9 @@ export interface SharedDailyRhythmDay {
   updatedAt: string;
 }
 
+export const CANONICAL_NOTE_LINKED_MODULES = ["tasks","finance","calendar"] as const;
+export type SharedNoteLinkedModule = (typeof CANONICAL_NOTE_LINKED_MODULES)[number];
+
 export interface SharedNote {
   id: string;
   title: string;
@@ -621,6 +658,8 @@ export interface SharedNote {
   isFavorite?: boolean;
   isArchived: boolean;
   isTrashed?: boolean;
+  projectId?: string;
+  goalId?: string;
   linkedModule?: 'tasks' | 'finance' | 'calendar';
   linkedId?: string;
   createdAt: string;

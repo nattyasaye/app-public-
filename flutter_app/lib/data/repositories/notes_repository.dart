@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 import '../../core/date/shared_date.dart';
 import '../database/app_database.dart';
+import '../../domain/notes/note_helpers.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/notes/note_contracts.dart';
 
@@ -60,8 +61,8 @@ class DriftNotesRepository implements INotesRepository {
     final query = _db.select(_db.notes);
 
     if (category != null && category != 'all') {
-      query.where(
-          (tbl) => tbl.category.equals(NoteEntity.normalizeCategory(category)));
+      query.where((tbl) =>
+          tbl.category.lower().equals(NoteEntity.normalizeCategory(category)));
     }
     if (projectId != null) {
       query.where((tbl) => tbl.projectId.equals(projectId));
@@ -119,8 +120,8 @@ class DriftNotesRepository implements INotesRepository {
   Future<NoteEntity> createNote(NoteEntity note) async {
     final now = EthiopiaClock.nowUtc();
     final safeTitle = NoteEntity.clampTitle(note.title);
-    final trimmedContent = note.content.trim();
     final normalizedCat = NoteEntity.normalizeCategory(note.category);
+    final normalizedTags = NoteDomainHelpers.normalizeTags(note.tags);
     final linkPair =
         NoteEntity.normalizeLinkPair(note.linkedModule, note.linkedId);
 
@@ -128,13 +129,13 @@ class DriftNotesRepository implements INotesRepository {
           NotesCompanion.insert(
             id: note.id,
             title: safeTitle,
-            content: trimmedContent,
+            content: note.content,
             category: Value(normalizedCat),
             projectId: Value(note.projectId),
             goalId: Value(note.goalId),
             linkedModule: Value(linkPair.$1),
             linkedId: Value(linkPair.$2),
-            tagsJson: Value(jsonEncode(note.tags)),
+            tagsJson: Value(jsonEncode(normalizedTags)),
             isPinned: Value(note.isPinned),
             isFavorite: Value(note.isFavorite),
             isArchived: Value(note.isArchived),
@@ -146,8 +147,9 @@ class DriftNotesRepository implements INotesRepository {
 
     return note.copyWith(
       title: safeTitle,
-      content: trimmedContent,
+      content: note.content,
       category: normalizedCat,
+      tags: normalizedTags,
       linkedModule: linkPair.$1,
       linkedId: linkPair.$2,
       clearLink: linkPair.$1 == null,
@@ -159,21 +161,23 @@ class DriftNotesRepository implements INotesRepository {
   Future<NoteEntity> updateNote(NoteEntity note) async {
     final now = EthiopiaClock.nowUtc();
     final safeTitle = NoteEntity.clampTitle(note.title);
-    final trimmedContent = note.content.trim();
     final normalizedCat = NoteEntity.normalizeCategory(note.category);
+    final normalizedTags = NoteDomainHelpers.normalizeTags(note.tags);
     final linkPair =
         NoteEntity.normalizeLinkPair(note.linkedModule, note.linkedId);
 
-    await (_db.update(_db.notes)..where((tbl) => tbl.id.equals(note.id))).write(
+    final updatedRows =
+        await (_db.update(_db.notes)..where((tbl) => tbl.id.equals(note.id)))
+            .write(
       NotesCompanion(
         title: Value(safeTitle),
-        content: Value(trimmedContent),
+        content: Value(note.content),
         category: Value(normalizedCat),
         projectId: Value(note.projectId),
         goalId: Value(note.goalId),
         linkedModule: Value(linkPair.$1),
         linkedId: Value(linkPair.$2),
-        tagsJson: Value(jsonEncode(note.tags)),
+        tagsJson: Value(jsonEncode(normalizedTags)),
         isPinned: Value(note.isPinned),
         isFavorite: Value(note.isFavorite),
         isArchived: Value(note.isArchived),
@@ -182,10 +186,15 @@ class DriftNotesRepository implements INotesRepository {
       ),
     );
 
+    if (updatedRows == 0) {
+      throw StateError('Note "${note.id}" not found for update.');
+    }
+
     return note.copyWith(
       title: safeTitle,
-      content: trimmedContent,
+      content: note.content,
       category: normalizedCat,
+      tags: normalizedTags,
       linkedModule: linkPair.$1,
       linkedId: linkPair.$2,
       clearLink: linkPair.$1 == null,
@@ -223,18 +232,16 @@ class DriftNotesRepository implements INotesRepository {
 
   @override
   Future<List<NoteEntity>> searchNotes(String query) async {
-    final clean = query.trim().toLowerCase();
+    final clean = query.trim();
     if (clean.isEmpty) return [];
 
-    final rows = await (_db.select(_db.notes)
-          ..where((tbl) =>
-              tbl.isTrashed.equals(false) &
-              (tbl.title.lower().like('%$clean%') |
-                  tbl.content.lower().like('%$clean%') |
-                  tbl.tagsJson.lower().like('%$clean%')))
-          ..orderBy([(tbl) => OrderingTerm.desc(tbl.updatedAt)]))
-        .get();
-
-    return rows.map(_mapRowToEntity).toList();
+    final candidates = await getNotes(
+      includeArchived: true,
+      includeTrashed: false,
+    );
+    final matches =
+        candidates.where((note) => note.matchesQuery(clean)).toList();
+    matches.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return matches;
   }
 }

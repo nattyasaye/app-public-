@@ -88,7 +88,8 @@ import { dailyRhythmWorkflowService } from './services/dailyRhythmWorkflowServic
 import { inboxService } from './services/inboxService';
 import { notesService } from './services/notesService';
 import { projectsService } from './services/projectsService';
-import { buildBoundedTaskNoteTitle } from './domain/taskNotes';
+import { normalizeNoteTitle } from './domain/noteHelpers';
+import { createQuickCaptureNoteRecord } from './domain/webNotesLifecycle';
 import {
   createEmptyDailyRhythmDay,
   DailyRhythmDayRecord,
@@ -956,24 +957,27 @@ export default function App() {
     }
 
     if (quickCaptureType === 'note') {
-      const nowIso = EthiopiaClock.nowUtc().toISOString();
-      const firstLine = text.split('\n')[0] || 'Quick Note';
-      const newNote: DaywellNote = {
-        id: `note-${Date.now()}`,
-        title: buildBoundedTaskNoteTitle(firstLine.slice(0, 80)),
-        content: text,
-        notebook: 'Personal',
-        tags: ['quick_capture'],
-        isPinned: false,
-        isArchived: false,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      };
-      handleUpdateNotes((prev) => [newNote, ...prev]);
+      const firstNonEmptyLine =
+        text
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find((line) => line.length > 0) ?? 'Quick Note';
+      const previewTitle = normalizeNoteTitle(firstNonEmptyLine, {
+        fallbackTitle: 'Quick Note',
+      });
+      handleUpdateNotes((prev) => {
+        const res = createQuickCaptureNoteRecord({
+          existingNotes: prev,
+          rawText: text,
+        });
+        return res.ok ? res.notes : prev;
+      });
       setIsSubmittingQuickCapture(false);
       setIsQuickCaptureOpen(false);
       setQuickCaptureInput('');
-      setQuickCaptureToast(`Saved note "${text.slice(0, 24)}..." to Notes`);
+      setQuickCaptureToast(
+        `Saved note "${previewTitle.slice(0, 24)}${previewTitle.length > 24 ? '...' : ''}" to Notes`
+      );
       setTimeout(() => setQuickCaptureToast(null), 3000);
       return;
     }

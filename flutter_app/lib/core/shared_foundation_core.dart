@@ -423,6 +423,39 @@ class SharedDailyRhythmContracts {
   static const bool useEthiopiaDateConvention = true;
 }
 
+class SharedNoteContracts {
+  static const int maxTitleLength = 250;
+
+  static const List<String> canonicalLinkedModules = [
+    'tasks',
+    'finance',
+    'calendar',
+  ];
+
+  static const List<String> flutterDefaultCategories = [
+    'general',
+    'reference',
+    'reflection',
+    'learning',
+  ];
+
+  static const String defaultExchangeFolder = 'General';
+  static const String defaultFlutterCategory = 'general';
+  static const String defaultWebNotebook = 'Personal';
+  static const String canonicalBodyField = 'body';
+  static const String runtimeContentField = 'content';
+  static const String canonicalFolderField = 'folder';
+  static const String runtimeCategoryField = 'category';
+  static const String webNotebookField = 'notebook';
+  static const String legacyTaskIdAlias = 'taskId';
+  static const String legacyCreatedAtAlias = 'createdAtUtc';
+
+  static const bool preserveAllNoteStatesAcrossExchange = true;
+  static const bool unlinkOnTargetDeleteWithoutDeletingNote = true;
+  static const bool clearOrphanedProjectAndGoalLinksOnImport = true;
+  static const bool preserveTimestampsAsUtcIso8601 = true;
+}
+
 class KnownSeedIds {
   static const Set<String> accounts = {
     'acc-cbe',

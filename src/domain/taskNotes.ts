@@ -1,9 +1,20 @@
 import { EthiopiaClock } from './date';
+import {
+  compareNotes,
+  isNoteTrashed,
+  MAX_NOTE_TITLE_LENGTH,
+  normalizeNoteFolder,
+  normalizeNoteLinkPair,
+  normalizeNoteTags,
+  normalizeNoteTitle,
+  normalizeWebNoteNotebook,
+} from './noteHelpers';
+import { SharedNoteLinkedModule } from './sharedFoundation';
 import { DaywellTaskRecord } from './taskOperations';
 
-export const MAX_NOTE_TITLE_LENGTH = 250;
+export { MAX_NOTE_TITLE_LENGTH };
 
-export type NoteLinkedModule = 'tasks' | 'finance' | 'calendar';
+export type NoteLinkedModule = SharedNoteLinkedModule;
 
 export interface TaskNoteRecord {
   id: string;
@@ -54,9 +65,7 @@ export interface UnlinkDeletedTaskNotesResult<
 }
 
 export function buildBoundedTaskNoteTitle(rawTitle?: string | null): string {
-  const trimmed = (rawTitle ?? '').trim();
-  if (!trimmed) return 'Task Note';
-  return trimmed.slice(0, MAX_NOTE_TITLE_LENGTH);
+  return normalizeNoteTitle(rawTitle, { fallbackTitle: 'Task Note' });
 }
 
 export function normalizeTaskNoteRecord(raw: unknown): TaskNoteRecord | null {
@@ -65,26 +74,27 @@ export function normalizeTaskNoteRecord(raw: unknown): TaskNoteRecord | null {
   const id = typeof r.id === 'string' ? r.id.trim() : '';
   if (!id) return null;
 
-  const titleRaw = typeof r.title === 'string' ? r.title.trim() : '';
+  const title = normalizeNoteTitle(
+    typeof r.title === 'string' ? r.title : undefined
+  );
   const content =
     typeof r.content === 'string'
       ? r.content
       : typeof r.body === 'string'
         ? r.body
         : '';
-  const notebookRaw =
+  const rawNotebook =
     typeof r.notebook === 'string' && r.notebook.trim()
-      ? r.notebook.trim()
+      ? r.notebook
       : typeof r.folder === 'string' && r.folder.trim()
-        ? r.folder.trim()
+        ? r.folder
         : typeof r.category === 'string' && r.category.trim()
-          ? r.category.trim()
-          : 'Personal';
-  const tags = Array.isArray(r.tags)
-    ? r.tags
-        .filter((t): t is string => typeof t === 'string' && t.trim().length > 0)
-        .map((t) => t.trim())
-    : [];
+          ? r.category
+          : undefined;
+  const notebookRaw = normalizeNoteFolder(rawNotebook, {
+    defaultFolder: 'Personal',
+  });
+  const tags = Array.isArray(r.tags) ? normalizeNoteTags(r.tags) : [];
   const createdAt =
     typeof r.createdAt === 'string' && r.createdAt.trim()
       ? r.createdAt.trim()
@@ -94,16 +104,10 @@ export function normalizeTaskNoteRecord(raw: unknown): TaskNoteRecord | null {
       ? r.updatedAt.trim()
       : createdAt;
 
-  const linkedModule =
-    r.linkedModule === 'tasks' ||
-    r.linkedModule === 'finance' ||
-    r.linkedModule === 'calendar'
-      ? r.linkedModule
-      : undefined;
-  const linkedId =
-    typeof r.linkedId === 'string' && r.linkedId.trim()
-      ? r.linkedId.trim()
-      : undefined;
+  const linkPair = normalizeNoteLinkPair(
+    typeof r.linkedModule === 'string' ? r.linkedModule : undefined,
+    typeof r.linkedId === 'string' ? r.linkedId : undefined
+  );
   const projectId =
     typeof r.projectId === 'string' && r.projectId.trim()
       ? r.projectId.trim()
@@ -115,7 +119,7 @@ export function normalizeTaskNoteRecord(raw: unknown): TaskNoteRecord | null {
 
   return {
     id,
-    title: (titleRaw || 'Untitled Note').slice(0, MAX_NOTE_TITLE_LENGTH),
+    title,
     content,
     notebook: notebookRaw,
     tags,
@@ -125,9 +129,7 @@ export function normalizeTaskNoteRecord(raw: unknown): TaskNoteRecord | null {
     ...(r.isTrashed !== undefined ? { isTrashed: Boolean(r.isTrashed) } : {}),
     ...(projectId !== undefined ? { projectId } : {}),
     ...(goalId !== undefined ? { goalId } : {}),
-    ...(linkedModule !== undefined && linkedId !== undefined
-      ? { linkedModule, linkedId }
-      : {}),
+    ...(linkPair !== null ? linkPair : {}),
     createdAt,
     updatedAt,
   };
@@ -138,7 +140,7 @@ export function isNoteLinkedToTask(
   taskId: string
 ): boolean {
   const cleanTaskId = taskId.trim();
-  if (!cleanTaskId || note.isTrashed) return false;
+  if (!cleanTaskId || isNoteTrashed(note)) return false;
   return note.linkedModule === 'tasks' && note.linkedId === cleanTaskId;
 }
 
@@ -155,10 +157,7 @@ export function getNotesLinkedToTask<T extends TaskNoteRecord>(
       return true;
     })
     .slice()
-    .sort((a, b) => {
-      if (a.isPinned !== b.isPinned) return a.isPinned ? -1 : 1;
-      return b.updatedAt.localeCompare(a.updatedAt);
-    });
+    .sort((a, b) => compareNotes(a, b, { sortBy: 'recent', pinFirst: true }));
 }
 
 export function countNotesLinkedToTask(
@@ -190,7 +189,7 @@ export function getAvailableNotesToLink<T extends TaskNoteRecord>(
 
   return notes
     .filter((note) => {
-      if (note.isTrashed) return false;
+      if (isNoteTrashed(note)) return false;
       if (isNoteLinkedToTask(note, cleanTaskId)) return false;
       if (!q) return true;
       return (
@@ -378,7 +377,7 @@ export function createNoteForTask<T extends TaskNoteRecord = TaskNoteRecord>(par
     noteId = `note-${now.getTime()}-${suffix}`;
   }
 
-  const notebook = params.notebook?.trim() || 'Personal';
+  const notebook = normalizeWebNoteNotebook(params.notebook);
   const noteTitle = buildBoundedTaskNoteTitle(params.title ?? params.task.title);
 
   const created = {
@@ -388,7 +387,9 @@ export function createNoteForTask<T extends TaskNoteRecord = TaskNoteRecord>(par
     notebook,
     tags: [],
     isPinned: false,
+    isFavorite: false,
     isArchived: false,
+    isTrashed: false,
     linkedModule: 'tasks',
     linkedId: cleanTaskId,
     createdAt: nowIso,

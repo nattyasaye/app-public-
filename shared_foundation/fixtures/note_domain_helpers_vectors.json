@@ -1,0 +1,263 @@
+{
+  "version": "1.0.0",
+  "titleCases": [
+    {
+      "name": "trims surrounding whitespace on valid title",
+      "raw": "  Architecture Review  ",
+      "fallback": "Untitled Note",
+      "expectedValid": true,
+      "expectedNormalized": "Architecture Review"
+    },
+    {
+      "name": "preserves Amharic Unicode title",
+      "raw": "  የሳምንቱ ዕቅድ  ",
+      "fallback": "Untitled Note",
+      "expectedValid": true,
+      "expectedNormalized": "የሳምንቱ ዕቅድ"
+    },
+    {
+      "name": "accepts exact 250-char title",
+      "repeatChar": "A",
+      "repeatCount": 250,
+      "fallback": "Untitled Note",
+      "expectedValid": true,
+      "expectedLength": 250
+    },
+    {
+      "name": "rejects validation and clamps 290-char title to 250",
+      "repeatChar": "B",
+      "repeatCount": 290,
+      "fallback": "Untitled Note",
+      "expectedValid": false,
+      "expectedLength": 250
+    },
+    {
+      "name": "rejects empty title and normalizes to Untitled Note",
+      "raw": "",
+      "fallback": "Untitled Note",
+      "expectedValid": false,
+      "expectedNormalized": "Untitled Note"
+    },
+    {
+      "name": "rejects whitespace-only title and supports custom fallback",
+      "raw": "   \t\n  ",
+      "fallback": "Task Note",
+      "expectedValid": false,
+      "expectedNormalized": "Task Note"
+    }
+  ],
+  "tagCases": [
+    {
+      "name": "trims whitespace and drops empty tags",
+      "input": ["  work ", "", "   ", "\t", "design "],
+      "expected": ["work", "design"]
+    },
+    {
+      "name": "deduplicates case-insensitively while preserving first occurrence casing and order",
+      "input": ["Finance", "finance", "ETB", "  etb ", "Planning", "FINANCE"],
+      "expected": ["Finance", "ETB", "Planning"]
+    },
+    {
+      "name": "preserves Unicode tags and removes duplicates",
+      "input": [" ዕቅድ ", "ዕቅድ", "ግብ"],
+      "expected": ["ዕቅድ", "ግብ"]
+    }
+  ],
+  "folderCases": [
+    {
+      "name": "preserves custom Web notebook casing",
+      "raw": "  Work Projects  ",
+      "defaultFolder": "Personal",
+      "lowercase": false,
+      "expected": "Work Projects"
+    },
+    {
+      "name": "uses Web Personal default on empty input",
+      "raw": "   ",
+      "defaultFolder": "Personal",
+      "lowercase": false,
+      "expected": "Personal"
+    },
+    {
+      "name": "uses canonical General default on null or empty input",
+      "raw": null,
+      "defaultFolder": "General",
+      "lowercase": false,
+      "expected": "General"
+    },
+    {
+      "name": "lowercases Flutter category while preserving custom name",
+      "raw": "  Reference  ",
+      "defaultFolder": "general",
+      "lowercase": true,
+      "expected": "reference"
+    },
+    {
+      "name": "uses Flutter general default on empty category",
+      "raw": "",
+      "defaultFolder": "general",
+      "lowercase": true,
+      "expected": "general"
+    }
+  ],
+  "lifecycleCases": [
+    {
+      "name": "active plain note",
+      "isPinned": false,
+      "isFavorite": false,
+      "isArchived": false,
+      "isTrashed": false,
+      "expectedState": "active",
+      "expectedActive": true,
+      "expectedArchived": false,
+      "expectedTrashed": false,
+      "expectedPinnedActive": false,
+      "expectedFavoriteActive": false
+    },
+    {
+      "name": "active pinned and favorite note",
+      "isPinned": true,
+      "isFavorite": true,
+      "isArchived": false,
+      "isTrashed": false,
+      "expectedState": "active",
+      "expectedActive": true,
+      "expectedArchived": false,
+      "expectedTrashed": false,
+      "expectedPinnedActive": true,
+      "expectedFavoriteActive": true
+    },
+    {
+      "name": "archived note hides active pinned and favorite flags",
+      "isPinned": true,
+      "isFavorite": true,
+      "isArchived": true,
+      "isTrashed": false,
+      "expectedState": "archived",
+      "expectedActive": false,
+      "expectedArchived": true,
+      "expectedTrashed": false,
+      "expectedPinnedActive": false,
+      "expectedFavoriteActive": false
+    },
+    {
+      "name": "trashed note",
+      "isPinned": true,
+      "isFavorite": false,
+      "isArchived": false,
+      "isTrashed": true,
+      "expectedState": "trashed",
+      "expectedActive": false,
+      "expectedArchived": false,
+      "expectedTrashed": true,
+      "expectedPinnedActive": false,
+      "expectedFavoriteActive": false
+    },
+    {
+      "name": "trashed overrides archived when both are true",
+      "isPinned": false,
+      "isFavorite": true,
+      "isArchived": true,
+      "isTrashed": true,
+      "expectedState": "trashed",
+      "expectedActive": false,
+      "expectedArchived": false,
+      "expectedTrashed": true,
+      "expectedPinnedActive": false,
+      "expectedFavoriteActive": false
+    }
+  ],
+  "linkCases": [
+    {
+      "name": "valid tasks link",
+      "rawModule": "tasks",
+      "rawId": "task-1",
+      "expectedSupportedModule": true,
+      "expectedModule": "tasks",
+      "expectedId": "task-1"
+    },
+    {
+      "name": "normalizes uppercase and whitespace on finance link",
+      "rawModule": "  FINANCE ",
+      "rawId": "  tx-99 ",
+      "expectedSupportedModule": true,
+      "expectedModule": "finance",
+      "expectedId": "tx-99"
+    },
+    {
+      "name": "normalizes mixed case calendar link",
+      "rawModule": "Calendar",
+      "rawId": "evt-7",
+      "expectedSupportedModule": true,
+      "expectedModule": "calendar",
+      "expectedId": "evt-7"
+    },
+    {
+      "name": "rejects unsupported module goals",
+      "rawModule": "goals",
+      "rawId": "goal-1",
+      "expectedSupportedModule": false,
+      "expectedModule": null,
+      "expectedId": null
+    },
+    {
+      "name": "clears half-link when linkedId is blank",
+      "rawModule": "tasks",
+      "rawId": "   ",
+      "expectedSupportedModule": true,
+      "expectedModule": null,
+      "expectedId": null
+    },
+    {
+      "name": "clears half-link when linkedModule is missing",
+      "rawModule": null,
+      "rawId": "task-1",
+      "expectedSupportedModule": false,
+      "expectedModule": null,
+      "expectedId": null
+    }
+  ],
+  "sortFixtureNotes": [
+    {
+      "id": "n-pinned-older",
+      "title": "Zulu Pinned",
+      "isPinned": true,
+      "createdAt": "2026-11-01T08:00:00.000Z",
+      "updatedAt": "2026-11-10T08:00:00.000Z"
+    },
+    {
+      "id": "n-pinned-newer",
+      "title": "Alpha Pinned",
+      "isPinned": true,
+      "createdAt": "2026-11-05T08:00:00.000Z",
+      "updatedAt": "2026-11-12T08:00:00.000Z"
+    },
+    {
+      "id": "n-tie-b",
+      "title": "Same Timestamp",
+      "isPinned": false,
+      "createdAt": "2026-11-02T08:00:00.000Z",
+      "updatedAt": "2026-11-15T08:00:00.000Z"
+    },
+    {
+      "id": "n-tie-a",
+      "title": "same timestamp",
+      "isPinned": false,
+      "createdAt": "2026-11-02T08:00:00.000Z",
+      "updatedAt": "2026-11-15T08:00:00.000Z"
+    },
+    {
+      "id": "n-unpinned-old",
+      "title": "",
+      "isPinned": false,
+      "createdAt": "2026-10-20T08:00:00.000Z",
+      "updatedAt": "2026-11-08T08:00:00.000Z"
+    }
+  ],
+  "sortExpectations": {
+    "recentPinFirst": ["n-pinned-newer", "n-pinned-older", "n-tie-a", "n-tie-b", "n-unpinned-old"],
+    "recentNoPin": ["n-tie-a", "n-tie-b", "n-pinned-newer", "n-pinned-older", "n-unpinned-old"],
+    "alphaPinFirst": ["n-pinned-newer", "n-pinned-older", "n-tie-a", "n-tie-b", "n-unpinned-old"],
+    "oldestPinFirst": ["n-pinned-older", "n-pinned-newer", "n-unpinned-old", "n-tie-a", "n-tie-b"]
+  }
+}

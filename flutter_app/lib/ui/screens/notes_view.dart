@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
+import '../../domain/notes/note_helpers.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/notes/task_notes_helpers.dart';
 import '../../domain/tasks/task_models.dart';
@@ -11,6 +12,29 @@ import '../../application/notes/notes_controller.dart';
 import '../../application/tasks/tasks_controller.dart';
 import '../app_state.dart';
 import '../widgets/shared_ui_widgets.dart';
+
+typedef _NoteDraftSnapshot = ({
+  int revision,
+  String title,
+  String content,
+  String category,
+  List<String> tags,
+  String? linkedModule,
+  String? linkedId,
+});
+
+String _formatFolderLabel(String category) {
+  if (category == 'all') return 'All Folders';
+  final parts = category
+      .trim()
+      .split(RegExp(r'[\s_-]+'))
+      .where((p) => p.isNotEmpty)
+      .toList();
+  if (parts.isEmpty) return 'General';
+  return parts
+      .map((p) => '${p[0].toUpperCase()}${p.length > 1 ? p.substring(1) : ''}')
+      .join(' ');
+}
 
 class NotesView extends StatefulWidget {
   final AppStateManager? state;
@@ -77,6 +101,9 @@ class _NotesViewState extends State<NotesView> {
   }
 
   void _openNoteEditor([NoteEntity? existingNote]) {
+    if (existingNote != null && existingNote.isTrashed) {
+      return;
+    }
     unawaited(
       Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
@@ -87,6 +114,21 @@ class _NotesViewState extends State<NotesView> {
             existingNote: existingNote,
           ),
         ),
+      ),
+    );
+  }
+
+  void _promptRestoreTrashedNote(NoteEntity note) {
+    final controller = widget.effectiveController;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Restore note from Trash before editing'),
+        action: SnackBarAction(
+          label: 'Restore',
+          onPressed: () => unawaited(controller.restoreFromTrash(note.id)),
+        ),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -121,6 +163,35 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
+  void _confirmEmptyTrash(NotesController controller, int count) {
+    final errorColor = Theme.of(context).colorScheme.error;
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Empty Trash?'),
+          content: Text(
+            'Permanently delete $count trashed ${count == 1 ? 'note' : 'notes'}? This cannot be undone.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: errorColor),
+              onPressed: () {
+                unawaited(controller.emptyTrash());
+                Navigator.pop(ctx);
+              },
+              child: const Text('Empty Trash'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.effectiveController;
@@ -129,6 +200,7 @@ class _NotesViewState extends State<NotesView> {
     final primary = isDark
         ? SharedDesignTokens.primaryDarkMode
         : SharedDesignTokens.primaryEmerald;
+    final colorScheme = Theme.of(context).colorScheme;
 
     return AnimatedBuilder(
       animation: Listenable.merge([
@@ -138,12 +210,45 @@ class _NotesViewState extends State<NotesView> {
       builder: (context, _) {
         final moduleState = controller.state;
         final notes = moduleState.filteredNotes;
+        const defaultOrder = ['reflection', 'reference', 'learning', 'general'];
+        final knownCategories = moduleState.sectionFilter == 'trash'
+            ? moduleState.availableAllCategories
+            : moduleState.availableCategories;
+        final extraCategories = knownCategories
+            .where((c) => !defaultOrder.contains(c))
+            .toList()
+          ..sort();
+        if (moduleState.categoryFilter != 'all' &&
+            !defaultOrder.contains(moduleState.categoryFilter) &&
+            !extraCategories.contains(moduleState.categoryFilter)) {
+          extraCategories.add(moduleState.categoryFilter);
+          extraCategories.sort();
+        }
+        final categoryChips = <String>[
+          'all',
+          ...defaultOrder,
+          ...extraCategories,
+        ];
+        final hasError = moduleState.errorMessage != null &&
+            moduleState.errorMessage!.trim().isNotEmpty;
 
         return Scaffold(
           appBar: AppBar(
             title: const Text('Notes & Knowledge',
                 style: TextStyle(fontWeight: FontWeight.bold)),
             actions: [
+              if (moduleState.sectionFilter == 'trash' &&
+                  moduleState.trashedNotesCount > 0)
+                TextButton(
+                  onPressed: () => _confirmEmptyTrash(
+                    controller,
+                    moduleState.trashedNotesCount,
+                  ),
+                  style: TextButton.styleFrom(
+                    foregroundColor: colorScheme.error,
+                  ),
+                  child: const Text('Empty Trash'),
+                ),
               IconButton(
                 icon: Icon(moduleState.isGridView
                     ? Icons.view_list_rounded
@@ -231,36 +336,54 @@ class _NotesViewState extends State<NotesView> {
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   children: [
-                    for (final cat in [
-                      ('all', 'All Folders'),
-                      ('reflection', 'Reflection'),
-                      ('reference', 'Reference'),
-                      ('learning', 'Learning'),
-                      ('general', 'General'),
-                    ])
+                    for (final cat in categoryChips)
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         child: FilterChip(
-                          label: Text(cat.$2,
+                          label: Text(_formatFolderLabel(cat),
                               style: const TextStyle(fontSize: 11)),
-                          selected: moduleState.categoryFilter == cat.$1,
-                          onSelected: (_) =>
-                              controller.setCategoryFilter(cat.$1),
+                          selected: moduleState.categoryFilter == cat,
+                          onSelected: (_) => controller.setCategoryFilter(cat),
                         ),
                       ),
                   ],
                 ),
               ),
+              if (hasError)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+                  child: DaywellStatusBanner(
+                    tone: DaywellStatusTone.error,
+                    title: 'Notes persistence error',
+                    message: moduleState.errorMessage!,
+                    actionLabel: 'Retry',
+                    onActionPressed: () => unawaited(controller.loadNotes()),
+                  ),
+                ),
               const Divider(height: 1),
               Expanded(
                 child: notes.isEmpty
                     ? DaywellEmptyState(
-                        icon: Icons.note_alt_outlined,
+                        icon: moduleState.sectionFilter == 'trash'
+                            ? Icons.delete_outline
+                            : Icons.note_alt_outlined,
                         message: moduleState.searchQuery.isNotEmpty
                             ? 'No notes match "${moduleState.searchQuery}"'
-                            : 'No notes in this view yet',
-                        actionLabel: 'Create First Note',
-                        onActionPressed: () => _openNoteEditor(),
+                            : moduleState.sectionFilter == 'trash'
+                                ? 'Trash is empty'
+                                : moduleState.sectionFilter == 'archive'
+                                    ? 'No archived notes yet'
+                                    : 'No notes in this view yet',
+                        actionLabel: moduleState.searchQuery.isEmpty &&
+                                moduleState.sectionFilter != 'trash' &&
+                                moduleState.sectionFilter != 'archive'
+                            ? 'Create First Note'
+                            : null,
+                        onActionPressed: moduleState.searchQuery.isEmpty &&
+                                moduleState.sectionFilter != 'trash' &&
+                                moduleState.sectionFilter != 'archive'
+                            ? () => _openNoteEditor()
+                            : null,
                       )
                     : moduleState.isGridView
                         ? GridView.builder(
@@ -312,7 +435,9 @@ class _NotesViewState extends State<NotesView> {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () => _openNoteEditor(note),
+        onTap: note.isTrashed
+            ? () => _promptRestoreTrashedNote(note)
+            : () => _openNoteEditor(note),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
@@ -329,10 +454,10 @@ class _NotesViewState extends State<NotesView> {
                           fontWeight: FontWeight.bold, fontSize: 15),
                     ),
                   ),
-                  if (note.isPinned)
+                  if (note.isPinned && !note.isTrashed && !note.isArchived)
                     const Icon(Icons.push_pin_rounded,
                         size: 16, color: SharedDesignTokens.primaryEmerald),
-                  if (note.isFavorite)
+                  if (note.isFavorite && !note.isTrashed && !note.isArchived)
                     const Icon(Icons.star_rounded,
                         size: 16, color: Colors.amber),
                   PopupMenuButton<String>(
@@ -371,22 +496,27 @@ class _NotesViewState extends State<NotesView> {
                       }
                     },
                     itemBuilder: (_) => [
-                      PopupMenuItem(
-                          value: 'pin',
-                          child: Text(note.isPinned ? 'Unpin' : 'Pin')),
-                      PopupMenuItem(
-                          value: 'fav',
-                          child: Text(note.isFavorite
-                              ? 'Remove Favorite'
-                              : 'Favorite')),
-                      const PopupMenuItem(
-                          value: 'duplicate', child: Text('Duplicate')),
+                      if (!note.isTrashed && !note.isArchived) ...[
+                        PopupMenuItem(
+                            value: 'pin',
+                            child: Text(note.isPinned ? 'Unpin' : 'Pin')),
+                        PopupMenuItem(
+                            value: 'fav',
+                            child: Text(note.isFavorite
+                                ? 'Remove Favorite'
+                                : 'Favorite')),
+                      ],
+                      if (!note.isTrashed) ...[
+                        const PopupMenuItem(
+                            value: 'duplicate', child: Text('Duplicate')),
+                      ],
                       const PopupMenuItem(
                           value: 'copy', child: Text('Copy Content')),
-                      PopupMenuItem(
-                          value: 'archive',
-                          child:
-                              Text(note.isArchived ? 'Unarchive' : 'Archive')),
+                      if (!note.isTrashed)
+                        PopupMenuItem(
+                            value: 'archive',
+                            child:
+                                Text(note.isArchived ? 'Unarchive' : 'Archive')),
                       PopupMenuItem(
                           value: 'trash',
                           child: Text(note.isTrashed
@@ -531,7 +661,15 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
   String? _linkedId;
   Timer? _autosaveTimer;
   String _saveStatus = 'Saved';
-  bool _isSaving = false;
+  String? _saveErrorMessage;
+  int _editRevision = 0;
+  int _savedRevision = 0;
+  Future<void> _savePipeline = Future<void>.value();
+  bool _isDisposed = false;
+  bool _allowDiscardOnNextPop = false;
+
+  bool get _hasPendingChanges =>
+      _editRevision > _savedRevision || _saveErrorMessage != null;
 
   @override
   void initState() {
@@ -541,66 +679,169 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         TextEditingController(text: widget.existingNote?.title ?? '');
     _contentController =
         TextEditingController(text: widget.existingNote?.content ?? '');
-    _category = widget.existingNote?.category ?? 'reflection';
-    _tags = List<String>.from(widget.existingNote?.tags ?? const []);
+    _category = widget.existingNote != null
+        ? NoteDomainHelpers.normalizeFlutterCategory(
+            widget.existingNote!.category,
+          )
+        : 'reflection';
+    _tags = NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
+        .toList();
     _linkedModule = widget.existingNote?.linkedModule;
     _linkedId = widget.existingNote?.linkedId;
   }
 
   @override
   void dispose() {
+    _isDisposed = true;
     _autosaveTimer?.cancel();
-    unawaited(_saveNow(fromDispose: true));
+    if (_hasPendingChanges) {
+      final finalSnapshot = _captureSnapshot();
+      unawaited(_enqueueSaveSnapshot(finalSnapshot, fromDispose: true));
+    }
     _titleController.dispose();
     _contentController.dispose();
     super.dispose();
   }
 
-  void _scheduleAutosave() {
-    setState(() => _saveStatus = 'Saving...');
-    _autosaveTimer?.cancel();
-    _autosaveTimer = Timer(
-      const Duration(milliseconds: 600),
-      () => unawaited(_saveNow()),
+  _NoteDraftSnapshot _captureSnapshot() {
+    return (
+      revision: _editRevision,
+      title: _titleController.text,
+      content: _contentController.text,
+      category: _category,
+      tags: List<String>.unmodifiable(_tags),
+      linkedModule: _linkedModule,
+      linkedId: _linkedId,
     );
   }
 
-  Future<void> _saveNow({bool fromDispose = false}) async {
-    if (_isSaving) return;
-    final title = _titleController.text.trim();
-    final content = _contentController.text;
-    if (title.isEmpty && content.trim().isEmpty) return;
-
-    _isSaving = true;
-    try {
-      if (_noteId == null) {
-        final created = await widget.controller.createNote(
-          title: title.isEmpty ? 'Untitled Note' : title,
-          content: content,
-          category: _category,
-          tags: _tags,
-          linkedModule: _linkedModule,
-          linkedId: _linkedId,
-        );
-        _noteId = created.id;
-      } else {
-        await widget.controller.updateNote(
-          id: _noteId!,
-          title: title.isEmpty ? 'Untitled Note' : title,
-          content: content,
-          category: _category,
-          tags: _tags,
-          linkedModule: _linkedModule,
-          linkedId: _linkedId,
-          clearLink: _linkedModule == null || _linkedId == null,
-        );
-      }
-      if (!fromDispose && mounted) {
-        setState(() => _saveStatus = 'Saved');
-      }
-    } finally {
-      _isSaving = false;
+  void _markDirty({bool scheduleTimer = true}) {
+    _editRevision++;
+    _allowDiscardOnNextPop = false;
+    _saveErrorMessage = null;
+    setState(() => _saveStatus = 'Saving...');
+    _autosaveTimer?.cancel();
+    if (scheduleTimer) {
+      _autosaveTimer = Timer(
+        const Duration(milliseconds: 600),
+        () => unawaited(_flushPendingSaves()),
+      );
     }
+  }
+
+  Future<bool> _flushPendingSaves({bool fromDispose = false}) {
+    _autosaveTimer?.cancel();
+    if (!_hasPendingChanges && !fromDispose) {
+      return Future<bool>.value(true);
+    }
+    final snapshot = _captureSnapshot();
+    return _enqueueSaveSnapshot(snapshot, fromDispose: fromDispose);
+  }
+
+  Future<bool> _enqueueSaveSnapshot(
+    _NoteDraftSnapshot snapshot, {
+    required bool fromDispose,
+  }) {
+    final completer = Completer<bool>();
+    _savePipeline = _savePipeline.catchError((Object _) {}).then((_) async {
+      final ok = await _persistSnapshot(snapshot, fromDispose: fromDispose);
+      completer.complete(ok);
+    });
+    return completer.future;
+  }
+
+  Future<bool> _persistSnapshot(
+    _NoteDraftSnapshot snapshot, {
+    required bool fromDispose,
+  }) async {
+    if (!fromDispose && !_isDisposed && snapshot.revision < _editRevision) {
+      return true;
+    }
+
+    final isNewBlankDraft = _noteId == null &&
+        snapshot.title.trim().isEmpty &&
+        snapshot.content.trim().isEmpty;
+    if (isNewBlankDraft) {
+      if (snapshot.revision > _savedRevision) {
+        _savedRevision = snapshot.revision;
+      }
+      if (!fromDispose && mounted && _editRevision == _savedRevision) {
+        setState(() {
+          _saveErrorMessage = null;
+          _saveStatus = 'Saved';
+        });
+      }
+      return true;
+    }
+
+    final persistTitle = NoteDomainHelpers.normalizeTitle(snapshot.title);
+
+    if (_noteId == null) {
+      final created = await widget.controller.createNote(
+        title: persistTitle,
+        content: snapshot.content,
+        category: snapshot.category,
+        tags: snapshot.tags,
+        linkedModule: snapshot.linkedModule,
+        linkedId: snapshot.linkedId,
+      );
+      final err = widget.controller.state.errorMessage;
+      final persisted = widget.controller.state.findById(created.id);
+      if (err != null || persisted == null) {
+        if (!fromDispose && mounted) {
+          setState(() {
+            _saveStatus = 'Save failed';
+            _saveErrorMessage = err ?? 'Unable to save note.';
+          });
+        }
+        return false;
+      }
+      _noteId = persisted.id;
+      _savedRevision = snapshot.revision;
+    } else {
+      await widget.controller.updateNote(
+        id: _noteId!,
+        title: persistTitle,
+        content: snapshot.content,
+        category: snapshot.category,
+        tags: snapshot.tags,
+        linkedModule: snapshot.linkedModule,
+        linkedId: snapshot.linkedId,
+        clearLink: snapshot.linkedModule == null || snapshot.linkedId == null,
+      );
+      final err = widget.controller.state.errorMessage;
+      if (err != null) {
+        if (!fromDispose && mounted) {
+          setState(() {
+            _saveStatus = 'Save failed';
+            _saveErrorMessage = err;
+          });
+        }
+        return false;
+      }
+      _savedRevision = snapshot.revision;
+    }
+
+    if (!fromDispose && mounted) {
+      setState(() {
+        _saveErrorMessage = null;
+        _saveStatus =
+            _editRevision == _savedRevision ? 'Saved' : 'Saving...';
+      });
+    }
+    return true;
+  }
+
+  Future<void> _handleTogglePin() async {
+    final ok = await _flushPendingSaves();
+    if (!ok || _noteId == null) return;
+    await widget.controller.togglePin(_noteId!);
+  }
+
+  Future<void> _handleToggleFavorite() async {
+    final ok = await _flushPendingSaves();
+    if (!ok || _noteId == null) return;
+    await widget.controller.toggleFavorite(_noteId!);
   }
 
   Future<void> _linkTask(TaskEntity task) async {
@@ -608,12 +849,9 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
       _linkedModule = NoteEntity.taskLinkModule;
       _linkedId = task.id;
     });
+    _markDirty(scheduleTimer: false);
     if (_noteId != null) {
-      await widget.controller.linkNoteToEntity(
-        _noteId!,
-        module: NoteEntity.taskLinkModule,
-        entityId: task.id,
-      );
+      await _flushPendingSaves();
     }
   }
 
@@ -624,8 +862,9 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
       _linkedModule = null;
       _linkedId = null;
     });
+    _markDirty(scheduleTimer: false);
     if (_noteId != null) {
-      await widget.controller.unlinkNote(_noteId!);
+      await _flushPendingSaves();
     }
     if (!mounted || prevModule == null || prevId == null) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -640,15 +879,10 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
                 _linkedModule = prevModule;
                 _linkedId = prevId;
               });
-            }
-            if (_noteId != null) {
-              unawaited(
-                widget.controller.linkNoteToEntity(
-                  _noteId!,
-                  module: prevModule,
-                  entityId: prevId,
-                ),
-              );
+              _markDirty(scheduleTimer: false);
+              if (_noteId != null) {
+                unawaited(_flushPendingSaves());
+              }
             }
           },
         ),
@@ -692,7 +926,7 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         offset: start + prefix.length + selected.length + suffix.length,
       ),
     );
-    _scheduleAutosave();
+    _markDirty();
   }
 
   void _addTagDialog() {
@@ -714,11 +948,16 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
             ),
             FilledButton(
               onPressed: () {
-                final tag = ctrl.text.trim().replaceAll('#', '');
-                if (tag.isNotEmpty && !_tags.contains(tag)) {
-                  setState(() => _tags.add(tag));
-                  if (_noteId != null) {
-                    unawaited(widget.controller.updateTags(_noteId!, _tags));
+                final candidate = ctrl.text.trim().replaceAll('#', '').trim();
+                if (candidate.isNotEmpty) {
+                  final nextTags =
+                      NoteDomainHelpers.normalizeTags([..._tags, candidate]);
+                  if (nextTags.length != _tags.length) {
+                    setState(() => _tags = nextTags.toList());
+                    _markDirty(scheduleTimer: false);
+                    if (_noteId != null) {
+                      unawaited(_flushPendingSaves());
+                    }
                   }
                 }
                 Navigator.pop(ctx);
@@ -726,6 +965,24 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
               child: const Text('Add'),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handlePopAttempt() async {
+    final ok = await _flushPendingSaves();
+    if (!mounted) return;
+    if (ok) {
+      Navigator.of(context).pop();
+      return;
+    }
+    setState(() => _allowDiscardOnNextPop = true);
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Could not save changes. Tap Back again to discard unsaved edits.',
         ),
       ),
     );
@@ -758,259 +1015,296 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
             : null;
         final semantic = context.daywellColors;
         final colorScheme = Theme.of(context).colorScheme;
+        const baseDropdownOrder = [
+          'reflection',
+          'reference',
+          'learning',
+          'general',
+        ];
+        final extraDropdownCategories = widget
+            .controller.state.availableCategories
+            .where((c) => !baseDropdownOrder.contains(c))
+            .toList()
+          ..sort();
+        final dropdownCategories = <String>[
+          ...baseDropdownOrder,
+          ...extraDropdownCategories,
+          if (!baseDropdownOrder.contains(_category) &&
+              !extraDropdownCategories.contains(_category))
+            _category,
+        ];
 
-        return Scaffold(
-          appBar: AppBar(
-            title: Text(
-              _saveStatus,
-              style: const TextStyle(fontSize: 13, color: Colors.grey),
-            ),
-            actions: [
-              if (_noteId != null) ...[
-                IconButton(
-                  icon: Icon(
-                    isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                  ),
-                  onPressed: () =>
-                      unawaited(widget.controller.togglePin(_noteId!)),
+        return PopScope<Object?>(
+          canPop: !_hasPendingChanges || _allowDiscardOnNextPop,
+          onPopInvokedWithResult: (bool didPop, Object? _) {
+            if (!didPop) {
+              unawaited(_handlePopAttempt());
+            }
+          },
+          child: Scaffold(
+            appBar: AppBar(
+              title: Text(
+                _saveStatus,
+                style: TextStyle(
+                  fontSize: 13,
+                  color: _saveStatus == 'Save failed'
+                      ? colorScheme.error
+                      : Colors.grey,
                 ),
+              ),
+              actions: [
+                if (_noteId != null) ...[
+                  IconButton(
+                    icon: Icon(
+                      isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                    ),
+                    onPressed: () => unawaited(_handleTogglePin()),
+                  ),
+                  IconButton(
+                    icon: Icon(isFavorite ? Icons.star : Icons.star_border),
+                    onPressed: () => unawaited(_handleToggleFavorite()),
+                  ),
+                ],
                 IconButton(
-                  icon: Icon(isFavorite ? Icons.star : Icons.star_border),
-                  onPressed: () =>
-                      unawaited(widget.controller.toggleFavorite(_noteId!)),
+                  icon: const Icon(Icons.copy_rounded),
+                  onPressed: () {
+                    unawaited(
+                      Clipboard.setData(
+                        ClipboardData(
+                          text:
+                              '${_titleController.text}\n\n${_contentController.text}',
+                        ),
+                      ),
+                    );
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Note copied to clipboard')),
+                    );
+                  },
                 ),
               ],
-              IconButton(
-                icon: const Icon(Icons.copy_rounded),
-                onPressed: () {
-                  unawaited(
-                    Clipboard.setData(
-                      ClipboardData(
-                        text:
-                            '${_titleController.text}\n\n${_contentController.text}',
-                      ),
+            ),
+            body: Column(
+              children: [
+                if (_saveErrorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                    child: DaywellStatusBanner(
+                      tone: DaywellStatusTone.error,
+                      title: 'Unable to save note',
+                      message: _saveErrorMessage!,
+                      actionLabel: 'Retry',
+                      onActionPressed: () => unawaited(_flushPendingSaves()),
                     ),
-                  );
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Note copied to clipboard')),
-                  );
-                },
-              ),
-            ],
-          ),
-          body: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: TextField(
-                  controller: _titleController,
-                  style: const TextStyle(
-                      fontSize: 22, fontWeight: FontWeight.bold),
-                  decoration: const InputDecoration(
-                    hintText: 'Note title...',
-                    border: InputBorder.none,
                   ),
-                  onChanged: (_) => _scheduleAutosave(),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Wrap(
-                  spacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    DropdownButton<String>(
-                      value: _category,
-                      underline: const SizedBox.shrink(),
-                      items: const [
-                        DropdownMenuItem(
-                            value: 'reflection', child: Text('Reflection')),
-                        DropdownMenuItem(
-                            value: 'reference', child: Text('Reference')),
-                        DropdownMenuItem(
-                            value: 'learning', child: Text('Learning')),
-                        DropdownMenuItem(
-                            value: 'general', child: Text('General')),
-                      ],
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() => _category = val);
-                          _scheduleAutosave();
-                        }
-                      },
-                    ),
-                    ActionChip(
-                      avatar: const Icon(Icons.tag, size: 14),
-                      label:
-                          const Text('Add Tag', style: TextStyle(fontSize: 12)),
-                      onPressed: _addTagDialog,
-                    ),
-                    if (tasksCtrl != null && !isTaskLinked)
-                      ActionChip(
-                        avatar: const Icon(Icons.add_link, size: 14),
-                        label: const Text('Link Task',
-                            style: TextStyle(fontSize: 12)),
-                        onPressed: _openTaskPicker,
-                      ),
-                  ],
-                ),
-              ),
-              if (isTaskLinked)
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: colorScheme.primaryContainer,
-                      borderRadius:
-                          BorderRadius.circular(SharedDesignTokens.radiusSm),
-                      border: Border.all(color: semantic.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.check_circle_outline,
-                          size: 16,
-                          color: linkedTask != null
-                              ? colorScheme.primary
-                              : semantic.textMuted,
-                        ),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            linkedTask != null
-                                ? 'Linked Task: ${linkedTask.title}'
-                                : 'Linked task unavailable',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                      color: linkedTask != null
-                                          ? colorScheme.onPrimaryContainer
-                                          : semantic.textMuted,
-                                    ),
-                          ),
-                        ),
-                        if (linkedTask != null && widget.onOpenTask != null)
-                          TextButton(
-                            onPressed: () async {
-                              await _saveNow();
-                              if (context.mounted) {
-                                Navigator.pop(context);
-                              }
-                              widget.onOpenTask!(linkedTask.id);
-                            },
-                            child: const Text('Open'),
-                          ),
-                        if (tasksCtrl != null)
-                          IconButton(
-                            icon: const Icon(Icons.swap_horiz, size: 18),
-                            tooltip: 'Change Linked Task',
-                            onPressed: _openTaskPicker,
-                          ),
-                        IconButton(
-                          icon: const Icon(Icons.link_off_outlined, size: 18),
-                          tooltip: 'Unlink Task',
-                          onPressed: () => unawaited(_unlinkTask()),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              if (_tags.isNotEmpty)
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                  child: Wrap(
-                    spacing: 6,
-                    children: _tags
-                        .map(
-                          (t) => Chip(
-                            label: Text('#$t',
-                                style: const TextStyle(fontSize: 11)),
-                            onDeleted: () {
-                              setState(() => _tags.remove(t));
-                              if (_noteId != null) {
-                                unawaited(
-                                  widget.controller.updateTags(_noteId!, _tags),
-                                );
-                              }
-                            },
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
-              const Divider(height: 1),
-              Expanded(
-                child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: TextField(
-                    controller: _contentController,
-                    maxLines: null,
-                    expands: true,
-                    textAlignVertical: TextAlignVertical.top,
+                    controller: _titleController,
+                    style: const TextStyle(
+                        fontSize: 22, fontWeight: FontWeight.bold),
                     decoration: const InputDecoration(
-                      hintText: 'Start writing (English & Amharic / ፊደል)...',
+                      hintText: 'Note title...',
                       border: InputBorder.none,
                     ),
-                    onChanged: (_) => _scheduleAutosave(),
+                    onChanged: (_) => _markDirty(),
                   ),
                 ),
-              ),
-              Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  border: Border(
-                      top: BorderSide(color: Colors.grey.withOpacity(0.2))),
-                ),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Row(
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      IconButton(
-                          icon: const Icon(Icons.title),
-                          tooltip: 'Heading',
-                          onPressed: () => _insertFormat('# ')),
-                      IconButton(
-                          icon: const Icon(Icons.format_bold),
-                          tooltip: 'Bold',
-                          onPressed: () => _insertFormat('**', '**')),
-                      IconButton(
-                          icon: const Icon(Icons.format_italic),
-                          tooltip: 'Italic',
-                          onPressed: () => _insertFormat('*', '*')),
-                      IconButton(
-                          icon: const Icon(Icons.format_list_bulleted),
-                          tooltip: 'Bullet',
-                          onPressed: () => _insertFormat('- ')),
-                      IconButton(
-                          icon: const Icon(Icons.format_list_numbered),
-                          tooltip: 'Numbered',
-                          onPressed: () => _insertFormat('1. ')),
-                      IconButton(
-                          icon: const Icon(Icons.check_box_outlined),
-                          tooltip: 'Checklist',
-                          onPressed: () => _insertFormat('- [ ] ')),
-                      IconButton(
-                          icon: const Icon(Icons.format_quote),
-                          tooltip: 'Quote',
-                          onPressed: () => _insertFormat('> ')),
-                      IconButton(
-                          icon: const Icon(Icons.link),
-                          tooltip: 'Link Note',
-                          onPressed: () => _insertFormat('[[', ']]')),
+                      DropdownButton<String>(
+                        value: _category,
+                        underline: const SizedBox.shrink(),
+                        items: [
+                          for (final cat in dropdownCategories)
+                            DropdownMenuItem(
+                              value: cat,
+                              child: Text(_formatFolderLabel(cat)),
+                            ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null && val != _category) {
+                            setState(() => _category = val);
+                            _markDirty();
+                          }
+                        },
+                      ),
+                      ActionChip(
+                        avatar: const Icon(Icons.tag, size: 14),
+                        label: const Text('Add Tag',
+                            style: TextStyle(fontSize: 12)),
+                        onPressed: _addTagDialog,
+                      ),
+                      if (tasksCtrl != null && !isTaskLinked)
+                        ActionChip(
+                          avatar: const Icon(Icons.add_link, size: 14),
+                          label: const Text('Link Task',
+                              style: TextStyle(fontSize: 12)),
+                          onPressed: _openTaskPicker,
+                        ),
                     ],
                   ),
                 ),
-              ),
-            ],
+                if (isTaskLinked)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colorScheme.primaryContainer,
+                        borderRadius:
+                            BorderRadius.circular(SharedDesignTokens.radiusSm),
+                        border: Border.all(color: semantic.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: 16,
+                            color: linkedTask != null
+                                ? colorScheme.primary
+                                : semantic.textMuted,
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              linkedTask != null
+                                  ? 'Linked Task: ${linkedTask.title}'
+                                  : 'Linked task unavailable',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color: linkedTask != null
+                                        ? colorScheme.onPrimaryContainer
+                                        : semantic.textMuted,
+                                  ),
+                            ),
+                          ),
+                          if (linkedTask != null && widget.onOpenTask != null)
+                            TextButton(
+                              onPressed: () async {
+                                final ok = await _flushPendingSaves();
+                                if (!ok || !context.mounted) return;
+                                Navigator.pop(context);
+                                widget.onOpenTask!(linkedTask.id);
+                              },
+                              child: const Text('Open'),
+                            ),
+                          if (tasksCtrl != null)
+                            IconButton(
+                              icon: const Icon(Icons.swap_horiz, size: 18),
+                              tooltip: 'Change Linked Task',
+                              onPressed: _openTaskPicker,
+                            ),
+                          IconButton(
+                            icon: const Icon(Icons.link_off_outlined, size: 18),
+                            tooltip: 'Unlink Task',
+                            onPressed: () => unawaited(_unlinkTask()),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (_tags.isNotEmpty)
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                    child: Wrap(
+                      spacing: 6,
+                      children: _tags
+                          .map(
+                            (t) => Chip(
+                              label: Text('#$t',
+                                  style: const TextStyle(fontSize: 11)),
+                              onDeleted: () {
+                                setState(() => _tags.remove(t));
+                                _markDirty(scheduleTimer: false);
+                                if (_noteId != null) {
+                                  unawaited(_flushPendingSaves());
+                                }
+                              },
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                const Divider(height: 1),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: TextField(
+                      controller: _contentController,
+                      maxLines: null,
+                      expands: true,
+                      textAlignVertical: TextAlignVertical.top,
+                      decoration: const InputDecoration(
+                        hintText: 'Start writing (English & Amharic / ፊደል)...',
+                        border: InputBorder.none,
+                      ),
+                      onChanged: (_) => _markDirty(),
+                    ),
+                  ),
+                ),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).cardColor,
+                    border: Border(
+                        top: BorderSide(color: Colors.grey.withOpacity(0.2))),
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    child: Row(
+                      children: [
+                        IconButton(
+                            icon: const Icon(Icons.title),
+                            tooltip: 'Heading',
+                            onPressed: () => _insertFormat('# ')),
+                        IconButton(
+                            icon: const Icon(Icons.format_bold),
+                            tooltip: 'Bold',
+                            onPressed: () => _insertFormat('**', '**')),
+                        IconButton(
+                            icon: const Icon(Icons.format_italic),
+                            tooltip: 'Italic',
+                            onPressed: () => _insertFormat('*', '*')),
+                        IconButton(
+                            icon: const Icon(Icons.format_list_bulleted),
+                            tooltip: 'Bullet',
+                            onPressed: () => _insertFormat('- ')),
+                        IconButton(
+                            icon: const Icon(Icons.format_list_numbered),
+                            tooltip: 'Numbered',
+                            onPressed: () => _insertFormat('1. ')),
+                        IconButton(
+                            icon: const Icon(Icons.check_box_outlined),
+                            tooltip: 'Checklist',
+                            onPressed: () => _insertFormat('- [ ] ')),
+                        IconButton(
+                            icon: const Icon(Icons.format_quote),
+                            tooltip: 'Quote',
+                            onPressed: () => _insertFormat('> ')),
+                        IconButton(
+                            icon: const Icon(Icons.link),
+                            tooltip: 'Link Note',
+                            onPressed: () => _insertFormat('[[', ']]')),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         );
       },

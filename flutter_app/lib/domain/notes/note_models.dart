@@ -1,4 +1,5 @@
 import '../../core/date/shared_date.dart';
+import 'note_helpers.dart';
 
 /// Pure domain models for the Daywell Notes module.
 ///
@@ -62,31 +63,18 @@ class NoteEntity {
         updatedAt = (updatedAt ?? EthiopiaClock.nowUtc()).toUtc();
 
   static String normalizeCategory(String raw) {
-    final trimmed = raw.trim().toLowerCase();
-    return trimmed.isEmpty ? 'general' : trimmed;
+    return NoteDomainHelpers.normalizeFlutterCategory(raw);
   }
 
   static (String?, String?) normalizeLinkPair(
     String? rawModule,
     String? rawId,
   ) {
-    final mod = rawModule?.trim().toLowerCase();
-    final id = rawId?.trim();
-    if (mod == null ||
-        mod.isEmpty ||
-        !allowedLinkedModules.contains(mod) ||
-        id == null ||
-        id.isEmpty) {
-      return (null, null);
-    }
-    return (mod, id);
+    return NoteDomainHelpers.normalizeLinkPair(rawModule, rawId);
   }
 
   static String clampTitle(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) return 'Untitled Note';
-    if (trimmed.length <= maxTitleLength) return trimmed;
-    return trimmed.substring(0, maxTitleLength);
+    return NoteDomainHelpers.normalizeTitle(raw);
   }
 
   bool get isLinkedToTask =>
@@ -101,11 +89,10 @@ class NoteEntity {
   bool matchesQuery(String rawQuery) {
     final query = rawQuery.trim().toLowerCase();
     if (query.isEmpty) return true;
-    final tagsStr = tags.join(' ').toLowerCase();
     return title.toLowerCase().contains(query) ||
         content.toLowerCase().contains(query) ||
         category.toLowerCase().contains(query) ||
-        tagsStr.contains(query);
+        tags.any((t) => t.toLowerCase().contains(query));
   }
 
   NoteEntity copyWith({

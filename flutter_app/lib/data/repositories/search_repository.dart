@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import '../database/app_database.dart';
 
@@ -32,6 +33,16 @@ class DriftSearchRepository implements ISearchRepository {
   final AppDatabase _db;
 
   DriftSearchRepository(this._db);
+
+  static List<String> _decodeNoteTags(String raw) {
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      return decoded.map((e) => e.toString()).toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
 
   @override
   Future<List<SearchResultItem>> searchAll(
@@ -84,16 +95,18 @@ class DriftSearchRepository implements ISearchRepository {
       }
     }
 
-    // 3. Search Notes (excluding soft-trashed notes)
+    // 3. Search Notes (excluding soft-trashed notes, literal wildcard-safe match)
     if (entityFilter == null || entityFilter == 'note') {
-      final noteMatches = await (_db.select(_db.notes)
-            ..where((tbl) =>
-                tbl.isTrashed.equals(false) &
-                (tbl.title.lower().like('%$cleanQuery%') |
-                    tbl.content.lower().like('%$cleanQuery%') |
-                    tbl.tagsJson.lower().like('%$cleanQuery%'))))
+      final nonTrashedNotes = await (_db.select(_db.notes)
+            ..where((tbl) => tbl.isTrashed.equals(false)))
           .get();
-      for (final note in noteMatches) {
+      for (final note in nonTrashedNotes) {
+        final tags = _decodeNoteTags(note.tagsJson);
+        final matches = note.title.toLowerCase().contains(cleanQuery) ||
+            note.content.toLowerCase().contains(cleanQuery) ||
+            note.category.toLowerCase().contains(cleanQuery) ||
+            tags.any((t) => t.toLowerCase().contains(cleanQuery));
+        if (!matches) continue;
         final snippet = note.content.length > 80
             ? '${note.content.substring(0, 80)}...'
             : note.content;
