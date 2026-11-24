@@ -2158,11 +2158,11 @@ class _TasksViewState extends State<TasksView>
                                                 }
                                                 final prev = controller.state;
                                                 final prevTasks =
-                                                    [...prev.tasks];
+                                                    prev.tasks.toList();
                                                 final prevCustom =
-                                                    [...prev.customTags];
+                                                    prev.customTags.toList();
                                                 final prevFilters =
-                                                    {...prev.tagFilters};
+                                                    prev.tagFilters.toSet();
                                                 final ok =
                                                     await controller.renameTag(
                                                   lbl,
@@ -2273,11 +2273,12 @@ class _TasksViewState extends State<TasksView>
                                           tooltip: 'Delete tag $lbl',
                                           onPressed: () async {
                                             final prev = controller.state;
-                                            final prevTasks = [...prev.tasks];
+                                            final prevTasks =
+                                                prev.tasks.toList();
                                             final prevCustom =
-                                                [...prev.customTags];
+                                                prev.customTags.toList();
                                             final prevFilters =
-                                                {...prev.tagFilters};
+                                                prev.tagFilters.toSet();
                                             await controller.deleteTag(lbl);
                                             if (!mounted) return;
                                             ScaffoldMessenger.of(context)
@@ -3184,34 +3185,7 @@ class _TasksViewState extends State<TasksView>
                                     drCtrl: drCtrl,
                                   )
                                 : tasks.isEmpty
-                                    ? DaywellEmptyState(
-                                        icon: Icons.check_circle_outline,
-                                        message: moduleState.hasActiveFilters
-                                            ? 'No tasks match active filters'
-                                            : moduleState.viewFilter ==
-                                                    'archived'
-                                                ? 'No archived tasks'
-                                                : 'No tasks in ${moduleState.viewFilter}',
-                                        actionLabel: moduleState
-                                                .hasActiveFilters
-                                            ? 'Clear filters'
-                                            : moduleState.viewFilter ==
-                                                    'archived'
-                                                ? null
-                                                : 'Add Task',
-                                        onActionPressed: moduleState
-                                                .hasActiveFilters
-                                            ? () {
-                                                _searchController.clear();
-                                                controller.clearFilters(
-                                                  resetView: false,
-                                                );
-                                              }
-                                            : moduleState.viewFilter ==
-                                                    'archived'
-                                                ? null
-                                                : () => _showQuickAddModal(),
-                                      )
+                                    ? _buildEmptyState(controller, moduleState)
                                     : ListView.builder(
                                         padding: const EdgeInsets.all(12),
                                         itemCount: tasks.length,
@@ -3229,6 +3203,34 @@ class _TasksViewState extends State<TasksView>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildEmptyState(
+    TasksController controller,
+    TasksModuleState moduleState,
+  ) {
+    final isArchived = moduleState.viewFilter == 'archived';
+    return DaywellEmptyState(
+      icon: Icons.check_circle_outline,
+      message: moduleState.hasActiveFilters
+          ? 'No tasks match active filters'
+          : isArchived
+              ? 'No archived tasks'
+              : 'No tasks in ${moduleState.viewFilter}',
+      actionLabel: moduleState.hasActiveFilters
+          ? 'Clear filters'
+          : isArchived
+              ? null
+              : 'Add Task',
+      onActionPressed: moduleState.hasActiveFilters
+          ? () {
+              _searchController.clear();
+              controller.clearFilters(resetView: false);
+            }
+          : isArchived
+              ? null
+              : () => _showQuickAddModal(),
     );
   }
 
