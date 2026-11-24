@@ -48,7 +48,7 @@ describe('PERMANENT UI CONSISTENCY & CROSS-PLATFORM DESIGN GOVERNANCE', () => {
     assert.strictEqual(result.passed, true);
     assert.ok(result.checkedWebFiles >= 8, 'Expected App.tsx, index.css, and Web UI components to be scanned');
     assert.ok(result.checkedFlutterFiles >= 20, 'Expected Flutter UI files to be scanned');
-    assert.strictEqual(result.flutterAllowlistCount, 5);
+    assert.strictEqual(result.flutterAllowlistCount, 4);
   });
 
   it('2. Enforces zero hardcoded hex colors in Web UI (fails closed on unallowlisted #RGB/#RRGGBB)', () => {
@@ -157,7 +157,7 @@ describe('PERMANENT UI CONSISTENCY & CROSS-PLATFORM DESIGN GOVERNANCE', () => {
     }
   });
 
-  it('6. Migrated Flutter MoreView and DashboardView contain zero raw Colors.* or Color(0x...) literals', () => {
+  it('6. Migrated Flutter MoreView, DashboardView, and NotesView contain zero raw Colors.* or Color(0x...) literals', () => {
     const moreSource = fs.readFileSync(
       path.join(REPO_ROOT, 'flutter_app', 'lib', 'ui', 'screens', 'more_view.dart'),
       'utf8'
@@ -166,10 +166,15 @@ describe('PERMANENT UI CONSISTENCY & CROSS-PLATFORM DESIGN GOVERNANCE', () => {
       path.join(REPO_ROOT, 'flutter_app', 'lib', 'ui', 'screens', 'dashboard_view.dart'),
       'utf8'
     );
+    const notesSource = fs.readFileSync(
+      path.join(REPO_ROOT, 'flutter_app', 'lib', 'ui', 'screens', 'notes_view.dart'),
+      'utf8'
+    );
 
     for (const [name, src] of [
       ['more_view.dart', moreSource],
       ['dashboard_view.dart', dashboardSource],
+      ['notes_view.dart', notesSource],
     ] as const) {
       assert.strictEqual(/Color\(\s*0x/i.test(src), false, `${name} must contain zero Color(0x...) literals`);
       const materialColors = (src.match(/\bColors\.[a-zA-Z0-9_]+/g) || []).filter(
@@ -186,6 +191,11 @@ describe('PERMANENT UI CONSISTENCY & CROSS-PLATFORM DESIGN GOVERNANCE', () => {
     assert.ok(moreSource.includes('DaywellSectionHeader'), 'MoreView must use DaywellSectionHeader');
     assert.ok(moreSource.includes('context.daywellColors'), 'MoreView must use context.daywellColors');
     assert.ok(moreSource.includes('DaywellTypography'), 'MoreView must use DaywellTypography');
+    assert.ok(notesSource.includes('DaywellCard'), 'NotesView must use DaywellCard');
+    assert.ok(notesSource.includes('DaywellSearchFilterBar'), 'NotesView must use DaywellSearchFilterBar');
+    assert.ok(notesSource.includes('DaywellConfirmationDialog'), 'NotesView must use DaywellConfirmationDialog');
+    assert.ok(notesSource.includes('context.daywellColors'), 'NotesView must use context.daywellColors');
+    assert.ok(notesSource.includes('DaywellTypography'), 'NotesView must use DaywellTypography');
   });
 
   it('7. Design tokens JSON, TypeScript, CSS variables, and Dart constants match on primary, surface, spacing, radii, and breakpoints', () => {

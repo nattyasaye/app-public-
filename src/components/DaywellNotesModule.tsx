@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import {
   NotebookPen,
   Plus,
@@ -13,21 +13,45 @@ import {
   Check,
   Bold,
   Italic,
+  Strikethrough,
   List,
+  ListOrdered,
   CheckSquare,
+  Square,
   Code,
+  SquareCode,
   Quote,
   RotateCcw,
   AlertCircle,
   Link2,
+  Link2Off,
+  FileText,
   Unlink,
+  Eye,
+  Pencil,
 } from 'lucide-react';
 import { EthiopiaClock, SharedDateFormatter } from '../domain/date';
 import {
+  getNoteMarkdownChecklistAtSelection,
+  markdownToPlainText,
+  toggleNoteMarkdownChecklistAtLine,
+} from '../domain/noteMarkdown';
+import {
+  applyNoteSmartBackspace,
+  applyNoteSmartEnter,
+  applyNoteToolbarFormat,
+  NoteToolbarFormatAction,
+} from '../domain/noteEditorFormatting';
+import {
+  isNoteActive,
   isNoteArchived,
   isNoteTrashed,
   normalizeNoteTags,
 } from '../domain/noteHelpers';
+import {
+  findNoteBacklinks,
+  NoteLinkCandidateShape,
+} from '../domain/noteLinks';
 import { DaywellTaskRecord } from '../domain/taskOperations';
 import {
   getLinkedTaskForNote,
@@ -63,6 +87,7 @@ import {
   DaywellStatusBadge,
   DaywellStatusBanner,
 } from './ui';
+import { NoteMarkdownPreview } from './notes/NoteMarkdownPreview';
 
 export interface DaywellNote {
   id: string;
@@ -192,6 +217,40 @@ export function DaywellNotesModule({
   const [editTags, setEditTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
+  const [editorMode, setEditorMode] = useState<'write' | 'preview'>('write');
+
+  const contentTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const lastContentSelectionRef = useRef<{ start: number; end: number }>({
+    start: 0,
+    end: 0,
+  });
+  const [contentSelection, setContentSelection] = useState<{
+    start: number;
+    end: number;
+  }>({ start: 0, end: 0 });
+  const pendingContentSelectionRef = useRef<{
+    start: number;
+    end: number;
+  } | null>(null);
+
+  const updateTrackedSelection = (start: number, end: number) => {
+    lastContentSelectionRef.current = { start, end };
+    setContentSelection((prev) =>
+      prev.start === start && prev.end === end ? prev : { start, end }
+    );
+  };
+
+  const activeWriteChecklist = useMemo(
+    () =>
+      editorMode === 'write'
+        ? getNoteMarkdownChecklistAtSelection(
+            editContent,
+            contentSelection.start,
+            contentSelection.end
+          )
+        : null,
+    [editorMode, editContent, contentSelection]
+  );
 
   const draftFieldsRef = useRef({
     title: editTitle,
@@ -229,6 +288,10 @@ export function DaywellNotesModule({
     useState<DaywellNote | null>(null);
   const [isConfirmEmptyTrashOpen, setIsConfirmEmptyTrashOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [ambiguousLinkChoice, setAmbiguousLinkChoice] = useState<{
+    targetTitle: string;
+    matches: DaywellNote[];
+  } | null>(null);
 
   const noteCounts = useMemo(() => getWebNoteCounts(notes), [notes]);
 
@@ -257,6 +320,39 @@ export function DaywellNotesModule({
     [notes, selectedNoteId]
   );
 
+  const liveNotesForInternalLinks = useMemo(() => {
+    if (!isEditorOpen || !selectedNoteId) return notes;
+    return notes.map((n) =>
+      n.id === selectedNoteId
+        ? {
+            ...n,
+            title: editTitle,
+            content: editContent,
+            notebook: editNotebook,
+            tags: editTags,
+          }
+        : n
+    );
+  }, [notes, isEditorOpen, selectedNoteId, editTitle, editContent, editNotebook, editTags]);
+
+  const currentNoteBacklinks = useMemo(() => {
+    if (!isEditorOpen) return [];
+    const targetForBacklinks = {
+      id: selectedNoteId ?? '__new_draft__',
+      title: editTitle,
+      isArchived: currentEditorNote?.isArchived ?? false,
+      isTrashed: currentEditorNote?.isTrashed ?? false,
+    };
+    return findNoteBacklinks(targetForBacklinks, liveNotesForInternalLinks);
+  }, [
+    isEditorOpen,
+    selectedNoteId,
+    editTitle,
+    currentEditorNote?.isArchived,
+    currentEditorNote?.isTrashed,
+    liveNotesForInternalLinks,
+  ]);
+
   const isCurrentNewDraftBlank =
     selectedNoteId === null &&
     isNoteDraftBlank({
@@ -281,13 +377,17 @@ export function DaywellNotesModule({
     };
   }, []);
 
-  const openEditor = (note: DaywellNote) => {
+  const openEditor = (
+    note: DaywellNote,
+    options?: { preserveMode?: boolean }
+  ) => {
     if (isNoteTrashed(note)) {
       setActiveTab('trash');
       triggerFeedback('Restore note from Trash before editing.');
       return;
     }
     clearAutosaveTimer();
+    setAmbiguousLinkChoice(null);
     selectedNoteIdRef.current = note.id;
     setSelectedNoteId(note.id);
     setEditTitle(note.title);
@@ -296,11 +396,54 @@ export function DaywellNotesModule({
     setEditTags([...note.tags]);
     setTagInput('');
     setSaveStatus('saved');
+    if (!options?.preserveMode) {
+      setEditorMode('write');
+    }
+    updateTrackedSelection(note.content.length, note.content.length);
+    pendingContentSelectionRef.current = null;
     setIsEditorOpen(true);
+  };
+
+  const handleNavigateToInternalNote = (targetNoteId: string) => {
+    setAmbiguousLinkChoice(null);
+    if (isEditorOpen && selectedNoteIdRef.current === targetNoteId) {
+      return;
+    }
+    if (isEditorOpen) {
+      commitEditorDraftToNote();
+    }
+    const freshTarget = notesRef.current.find((n) => n.id === targetNoteId);
+    if (!freshTarget || !isNoteActive(freshTarget)) {
+      triggerFeedback('Referenced note is unavailable.', undefined, true);
+      return;
+    }
+    setSearchQuery('');
+    setActiveTab('all');
+    openEditor(freshTarget, { preserveMode: isEditorOpen });
+  };
+
+  const handleOpenAmbiguousInternalLink = (
+    targetTitle: string,
+    matches: readonly NoteLinkCandidateShape[]
+  ) => {
+    const resolvedMatches = matches
+      .map((m) => notesRef.current.find((n) => n.id === m.id) ?? (m as DaywellNote))
+      .filter((n) => isNoteActive(n));
+    if (resolvedMatches.length === 1) {
+      handleNavigateToInternalNote(resolvedMatches[0].id);
+      return;
+    }
+    if (resolvedMatches.length > 1) {
+      setAmbiguousLinkChoice({
+        targetTitle,
+        matches: resolvedMatches,
+      });
+    }
   };
 
   const handleCreateNote = () => {
     clearAutosaveTimer();
+    setAmbiguousLinkChoice(null);
     selectedNoteIdRef.current = null;
     setSelectedNoteId(null);
     setEditTitle('');
@@ -309,6 +452,9 @@ export function DaywellNotesModule({
     setEditTags([]);
     setTagInput('');
     setSaveStatus('saved');
+    setEditorMode('write');
+    updateTrackedSelection(0, 0);
+    pendingContentSelectionRef.current = null;
     setIsEditorOpen(true);
   };
 
@@ -697,30 +843,123 @@ export function DaywellNotesModule({
     );
   };
 
-  const insertFormatting = (prefix: string, suffix: string = '') => {
-    const textarea = document.getElementById(
-      'note-content-editor'
-    ) as HTMLTextAreaElement | null;
+  useLayoutEffect(() => {
+    const pending = pendingContentSelectionRef.current;
+    if (!pending || editorMode !== 'write') return;
+    pendingContentSelectionRef.current = null;
+    const textarea = contentTextareaRef.current;
     if (!textarea) return;
+    const maxLen = textarea.value.length;
+    const start = Math.max(0, Math.min(maxLen, pending.start));
+    const end = Math.max(0, Math.min(maxLen, pending.end));
+    textarea.setSelectionRange(start, end);
+  }, [editContent, editorMode]);
 
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    const selected = textarea.value.substring(start, end) || 'text';
-    const replacement = `${prefix}${selected}${suffix}`;
+  const syncTextareaSelection = (textarea: HTMLTextAreaElement) => {
+    updateTrackedSelection(
+      textarea.selectionStart ?? 0,
+      textarea.selectionEnd ?? 0
+    );
+  };
 
-    const newContent =
-      textarea.value.substring(0, start) +
-      replacement +
-      textarea.value.substring(end);
-    setEditContent(newContent);
+  const handleToggleChecklistLine = (lineIndex: number) => {
+    const currentText = draftFieldsRef.current.content;
+    const toggled = toggleNoteMarkdownChecklistAtLine(currentText, lineIndex);
+    if (!toggled) return;
 
-    setTimeout(() => {
-      textarea.focus();
-      textarea.setSelectionRange(
-        start + prefix.length,
-        start + prefix.length + selected.length
-      );
-    }, 50);
+    const textarea = contentTextareaRef.current;
+    const hasTextareaSelection =
+      editorMode === 'write' &&
+      textarea !== null &&
+      typeof document !== 'undefined' &&
+      document.activeElement === textarea;
+
+    const rawStart = hasTextareaSelection
+      ? textarea.selectionStart ?? lastContentSelectionRef.current.start
+      : lastContentSelectionRef.current.start;
+    const rawEnd = hasTextareaSelection
+      ? textarea.selectionEnd ?? rawStart
+      : lastContentSelectionRef.current.end;
+
+    const nextStart = Math.max(0, Math.min(toggled.text.length, rawStart));
+    const nextEnd = Math.max(0, Math.min(toggled.text.length, rawEnd));
+
+    draftFieldsRef.current.content = toggled.text;
+    updateTrackedSelection(nextStart, nextEnd);
+    if (editorMode === 'write') {
+      pendingContentSelectionRef.current = { start: nextStart, end: nextEnd };
+    }
+    setEditContent(toggled.text);
+  };
+
+  const applyToolbarFormatting = (action: NoteToolbarFormatAction) => {
+    const textarea = contentTextareaRef.current;
+    const currentText = draftFieldsRef.current.content;
+    const hasTextareaSelection =
+      textarea !== null &&
+      typeof document !== 'undefined' &&
+      document.activeElement === textarea;
+
+    const rawStart = hasTextareaSelection
+      ? textarea.selectionStart ?? 0
+      : lastContentSelectionRef.current.start;
+    const rawEnd = hasTextareaSelection
+      ? textarea.selectionEnd ?? rawStart
+      : lastContentSelectionRef.current.end;
+
+    const next = applyNoteToolbarFormat(currentText, rawStart, rawEnd, action);
+    draftFieldsRef.current.content = next.text;
+    updateTrackedSelection(next.selectionStart, next.selectionEnd);
+    pendingContentSelectionRef.current = {
+      start: next.selectionStart,
+      end: next.selectionEnd,
+    };
+    setEditContent(next.text);
+  };
+
+  const handleEditorContentKeyDown = (
+    e: React.KeyboardEvent<HTMLTextAreaElement>
+  ) => {
+    if (
+      e.nativeEvent.isComposing ||
+      e.shiftKey ||
+      e.ctrlKey ||
+      e.metaKey ||
+      e.altKey
+    ) {
+      return;
+    }
+
+    const textarea = e.currentTarget;
+    const start = textarea.selectionStart ?? 0;
+    const end = textarea.selectionEnd ?? start;
+
+    if (e.key === 'Enter') {
+      const next = applyNoteSmartEnter(textarea.value, start, end);
+      if (!next) return;
+      e.preventDefault();
+      draftFieldsRef.current.content = next.text;
+      updateTrackedSelection(next.selectionStart, next.selectionEnd);
+      pendingContentSelectionRef.current = {
+        start: next.selectionStart,
+        end: next.selectionEnd,
+      };
+      setEditContent(next.text);
+      return;
+    }
+
+    if (e.key === 'Backspace') {
+      const next = applyNoteSmartBackspace(textarea.value, start, end);
+      if (!next) return;
+      e.preventDefault();
+      draftFieldsRef.current.content = next.text;
+      updateTrackedSelection(next.selectionStart, next.selectionEnd);
+      pendingContentSelectionRef.current = {
+        start: next.selectionStart,
+        end: next.selectionEnd,
+      };
+      setEditContent(next.text);
+    }
   };
 
   const handleAddTag = () => {
@@ -1043,7 +1282,7 @@ export function DaywellNotesModule({
 
                   {note.content && (
                     <p className="dw-type-body-compact text-[var(--dw-text-secondary)] line-clamp-2">
-                      {note.content.replace(/[#*`>]/g, '')}
+                      {markdownToPlainText(note.content) || note.content}
                     </p>
                   )}
 
@@ -1333,86 +1572,396 @@ export function DaywellNotesModule({
             ) : null
           )}
 
-          {/* Formatting Toolbar */}
-          <div className="flex items-center gap-1 p-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] overflow-x-auto">
-            <button
-              type="button"
-              onClick={() => insertFormatting('## ', '')}
-              className="min-w-[34px] min-h-[34px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-xs font-bold text-[var(--dw-text-secondary)] cursor-pointer"
-              title="Heading"
+          {/* Write / Preview Switcher */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div
+              role="tablist"
+              aria-label="Note editor mode"
+              className="inline-flex items-center p-1 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] gap-1"
             >
-              H2
-            </button>
-            <button
-              type="button"
-              onClick={() => insertFormatting('**', '**')}
-              className="min-w-[34px] min-h-[34px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center"
-              title="Bold"
-            >
-              <Bold className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => insertFormatting('*', '*')}
-              className="min-w-[34px] min-h-[34px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center"
-              title="Italic"
-            >
-              <Italic className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => insertFormatting('- ', '')}
-              className="min-w-[34px] min-h-[34px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center"
-              title="Bullet List"
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => insertFormatting('- [ ] ', '')}
-              className="min-w-[34px] min-h-[34px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center"
-              title="Checklist"
-            >
-              <CheckSquare className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => insertFormatting('> ', '')}
-              className="min-w-[34px] min-h-[34px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center"
-              title="Quote"
-            >
-              <Quote className="w-3.5 h-3.5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => insertFormatting('`', '`')}
-              className="min-w-[34px] min-h-[34px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center"
-              title="Inline Code"
-            >
-              <Code className="w-3.5 h-3.5" />
-            </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={editorMode === 'write'}
+                onClick={() => setEditorMode('write')}
+                className={`min-h-[36px] px-3 py-1.5 rounded-[var(--dw-radius-sm)] text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+                  editorMode === 'write'
+                    ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] font-bold'
+                    : 'text-[var(--dw-text-secondary)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                <span>Write</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={editorMode === 'preview'}
+                onClick={() => setEditorMode('preview')}
+                className={`min-h-[36px] px-3 py-1.5 rounded-[var(--dw-radius-sm)] text-xs font-semibold inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+                  editorMode === 'preview'
+                    ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] font-bold'
+                    : 'text-[var(--dw-text-secondary)] hover:text-[var(--dw-text-primary)]'
+                }`}
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Preview</span>
+              </button>
+            </div>
           </div>
 
-          {/* Title Input */}
-          <input
-            type="text"
-            value={editTitle}
-            maxLength={MAX_NOTE_TITLE_LENGTH}
-            onChange={(e) => setEditTitle(e.target.value)}
-            placeholder="Note Title"
-            className="w-full dw-type-heading bg-transparent border-none outline-none text-[var(--dw-text-primary)] placeholder:text-[var(--dw-text-muted)]"
-          />
+          {editorMode === 'write' ? (
+            <>
+              {/* Formatting Toolbar */}
+              <div
+                role="toolbar"
+                aria-label="Markdown formatting"
+                className="flex items-center gap-1 p-1 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] overflow-x-auto"
+              >
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('heading2')}
+                  aria-label="Heading 2"
+                  title="Heading 2"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-xs font-bold text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  H2
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('bold')}
+                  aria-label="Bold"
+                  title="Bold"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <Bold className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('italic')}
+                  aria-label="Italic"
+                  title="Italic"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <Italic className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('strikethrough')}
+                  aria-label="Strikethrough"
+                  title="Strikethrough"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <Strikethrough className="w-3.5 h-3.5" />
+                </button>
+                <span
+                  aria-hidden="true"
+                  className="w-px h-5 bg-[var(--dw-divider)] mx-0.5 shrink-0"
+                />
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('bulletList')}
+                  aria-label="Bulleted list"
+                  title="Bulleted list"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <List className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('numberedList')}
+                  aria-label="Numbered list"
+                  title="Numbered list"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <ListOrdered className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('checklist')}
+                  aria-label="Checklist"
+                  title="Checklist"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <CheckSquare className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('blockquote')}
+                  aria-label="Blockquote"
+                  title="Blockquote"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <Quote className="w-3.5 h-3.5" />
+                </button>
+                <span
+                  aria-hidden="true"
+                  className="w-px h-5 bg-[var(--dw-divider)] mx-0.5 shrink-0"
+                />
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('inlineCode')}
+                  aria-label="Inline code"
+                  title="Inline code"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <Code className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('codeBlock')}
+                  aria-label="Code block"
+                  title="Code block"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <SquareCode className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => applyToolbarFormatting('internalLink')}
+                  aria-label="Internal note link"
+                  title="Internal note link ([[Note Title]])"
+                  className="min-w-[36px] min-h-[36px] p-1.5 rounded-[var(--dw-radius-sm)] hover:bg-[var(--dw-card)] text-[var(--dw-text-secondary)] cursor-pointer inline-flex items-center justify-center shrink-0"
+                >
+                  <Link2 className="w-3.5 h-3.5" />
+                </button>
+                {activeWriteChecklist && (
+                  <>
+                    <span
+                      aria-hidden="true"
+                      className="w-px h-5 bg-[var(--dw-divider)] mx-0.5 shrink-0"
+                    />
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() =>
+                        handleToggleChecklistLine(activeWriteChecklist.lineIndex)
+                      }
+                      aria-label={
+                        activeWriteChecklist.checked
+                          ? 'Mark item incomplete'
+                          : 'Mark item complete'
+                      }
+                      title={
+                        activeWriteChecklist.checked
+                          ? 'Mark item incomplete'
+                          : 'Mark item complete'
+                      }
+                      className="min-h-[36px] px-2.5 py-1.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] text-[11px] font-semibold cursor-pointer inline-flex items-center gap-1.5 shrink-0"
+                    >
+                      {activeWriteChecklist.checked ? (
+                        <CheckSquare className="w-3.5 h-3.5" />
+                      ) : (
+                        <Square className="w-3.5 h-3.5" />
+                      )}
+                      <span>
+                        {activeWriteChecklist.checked ? 'Checked' : 'Check item'}
+                      </span>
+                    </button>
+                  </>
+                )}
+              </div>
 
-          {/* Content Textarea */}
-          <textarea
-            id="note-content-editor"
-            value={editContent}
-            onChange={(e) => setEditContent(e.target.value)}
-            placeholder="Type your notes here... (Supports Markdown syntax, checklists, and Ethiopian Ge'ez script)"
-            rows={14}
-            className="w-full bg-transparent border-none outline-none text-xs text-[var(--dw-text-primary)] placeholder:text-[var(--dw-text-muted)] font-sans leading-relaxed resize-none"
-          />
+              {/* Title Input */}
+              <input
+                type="text"
+                value={editTitle}
+                maxLength={MAX_NOTE_TITLE_LENGTH}
+                onChange={(e) => setEditTitle(e.target.value)}
+                placeholder="Note Title"
+                className="w-full dw-type-heading bg-transparent border-none outline-none text-[var(--dw-text-primary)] placeholder:text-[var(--dw-text-muted)]"
+              />
+
+              {/* Content Textarea */}
+              <textarea
+                id="note-content-editor"
+                ref={contentTextareaRef}
+                value={editContent}
+                onChange={(e) => {
+                  syncTextareaSelection(e.currentTarget);
+                  draftFieldsRef.current.content = e.target.value;
+                  setEditContent(e.target.value);
+                }}
+                onKeyDown={handleEditorContentKeyDown}
+                onSelect={(e) => syncTextareaSelection(e.currentTarget)}
+                onKeyUp={(e) => syncTextareaSelection(e.currentTarget)}
+                onMouseUp={(e) => syncTextareaSelection(e.currentTarget)}
+                placeholder="Type your notes here... (Supports Markdown syntax, checklists, and Ethiopian Ge'ez script)"
+                rows={14}
+                className="w-full bg-transparent border-none outline-none text-xs text-[var(--dw-text-primary)] placeholder:text-[var(--dw-text-muted)] font-sans leading-relaxed resize-none"
+              />
+            </>
+          ) : (
+            <div className="space-y-4 pt-1">
+              <h2 className="dw-type-heading text-[var(--dw-text-primary)] break-words">
+                {getDisplayNoteTitle(editTitle)}
+              </h2>
+              <div className="min-h-[260px] pt-1">
+                <NoteMarkdownPreview
+                  content={editContent}
+                  notes={liveNotesForInternalLinks}
+                  onToggleChecklistItem={handleToggleChecklistLine}
+                  onOpenInternalNote={handleNavigateToInternalNote}
+                  onOpenAmbiguousInternalLink={handleOpenAmbiguousInternalLink}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Backlinks Section */}
+          {!isCurrentNewDraftBlank && (
+            <section
+              data-testid="note-backlinks-section"
+              aria-label="Backlinks"
+              className="pt-3 border-t border-[var(--dw-divider)] space-y-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="dw-type-caption uppercase tracking-wider text-[var(--dw-text-muted)] font-bold">
+                  Backlinks ({currentNoteBacklinks.length})
+                </span>
+              </div>
+              {currentNoteBacklinks.length === 0 ? (
+                <p className="dw-type-body-compact text-[var(--dw-text-muted)]">
+                  No active notes link to this note yet.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {currentNoteBacklinks.map((entry) => {
+                    const refTitle = getDisplayNoteTitle(entry.note.title);
+                    return (
+                      <button
+                        key={entry.note.id}
+                        type="button"
+                        data-testid={`backlink-item-${entry.note.id}`}
+                        onClick={() => handleNavigateToInternalNote(entry.note.id)}
+                        className="w-full text-left p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] hover:border-[var(--dw-primary)]/40 transition-colors flex items-start justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="min-w-0 space-y-0.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <FileText
+                              className="w-3.5 h-3.5 text-[var(--dw-primary)] shrink-0"
+                              aria-hidden="true"
+                            />
+                            <span className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
+                              {refTitle}
+                            </span>
+                            {entry.linkCount > 1 && (
+                              <span className="text-[10px] font-semibold text-[var(--dw-text-muted)] shrink-0">
+                                ({entry.linkCount})
+                              </span>
+                            )}
+                          </div>
+                          {entry.snippet && (
+                            <p className="dw-type-body-compact text-[var(--dw-text-secondary)] line-clamp-2 break-words">
+                              {entry.snippet}
+                            </p>
+                          )}
+                        </div>
+                        <ArrowUpRight
+                          className="w-4 h-4 text-[var(--dw-text-muted)] shrink-0 mt-0.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
         </DaywellCard>
+      )}
+
+      {/* Ambiguous Internal Link Disambiguation Modal */}
+      {ambiguousLinkChoice && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ambiguous-note-link-title"
+          data-testid="ambiguous-note-link-dialog"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45"
+          onClick={() => setAmbiguousLinkChoice(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-[var(--dw-radius-xl)] bg-[var(--dw-elevated)] border border-[var(--dw-border)] shadow-2xl p-4 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-2">
+              <div className="space-y-0.5 min-w-0">
+                <h3
+                  id="ambiguous-note-link-title"
+                  className="dw-type-title text-[var(--dw-text-primary)] break-words"
+                >
+                  Choose note for &ldquo;{ambiguousLinkChoice.targetTitle}&rdquo;
+                </h3>
+                <p className="dw-type-body-compact text-[var(--dw-text-secondary)]">
+                  Multiple active notes share this title. Select the note you want to open.
+                </p>
+              </div>
+              <DaywellIconButton
+                label="Close chooser"
+                size="compact"
+                tone="muted"
+                onClick={() => setAmbiguousLinkChoice(null)}
+                icon={<X className="w-4 h-4" />}
+              />
+            </div>
+
+            <div className="max-h-64 overflow-y-auto space-y-2">
+              {ambiguousLinkChoice.matches.map((match) => {
+                const snippet = (markdownToPlainText(match.content) || match.content).trim();
+                const dateObj = SharedDateFormatter.tryParseFlexibleToCalendarDate(
+                  match.updatedAt
+                );
+                const dateLabel = dateObj
+                  ? `${dateObj.gregorianShortMonthName} ${dateObj.day}`
+                  : match.updatedAt.slice(0, 10);
+                return (
+                  <button
+                    key={match.id}
+                    type="button"
+                    data-testid={`ambiguous-choice-${match.id}`}
+                    onClick={() => handleNavigateToInternalNote(match.id)}
+                    className="w-full text-left p-2.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] hover:border-[var(--dw-primary)] transition-colors space-y-1 cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
+                        {getDisplayNoteTitle(match.title)}
+                      </span>
+                      <span className="text-[10px] font-medium text-[var(--dw-text-muted)] shrink-0">
+                        {match.notebook} · {dateLabel}
+                      </span>
+                    </div>
+                    {snippet && (
+                      <p className="dw-type-body-compact text-[var(--dw-text-secondary)] line-clamp-2 break-words">
+                        {snippet}
+                      </p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex justify-end pt-1">
+              <DaywellButton
+                label="Cancel"
+                variant="outlined"
+                size="compact"
+                onClick={() => setAmbiguousLinkChoice(null)}
+              />
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Permanent Delete Confirmation Modal (Trash Only) */}

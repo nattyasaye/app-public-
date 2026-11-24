@@ -1,0 +1,173 @@
+{
+  "version": "1.0.0",
+  "description": "Shared Stage N2.4 fixtures verifying identical TypeScript and Dart parsing, title normalization, resolution, backlinks discovery, and Write-mode internal link insertion.",
+  "inlineCases": [
+    {
+      "name": "single valid internal link in paragraph",
+      "input": "See [[Project Roadmap]] for details.",
+      "expectedTypes": [
+        "text:See ",
+        "internalLink:Project Roadmap|[[Project Roadmap]]",
+        "text: for details."
+      ]
+    },
+    {
+      "name": "trims surrounding whitespace inside double brackets",
+      "input": "Link [[  Deep Work  ]] here",
+      "expectedTypes": [
+        "text:Link ",
+        "internalLink:Deep Work|[[  Deep Work  ]]",
+        "text: here"
+      ]
+    },
+    {
+      "name": "bold wrapped around internal link",
+      "input": "**[[Priority Plan]]**",
+      "expectedTypes": [
+        "bold:[internalLink:Priority Plan|[[Priority Plan]]]"
+      ]
+    },
+    {
+      "name": "empty and whitespace-only brackets remain literal text",
+      "input": "Empty [[]] and spaces [[   ]] stay plain.",
+      "expectedTypes": [
+        "text:Empty [[]] and spaces [[   ]] stay plain."
+      ]
+    },
+    {
+      "name": "unclosed double brackets stay literal text",
+      "input": "Broken [[Unclosed link",
+      "expectedTypes": [
+        "text:Broken [[Unclosed link"
+      ]
+    },
+    {
+      "name": "nested double brackets rescue inner valid link safely",
+      "input": "Nested [[outer [[Inner Note]] end",
+      "expectedTypes": [
+        "text:Nested [[outer ",
+        "internalLink:Inner Note|[[Inner Note]]",
+        "text: end"
+      ]
+    },
+    {
+      "name": "inline code ignores internal link syntax",
+      "input": "Use `[[Template Note]]` in code and [[Real Note]] outside.",
+      "expectedTypes": [
+        "text:Use ",
+        "code:[[Template Note]]",
+        "text: in code and ",
+        "internalLink:Real Note|[[Real Note]]",
+        "text: outside."
+      ]
+    },
+    {
+      "name": "does not interfere with external Markdown links",
+      "input": "[Daywell Docs](https://daywell.example) and [[Internal Target]]",
+      "expectedTypes": [
+        "link:Daywell Docs|https://daywell.example",
+        "text: and ",
+        "internalLink:Internal Target|[[Internal Target]]"
+      ]
+    },
+    {
+      "name": "amharic and unicode note title parses cleanly",
+      "input": "ክለሳ [[የዓመት ዕቅድ 2017]] ዛሬ",
+      "expectedTypes": [
+        "text:ክለሳ ",
+        "internalLink:የዓመት ዕቅድ 2017|[[የዓመት ዕቅድ 2017]]",
+        "text: ዛሬ"
+      ]
+    }
+  ],
+  "normalizeTitleCases": [
+    { "input": "Project Roadmap", "expected": "project roadmap" },
+    { "input": "  Project   Roadmap \t ", "expected": "project roadmap" },
+    { "input": "   ", "expected": "" },
+    { "input": "የዓመት   ዕቅድ", "expected": "የዓመት ዕቅድ" }
+  ],
+  "resolutionCases": [
+    {
+      "name": "exact normalized active match resolves",
+      "targetTitle": "  project   roadmap ",
+      "expectedStatus": "resolved",
+      "expectedMatchedIds": ["n-roadmap"]
+    },
+    {
+      "name": "duplicate active titles report ambiguity deterministically",
+      "targetTitle": "Weekly Review",
+      "expectedStatus": "ambiguous",
+      "expectedMatchedIds": ["n-weekly-new", "n-weekly-old"]
+    },
+    {
+      "name": "archived note does not resolve active internal link",
+      "targetTitle": "Archived Spec",
+      "expectedStatus": "missing",
+      "expectedMatchedIds": []
+    },
+    {
+      "name": "trashed note does not resolve active internal link",
+      "targetTitle": "Trashed Draft",
+      "expectedStatus": "missing",
+      "expectedMatchedIds": []
+    },
+    {
+      "name": "partial title never fuzzy-matches",
+      "targetTitle": "Roadmap",
+      "expectedStatus": "missing",
+      "expectedMatchedIds": []
+    }
+  ],
+  "backlinkCases": [
+    {
+      "name": "finds active backlinks while excluding self, code, archived, and trashed notes",
+      "targetNoteId": "n-roadmap",
+      "expectedReferrerIds": ["n-daily", "n-ref-checklist"],
+      "expectedCounts": [2, 1]
+    },
+    {
+      "name": "archived target note shows no backlinks",
+      "targetNoteId": "n-archived-spec",
+      "expectedReferrerIds": [],
+      "expectedCounts": []
+    }
+  ],
+  "toolbarCases": [
+    {
+      "name": "collapsed cursor inserts [[]] with caret centered inside",
+      "text": "See ",
+      "selectionStart": 4,
+      "selectionEnd": 4,
+      "expectedText": "See [[]]",
+      "expectedStart": 6,
+      "expectedEnd": 6
+    },
+    {
+      "name": "selected title wraps cleanly as [[title]] preserving surrounding whitespace",
+      "text": "Review  Project Roadmap  soon",
+      "selectionStart": 7,
+      "selectionEnd": 24,
+      "expectedText": "Review  [[Project Roadmap]]  soon",
+      "expectedStart": 10,
+      "expectedEnd": 25
+    },
+    {
+      "name": "selected [[title]] unwraps cleanly",
+      "text": "See [[Project Roadmap]]",
+      "selectionStart": 4,
+      "selectionEnd": 23,
+      "expectedText": "See Project Roadmap",
+      "expectedStart": 4,
+      "expectedEnd": 19
+    },
+    {
+      "name": "inner selection surrounded by [[ and ]] unwraps cleanly",
+      "text": "See [[Project Roadmap]]",
+      "selectionStart": 6,
+      "selectionEnd": 21,
+      "expectedText": "See Project Roadmap",
+      "expectedStart": 4,
+      "expectedEnd": 19
+    }
+  ]
+}

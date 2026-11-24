@@ -1,0 +1,199 @@
+{
+  "version": "1.0.0",
+  "description": "Shared Stage N2.1 Markdown parser and safety vectors verified identically across TypeScript and Dart.",
+  "blockCases": [
+    {
+      "name": "empty_string",
+      "markdown": "",
+      "expectedBlockTypes": [],
+      "expectedPlainText": ""
+    },
+    {
+      "name": "whitespace_and_blank_lines_only",
+      "markdown": "   \n\n  \t \n",
+      "expectedBlockTypes": [],
+      "expectedPlainText": ""
+    },
+    {
+      "name": "headings_h1_h2_h3_and_non_headings",
+      "markdown": "# Heading One\n## Heading Two\n### Heading Three\n\n#### Not Heading Four\n#tag_without_space",
+      "expectedBlockTypes": [
+        "heading:1",
+        "heading:2",
+        "heading:3",
+        "paragraph"
+      ],
+      "expectedPlainText": "Heading One\nHeading Two\nHeading Three\n#### Not Heading Four\n#tag_without_space"
+    },
+    {
+      "name": "bulleted_lists_dash_and_asterisk",
+      "markdown": "- First dash\n* Second star\n  - Indented item",
+      "expectedBlockTypes": [
+        "bulletList:3"
+      ],
+      "expectedPlainText": "First dash\nSecond star\nIndented item"
+    },
+    {
+      "name": "ordered_list_and_custom_start",
+      "markdown": "1. Step one\n2. Step two\n\n5. Resume five\n6. Six",
+      "expectedBlockTypes": [
+        "orderedList:1:2",
+        "orderedList:5:2"
+      ],
+      "expectedPlainText": "Step one\nStep two\nResume five\nSix"
+    },
+    {
+      "name": "checkboxes_unchecked_and_checked",
+      "markdown": "- [ ] Open item\n- [x] Lowercase done\n- [X] Uppercase done",
+      "expectedBlockTypes": [
+        "checklist:false,true,true"
+      ],
+      "expectedPlainText": "Open item\nLowercase done\nUppercase done"
+    },
+    {
+      "name": "blockquote_multiline_and_horizontal_rule",
+      "markdown": "> First quote line\n> Second **bold** line\n\n---\n\nAfter rule",
+      "expectedBlockTypes": [
+        "blockquote:2",
+        "horizontalRule",
+        "paragraph"
+      ],
+      "expectedPlainText": "First quote line\nSecond bold line\nAfter rule"
+    },
+    {
+      "name": "fenced_code_block_preserves_markdown_and_blank_lines",
+      "markdown": "Before code\n\n```dart\n# Not a heading\n**not bold**\n\n  final x = 1;\n```\n\nAfter code",
+      "expectedBlockTypes": [
+        "paragraph",
+        "codeBlock:dart",
+        "paragraph"
+      ],
+      "expectedCodeBlocks": [
+        {
+          "language": "dart",
+          "code": "# Not a heading\n**not bold**\n\n  final x = 1;"
+        }
+      ],
+      "expectedPlainText": "Before code\n# Not a heading\n**not bold**\n\n  final x = 1;\nAfter code"
+    },
+    {
+      "name": "unclosed_fenced_code_block_fails_safely",
+      "markdown": "```ts\nconst a = 1;\n// unclosed fence",
+      "expectedBlockTypes": [
+        "codeBlock:ts"
+      ],
+      "expectedCodeBlocks": [
+        {
+          "language": "ts",
+          "code": "const a = 1;\n// unclosed fence"
+        }
+      ]
+    },
+    {
+      "name": "single_line_triple_backtick_is_not_fenced_block",
+      "markdown": "```inline_only```",
+      "expectedBlockTypes": [
+        "paragraph"
+      ]
+    },
+    {
+      "name": "ethiopic_mixed_note",
+      "markdown": "## የ2017 ዓ.ም ዕቅድ\n\n1. **ጤና**: በቂ ውሃ መጠጣት\n- [x] የጠዋት የእግር ጉዞ",
+      "expectedBlockTypes": [
+        "heading:2",
+        "orderedList:1:1",
+        "checklist:true"
+      ],
+      "expectedPlainText": "የ2017 ዓ.ም ዕቅድ\nጤና: በቂ ውሃ መጠጣት\nየጠዋት የእግር ጉዞ"
+    }
+  ],
+  "inlineCases": [
+    {
+      "name": "bold_italic_strike_code",
+      "input": "Hello **bold**, *italic*, ~~old~~, and `code()`.",
+      "expectedTypes": [
+        "text:Hello ",
+        "bold:[text:bold]",
+        "text:, ",
+        "italic:[text:italic]",
+        "text:, ",
+        "strike:[text:old]",
+        "text:, and ",
+        "code:code()",
+        "text:."
+      ]
+    },
+    {
+      "name": "bold_containing_italic_and_triple_markers",
+      "input": "***both*** and **bold *inner***",
+      "expectedTypes": [
+        "bold:[italic:[text:both]]",
+        "text: and ",
+        "bold:[text:bold ,italic:[text:inner]]"
+      ]
+    },
+    {
+      "name": "inline_code_shields_delimiters",
+      "input": "Keep `**not bold** and ~~not strike~~` literal.",
+      "expectedTypes": [
+        "text:Keep ",
+        "code:**not bold** and ~~not strike~~",
+        "text: literal."
+      ]
+    },
+    {
+      "name": "malformed_unclosed_delimiters_stay_literal",
+      "input": "**unclosed *italic ~~strike `code [broken(url)",
+      "expectedTypes": [
+        "text:**unclosed *italic ~~strike `code [broken(url)"
+      ]
+    },
+    {
+      "name": "math_asterisks_not_italicized",
+      "input": "2 * 3 * 4 = 24",
+      "expectedTypes": [
+        "text:2 * 3 * 4 = 24"
+      ]
+    },
+    {
+      "name": "html_script_injection_stays_plain_text",
+      "input": "<script>alert(1)</script> and <img src=x onerror=alert(1)>",
+      "expectedTypes": [
+        "text:<script>alert(1)</script> and <img src=x onerror=alert(1)>"
+      ]
+    },
+    {
+      "name": "safe_links_preserved",
+      "input": "Visit [Daywell](https://daywell.example/docs?a=1_(2)) or [Mail](mailto:hi@daywell.example)",
+      "expectedTypes": [
+        "text:Visit ",
+        "link:Daywell|https://daywell.example/docs?a=1_(2)",
+        "text: or ",
+        "link:Mail|mailto:hi@daywell.example"
+      ]
+    },
+    {
+      "name": "unsafe_links_stripped_to_inert_text",
+      "input": "[JS](javascript:alert(1)) [Data](data:text/html,<script>1</script>) [Mixed](JaVaScRiPt:alert(1)) [Ctrl](java\tscript:alert(1)) [Proto](//evil.example)",
+      "expectedTypes": [
+        "text:JS Data Mixed Ctrl Proto"
+      ]
+    }
+  ],
+  "urlSafetyCases": [
+    { "url": "https://daywell.example/notes", "expectedSafe": "https://daywell.example/notes" },
+    { "url": "  http://localhost:3000/path  ", "expectedSafe": "http://localhost:3000/path" },
+    { "url": "mailto:support@daywell.example", "expectedSafe": "mailto:support@daywell.example" },
+    { "url": "javascript:alert(1)", "expectedSafe": null },
+    { "url": "JAVASCRIPT:alert(1)", "expectedSafe": null },
+    { "url": "java\nscript:alert(1)", "expectedSafe": null },
+    { "url": "java\tscript:alert(1)", "expectedSafe": null },
+    { "url": "&#106;avascript:alert(1)", "expectedSafe": null },
+    { "url": "vbscript:msgbox(1)", "expectedSafe": null },
+    { "url": "data:text/html,<script>alert(1)</script>", "expectedSafe": null },
+    { "url": "file:///etc/passwd", "expectedSafe": null },
+    { "url": "//evil.example/phish", "expectedSafe": null },
+    { "url": "https://", "expectedSafe": null },
+    { "url": "", "expectedSafe": null }
+  ]
+}

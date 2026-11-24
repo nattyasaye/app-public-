@@ -1,0 +1,133 @@
+{
+  "version": "1.0.0",
+  "description": "Shared Stage N2.3 interactive Markdown checklist parsing, toggling, fenced-code isolation, and Write-mode cursor inspection vectors verified identically across TypeScript and Dart.",
+  "toggleCases": [
+    {
+      "name": "check_first_unchecked_item",
+      "source": "- [ ] Buy milk\n- [ ] Call home",
+      "lineIndex": 0,
+      "toggled": true,
+      "expectedText": "- [x] Buy milk\n- [ ] Call home",
+      "expectedChecked": true
+    },
+    {
+      "name": "uncheck_lowercase_checked_item",
+      "source": "- [x] Buy milk\n- [ ] Call home",
+      "lineIndex": 0,
+      "toggled": true,
+      "expectedText": "- [ ] Buy milk\n- [ ] Call home",
+      "expectedChecked": false
+    },
+    {
+      "name": "uncheck_uppercase_X_item_and_preserve_indent_and_star",
+      "source": "Intro paragraph\n  * [X]   Uppercase task  \n- [ ] Next task",
+      "lineIndex": 1,
+      "toggled": true,
+      "expectedText": "Intro paragraph\n  * [ ]   Uppercase task  \n- [ ] Next task",
+      "expectedChecked": false
+    },
+    {
+      "name": "toggle_preserves_crlf_line_endings_and_inline_markdown",
+      "source": "# Heading\r\n\r\n- [ ] **Bold** & `code` [Docs](https://daywell.example)\r\n- [x] Second item\r\n",
+      "lineIndex": 2,
+      "toggled": true,
+      "expectedText": "# Heading\r\n\r\n- [x] **Bold** & `code` [Docs](https://daywell.example)\r\n- [x] Second item\r\n",
+      "expectedChecked": true
+    },
+    {
+      "name": "toggle_empty_checklist_item_without_trailing_space",
+      "source": "- [ ]",
+      "lineIndex": 0,
+      "toggled": true,
+      "expectedText": "- [x]",
+      "expectedChecked": true
+    },
+    {
+      "name": "toggle_empty_checklist_item_with_trailing_space",
+      "source": "- [x] ",
+      "lineIndex": 0,
+      "toggled": true,
+      "expectedText": "- [ ] ",
+      "expectedChecked": false
+    },
+    {
+      "name": "ordinary_bullet_is_not_toggled",
+      "source": "- Ordinary dash bullet\n* Ordinary star bullet",
+      "lineIndex": 0,
+      "toggled": false
+    },
+    {
+      "name": "malformed_and_incomplete_checklists_are_ignored",
+      "source": "- [] missing space\n- [y] invalid char\n- [  ] double space\n- [x]nospace",
+      "lineIndex": 0,
+      "toggled": false
+    },
+    {
+      "name": "malformed_no_space_after_bracket_is_ignored",
+      "source": "- [] missing space\n- [y] invalid char\n- [  ] double space\n- [x]nospace",
+      "lineIndex": 3,
+      "toggled": false
+    },
+    {
+      "name": "checklist_inside_fenced_code_block_is_ignored",
+      "source": "```markdown\n- [ ] Inside code fence\n```\n- [ ] Outside fence",
+      "lineIndex": 1,
+      "toggled": false
+    },
+    {
+      "name": "checklist_after_closed_fenced_code_block_toggles",
+      "source": "```markdown\n- [ ] Inside code fence\n```\n- [ ] Outside fence",
+      "lineIndex": 3,
+      "toggled": true,
+      "expectedText": "```markdown\n- [ ] Inside code fence\n```\n- [x] Outside fence",
+      "expectedChecked": true
+    },
+    {
+      "name": "out_of_range_line_index_returns_null",
+      "source": "- [ ] Only line",
+      "lineIndex": 4,
+      "toggled": false
+    }
+  ],
+  "selectionCases": [
+    {
+      "name": "collapsed_cursor_on_unchecked_line",
+      "source": "Title\n- [ ] Review PR",
+      "selectionStart": 14,
+      "selectionEnd": 14,
+      "found": true,
+      "lineIndex": 1,
+      "checked": false
+    },
+    {
+      "name": "same_line_selection_on_checked_line",
+      "source": "- [x] Ship release",
+      "selectionStart": 6,
+      "selectionEnd": 10,
+      "found": true,
+      "lineIndex": 0,
+      "checked": true
+    },
+    {
+      "name": "multiline_selection_returns_null",
+      "source": "- [ ] One\n- [x] Two",
+      "selectionStart": 4,
+      "selectionEnd": 14,
+      "found": false
+    },
+    {
+      "name": "cursor_on_ordinary_bullet_returns_null",
+      "source": "- Plain bullet",
+      "selectionStart": 8,
+      "selectionEnd": 8,
+      "found": false
+    },
+    {
+      "name": "cursor_inside_fenced_code_block_returns_null",
+      "source": "```\n- [ ] In fence\n```",
+      "selectionStart": 10,
+      "selectionEnd": 10,
+      "found": false
+    }
+  ]
+}

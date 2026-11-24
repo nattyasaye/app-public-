@@ -1,0 +1,348 @@
+{
+  "version": "1.0.0",
+  "description": "Shared Stage N2.2 Markdown toolbar formatting, smart Enter continuation, and smart Backspace exit vectors verified identically across TypeScript and Dart.",
+  "toolbarCases": [
+    {
+      "name": "bold_selected_text",
+      "action": "bold",
+      "text": "Hello world!",
+      "selectionStart": 6,
+      "selectionEnd": 11,
+      "expectedText": "Hello **world**!",
+      "expectedStart": 8,
+      "expectedEnd": 13
+    },
+    {
+      "name": "bold_toggle_off_when_already_wrapped_outside",
+      "action": "bold",
+      "text": "Hello **world**!",
+      "selectionStart": 8,
+      "selectionEnd": 13,
+      "expectedText": "Hello world!",
+      "expectedStart": 6,
+      "expectedEnd": 11
+    },
+    {
+      "name": "bold_toggle_off_when_markers_included_in_selection",
+      "action": "bold",
+      "text": "Hello **world**!",
+      "selectionStart": 6,
+      "selectionEnd": 15,
+      "expectedText": "Hello world!",
+      "expectedStart": 6,
+      "expectedEnd": 11
+    },
+    {
+      "name": "bold_collapsed_cursor_inserts_pair_and_centers_cursor",
+      "action": "bold",
+      "text": "Hello ",
+      "selectionStart": 6,
+      "selectionEnd": 6,
+      "expectedText": "Hello ****",
+      "expectedStart": 8,
+      "expectedEnd": 8
+    },
+    {
+      "name": "italic_selected_text_and_no_bold_collision",
+      "action": "italic",
+      "text": "Keep **bold** and plain",
+      "selectionStart": 18,
+      "selectionEnd": 23,
+      "expectedText": "Keep **bold** and *plain*",
+      "expectedStart": 19,
+      "expectedEnd": 24
+    },
+    {
+      "name": "italic_does_not_unwrap_bold_markers",
+      "action": "italic",
+      "text": "**word**",
+      "selectionStart": 2,
+      "selectionEnd": 6,
+      "expectedText": "***word***",
+      "expectedStart": 3,
+      "expectedEnd": 7
+    },
+    {
+      "name": "strikethrough_selected_with_surrounding_spaces",
+      "action": "strikethrough",
+      "text": "Drop old task",
+      "selectionStart": 4,
+      "selectionEnd": 9,
+      "expectedText": "Drop ~~old~~ task",
+      "expectedStart": 7,
+      "expectedEnd": 10
+    },
+    {
+      "name": "inline_code_collapsed_and_selected",
+      "action": "inlineCode",
+      "text": "Run fn()",
+      "selectionStart": 4,
+      "selectionEnd": 8,
+      "expectedText": "Run `fn()`",
+      "expectedStart": 5,
+      "expectedEnd": 9
+    },
+    {
+      "name": "heading2_applies_and_toggles_preserving_cursor",
+      "action": "heading2",
+      "text": "Intro\nSection Title\nEnd",
+      "selectionStart": 13,
+      "selectionEnd": 13,
+      "expectedText": "Intro\n## Section Title\nEnd",
+      "expectedStart": 16,
+      "expectedEnd": 16
+    },
+    {
+      "name": "heading2_replaces_existing_list_prefix_instead_of_duplicating",
+      "action": "heading2",
+      "text": "- Bullet line",
+      "selectionStart": 5,
+      "selectionEnd": 5,
+      "expectedText": "## Bullet line",
+      "expectedStart": 6,
+      "expectedEnd": 6
+    },
+    {
+      "name": "bullet_list_multiline_preserves_blank_lines",
+      "action": "bulletList",
+      "text": "First\n\nSecond\nThird",
+      "selectionStart": 0,
+      "selectionEnd": 19,
+      "expectedText": "- First\n\n- Second\n- Third",
+      "expectedStart": 2,
+      "expectedEnd": 25
+    },
+    {
+      "name": "numbered_list_multiline_increments_and_toggles_off",
+      "action": "numberedList",
+      "text": "Alpha\nBeta\nGamma",
+      "selectionStart": 0,
+      "selectionEnd": 16,
+      "expectedText": "1. Alpha\n2. Beta\n3. Gamma",
+      "expectedStart": 3,
+      "expectedEnd": 25
+    },
+    {
+      "name": "checklist_applies_to_multiple_lines",
+      "action": "checklist",
+      "text": "Buy milk\nCall home",
+      "selectionStart": 2,
+      "selectionEnd": 15,
+      "expectedText": "- [ ] Buy milk\n- [ ] Call home",
+      "expectedStart": 8,
+      "expectedEnd": 27
+    },
+    {
+      "name": "blockquote_applies_and_avoids_duplication",
+      "action": "blockquote",
+      "text": "> Already quoted",
+      "selectionStart": 4,
+      "selectionEnd": 4,
+      "expectedText": "Already quoted",
+      "expectedStart": 2,
+      "expectedEnd": 2
+    },
+    {
+      "name": "code_block_collapsed_and_multiline_selection",
+      "action": "codeBlock",
+      "text": "const a = 1;\nconst b = 2;",
+      "selectionStart": 0,
+      "selectionEnd": 25,
+      "expectedText": "```\nconst a = 1;\nconst b = 2;\n```",
+      "expectedStart": 4,
+      "expectedEnd": 29
+    },
+    {
+      "name": "code_block_collapsed_empty_line",
+      "action": "codeBlock",
+      "text": "",
+      "selectionStart": 0,
+      "selectionEnd": 0,
+      "expectedText": "```\n\n```",
+      "expectedStart": 4,
+      "expectedEnd": 4
+    }
+  ],
+  "enterCases": [
+    {
+      "name": "bullet_dash_continues",
+      "text": "- First item",
+      "selectionStart": 12,
+      "selectionEnd": 12,
+      "handled": true,
+      "expectedText": "- First item\n- ",
+      "expectedStart": 15,
+      "expectedEnd": 15
+    },
+    {
+      "name": "bullet_asterisk_continues_preserving_marker",
+      "text": "* First star",
+      "selectionStart": 12,
+      "selectionEnd": 12,
+      "handled": true,
+      "expectedText": "* First star\n* ",
+      "expectedStart": 15,
+      "expectedEnd": 15
+    },
+    {
+      "name": "numbered_list_increments_number",
+      "text": "1. One\n2. Two",
+      "selectionStart": 13,
+      "selectionEnd": 13,
+      "handled": true,
+      "expectedText": "1. One\n2. Two\n3. ",
+      "expectedStart": 17,
+      "expectedEnd": 17
+    },
+    {
+      "name": "checklist_checked_continues_unchecked",
+      "text": "- [x] Done step",
+      "selectionStart": 15,
+      "selectionEnd": 15,
+      "handled": true,
+      "expectedText": "- [x] Done step\n- [ ] ",
+      "expectedStart": 22,
+      "expectedEnd": 22
+    },
+    {
+      "name": "blockquote_continues",
+      "text": "> First quote",
+      "selectionStart": 13,
+      "selectionEnd": 13,
+      "handled": true,
+      "expectedText": "> First quote\n> ",
+      "expectedStart": 16,
+      "expectedEnd": 16
+    },
+    {
+      "name": "empty_bullet_exits_to_paragraph",
+      "text": "- First\n- ",
+      "selectionStart": 10,
+      "selectionEnd": 10,
+      "handled": true,
+      "expectedText": "- First\n",
+      "expectedStart": 8,
+      "expectedEnd": 8
+    },
+    {
+      "name": "empty_numbered_item_exits_preserving_following_lines",
+      "text": "1. First\n2. \nTail paragraph",
+      "selectionStart": 12,
+      "selectionEnd": 12,
+      "handled": true,
+      "expectedText": "1. First\n\nTail paragraph",
+      "expectedStart": 9,
+      "expectedEnd": 9
+    },
+    {
+      "name": "empty_checklist_exits_to_paragraph",
+      "text": "- [ ] Open\n- [ ] ",
+      "selectionStart": 17,
+      "selectionEnd": 17,
+      "handled": true,
+      "expectedText": "- [ ] Open\n",
+      "expectedStart": 11,
+      "expectedEnd": 11
+    },
+    {
+      "name": "empty_blockquote_exits",
+      "text": "> Quote\n> ",
+      "selectionStart": 10,
+      "selectionEnd": 10,
+      "handled": true,
+      "expectedText": "> Quote\n",
+      "expectedStart": 8,
+      "expectedEnd": 8
+    },
+    {
+      "name": "splits_non_empty_item_at_middle_cursor",
+      "text": "- Hello world",
+      "selectionStart": 8,
+      "selectionEnd": 8,
+      "handled": true,
+      "expectedText": "- Hello \n- world",
+      "expectedStart": 11,
+      "expectedEnd": 11
+    },
+    {
+      "name": "inside_fenced_code_block_does_not_continue_list",
+      "text": "```markdown\n- inside code",
+      "selectionStart": 25,
+      "selectionEnd": 25,
+      "handled": false
+    },
+    {
+      "name": "after_closed_fenced_code_block_continues_list",
+      "text": "```ts\nconst x = 1;\n```\n- Real item",
+      "selectionStart": 34,
+      "selectionEnd": 34,
+      "handled": true,
+      "expectedText": "```ts\nconst x = 1;\n```\n- Real item\n- ",
+      "expectedStart": 37,
+      "expectedEnd": 37
+    }
+  ],
+  "backspaceCases": [
+    {
+      "name": "empty_bullet_exits_list_without_deleting_previous_line",
+      "text": "Keep above\n- ",
+      "selectionStart": 13,
+      "selectionEnd": 13,
+      "handled": true,
+      "expectedText": "Keep above\n",
+      "expectedStart": 11,
+      "expectedEnd": 11
+    },
+    {
+      "name": "empty_checklist_exits_list",
+      "text": "- [ ] ",
+      "selectionStart": 6,
+      "selectionEnd": 6,
+      "handled": true,
+      "expectedText": "",
+      "expectedStart": 0,
+      "expectedEnd": 0
+    },
+    {
+      "name": "empty_numbered_item_exits_list",
+      "text": "1. One\n2. ",
+      "selectionStart": 10,
+      "selectionEnd": 10,
+      "handled": true,
+      "expectedText": "1. One\n",
+      "expectedStart": 7,
+      "expectedEnd": 7
+    },
+    {
+      "name": "empty_blockquote_exits_quote",
+      "text": "> Quote\n> ",
+      "selectionStart": 10,
+      "selectionEnd": 10,
+      "handled": true,
+      "expectedText": "> Quote\n",
+      "expectedStart": 8,
+      "expectedEnd": 8
+    },
+    {
+      "name": "non_empty_list_item_falls_back_to_normal_backspace",
+      "text": "- Has text",
+      "selectionStart": 2,
+      "selectionEnd": 2,
+      "handled": false
+    },
+    {
+      "name": "cursor_at_line_start_falls_back_to_normal_backspace",
+      "text": "Previous\n- ",
+      "selectionStart": 9,
+      "selectionEnd": 9,
+      "handled": false
+    },
+    {
+      "name": "inside_fenced_code_block_falls_back_to_normal_backspace",
+      "text": "```\n- ",
+      "selectionStart": 6,
+      "selectionEnd": 6,
+      "handled": false
+    }
+  ]
+}
