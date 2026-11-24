@@ -330,9 +330,15 @@ void main() {
         await tester.pumpAndSettle();
 
         // Legend and initial read-only history card visible
-        expect(find.text('Daily Rhythm history'), findsOneWidget);
         expect(find.text('Provisional freeze'), findsOneWidget);
         expect(find.text('Freeze protected'), findsOneWidget);
+        await tester.scrollUntilVisible(
+          find.text('Daily Rhythm history'),
+          200.0,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Daily Rhythm history'), findsOneWidget);
 
         // Select the qualified day
         state.calendarController.setSelectedCalendarDate(qualifiedDay);
