@@ -300,12 +300,10 @@ class DailyRhythmWorkflows {
     CalendarDate targetDate,
     Set<String> plannedIds,
   ) {
-    final overdueA = (a.dueDate != null && a.dueDate!.isBefore(targetDate))
-        ? 0
-        : 1;
-    final overdueB = (b.dueDate != null && b.dueDate!.isBefore(targetDate))
-        ? 0
-        : 1;
+    final overdueA =
+        (a.dueDate != null && a.dueDate!.isBefore(targetDate)) ? 0 : 1;
+    final overdueB =
+        (b.dueDate != null && b.dueDate!.isBefore(targetDate)) ? 0 : 1;
     if (overdueA != overdueB) return overdueA.compareTo(overdueB);
 
     final plannedA = plannedIds.contains(a.id) ? 0 : 1;

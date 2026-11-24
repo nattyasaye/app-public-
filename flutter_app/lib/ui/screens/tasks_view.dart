@@ -2172,11 +2172,11 @@ class _TasksViewState extends State<TasksView>
                                                 );
                                                 if (!ok) {
                                                   if (dialogContext.mounted) {
+                                                    final s = controller.state;
+                                                    final m = s.errorMessage ??
+                                                        'Unable to rename tag';
                                                     setDialogState(
-                                                      () => editError = controller
-                                                              .state
-                                                              .errorMessage ??
-                                                          'Unable to rename tag',
+                                                      () => editError = m,
                                                     );
                                                   }
                                                   return;

@@ -153,16 +153,15 @@ class DriftDailyRhythmRepository implements IDailyRhythmRepository {
         ? _parseOptionalUtcInstant(day.updatedAt, 'updatedAt')!
         : EthiopiaClock.nowUtc();
 
-    final normalizedEvidence =
-        day.taskReviewConfirmed && day.taskReviewEvidence != null
-            ? DailyRhythmTaskReviewEvidence.normalized(
-                overdueCount: day.taskReviewEvidence!.overdueCount,
-                todayCount: day.taskReviewEvidence!.todayCount,
-                plannedCount: day.taskReviewEvidence!.plannedCount,
-                completedTodayCount:
-                    day.taskReviewEvidence!.completedTodayCount,
-              )
-            : null;
+    final rawEvidence = day.taskReviewEvidence;
+    final normalizedEvidence = day.taskReviewConfirmed && rawEvidence != null
+        ? DailyRhythmTaskReviewEvidence.normalized(
+            overdueCount: rawEvidence.overdueCount,
+            todayCount: rawEvidence.todayCount,
+            plannedCount: rawEvidence.plannedCount,
+            completedTodayCount: rawEvidence.completedTodayCount,
+          )
+        : null;
 
     final encodedEvidence = normalizedEvidence == null
         ? null

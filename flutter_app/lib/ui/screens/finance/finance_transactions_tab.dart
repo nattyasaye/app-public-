@@ -235,8 +235,7 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     final hasMoreButton = filtered.length > visibleCount;
     return ListView.separated(
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
-      itemCount:
-          headerOffset + visibleEntries.length + (hasMoreButton ? 1 : 0),
+      itemCount: headerOffset + visibleEntries.length + (hasMoreButton ? 1 : 0),
       separatorBuilder: (_, __) =>
           const SizedBox(height: SharedDesignTokens.spacingSm),
       itemBuilder: (context, index) {
