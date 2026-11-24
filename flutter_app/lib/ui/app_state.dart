@@ -309,6 +309,25 @@ class AppStateManager extends ChangeNotifier {
     );
     notesController = NotesController(
       repository: DriftNotesRepository(db),
+      loadCustomFolders: () async {
+        final raw = await db.readAppSetting(
+          NotesController.customFoldersSettingKey,
+        );
+        if (raw == null || raw.trim().isEmpty) return const <String>[];
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is! List) return const <String>[];
+          return decoded.map((e) => e.toString()).toList(growable: false);
+        } catch (_) {
+          return const <String>[];
+        }
+      },
+      saveCustomFolders: (folders) async {
+        await db.writeAppSetting(
+          NotesController.customFoldersSettingKey,
+          jsonEncode(folders),
+        );
+      },
     );
     inboxController = InboxController(
       repository: DriftInboxRepository(db),

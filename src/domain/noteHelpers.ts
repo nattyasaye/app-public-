@@ -1,3 +1,4 @@
+import { CalendarDate, EthiopiaClock, SharedDateFormatter } from './date';
 import {
   CANONICAL_NOTE_LINKED_MODULES,
   SHARED_BUSINESS_RULES,
@@ -8,7 +9,13 @@ export const DEFAULT_NOTE_TITLE = 'Untitled Note';
 export const MAX_NOTE_TITLE_LENGTH = SHARED_BUSINESS_RULES.notes.maxTitleLength;
 
 export type NoteLifecycleState = 'active' | 'archived' | 'trashed';
-export type NoteSortMode = 'recent' | 'alpha' | 'oldest';
+export type NoteSortMode = 'recent' | 'created' | 'alpha' | 'oldest';
+export type NoteDateFilterMode =
+  | 'all'
+  | 'updated_7d'
+  | 'updated_30d'
+  | 'created_7d'
+  | 'created_30d';
 
 export interface NoteLifecycleShape {
   isPinned?: boolean;
@@ -120,6 +127,97 @@ export function normalizeNoteTags(rawTags: Iterable<unknown> | null | undefined)
     normalized.push(trimmed);
   }
   return normalized;
+}
+
+export const RESERVED_NOTE_FOLDER_NAMES: ReadonlySet<string> = new Set([
+  'all',
+  'pinned',
+  'favorites',
+  'archive',
+  'archived',
+  'trash',
+]);
+
+export function normalizeFolderComparisonKey(
+  rawFolder: string | null | undefined
+): string {
+  return typeof rawFolder === 'string' ? rawFolder.trim().toLowerCase() : '';
+}
+
+export function isReservedNoteFolderName(
+  rawFolder: string | null | undefined
+): boolean {
+  const key = normalizeFolderComparisonKey(rawFolder);
+  return key.length > 0 && RESERVED_NOTE_FOLDER_NAMES.has(key);
+}
+
+/**
+ * Collects unique tags across notes case-insensitively (preserving first-seen
+ * casing) and returns them sorted alphabetically.
+ */
+export function collectUniqueNoteTags(
+  notes: readonly {
+    tags?: readonly string[];
+    isArchived?: boolean;
+    isTrashed?: boolean;
+  }[],
+  options?: {
+    includeArchived?: boolean;
+    includeTrashed?: boolean;
+  }
+): string[] {
+  const includeArchived = options?.includeArchived ?? true;
+  const includeTrashed = options?.includeTrashed ?? false;
+  const seen = new Map<string, string>();
+  for (const note of notes) {
+    if (!includeTrashed && note.isTrashed) continue;
+    if (!includeArchived && note.isArchived && !note.isTrashed) continue;
+    for (const rawTag of note.tags ?? []) {
+      const trimmed = typeof rawTag === 'string' ? rawTag.trim() : '';
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (!seen.has(key)) {
+        seen.set(key, trimmed);
+      }
+    }
+  }
+  return Array.from(seen.values()).sort((a, b) =>
+    a.toLowerCase().localeCompare(b.toLowerCase())
+  );
+}
+
+/**
+ * Cleans a candidate tag (trims whitespace and leading `#`) and reuses the
+ * canonical existing casing from `availableTags` when a case-insensitive match
+ * exists. Returns `null` when blank.
+ */
+export function resolveReusableNoteTag(
+  rawCandidate: string | null | undefined,
+  availableTags: readonly string[]
+): string | null {
+  const cleaned = (typeof rawCandidate === 'string' ? rawCandidate : '')
+    .trim()
+    .replace(/^#+/, '')
+    .trim();
+  if (!cleaned) return null;
+  const lower = cleaned.toLowerCase();
+  for (const existing of availableTags) {
+    const trimmedExisting = typeof existing === 'string' ? existing.trim() : '';
+    if (trimmedExisting && trimmedExisting.toLowerCase() === lower) {
+      return trimmedExisting;
+    }
+  }
+  return cleaned;
+}
+
+export function noteMatchesTagFilter(
+  noteTags: readonly string[] | undefined,
+  tagFilter: string | null | undefined
+): boolean {
+  const cleanFilter = typeof tagFilter === 'string' ? tagFilter.trim() : '';
+  if (!cleanFilter || cleanFilter.toLowerCase() === 'all') return true;
+  const targetLower = cleanFilter.toLowerCase();
+  return (noteTags ?? []).some((t) => t.trim().toLowerCase() === targetLower);
 }
 
 /**
@@ -253,8 +351,42 @@ function compareCodeUnits(a: string, b: string): number {
   return 0;
 }
 
+export function parseNoteDateFilterMode(
+  rawFilter: string | null | undefined
+): NoteDateFilterMode {
+  const normalized =
+    typeof rawFilter === 'string' ? rawFilter.trim().toLowerCase() : '';
+  if (normalized === 'updated_7d') return 'updated_7d';
+  if (normalized === 'updated_30d') return 'updated_30d';
+  if (normalized === 'created_7d') return 'created_7d';
+  if (normalized === 'created_30d') return 'created_30d';
+  return 'all';
+}
+
+export function noteMatchesDateFilter(
+  note: Pick<NoteSortItemShape, 'createdAt' | 'updatedAt'>,
+  filter: NoteDateFilterMode,
+  nowUtc?: Date
+): boolean {
+  if (filter === 'all') return true;
+  const today = CalendarDate.fromUtcInstantInEthiopia(
+    nowUtc ?? EthiopiaClock.nowUtc()
+  );
+  const windowDays =
+    filter === 'updated_7d' || filter === 'created_7d' ? 7 : 30;
+  const cutoff = today.subtractDays(windowDays - 1);
+  const targetRaw =
+    filter === 'created_7d' || filter === 'created_30d'
+      ? note.createdAt
+      : note.updatedAt;
+  const targetDate = SharedDateFormatter.tryParseFlexibleToCalendarDate(targetRaw);
+  if (!targetDate) return false;
+  return targetDate.jdn >= cutoff.jdn;
+}
+
 export function parseNoteSortMode(rawSort: string | null | undefined): NoteSortMode {
   const normalized = typeof rawSort === 'string' ? rawSort.trim().toLowerCase() : '';
+  if (normalized === 'created') return 'created';
   if (normalized === 'alpha') return 'alpha';
   if (normalized === 'oldest') return 'oldest';
   return 'recent';
@@ -263,7 +395,7 @@ export function parseNoteSortMode(rawSort: string | null | undefined): NoteSortM
 /**
  * Deterministic cross-platform Note comparator.
  * - Optional pinFirst priority (active/pinned views vs archive/trash).
- * - Mode-specific comparison (`recent`, `alpha`, `oldest`) with deterministic tie-breakers.
+ * - Mode-specific comparison (`recent`, `created`, `alpha`, `oldest`) with deterministic tie-breakers.
  */
 export function compareNotes<T extends NoteSortItemShape>(
   a: T,
@@ -290,6 +422,16 @@ export function compareNotes<T extends NoteSortItemShape>(
       normalizeNoteTitle(b.title).toLowerCase()
     );
     if (titleCmp !== 0) return titleCmp;
+    const updatedCmp =
+      parseUtcTimestampMs(b.updatedAt) - parseUtcTimestampMs(a.updatedAt);
+    if (updatedCmp !== 0) return updatedCmp;
+    return compareCodeUnits(a.id, b.id);
+  }
+
+  if (sortBy === 'created') {
+    const createdCmp =
+      parseUtcTimestampMs(b.createdAt) - parseUtcTimestampMs(a.createdAt);
+    if (createdCmp !== 0) return createdCmp;
     const updatedCmp =
       parseUtcTimestampMs(b.updatedAt) - parseUtcTimestampMs(a.updatedAt);
     if (updatedCmp !== 0) return updatedCmp;

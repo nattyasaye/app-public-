@@ -40,6 +40,82 @@ String _formatFolderLabel(String category) {
       .join(' ');
 }
 
+Future<String?> _showNotesFolderNameDialog(
+  BuildContext context,
+  NotesController controller, {
+  String? oldName,
+}) async {
+  final isRename = oldName != null;
+  final ctrl = TextEditingController(
+    text: isRename ? _formatFolderLabel(oldName) : '',
+  );
+  String? errorText;
+  try {
+    return await showDialog<String>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: Text(isRename ? 'Rename Folder' : 'New Folder'),
+          content: SingleChildScrollView(
+            child: DaywellTextField(
+              controller: ctrl,
+              label: 'Folder name',
+              hintText: 'e.g. Research',
+              errorText: errorText,
+              autofocus: true,
+              onChanged: (_) {
+                if (errorText != null) {
+                  setDialogState(() => errorText = null);
+                }
+              },
+            ),
+          ),
+          actions: [
+            DaywellButton(
+              label: 'Cancel',
+              variant: DaywellButtonVariant.text,
+              size: DaywellButtonSize.compact,
+              onPressed: () => Navigator.pop(ctx),
+            ),
+            DaywellButton(
+              label: isRename ? 'Rename' : 'Create',
+              variant: DaywellButtonVariant.primary,
+              size: DaywellButtonSize.compact,
+              onPressed: () async {
+                if (isRename) {
+                  final res = await controller.renameFolder(oldName, ctrl.text);
+                  if (!ctx.mounted) return;
+                  if (!res.ok || res.folder == null) {
+                    setDialogState(
+                      () => errorText =
+                          res.errorMessage ?? 'Could not rename folder.',
+                    );
+                    return;
+                  }
+                  Navigator.pop(ctx, res.folder);
+                } else {
+                  final res = await controller.createFolder(ctrl.text);
+                  if (!ctx.mounted) return;
+                  if (!res.ok || res.folder == null) {
+                    setDialogState(
+                      () => errorText =
+                          res.errorMessage ?? 'Could not create folder.',
+                    );
+                    return;
+                  }
+                  Navigator.pop(ctx, res.folder);
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  } finally {
+    ctrl.dispose();
+  }
+}
+
 class NotesView extends StatefulWidget {
   final AppStateManager? state;
   final NotesController? controller;
@@ -108,6 +184,9 @@ class _NotesViewState extends State<NotesView> {
     if (existingNote != null && existingNote.isTrashed) {
       return;
     }
+    final activeCategoryFilter = widget.effectiveController.state.categoryFilter;
+    final defaultNewCategory =
+        activeCategoryFilter != 'all' ? activeCategoryFilter : 'reflection';
     unawaited(
       Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
@@ -116,6 +195,7 @@ class _NotesViewState extends State<NotesView> {
             tasksController: widget.effectiveTasksController,
             onOpenTask: widget.onOpenTask,
             existingNote: existingNote,
+            initialCategory: defaultNewCategory,
           ),
         ),
       ),
@@ -173,19 +253,242 @@ class _NotesViewState extends State<NotesView> {
     );
   }
 
+  Future<String?> _showFolderNameDialog(
+    NotesController controller, {
+    String? oldName,
+  }) =>
+      _showNotesFolderNameDialog(context, controller, oldName: oldName);
+
+  void _handleCreateFolderFromList(NotesController controller) {
+    unawaited(() async {
+      final created = await _showFolderNameDialog(controller);
+      if (created == null || !mounted) return;
+      controller.setCategoryFilter(created);
+      if (controller.state.sectionFilter == 'trash' ||
+          controller.state.sectionFilter == 'archive') {
+        controller.setSectionFilter('active');
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Created folder "${_formatFolderLabel(created)}"'),
+        ),
+      );
+    }());
+  }
+
+  void _handleRenameFolderFromList(
+    NotesController controller,
+    String folderName,
+  ) {
+    unawaited(() async {
+      final renamed = await _showFolderNameDialog(
+        controller,
+        oldName: folderName,
+      );
+      if (renamed == null || !mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Renamed folder to "${_formatFolderLabel(renamed)}"'),
+        ),
+      );
+    }());
+  }
+
+  void _confirmDeleteFolder(
+    NotesController controller,
+    String folderName,
+    NotesModuleState moduleState,
+  ) {
+    final normalized = NoteDomainHelpers.normalizeFlutterCategory(folderName);
+    final affectedCount = moduleState.notes
+        .where((n) => !n.isTrashed && n.category == normalized)
+        .length;
+    final label = _formatFolderLabel(normalized);
+    unawaited(
+      DaywellConfirmationDialog.show(
+        context,
+        title: 'Delete Folder?',
+        message: affectedCount > 0
+            ? 'Delete "$label"? No notes will be deleted — $affectedCount ${affectedCount == 1 ? 'note' : 'notes'} will move safely to "General".'
+            : 'Delete empty folder "$label"?',
+        cancelLabel: 'Cancel',
+        confirmLabel: 'Delete Folder',
+        isDestructive: true,
+        icon: Icons.folder_delete_outlined,
+      ).then((confirmed) async {
+        if (!confirmed || !mounted) return;
+        final res = await controller.deleteFolder(
+          normalized,
+          destinationFolder: 'general',
+        );
+        if (!mounted) return;
+        if (!res.ok) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(res.errorMessage ?? 'Could not delete folder.'),
+            ),
+          );
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              res.movedCount > 0
+                  ? 'Deleted "$label" — moved ${res.movedCount} ${res.movedCount == 1 ? 'note' : 'notes'} to General'
+                  : 'Deleted folder "$label"',
+            ),
+          ),
+        );
+      }),
+    );
+  }
+
+  void _showMoveNoteFolderDialog(NotesController controller, NoteEntity note) {
+    const defaultOrder = ['reflection', 'reference', 'learning', 'general'];
+    final extra = controller.state.availableCategories
+        .where((c) => !defaultOrder.contains(c))
+        .toList()
+      ..sort();
+    final folders = <String>[
+      ...defaultOrder,
+      ...extra,
+      if (!defaultOrder.contains(note.category) && !extra.contains(note.category))
+        note.category,
+    ];
+
+    unawaited(
+      showDialog<void>(
+        context: context,
+        builder: (ctx) {
+          final semantic = ctx.daywellColors;
+          final colorScheme = Theme.of(ctx).colorScheme;
+          return AlertDialog(
+            title: const Text('Move to Folder'),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 300),
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    for (final folder in folders)
+                      ListTile(
+                        leading: Icon(
+                          folder == note.category
+                              ? Icons.folder_rounded
+                              : Icons.folder_outlined,
+                          color: folder == note.category
+                              ? colorScheme.primary
+                              : semantic.textSecondary,
+                        ),
+                        title: Text(
+                          _formatFolderLabel(folder),
+                          style: DaywellTypography.body(
+                            color: semantic.textPrimary,
+                          ).copyWith(
+                            fontWeight: folder == note.category
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                          ),
+                        ),
+                        trailing: folder == note.category
+                            ? Icon(
+                                Icons.check_rounded,
+                                color: colorScheme.primary,
+                              )
+                            : null,
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          unawaited(() async {
+                            final res = await controller.moveNoteToFolder(
+                              note.id,
+                              folder,
+                            );
+                            if (!mounted) return;
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  res.saved
+                                      ? 'Moved to "${_formatFolderLabel(folder)}"'
+                                      : (res.errorMessage ?? 'Could not move note.'),
+                                ),
+                              ),
+                            );
+                          }());
+                        },
+                      ),
+                    const Divider(),
+                    ListTile(
+                      leading: Icon(
+                        Icons.create_new_folder_outlined,
+                        color: colorScheme.primary,
+                      ),
+                      title: Text(
+                        'New Folder...',
+                        style: DaywellTypography.body(
+                          color: colorScheme.primary,
+                        ).copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        unawaited(() async {
+                          final created = await _showFolderNameDialog(controller);
+                          if (created == null || !mounted) return;
+                          final res = await controller.moveNoteToFolder(
+                            note.id,
+                            created,
+                          );
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                res.saved
+                                    ? 'Moved to "${_formatFolderLabel(created)}"'
+                                    : (res.errorMessage ?? 'Could not move note.'),
+                              ),
+                            ),
+                          );
+                        }());
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              DaywellButton(
+                label: 'Cancel',
+                variant: DaywellButtonVariant.text,
+                size: DaywellButtonSize.compact,
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Widget _buildEmptyState(
     BuildContext context,
     NotesController controller,
-    dynamic moduleState,
+    NotesModuleState moduleState,
   ) {
-    final String query = moduleState.searchQuery as String;
-    final String section = moduleState.sectionFilter as String;
-    final String category = moduleState.categoryFilter as String;
+    final String query = moduleState.searchQuery;
+    final String section = moduleState.sectionFilter;
+    final String category = moduleState.categoryFilter;
+    final String tagFilter = moduleState.tagFilter;
+    final String dateFilter = moduleState.dateFilter;
 
-    if (query.isNotEmpty) {
+    if (query.isNotEmpty ||
+        tagFilter != 'all' ||
+        dateFilter != 'all' ||
+        (category != 'all' && section != 'active')) {
       return DaywellEmptyState(
         icon: Icons.search_off_rounded,
-        message: 'No notes match "$query"',
+        message: query.isNotEmpty
+            ? 'No notes match "$query"'
+            : 'No notes match your active filters',
         subtitle: 'Try another keyword or clear your active filters.',
         actionLabel: 'Clear filters',
         onActionPressed: () {
@@ -267,6 +570,34 @@ class _NotesViewState extends State<NotesView> {
     }
   }
 
+  String _dateFilterDisplayLabel(String dateFilter) {
+    switch (dateFilter) {
+      case 'updated_7d':
+        return 'Updated 7d';
+      case 'updated_30d':
+        return 'Updated 30d';
+      case 'created_7d':
+        return 'Created 7d';
+      case 'created_30d':
+        return 'Created 30d';
+      default:
+        return 'Any Date';
+    }
+  }
+
+  String _sortDisplayLabel(String sortBy) {
+    switch (sortBy) {
+      case 'created':
+        return 'Recently Created';
+      case 'alpha':
+        return 'A–Z';
+      case 'oldest':
+        return 'Oldest First';
+      default:
+        return 'Recently Modified';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final controller = widget.effectiveController;
@@ -307,14 +638,31 @@ class _NotesViewState extends State<NotesView> {
           ...defaultOrder,
           ...extraCategories,
         ];
+        final availableTags = <String>[...moduleState.availableTags];
+        if (moduleState.tagFilter != 'all' &&
+            !availableTags.any(
+              (t) => t.toLowerCase() == moduleState.tagFilter.toLowerCase(),
+            )) {
+          availableTags.add(moduleState.tagFilter);
+        }
         final hasError = moduleState.errorMessage != null &&
             moduleState.errorMessage!.trim().isNotEmpty;
         final hasActiveFilters = moduleState.searchQuery.isNotEmpty ||
             moduleState.categoryFilter != 'all' ||
-            moduleState.sectionFilter != 'active';
+            moduleState.tagFilter != 'all' ||
+            moduleState.dateFilter != 'all' ||
+            moduleState.sectionFilter != 'active' ||
+            moduleState.sortBy != 'recent';
         final String? activeSummary = hasActiveFilters
-            ? '${notes.length} ${notes.length == 1 ? 'note' : 'notes'} · ${_sectionDisplayLabel(moduleState.sectionFilter)}${moduleState.categoryFilter != 'all' ? ' · ${_formatFolderLabel(moduleState.categoryFilter)}' : ''}'
+            ? '${notes.length} ${notes.length == 1 ? 'note' : 'notes'} · ${_sectionDisplayLabel(moduleState.sectionFilter)}'
+                '${moduleState.categoryFilter != 'all' ? ' · ${_formatFolderLabel(moduleState.categoryFilter)}' : ''}'
+                '${moduleState.tagFilter != 'all' ? ' · #${moduleState.tagFilter}' : ''}'
+                '${moduleState.dateFilter != 'all' ? ' · ${_dateFilterDisplayLabel(moduleState.dateFilter)}' : ''}'
+                '${moduleState.sortBy != 'recent' ? ' · ${_sortDisplayLabel(moduleState.sortBy)}' : ''}'
             : null;
+        final bool canManageSelectedFolder =
+            moduleState.categoryFilter != 'all' &&
+            !NoteEntity.defaultCategories.contains(moduleState.categoryFilter);
 
         return Scaffold(
           appBar: AppBar(
@@ -369,6 +717,7 @@ class _NotesViewState extends State<NotesView> {
                 itemBuilder: (_) => [
                   for (final option in const [
                     ('recent', 'Recently Modified'),
+                    ('created', 'Recently Created'),
                     ('alpha', 'Alphabetical (A–Z)'),
                     ('oldest', 'Oldest First'),
                   ])
@@ -481,7 +830,7 @@ class _NotesViewState extends State<NotesView> {
                       SharedDesignTokens.spacingMd,
                       0,
                       SharedDesignTokens.spacingMd,
-                      SharedDesignTokens.spacingSm,
+                      SharedDesignTokens.spacingXs,
                     ),
                     child: Row(
                       children: [
@@ -496,7 +845,179 @@ class _NotesViewState extends State<NotesView> {
                               ),
                             ),
                             selected: moduleState.categoryFilter == cat,
-                            onSelected: (_) => controller.setCategoryFilter(cat),
+                            onSelected: (_) => controller.setCategoryFilter(
+                              moduleState.categoryFilter == cat && cat != 'all'
+                                  ? 'all'
+                                  : cat,
+                            ),
+                          ),
+                          const SizedBox(width: SharedDesignTokens.spacingSm),
+                        ],
+                        ActionChip(
+                          avatar: Icon(
+                            Icons.create_new_folder_outlined,
+                            size: DaywellIconSize.xs,
+                            color: colorScheme.primary,
+                          ),
+                          label: Text(
+                            'New Folder',
+                            style: DaywellTypography.caption(
+                              color: colorScheme.primary,
+                            ).copyWith(fontWeight: FontWeight.w600),
+                          ),
+                          onPressed: () =>
+                              _handleCreateFolderFromList(controller),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (canManageSelectedFolder)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        SharedDesignTokens.spacingMd,
+                        0,
+                        SharedDesignTokens.spacingMd,
+                        SharedDesignTokens.spacingXs,
+                      ),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: SharedDesignTokens.spacingCompact,
+                          vertical: SharedDesignTokens.spacingXs,
+                        ),
+                        decoration: BoxDecoration(
+                          color: semantic.surfaceSubtle,
+                          borderRadius: BorderRadius.circular(
+                            SharedDesignTokens.radiusMd,
+                          ),
+                          border: Border.all(color: semantic.border),
+                        ),
+                        child: Wrap(
+                          spacing: SharedDesignTokens.spacingSm,
+                          runSpacing: SharedDesignTokens.spacingXs,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.folder_outlined,
+                                  size: DaywellIconSize.xs,
+                                  color: colorScheme.primary,
+                                ),
+                                const SizedBox(
+                                  width: SharedDesignTokens.spacingXs,
+                                ),
+                                Text(
+                                  'Folder: ${_formatFolderLabel(moduleState.categoryFilter)}',
+                                  style: DaywellTypography.label(
+                                    color: semantic.textPrimary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            DaywellButton(
+                              label: 'Rename',
+                              variant: DaywellButtonVariant.outlined,
+                              size: DaywellButtonSize.compact,
+                              onPressed: () => _handleRenameFolderFromList(
+                                controller,
+                                moduleState.categoryFilter,
+                              ),
+                            ),
+                            DaywellButton(
+                              label: 'Delete Folder',
+                              variant: DaywellButtonVariant.text,
+                              size: DaywellButtonSize.compact,
+                              onPressed: () => _confirmDeleteFolder(
+                                controller,
+                                moduleState.categoryFilter,
+                                moduleState,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (availableTags.isNotEmpty)
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(
+                        SharedDesignTokens.spacingMd,
+                        0,
+                        SharedDesignTokens.spacingMd,
+                        SharedDesignTokens.spacingXs,
+                      ),
+                      child: Row(
+                        children: [
+                          FilterChip(
+                            label: Text(
+                              'All Tags',
+                              style: DaywellTypography.caption(
+                                color: moduleState.tagFilter == 'all'
+                                    ? colorScheme.onPrimaryContainer
+                                    : semantic.textSecondary,
+                              ),
+                            ),
+                            selected: moduleState.tagFilter == 'all',
+                            onSelected: (_) => controller.setTagFilter('all'),
+                          ),
+                          const SizedBox(width: SharedDesignTokens.spacingSm),
+                          for (final tag in availableTags) ...[
+                            FilterChip(
+                              label: Text(
+                                '#$tag',
+                                style: DaywellTypography.caption(
+                                  color: moduleState.tagFilter.toLowerCase() ==
+                                          tag.toLowerCase()
+                                      ? colorScheme.onPrimaryContainer
+                                      : semantic.textSecondary,
+                                ),
+                              ),
+                              selected: moduleState.tagFilter.toLowerCase() ==
+                                  tag.toLowerCase(),
+                              onSelected: (_) => controller.setTagFilter(
+                                moduleState.tagFilter.toLowerCase() ==
+                                        tag.toLowerCase()
+                                    ? 'all'
+                                    : tag,
+                              ),
+                            ),
+                            const SizedBox(
+                              width: SharedDesignTokens.spacingSm,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      0,
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingSm,
+                    ),
+                    child: Row(
+                      children: [
+                        for (final opt in const [
+                          ('all', 'Any Date'),
+                          ('updated_7d', 'Updated 7d'),
+                          ('updated_30d', 'Updated 30d'),
+                          ('created_7d', 'Created 7d'),
+                          ('created_30d', 'Created 30d'),
+                        ]) ...[
+                          ChoiceChip(
+                            label: Text(
+                              opt.$2,
+                              style: DaywellTypography.caption(
+                                color: moduleState.dateFilter == opt.$1
+                                    ? colorScheme.onPrimaryContainer
+                                    : semantic.textSecondary,
+                              ),
+                            ),
+                            selected: moduleState.dateFilter == opt.$1,
+                            onSelected: (_) =>
+                                controller.setDateFilter(opt.$1),
                           ),
                           const SizedBox(width: SharedDesignTokens.spacingSm),
                         ],
@@ -552,7 +1073,7 @@ class _NotesViewState extends State<NotesView> {
                                             : constraints.maxWidth < 340
                                                 ? 1
                                                 : 2;
-                                    final double cardExtent = (244.0 *
+                                    final double cardExtent = (256.0 *
                                             textScale.clamp(1.0, 2.0))
                                         .ceilToDouble();
                                     return GridView.builder(
@@ -702,6 +1223,8 @@ class _NotesViewState extends State<NotesView> {
                       unawaited(controller.togglePin(note.id));
                     } else if (action == 'fav') {
                       unawaited(controller.toggleFavorite(note.id));
+                    } else if (action == 'move_folder') {
+                      _showMoveNoteFolderDialog(controller, note);
                     } else if (action == 'duplicate') {
                       unawaited(controller.duplicateNote(note.id));
                     } else if (action == 'copy') {
@@ -742,6 +1265,11 @@ class _NotesViewState extends State<NotesView> {
                         ),
                       ),
                     ],
+                    if (!note.isTrashed)
+                      const PopupMenuItem(
+                        value: 'move_folder',
+                        child: Text('Move to Folder'),
+                      ),
                     if (!note.isTrashed)
                       const PopupMenuItem(
                         value: 'duplicate',
@@ -835,6 +1363,25 @@ class _NotesViewState extends State<NotesView> {
                       ).copyWith(fontWeight: FontWeight.w600),
                     ),
                   ),
+                if (note.tags.length > 2)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: SharedDesignTokens.spacingXs,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: semantic.surfaceSubtle,
+                      borderRadius:
+                          BorderRadius.circular(SharedDesignTokens.radiusSm),
+                      border: Border.all(color: semantic.border),
+                    ),
+                    child: Text(
+                      '+${note.tags.length - 2}',
+                      style: DaywellTypography.caption(
+                        color: semantic.textSecondary,
+                      ).copyWith(fontWeight: FontWeight.w600),
+                    ),
+                  ),
                 Text(
                   SharedDateFormatter.formatEthiopian(
                     ethDate,
@@ -911,6 +1458,7 @@ class _NoteEditorScreen extends StatefulWidget {
   final void Function(String taskId)? onOpenTask;
   final NoteEntity? existingNote;
   final bool initialPreviewMode;
+  final String initialCategory;
 
   const _NoteEditorScreen({
     required this.controller,
@@ -918,6 +1466,7 @@ class _NoteEditorScreen extends StatefulWidget {
     this.onOpenTask,
     required this.existingNote,
     this.initialPreviewMode = false,
+    this.initialCategory = 'reflection',
   });
 
   @override
@@ -977,7 +1526,7 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         ? NoteDomainHelpers.normalizeFlutterCategory(
             widget.existingNote!.category,
           )
-        : 'reflection';
+        : NoteDomainHelpers.normalizeFlutterCategory(widget.initialCategory);
     _tags = NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
         .toList();
     _linkedModule = widget.existingNote?.linkedModule;
@@ -1390,48 +1939,129 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
     _markDirty();
   }
 
+  Future<void> _handleCreateFolderFromEditor() async {
+    final created = await _showNotesFolderNameDialog(
+      context,
+      widget.controller,
+    );
+    if (created == null || !mounted || _isDisposed) return;
+    setState(() => _category = created);
+    _markDirty();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Moved to new folder "${_formatFolderLabel(created)}"'),
+      ),
+    );
+  }
+
+  void _applyTagCandidate(String rawCandidate) {
+    final resolved = NoteDomainHelpers.resolveTagForReuse(
+      rawCandidate,
+      [..._tags, ...widget.controller.state.availableTags],
+    );
+    if (resolved == null) return;
+    final alreadyOnNote = _tags.any(
+      (existing) => existing.toLowerCase() == resolved.toLowerCase(),
+    );
+    if (alreadyOnNote) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Tag "#$resolved" is already on this note'),
+        ),
+      );
+      return;
+    }
+    final nextTags = NoteDomainHelpers.normalizeTags([..._tags, resolved]);
+    if (nextTags.length != _tags.length) {
+      setState(() => _tags = nextTags.toList());
+      _markDirty(scheduleTimer: false);
+      if (_noteId != null) {
+        unawaited(_flushPendingSaves());
+      }
+    }
+  }
+
   void _addTagDialog() {
     final ctrl = TextEditingController();
+    final existingSuggestions = widget.controller.state.availableTags
+        .where(
+          (tag) => !_tags.any(
+            (existing) => existing.toLowerCase() == tag.toLowerCase(),
+          ),
+        )
+        .toList();
     unawaited(
       showDialog<void>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Add Tag'),
-          content: DaywellTextField(
-            controller: ctrl,
-            label: 'Tag name',
-            hintText: 'e.g. architecture',
-            autofocus: true,
-          ),
-          actions: [
-            DaywellButton(
-              label: 'Cancel',
-              variant: DaywellButtonVariant.text,
-              size: DaywellButtonSize.compact,
-              onPressed: () => Navigator.pop(ctx),
+        builder: (ctx) {
+          final semantic = ctx.daywellColors;
+          return AlertDialog(
+            title: const Text('Add Tag'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DaywellTextField(
+                    controller: ctrl,
+                    label: 'Tag name',
+                    hintText: 'e.g. architecture',
+                    autofocus: true,
+                  ),
+                  if (existingSuggestions.isNotEmpty) ...[
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    Text(
+                      'Existing tags',
+                      style: DaywellTypography.caption(
+                        color: semantic.textMuted,
+                      ).copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingXs),
+                    Wrap(
+                      spacing: SharedDesignTokens.spacingXs,
+                      runSpacing: SharedDesignTokens.spacingXs,
+                      children: [
+                        for (final suggestion in existingSuggestions)
+                          ActionChip(
+                            label: Text(
+                              '#$suggestion',
+                              style: DaywellTypography.caption(
+                                color: semantic.onTransferContainer,
+                              ).copyWith(fontWeight: FontWeight.w600),
+                            ),
+                            backgroundColor: semantic.transferContainer,
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _applyTagCandidate(suggestion);
+                            },
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
             ),
-            DaywellButton(
-              label: 'Add',
-              variant: DaywellButtonVariant.primary,
-              size: DaywellButtonSize.compact,
-              onPressed: () {
-                final candidate = ctrl.text.trim().replaceAll('#', '').trim();
-                if (candidate.isNotEmpty) {
-                  final nextTags =
-                      NoteDomainHelpers.normalizeTags([..._tags, candidate]);
-                  if (nextTags.length != _tags.length) {
-                    setState(() => _tags = nextTags.toList());
-                    _markDirty(scheduleTimer: false);
-                    if (_noteId != null) {
-                      unawaited(_flushPendingSaves());
-                    }
-                  }
-                }
-                Navigator.pop(ctx);
-              },
-            ),
-          ],
-        ),
+            actions: [
+              DaywellButton(
+                label: 'Cancel',
+                variant: DaywellButtonVariant.text,
+                size: DaywellButtonSize.compact,
+                onPressed: () => Navigator.pop(ctx),
+              ),
+              DaywellButton(
+                label: 'Add',
+                variant: DaywellButtonVariant.primary,
+                size: DaywellButtonSize.compact,
+                onPressed: () {
+                  final candidate = ctrl.text;
+                  Navigator.pop(ctx);
+                  _applyTagCandidate(candidate);
+                },
+              ),
+            ],
+          );
+        },
       ).whenComplete(ctrl.dispose),
     );
   }
@@ -1905,6 +2535,13 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
                                   ),
                                 ],
                               ),
+                            ),
+                            DaywellIconButton(
+                              icon: Icons.create_new_folder_outlined,
+                              iconSize: DaywellIconSize.sm,
+                              tooltip: 'New folder',
+                              onPressed: () =>
+                                  unawaited(_handleCreateFolderFromEditor()),
                             ),
                             ActionChip(
                               avatar: Icon(

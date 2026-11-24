@@ -45,6 +45,7 @@ class AppSettingsBackupPolicy {
     'calendar_preference',
     'daywell_finance_planning_horizon',
     'daywell_user_profile',
+    'notes_custom_folders',
   };
 
   static bool isTopLevelManagedKey(String key) =>

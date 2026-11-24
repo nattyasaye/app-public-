@@ -15,7 +15,11 @@ import 'notes_state.dart';
 class NotesController extends ChangeNotifier {
   static const Uuid _uuid = Uuid();
 
+  static const String customFoldersSettingKey = 'notes_custom_folders';
+
   final INotesRepository _repository;
+  final Future<List<String>> Function()? _loadCustomFolders;
+  final Future<void> Function(List<String> folders)? _saveCustomFolders;
   NotesModuleState _state;
   Future<void> _mutationQueue = Future<void>.value();
   bool _isDisposed = false;
@@ -23,7 +27,11 @@ class NotesController extends ChangeNotifier {
   NotesController({
     required INotesRepository repository,
     NotesModuleState? initialState,
+    Future<List<String>> Function()? loadCustomFolders,
+    Future<void> Function(List<String> folders)? saveCustomFolders,
   })  : _repository = repository,
+        _loadCustomFolders = loadCustomFolders,
+        _saveCustomFolders = saveCustomFolders,
         _state = initialState ?? const NotesModuleState();
 
   NotesModuleState get state => _state;
@@ -56,6 +64,22 @@ class NotesController extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setTagFilter(String tag) {
+    final trimmed = tag.trim();
+    final normalized =
+        (trimmed.isEmpty || trimmed.toLowerCase() == 'all') ? 'all' : trimmed;
+    _state = _state.copyWith(tagFilter: normalized);
+    notifyListeners();
+  }
+
+  void setDateFilter(String dateFilter) {
+    final parsed = NoteDomainHelpers.parseDateFilterMode(dateFilter);
+    _state = _state.copyWith(
+      dateFilter: NoteDomainHelpers.dateFilterKey(parsed),
+    );
+    notifyListeners();
+  }
+
   void setSectionFilter(String section) {
     _state = _state.copyWith(sectionFilter: section);
     notifyListeners();
@@ -75,6 +99,8 @@ class NotesController extends ChangeNotifier {
     _state = _state.copyWith(
       searchQuery: '',
       categoryFilter: 'all',
+      tagFilter: 'all',
+      dateFilter: 'all',
       sectionFilter: 'active',
       sortBy: 'recent',
     );
@@ -82,6 +108,21 @@ class NotesController extends ChangeNotifier {
   }
 
   // --- Loading & Initialization ---
+
+  List<String> _normalizeFolderList(Iterable<String> raw) {
+    final seen = <String>{};
+    final out = <String>[];
+    for (final entry in raw) {
+      final trimmed = entry.trim();
+      if (trimmed.isEmpty) continue;
+      final norm = NoteDomainHelpers.normalizeFlutterCategory(trimmed);
+      if (NoteEntity.defaultCategories.contains(norm)) continue;
+      if (seen.add(norm)) {
+        out.add(norm);
+      }
+    }
+    return List<String>.unmodifiable(out);
+  }
 
   Future<void> loadNotes() {
     return _enqueue(() async {
@@ -92,8 +133,19 @@ class NotesController extends ChangeNotifier {
           includeArchived: true,
           includeTrashed: true,
         );
+        var loadedCustomFolders = _state.customFolders;
+        if (_loadCustomFolders != null) {
+          try {
+            loadedCustomFolders = _normalizeFolderList(
+              await _loadCustomFolders!(),
+            );
+          } catch (_) {
+            // Keep existing folders if optional settings lookup is unavailable.
+          }
+        }
         _state = _state.copyWith(
           notes: List<NoteEntity>.unmodifiable(persisted),
+          customFolders: loadedCustomFolders,
           isLoading: false,
           clearError: true,
         );
@@ -283,6 +335,271 @@ class NotesController extends ChangeNotifier {
         _state = _state.copyWith(errorMessage: e.toString());
       }
       notifyListeners();
+    });
+  }
+
+  Future<({bool saved, String? errorMessage})> moveNoteToFolder(
+    String id,
+    String targetFolder,
+  ) {
+    return _enqueue(() async {
+      final existing = _state.findById(id);
+      if (existing == null || NoteDomainHelpers.isTrashed(existing)) {
+        final reason = existing == null
+            ? 'Note no longer exists.'
+            : 'Restore note from Trash before moving folders.';
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (saved: false, errorMessage: reason);
+      }
+      final normalizedTarget =
+          NoteDomainHelpers.normalizeFlutterCategory(targetFolder);
+      if (existing.category == normalizedTarget) {
+        return (saved: true, errorMessage: null);
+      }
+      final updated = existing.copyWith(
+        category: normalizedTarget,
+        updatedAt: EthiopiaClock.nowUtc(),
+      );
+      try {
+        final saved = await _repository.updateNote(updated);
+        _upsertInState(saved);
+        notifyListeners();
+        return (saved: true, errorMessage: null);
+      } catch (e) {
+        final reason = e.toString();
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (saved: false, errorMessage: reason);
+      }
+    });
+  }
+
+  Future<({bool ok, String? folder, String? errorMessage})> createFolder(
+    String rawName,
+  ) {
+    return _enqueue(() async {
+      final trimmed = rawName.trim();
+      if (trimmed.isEmpty) {
+        return (
+          ok: false,
+          folder: null,
+          errorMessage: 'Folder name cannot be empty.',
+        );
+      }
+      if (NoteDomainHelpers.isReservedFolderName(trimmed)) {
+        return (
+          ok: false,
+          folder: null,
+          errorMessage: '"$trimmed" is a reserved view name.',
+        );
+      }
+      final normalized = NoteDomainHelpers.normalizeFlutterCategory(trimmed);
+      if (_state.availableAllCategories.contains(normalized)) {
+        return (
+          ok: false,
+          folder: null,
+          errorMessage: 'Folder "$trimmed" already exists.',
+        );
+      }
+      final nextCustomFolders =
+          _normalizeFolderList([..._state.customFolders, normalized]);
+      try {
+        if (_saveCustomFolders != null) {
+          await _saveCustomFolders!(nextCustomFolders);
+        }
+        _state = _state.copyWith(
+          customFolders: nextCustomFolders,
+          clearError: true,
+        );
+        notifyListeners();
+        return (ok: true, folder: normalized, errorMessage: null);
+      } catch (e) {
+        final reason = e.toString();
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (ok: false, folder: null, errorMessage: reason);
+      }
+    });
+  }
+
+  Future<({bool ok, String? folder, int affectedCount, String? errorMessage})>
+      renameFolder(String oldName, String newName) {
+    return _enqueue(() async {
+      final oldNorm = NoteDomainHelpers.normalizeFlutterCategory(oldName);
+      if (NoteEntity.defaultCategories.contains(oldNorm)) {
+        return (
+          ok: false,
+          folder: null,
+          affectedCount: 0,
+          errorMessage: 'Built-in folders cannot be renamed.',
+        );
+      }
+      final trimmedNew = newName.trim();
+      if (trimmedNew.isEmpty) {
+        return (
+          ok: false,
+          folder: null,
+          affectedCount: 0,
+          errorMessage: 'Folder name cannot be empty.',
+        );
+      }
+      if (NoteDomainHelpers.isReservedFolderName(trimmedNew)) {
+        return (
+          ok: false,
+          folder: null,
+          affectedCount: 0,
+          errorMessage: '"$trimmedNew" is a reserved view name.',
+        );
+      }
+      final newNorm = NoteDomainHelpers.normalizeFlutterCategory(trimmedNew);
+      if (newNorm == oldNorm) {
+        return (
+          ok: true,
+          folder: newNorm,
+          affectedCount: 0,
+          errorMessage: null,
+        );
+      }
+      if (_state.availableAllCategories.contains(newNorm)) {
+        return (
+          ok: false,
+          folder: null,
+          affectedCount: 0,
+          errorMessage: 'Folder "$trimmedNew" already exists.',
+        );
+      }
+
+      var renamedCount = 0;
+      final updatedById = <String, NoteEntity>{};
+      try {
+        for (final note in _state.notes) {
+          if (NoteDomainHelpers.isTrashed(note)) continue;
+          if (note.category != oldNorm) continue;
+          final saved = await _repository.updateNote(
+            note.copyWith(
+              category: newNorm,
+              updatedAt: EthiopiaClock.nowUtc(),
+            ),
+          );
+          updatedById[saved.id] = saved;
+          renamedCount++;
+        }
+
+        final nextNotes = _state.notes
+            .map((n) => updatedById[n.id] ?? n)
+            .toList(growable: false);
+        final nextCustomFolders = _normalizeFolderList([
+          for (final f in _state.customFolders)
+            if (f != oldNorm) f,
+          newNorm,
+        ]);
+        if (_saveCustomFolders != null) {
+          await _saveCustomFolders!(nextCustomFolders);
+        }
+        _state = _state.copyWith(
+          notes: List<NoteEntity>.unmodifiable(nextNotes),
+          customFolders: nextCustomFolders,
+          categoryFilter:
+              _state.categoryFilter == oldNorm ? newNorm : _state.categoryFilter,
+          clearError: true,
+        );
+        notifyListeners();
+        return (
+          ok: true,
+          folder: newNorm,
+          affectedCount: renamedCount,
+          errorMessage: null,
+        );
+      } catch (e) {
+        final reason = e.toString();
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (
+          ok: false,
+          folder: null,
+          affectedCount: renamedCount,
+          errorMessage: reason,
+        );
+      }
+    });
+  }
+
+  Future<
+      ({
+        bool ok,
+        int movedCount,
+        String destinationFolder,
+        String? errorMessage,
+      })> deleteFolder(
+    String folderName, {
+    String destinationFolder = 'general',
+  }) {
+    return _enqueue(() async {
+      final targetNorm = NoteDomainHelpers.normalizeFlutterCategory(folderName);
+      if (NoteEntity.defaultCategories.contains(targetNorm)) {
+        return (
+          ok: false,
+          movedCount: 0,
+          destinationFolder: 'general',
+          errorMessage: 'Built-in folders cannot be deleted.',
+        );
+      }
+      final candidateDest = destinationFolder.trim().isEmpty
+          ? 'general'
+          : NoteDomainHelpers.normalizeFlutterCategory(destinationFolder);
+      final safeDest = candidateDest == targetNorm ? 'general' : candidateDest;
+
+      var movedCount = 0;
+      final updatedById = <String, NoteEntity>{};
+      try {
+        for (final note in _state.notes) {
+          if (NoteDomainHelpers.isTrashed(note)) continue;
+          if (note.category != targetNorm) continue;
+          final saved = await _repository.updateNote(
+            note.copyWith(
+              category: safeDest,
+              updatedAt: EthiopiaClock.nowUtc(),
+            ),
+          );
+          updatedById[saved.id] = saved;
+          movedCount++;
+        }
+
+        final nextNotes = _state.notes
+            .map((n) => updatedById[n.id] ?? n)
+            .toList(growable: false);
+        final nextCustomFolders = _normalizeFolderList(
+          _state.customFolders.where((f) => f != targetNorm),
+        );
+        if (_saveCustomFolders != null) {
+          await _saveCustomFolders!(nextCustomFolders);
+        }
+        _state = _state.copyWith(
+          notes: List<NoteEntity>.unmodifiable(nextNotes),
+          customFolders: nextCustomFolders,
+          categoryFilter:
+              _state.categoryFilter == targetNorm ? 'all' : _state.categoryFilter,
+          clearError: true,
+        );
+        notifyListeners();
+        return (
+          ok: true,
+          movedCount: movedCount,
+          destinationFolder: safeDest,
+          errorMessage: null,
+        );
+      } catch (e) {
+        final reason = e.toString();
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (
+          ok: false,
+          movedCount: movedCount,
+          destinationFolder: safeDest,
+          errorMessage: reason,
+        );
+      }
     });
   }
 

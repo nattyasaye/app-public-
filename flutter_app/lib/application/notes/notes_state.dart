@@ -4,22 +4,29 @@ import '../../domain/notes/note_models.dart';
 /// Immutable state container for the Daywell Notes & Knowledge module.
 class NotesModuleState {
   final List<NoteEntity> notes;
+  final List<String> customFolders;
 
   // Presentation / Filter State
   final String searchQuery;
   final String
-      categoryFilter; // 'all', 'general', 'reference', 'reflection', 'learning'
+      categoryFilter; // 'all', 'general', 'reference', 'reflection', 'learning', or custom folder
+  final String tagFilter; // 'all' or tag name
+  final String
+      dateFilter; // 'all', 'updated_7d', 'updated_30d', 'created_7d', 'created_30d'
   final String
       sectionFilter; // 'active', 'pinned', 'favorites', 'archive', 'trash'
-  final String sortBy; // 'recent', 'alpha', 'oldest'
+  final String sortBy; // 'recent', 'created', 'alpha', 'oldest'
   final bool isGridView;
   final bool isLoading;
   final String? errorMessage;
 
   const NotesModuleState({
     this.notes = const [],
+    this.customFolders = const [],
     this.searchQuery = '',
     this.categoryFilter = 'all',
+    this.tagFilter = 'all',
+    this.dateFilter = 'all',
     this.sectionFilter = 'active',
     this.sortBy = 'recent',
     this.isGridView = false,
@@ -29,8 +36,11 @@ class NotesModuleState {
 
   NotesModuleState copyWith({
     List<NoteEntity>? notes,
+    List<String>? customFolders,
     String? searchQuery,
     String? categoryFilter,
+    String? tagFilter,
+    String? dateFilter,
     String? sectionFilter,
     String? sortBy,
     bool? isGridView,
@@ -40,8 +50,11 @@ class NotesModuleState {
   }) {
     return NotesModuleState(
       notes: notes ?? this.notes,
+      customFolders: customFolders ?? this.customFolders,
       searchQuery: searchQuery ?? this.searchQuery,
       categoryFilter: categoryFilter ?? this.categoryFilter,
+      tagFilter: tagFilter ?? this.tagFilter,
+      dateFilter: dateFilter ?? this.dateFilter,
       sectionFilter: sectionFilter ?? this.sectionFilter,
       sortBy: sortBy ?? this.sortBy,
       isGridView: isGridView ?? this.isGridView,
@@ -60,6 +73,7 @@ class NotesModuleState {
   // --- Derived Calculations & Filtered Notes ---
 
   List<NoteEntity> get filteredNotes {
+    final parsedDateFilter = NoteDomainHelpers.parseDateFilterMode(dateFilter);
     final list = notes.where((note) {
       if (sectionFilter == 'trash') {
         if (!NoteDomainHelpers.isTrashed(note)) return false;
@@ -74,6 +88,14 @@ class NotesModuleState {
       if (categoryFilter != 'all' &&
           note.category !=
               NoteDomainHelpers.normalizeFlutterCategory(categoryFilter)) {
+        return false;
+      }
+
+      if (!NoteDomainHelpers.matchesTagFilter(note.tags, tagFilter)) {
+        return false;
+      }
+
+      if (!NoteDomainHelpers.matchesDateFilter(note, parsedDateFilter)) {
         return false;
       }
 
@@ -101,8 +123,19 @@ class NotesModuleState {
       notes.where(NoteDomainHelpers.isArchived).length;
   int get trashedNotesCount => notes.where(NoteDomainHelpers.isTrashed).length;
 
+  List<String> get availableTags => NoteDomainHelpers.collectUniqueTags(
+        notes,
+        includeArchived: true,
+        includeTrashed: sectionFilter == 'trash',
+      );
+
   Set<String> get availableCategories {
     final cats = Set<String>.from(NoteEntity.defaultCategories);
+    for (final folder in customFolders) {
+      if (folder.trim().isNotEmpty) {
+        cats.add(NoteDomainHelpers.normalizeFlutterCategory(folder));
+      }
+    }
     for (final n in notes) {
       if (!n.isTrashed && n.category.isNotEmpty) {
         cats.add(n.category);
@@ -113,6 +146,11 @@ class NotesModuleState {
 
   Set<String> get availableAllCategories {
     final cats = Set<String>.from(NoteEntity.defaultCategories);
+    for (final folder in customFolders) {
+      if (folder.trim().isNotEmpty) {
+        cats.add(NoteDomainHelpers.normalizeFlutterCategory(folder));
+      }
+    }
     for (final n in notes) {
       if (n.category.isNotEmpty) {
         cats.add(n.category);

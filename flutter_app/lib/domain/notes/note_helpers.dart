@@ -1,3 +1,4 @@
+import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation_core.dart';
 import 'note_models.dart';
 
@@ -5,8 +6,8 @@ import 'note_models.dart';
 ///
 /// Zero dependencies on Flutter widgets or Drift SQLite.
 /// Keeps title bounds, tag normalization, folder/category defaults,
-/// lifecycle predicates, polymorphic link validation, and deterministic
-/// sorting equivalent to `src/domain/noteHelpers.ts`.
+/// lifecycle predicates, polymorphic link validation, date-window/tag filters,
+/// and deterministic sorting equivalent to `src/domain/noteHelpers.ts`.
 enum NoteLifecycleState {
   active,
   archived,
@@ -15,8 +16,17 @@ enum NoteLifecycleState {
 
 enum NoteSortMode {
   recent,
+  created,
   alpha,
   oldest,
+}
+
+enum NoteDateFilterMode {
+  all,
+  updated7d,
+  updated30d,
+  created7d,
+  created30d,
 }
 
 class NoteTitleValidationResult {
@@ -36,6 +46,14 @@ class NoteDomainHelpers {
 
   static const String defaultTitle = 'Untitled Note';
   static const int maxTitleLength = SharedNoteContracts.maxTitleLength;
+  static const Set<String> reservedFolderNames = <String>{
+    'all',
+    'pinned',
+    'favorites',
+    'archive',
+    'archived',
+    'trash',
+  };
 
   static final Set<String> _supportedLinkModules =
       SharedNoteContracts.canonicalLinkedModules.toSet();
@@ -100,6 +118,64 @@ class NoteDomainHelpers {
       normalized.add(trimmed);
     }
     return List<String>.unmodifiable(normalized);
+  }
+
+  /// Collects unique tags across [notes] case-insensitively (preserving first-seen
+  /// casing) and sorts them alphabetically.
+  static List<String> collectUniqueTags(
+    Iterable<NoteEntity> notes, {
+    bool includeArchived = true,
+    bool includeTrashed = false,
+  }) {
+    final seen = <String, String>{};
+    for (final note in notes) {
+      if (!includeTrashed && note.isTrashed) continue;
+      if (!includeArchived && note.isArchived && !note.isTrashed) continue;
+      for (final rawTag in note.tags) {
+        final trimmed = rawTag.trim();
+        if (trimmed.isEmpty) continue;
+        seen.putIfAbsent(trimmed.toLowerCase(), () => trimmed);
+      }
+    }
+    final result = seen.values.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return List<String>.unmodifiable(result);
+  }
+
+  /// Cleans [rawCandidate] (trimming whitespace and leading `#`) and reuses the
+  /// canonical existing casing from [availableTags] when a case-insensitive
+  /// match exists. Returns `null` if blank.
+  static String? resolveTagForReuse(
+    String? rawCandidate,
+    Iterable<String> availableTags,
+  ) {
+    final cleaned = (rawCandidate ?? '').trim().replaceFirst(RegExp(r'^#+'), '').trim();
+    if (cleaned.isEmpty) return null;
+    final lower = cleaned.toLowerCase();
+    for (final existing in availableTags) {
+      final trimmedExisting = existing.trim();
+      if (trimmedExisting.isNotEmpty && trimmedExisting.toLowerCase() == lower) {
+        return trimmedExisting;
+      }
+    }
+    return cleaned;
+  }
+
+  static bool matchesTagFilter(Iterable<String> noteTags, String? tagFilter) {
+    final cleanFilter = tagFilter?.trim() ?? '';
+    if (cleanFilter.isEmpty || cleanFilter.toLowerCase() == 'all') {
+      return true;
+    }
+    final targetLower = cleanFilter.toLowerCase();
+    for (final tag in noteTags) {
+      if (tag.trim().toLowerCase() == targetLower) return true;
+    }
+    return false;
+  }
+
+  static bool isReservedFolderName(String? rawFolder) {
+    final key = (rawFolder ?? '').trim().toLowerCase();
+    return key.isNotEmpty && reservedFolderNames.contains(key);
   }
 
   static String normalizeFolder(
@@ -189,8 +265,55 @@ class NoteDomainHelpers {
     return pair.$1 != null && pair.$2 != null;
   }
 
+  static NoteDateFilterMode parseDateFilterMode(String? rawFilter) {
+    final normalized = rawFilter?.trim().toLowerCase() ?? '';
+    return switch (normalized) {
+      'updated_7d' => NoteDateFilterMode.updated7d,
+      'updated_30d' => NoteDateFilterMode.updated30d,
+      'created_7d' => NoteDateFilterMode.created7d,
+      'created_30d' => NoteDateFilterMode.created30d,
+      _ => NoteDateFilterMode.all,
+    };
+  }
+
+  static String dateFilterKey(NoteDateFilterMode mode) {
+    return switch (mode) {
+      NoteDateFilterMode.all => 'all',
+      NoteDateFilterMode.updated7d => 'updated_7d',
+      NoteDateFilterMode.updated30d => 'updated_30d',
+      NoteDateFilterMode.created7d => 'created_7d',
+      NoteDateFilterMode.created30d => 'created_30d',
+    };
+  }
+
+  static bool matchesDateFilter(
+    NoteEntity note,
+    NoteDateFilterMode filter, {
+    DateTime? nowUtc,
+  }) {
+    if (filter == NoteDateFilterMode.all) return true;
+    final today = CalendarDate.fromUtcInstantInEthiopia(
+      (nowUtc ?? EthiopiaClock.nowUtc()).toUtc(),
+    );
+    final int windowDays =
+        (filter == NoteDateFilterMode.updated7d ||
+                filter == NoteDateFilterMode.created7d)
+            ? 7
+            : 30;
+    final cutoff = today.subtractDays(windowDays - 1);
+    final targetInstant =
+        (filter == NoteDateFilterMode.created7d ||
+                filter == NoteDateFilterMode.created30d)
+            ? note.createdAt
+            : note.updatedAt;
+    final targetDate =
+        CalendarDate.fromUtcInstantInEthiopia(targetInstant.toUtc());
+    return targetDate.jdn >= cutoff.jdn;
+  }
+
   static NoteSortMode parseSortMode(String? rawSort) {
     final normalized = rawSort?.trim().toLowerCase() ?? '';
+    if (normalized == 'created') return NoteSortMode.created;
     if (normalized == 'alpha') return NoteSortMode.alpha;
     if (normalized == 'oldest') return NoteSortMode.oldest;
     return NoteSortMode.recent;
@@ -211,6 +334,20 @@ class NoteDomainHelpers {
           .toLowerCase()
           .compareTo(normalizeTitle(b.title).toLowerCase());
       if (titleCmp != 0) return titleCmp;
+      final updatedCmp = b.updatedAt
+          .toUtc()
+          .millisecondsSinceEpoch
+          .compareTo(a.updatedAt.toUtc().millisecondsSinceEpoch);
+      if (updatedCmp != 0) return updatedCmp;
+      return a.id.compareTo(b.id);
+    }
+
+    if (sortBy == NoteSortMode.created) {
+      final createdCmp = b.createdAt
+          .toUtc()
+          .millisecondsSinceEpoch
+          .compareTo(a.createdAt.toUtc().millisecondsSinceEpoch);
+      if (createdCmp != 0) return createdCmp;
       final updatedCmp = b.updatedAt
           .toUtc()
           .millisecondsSinceEpoch

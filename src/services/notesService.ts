@@ -2,6 +2,7 @@ import { normalizeTaskNoteRecord, TaskNoteRecord } from '../domain/taskNotes';
 import { SharedStateBridge } from './sharedStateBridge';
 
 const NOTES_STORAGE_KEY = 'daywell_notes';
+const NOTE_FOLDERS_STORAGE_KEY = 'daywell_note_folders';
 
 function dedupeNotesById<T extends TaskNoteRecord>(items: readonly T[]): T[] {
   const seen = new Set<string>();
@@ -11,6 +12,21 @@ function dedupeNotesById<T extends TaskNoteRecord>(items: readonly T[]): T[] {
       seen.add(item.id);
       out.push(item);
     }
+  }
+  return out;
+}
+
+function dedupeFolderNames(items: readonly unknown[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of items) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
   }
   return out;
 }
@@ -59,6 +75,34 @@ export const notesService = {
     }
     if (options?.emitSync !== false) {
       dispatchNotesSync(normalized);
+    }
+    return normalized;
+  },
+
+  loadCustomFolders(): string[] {
+    if (typeof localStorage === 'undefined') return [];
+    try {
+      const raw = localStorage.getItem(NOTE_FOLDERS_STORAGE_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return dedupeFolderNames(parsed);
+    } catch {
+      return [];
+    }
+  },
+
+  saveCustomFolders(folders: readonly string[]): string[] {
+    const normalized = dedupeFolderNames(folders);
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.setItem(
+          NOTE_FOLDERS_STORAGE_KEY,
+          JSON.stringify(normalized)
+        );
+      } catch (err) {
+        console.error('[notesService] Failed to save custom folders:', err);
+      }
     }
     return normalized;
   },

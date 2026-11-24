@@ -814,6 +814,24 @@ class AppDatabase extends _$AppDatabase {
     await V6LedgerMigrator.ensureSystemControlAccounts(this);
   }
 
+  /// Reads a user/app setting value by key from `app_settings`, or `null` if absent.
+  Future<String?> readAppSetting(String key) async {
+    final row = await (select(appSettings)..where((tbl) => tbl.key.equals(key)))
+        .getSingleOrNull();
+    return row?.value;
+  }
+
+  /// Persists a user/app setting key/value pair into `app_settings`.
+  Future<void> writeAppSetting(String key, String value) async {
+    await into(appSettings).insertOnConflictUpdate(
+      AppSettingsCompanion.insert(
+        key: key,
+        value: value,
+        updatedAt: EthiopiaClock.nowUtc(),
+      ),
+    );
+  }
+
   /// Seeds default settings and canonical starter categories ONLY on first run
   /// when [seedSentinelKey] is not yet recorded and without overwriting user rows.
   Future<void> seedDefaultsIfFirstRun() async {

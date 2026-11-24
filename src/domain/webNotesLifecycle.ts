@@ -6,11 +6,17 @@ import {
   isNoteFavoriteActive,
   isNotePinnedActive,
   isNoteTrashed,
+  isReservedNoteFolderName,
+  normalizeFolderComparisonKey,
   normalizeNoteLinkPair,
   normalizeNoteTags,
   normalizeNoteTitle,
   normalizeWebNoteNotebook,
+  NoteDateFilterMode,
+  noteMatchesDateFilter,
+  noteMatchesTagFilter,
   NoteSortMode,
+  parseNoteDateFilterMode,
   sortNotes,
 } from './noteHelpers';
 import { TaskNoteRecord } from './taskNotes';
@@ -232,31 +238,336 @@ export function getWebNoteCounts(notes: readonly TaskNoteRecord[]): WebNoteCount
   return { active, pinned, favorites, archived, trash };
 }
 
+export function isDefaultWebNotebook(
+  rawFolder: string | null | undefined,
+  defaults: readonly string[] = DEFAULT_WEB_NOTEBOOKS
+): boolean {
+  const key = normalizeFolderComparisonKey(rawFolder);
+  if (!key) return false;
+  return defaults.some((d) => normalizeFolderComparisonKey(d) === key);
+}
+
 export function getAvailableWebNotebooks(
   notes: readonly TaskNoteRecord[],
-  defaults: readonly string[] = DEFAULT_WEB_NOTEBOOKS
+  defaults: readonly string[] = DEFAULT_WEB_NOTEBOOKS,
+  customFolders: readonly string[] = []
 ): string[] {
-  const set = new Set<string>(defaults);
+  const seen = new Map<string, string>();
+  const addFolder = (raw: string | null | undefined) => {
+    const trimmed = typeof raw === 'string' ? raw.trim() : '';
+    if (!trimmed) return;
+    const key = trimmed.toLowerCase();
+    if (!seen.has(key)) {
+      seen.set(key, trimmed);
+    }
+  };
+
+  for (const def of defaults) {
+    addFolder(def);
+  }
+  for (const custom of customFolders) {
+    addFolder(custom);
+  }
   for (const note of notes) {
     if (isNoteTrashed(note)) continue;
-    const clean = note.notebook.trim();
-    if (clean) {
-      set.add(clean);
+    addFolder(note.notebook);
+  }
+  return Array.from(seen.values());
+}
+
+export interface WebFolderMutationResult<
+  T extends TaskNoteRecord = TaskNoteRecord,
+> {
+  ok: boolean;
+  notes: T[];
+  customFolders: string[];
+  folder?: string;
+  affectedCount: number;
+  destinationNotebook?: string;
+  error?: string;
+}
+
+export function createWebCustomFolder(params: {
+  existingFolders: readonly string[];
+  folderName: string;
+  defaults?: readonly string[];
+  knownFolders?: readonly string[];
+}): {
+  ok: boolean;
+  customFolders: string[];
+  folder?: string;
+  error?: string;
+} {
+  const trimmed = params.folderName.trim();
+  if (!trimmed) {
+    return {
+      ok: false,
+      customFolders: [...params.existingFolders],
+      error: 'Folder name cannot be empty.',
+    };
+  }
+  if (isReservedNoteFolderName(trimmed)) {
+    return {
+      ok: false,
+      customFolders: [...params.existingFolders],
+      error: `"${trimmed}" is a reserved view name.`,
+    };
+  }
+  const key = normalizeFolderComparisonKey(trimmed);
+  const defaults = params.defaults ?? DEFAULT_WEB_NOTEBOOKS;
+  const known = [
+    ...defaults,
+    ...params.existingFolders,
+    ...(params.knownFolders ?? []),
+  ];
+  const existingMatch = known.find(
+    (f) => normalizeFolderComparisonKey(f) === key
+  );
+  if (existingMatch) {
+    return {
+      ok: false,
+      customFolders: [...params.existingFolders],
+      error: `Folder "${existingMatch}" already exists.`,
+    };
+  }
+  return {
+    ok: true,
+    folder: trimmed,
+    customFolders: [...params.existingFolders, trimmed],
+  };
+}
+
+export function renameWebNotebook<T extends TaskNoteRecord>(params: {
+  notes: readonly T[];
+  customFolders: readonly string[];
+  oldName: string;
+  newName: string;
+  defaults?: readonly string[];
+  nowUtc?: Date;
+}): WebFolderMutationResult<T> {
+  const defaults = params.defaults ?? DEFAULT_WEB_NOTEBOOKS;
+  const oldTrimmed = params.oldName.trim();
+  const newTrimmed = params.newName.trim();
+  const oldKey = normalizeFolderComparisonKey(oldTrimmed);
+  const newKey = normalizeFolderComparisonKey(newTrimmed);
+
+  if (!oldKey) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      customFolders: [...params.customFolders],
+      affectedCount: 0,
+      error: 'Select a folder to rename.',
+    };
+  }
+  if (isDefaultWebNotebook(oldTrimmed, defaults)) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      customFolders: [...params.customFolders],
+      affectedCount: 0,
+      error: 'Built-in folders cannot be renamed.',
+    };
+  }
+  if (!newTrimmed) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      customFolders: [...params.customFolders],
+      affectedCount: 0,
+      error: 'Folder name cannot be empty.',
+    };
+  }
+  if (isReservedNoteFolderName(newTrimmed)) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      customFolders: [...params.customFolders],
+      affectedCount: 0,
+      error: `"${newTrimmed}" is a reserved view name.`,
+    };
+  }
+
+  const allExisting = getAvailableWebNotebooks(
+    params.notes,
+    defaults,
+    params.customFolders
+  );
+  const conflict = allExisting.find(
+    (f) =>
+      normalizeFolderComparisonKey(f) === newKey &&
+      normalizeFolderComparisonKey(f) !== oldKey
+  );
+  if (conflict) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      customFolders: [...params.customFolders],
+      affectedCount: 0,
+      error: `Folder "${conflict}" already exists.`,
+    };
+  }
+
+  const nowIso = (params.nowUtc ?? EthiopiaClock.nowUtc()).toISOString();
+  let renamedCount = 0;
+  const nextNotes = params.notes.map((note) => {
+    if (isNoteTrashed(note)) return note;
+    if (normalizeFolderComparisonKey(note.notebook) !== oldKey) return note;
+    renamedCount += 1;
+    return {
+      ...note,
+      notebook: newTrimmed,
+      updatedAt: nowIso,
+    };
+  });
+
+  const nextCustomSet = new Map<string, string>();
+  let replaced = false;
+  for (const folder of params.customFolders) {
+    const k = normalizeFolderComparisonKey(folder);
+    if (!k) continue;
+    if (k === oldKey) {
+      if (!isDefaultWebNotebook(newTrimmed, defaults)) {
+        nextCustomSet.set(newKey, newTrimmed);
+      }
+      replaced = true;
+    } else if (!nextCustomSet.has(k)) {
+      nextCustomSet.set(k, folder.trim());
     }
   }
-  return Array.from(set);
+  if (!replaced && !isDefaultWebNotebook(newTrimmed, defaults)) {
+    nextCustomSet.set(newKey, newTrimmed);
+  }
+
+  return {
+    ok: true,
+    notes: nextNotes,
+    customFolders: Array.from(nextCustomSet.values()),
+    folder: newTrimmed,
+    affectedCount: renamedCount,
+  };
+}
+
+export function deleteWebNotebook<T extends TaskNoteRecord>(params: {
+  notes: readonly T[];
+  customFolders: readonly string[];
+  folderName: string;
+  destinationNotebook?: string;
+  defaults?: readonly string[];
+  nowUtc?: Date;
+}): WebFolderMutationResult<T> {
+  const defaults = params.defaults ?? DEFAULT_WEB_NOTEBOOKS;
+  const targetTrimmed = params.folderName.trim();
+  const targetKey = normalizeFolderComparisonKey(targetTrimmed);
+
+  if (!targetKey) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      customFolders: [...params.customFolders],
+      affectedCount: 0,
+      error: 'Select a folder to delete.',
+    };
+  }
+  if (isDefaultWebNotebook(targetTrimmed, defaults)) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      customFolders: [...params.customFolders],
+      affectedCount: 0,
+      error: 'Built-in folders cannot be deleted.',
+    };
+  }
+
+  const candidateDest = (params.destinationNotebook ?? '').trim();
+  const safeDestination =
+    candidateDest &&
+    normalizeFolderComparisonKey(candidateDest) !== targetKey
+      ? candidateDest
+      : normalizeWebNoteNotebook(undefined);
+
+  const nowIso = (params.nowUtc ?? EthiopiaClock.nowUtc()).toISOString();
+  let movedCount = 0;
+  const nextNotes = params.notes.map((note) => {
+    if (isNoteTrashed(note)) return note;
+    if (normalizeFolderComparisonKey(note.notebook) !== targetKey) return note;
+    movedCount += 1;
+    return {
+      ...note,
+      notebook: safeDestination,
+      updatedAt: nowIso,
+    };
+  });
+
+  const nextCustomFolders = params.customFolders.filter(
+    (f) => normalizeFolderComparisonKey(f) !== targetKey
+  );
+
+  return {
+    ok: true,
+    notes: nextNotes,
+    customFolders: nextCustomFolders,
+    folder: targetTrimmed,
+    affectedCount: movedCount,
+    destinationNotebook: safeDestination,
+  };
+}
+
+export function moveWebNoteToNotebook<T extends TaskNoteRecord>(
+  notes: readonly T[],
+  noteId: string,
+  targetNotebook: string,
+  nowUtc?: Date
+): WebNoteLifecycleMutationResult<T> {
+  const target = notes.find((n) => n.id === noteId);
+  if (!target) {
+    return { ok: false, notes: [...notes], error: 'Note not found.' };
+  }
+  if (isNoteTrashed(target)) {
+    return {
+      ok: false,
+      notes: [...notes],
+      error: 'Restore note from Trash before moving folders.',
+    };
+  }
+  const normalizedTarget = normalizeWebNoteNotebook(targetNotebook);
+  if (target.notebook === normalizedTarget) {
+    return { ok: true, notes: [...notes], updatedNote: target };
+  }
+  const nowIso = (nowUtc ?? EthiopiaClock.nowUtc()).toISOString();
+  const updatedNote: T = {
+    ...target,
+    notebook: normalizedTarget,
+    updatedAt: nowIso,
+  };
+  return {
+    ok: true,
+    notes: notes.map((n) => (n.id === noteId ? updatedNote : n)),
+    updatedNote,
+  };
 }
 
 export function filterAndSortWebNotes<T extends TaskNoteRecord>(
   notes: readonly T[],
   options: {
     activeTab: WebNotesFilterTab;
+    notebookFilter?: string;
+    tagFilter?: string;
+    dateFilter?: NoteDateFilterMode;
     searchQuery?: string;
     sortBy?: NoteSortMode;
+    nowUtc?: Date;
   }
 ): T[] {
   const tab = options.activeTab || 'all';
   const query = (options.searchQuery ?? '').trim().toLowerCase();
+  const hasExplicitNotebookFilter = options.notebookFilter !== undefined;
+  const cleanNotebookFilter = (options.notebookFilter ?? '').trim();
+  const normalizedNotebookFilterKey =
+    cleanNotebookFilter && cleanNotebookFilter.toLowerCase() !== 'all'
+      ? cleanNotebookFilter.toLowerCase()
+      : null;
+  const dateFilter = parseNoteDateFilterMode(options.dateFilter);
 
   const filtered = notes.filter((note) => {
     if (tab === 'trash') {
@@ -269,8 +580,31 @@ export function filterAndSortWebNotes<T extends TaskNoteRecord>(
       if (!isNoteFavoriteActive(note)) return false;
     } else if (tab === 'all') {
       if (!isNoteActive(note)) return false;
+    } else if (!hasExplicitNotebookFilter) {
+      if (
+        !isNoteActive(note) ||
+        normalizeFolderComparisonKey(note.notebook) !==
+          normalizeFolderComparisonKey(tab)
+      ) {
+        return false;
+      }
     } else {
-      if (!isNoteActive(note) || note.notebook !== tab) return false;
+      if (!isNoteActive(note)) return false;
+    }
+
+    if (
+      normalizedNotebookFilterKey !== null &&
+      normalizeFolderComparisonKey(note.notebook) !== normalizedNotebookFilterKey
+    ) {
+      return false;
+    }
+
+    if (!noteMatchesTagFilter(note.tags, options.tagFilter)) {
+      return false;
+    }
+
+    if (!noteMatchesDateFilter(note, dateFilter, options.nowUtc)) {
+      return false;
     }
 
     if (!query) return true;

@@ -29,8 +29,11 @@ import {
   Unlink,
   Eye,
   Pencil,
+  FolderPlus,
+  LayoutGrid,
+  Tag,
 } from 'lucide-react';
-import { EthiopiaClock, SharedDateFormatter } from '../domain/date';
+import { CalendarDate, EthiopiaClock, SharedDateFormatter } from '../domain/date';
 import {
   getNoteMarkdownChecklistAtSelection,
   markdownToPlainText,
@@ -43,10 +46,15 @@ import {
   NoteToolbarFormatAction,
 } from '../domain/noteEditorFormatting';
 import {
+  collectUniqueNoteTags,
   isNoteActive,
   isNoteArchived,
   isNoteTrashed,
+  normalizeFolderComparisonKey,
   normalizeNoteTags,
+  NoteDateFilterMode,
+  NoteSortMode,
+  resolveReusableNoteTag,
 } from '../domain/noteHelpers';
 import {
   findNoteBacklinks,
@@ -60,14 +68,19 @@ import {
   unlinkNoteFromTask,
 } from '../domain/taskNotes';
 import {
+  createWebCustomFolder,
+  deleteWebNotebook,
   emptyWebNotesTrash,
   filterAndSortWebNotes,
   getAvailableWebNotebooks,
   getDisplayNoteTitle,
   getWebNoteCounts,
+  isDefaultWebNotebook,
   isNoteDraftBlank,
+  moveWebNoteToNotebook,
   moveWebNoteToTrash,
   permanentlyDeleteWebNote,
+  renameWebNotebook,
   resolveDefaultNotebookForTab,
   restoreWebNoteFromTrash,
   saveWebNoteDraft,
@@ -86,6 +99,7 @@ import {
   DaywellSearchField,
   DaywellStatusBadge,
   DaywellStatusBanner,
+  DaywellTextField,
 } from './ui';
 import { NoteMarkdownPreview } from './notes/NoteMarkdownPreview';
 
@@ -168,11 +182,15 @@ export function DaywellNotesModule({
   const [internalNotes, setInternalNotes] = useState<DaywellNote[]>(() =>
     notesService.loadNotes()
   );
+  const [customFolders, setCustomFolders] = useState<string[]>(() =>
+    notesService.loadCustomFolders()
+  );
 
   useEffect(() => {
     if (typeof window === 'undefined' || controlledNotes !== undefined) return;
     const handleSync = () => {
       setInternalNotes(notesService.loadNotes());
+      setCustomFolders(notesService.loadCustomFolders());
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
@@ -204,8 +222,28 @@ export function DaywellNotesModule({
     }
   };
 
-  const [activeTab, setActiveTab] = useState<string>('all');
+  const persistCustomFolders = (nextFolders: readonly string[]): string[] => {
+    const saved = notesService.saveCustomFolders(nextFolders);
+    setCustomFolders(saved);
+    return saved;
+  };
+
+  const [activeTab, setActiveTab] = useState<'all' | 'pinned' | 'favorites' | 'archived' | 'trash'>('all');
+  const [notebookFilter, setNotebookFilter] = useState<string>('all');
+  const [tagFilter, setTagFilter] = useState<string>('all');
+  const [dateFilter, setDateFilter] = useState<NoteDateFilterMode>('all');
+  const [sortBy, setSortBy] = useState<NoteSortMode>('recent');
+  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list');
   const [searchQuery, setSearchQuery] = useState('');
+
+  const [folderDialogState, setFolderDialogState] = useState<{
+    mode: 'create' | 'rename';
+    sourceName?: string;
+    targetContext?: 'list' | 'editor';
+  } | null>(null);
+  const [folderNameDraft, setFolderNameDraft] = useState('');
+  const [folderDialogError, setFolderDialogError] = useState<string | null>(null);
+  const [confirmDeleteFolder, setConfirmDeleteFolder] = useState<string | null>(null);
 
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
   const selectedNoteIdRef = useRef<string | null>(null);
@@ -295,10 +333,45 @@ export function DaywellNotesModule({
 
   const noteCounts = useMemo(() => getWebNoteCounts(notes), [notes]);
 
-  const notebooks = useMemo(() => getAvailableWebNotebooks(notes), [notes]);
+  const notebooks = useMemo(
+    () => getAvailableWebNotebooks(notes, undefined, customFolders),
+    [notes, customFolders]
+  );
+
+  const availableFilterTags = useMemo(() => {
+    const collected = collectUniqueNoteTags(notes, {
+      includeArchived: activeTab === 'archived' || activeTab === 'trash',
+      includeTrashed: activeTab === 'trash',
+    });
+    if (
+      tagFilter !== 'all' &&
+      !collected.some((t) => t.toLowerCase() === tagFilter.toLowerCase())
+    ) {
+      return [...collected, tagFilter];
+    }
+    return collected;
+  }, [notes, activeTab, tagFilter]);
+
+  const allKnownTags = useMemo(
+    () =>
+      collectUniqueNoteTags(notes, {
+        includeArchived: true,
+        includeTrashed: false,
+      }),
+    [notes]
+  );
 
   const editorNotebooks = useMemo(() => {
-    if (!editNotebook || notebooks.includes(editNotebook)) return notebooks;
+    if (
+      !editNotebook ||
+      notebooks.some(
+        (nb) =>
+          normalizeFolderComparisonKey(nb) ===
+          normalizeFolderComparisonKey(editNotebook)
+      )
+    ) {
+      return notebooks;
+    }
     return [...notebooks, editNotebook];
   }, [notebooks, editNotebook]);
 
@@ -306,11 +379,31 @@ export function DaywellNotesModule({
     () =>
       filterAndSortWebNotes(notes, {
         activeTab,
+        notebookFilter,
+        tagFilter,
+        dateFilter,
         searchQuery,
-        sortBy: 'recent',
+        sortBy,
       }),
-    [notes, activeTab, searchQuery]
+    [notes, activeTab, notebookFilter, tagFilter, dateFilter, searchQuery, sortBy]
   );
+
+  const hasActiveFilters =
+    searchQuery.trim().length > 0 ||
+    activeTab !== 'all' ||
+    notebookFilter !== 'all' ||
+    tagFilter !== 'all' ||
+    dateFilter !== 'all' ||
+    sortBy !== 'recent';
+
+  const clearAllFilters = () => {
+    setSearchQuery('');
+    setActiveTab('all');
+    setNotebookFilter('all');
+    setTagFilter('all');
+    setDateFilter('all');
+    setSortBy('recent');
+  };
 
   const currentEditorNote = useMemo(
     () =>
@@ -448,7 +541,11 @@ export function DaywellNotesModule({
     setSelectedNoteId(null);
     setEditTitle('');
     setEditContent('');
-    setEditNotebook(resolveDefaultNotebookForTab(activeTab));
+    setEditNotebook(
+      notebookFilter !== 'all'
+        ? resolveDefaultNotebookForTab(notebookFilter)
+        : resolveDefaultNotebookForTab(activeTab)
+    );
     setEditTags([]);
     setTagInput('');
     setSaveStatus('saved');
@@ -962,20 +1059,272 @@ export function DaywellNotesModule({
     }
   };
 
-  const handleAddTag = () => {
-    const clean = tagInput.trim().replace(/^#/, '');
-    if (!clean) {
-      setTagInput('');
+  const handleAddTag = (explicitTag?: string) => {
+    const candidate = explicitTag ?? tagInput;
+    const resolved = resolveReusableNoteTag(candidate, [
+      ...editTags,
+      ...allKnownTags,
+    ]);
+    if (!resolved) {
+      if (explicitTag === undefined) setTagInput('');
       return;
     }
-    const nextTags = normalizeNoteTags([...editTags, clean]);
+    const alreadyExists = editTags.some(
+      (t) => t.toLowerCase() === resolved.toLowerCase()
+    );
+    if (alreadyExists) {
+      if (explicitTag === undefined) setTagInput('');
+      triggerFeedback(`Tag "#${resolved}" is already on this note.`);
+      return;
+    }
+    const nextTags = normalizeNoteTags([...editTags, resolved]);
     setEditTags(nextTags);
-    setTagInput('');
+    if (explicitTag === undefined) setTagInput('');
   };
 
   const handleRemoveTag = (tag: string) => {
     setEditTags(editTags.filter((t) => t !== tag));
   };
+
+  const reusableTagSuggestions = useMemo(() => {
+    const activeLower = new Set(editTags.map((t) => t.toLowerCase()));
+    const needle = tagInput.trim().replace(/^#+/, '').toLowerCase();
+    return allKnownTags.filter((tag) => {
+      if (activeLower.has(tag.toLowerCase())) return false;
+      if (!needle) return true;
+      return tag.toLowerCase().includes(needle);
+    });
+  }, [allKnownTags, editTags, tagInput]);
+
+  const openCreateFolderDialog = (targetContext: 'list' | 'editor' = 'list') => {
+    setFolderNameDraft('');
+    setFolderDialogError(null);
+    setFolderDialogState({ mode: 'create', targetContext });
+  };
+
+  const openRenameFolderDialog = (folderName: string) => {
+    if (isDefaultWebNotebook(folderName)) {
+      triggerFeedback('Built-in folders cannot be renamed.', undefined, true);
+      return;
+    }
+    setFolderNameDraft(folderName);
+    setFolderDialogError(null);
+    setFolderDialogState({ mode: 'rename', sourceName: folderName });
+  };
+
+  const handleSubmitFolderDialog = () => {
+    if (!folderDialogState) return;
+    if (folderDialogState.mode === 'create') {
+      const res = createWebCustomFolder({
+        existingFolders: customFolders,
+        folderName: folderNameDraft,
+        knownFolders: notebooks,
+      });
+      if (!res.ok || !res.folder) {
+        setFolderDialogError(res.error ?? 'Could not create folder.');
+        return;
+      }
+      persistCustomFolders(res.customFolders);
+      if (folderDialogState.targetContext === 'editor') {
+        setEditNotebook(res.folder);
+      } else {
+        setNotebookFilter(res.folder);
+        if (activeTab === 'trash' || activeTab === 'archived') {
+          setActiveTab('all');
+        }
+      }
+      setFolderDialogState(null);
+      setFolderNameDraft('');
+      setFolderDialogError(null);
+      triggerFeedback(`Created folder "${res.folder}"`);
+      return;
+    }
+
+    const oldName = folderDialogState.sourceName ?? '';
+    const res = renameWebNotebook({
+      notes: notesRef.current,
+      customFolders,
+      oldName,
+      newName: folderNameDraft,
+    });
+    if (!res.ok || !res.folder) {
+      setFolderDialogError(res.error ?? 'Could not rename folder.');
+      return;
+    }
+    if (res.affectedCount > 0) {
+      applyNotesUpdate((prev) =>
+        renameWebNotebook({
+          notes: prev,
+          customFolders,
+          oldName,
+          newName: folderNameDraft,
+        }).notes
+      );
+    }
+    persistCustomFolders(res.customFolders);
+    if (
+      normalizeFolderComparisonKey(notebookFilter) ===
+      normalizeFolderComparisonKey(oldName)
+    ) {
+      setNotebookFilter(res.folder);
+    }
+    if (
+      normalizeFolderComparisonKey(editNotebook) ===
+      normalizeFolderComparisonKey(oldName)
+    ) {
+      setEditNotebook(res.folder);
+    }
+    setFolderDialogState(null);
+    setFolderNameDraft('');
+    setFolderDialogError(null);
+    triggerFeedback(
+      res.affectedCount > 0
+        ? `Renamed "${oldName}" to "${res.folder}" (${res.affectedCount} ${
+            res.affectedCount === 1 ? 'note' : 'notes'
+          } updated)`
+        : `Renamed folder "${oldName}" to "${res.folder}"`
+    );
+  };
+
+  const handleConfirmDeleteFolder = () => {
+    if (!confirmDeleteFolder) return;
+    const targetName = confirmDeleteFolder;
+    const prevNotesSnapshot = [...notesRef.current];
+    const prevFoldersSnapshot = [...customFolders];
+    const res = deleteWebNotebook({
+      notes: prevNotesSnapshot,
+      customFolders: prevFoldersSnapshot,
+      folderName: targetName,
+      destinationNotebook: 'Personal',
+    });
+    setConfirmDeleteFolder(null);
+    if (!res.ok) {
+      triggerFeedback(res.error ?? 'Could not delete folder.', undefined, true);
+      return;
+    }
+    if (res.affectedCount > 0) {
+      applyNotesUpdate((prev) =>
+        deleteWebNotebook({
+          notes: prev,
+          customFolders: prevFoldersSnapshot,
+          folderName: targetName,
+          destinationNotebook: 'Personal',
+        }).notes
+      );
+    }
+    persistCustomFolders(res.customFolders);
+    if (
+      normalizeFolderComparisonKey(notebookFilter) ===
+      normalizeFolderComparisonKey(targetName)
+    ) {
+      setNotebookFilter('all');
+    }
+    if (
+      normalizeFolderComparisonKey(editNotebook) ===
+      normalizeFolderComparisonKey(targetName)
+    ) {
+      setEditNotebook(res.destinationNotebook ?? 'Personal');
+    }
+    triggerFeedback(
+      res.affectedCount > 0
+        ? `Deleted folder "${targetName}" — moved ${res.affectedCount} ${
+            res.affectedCount === 1 ? 'note' : 'notes'
+          } to ${res.destinationNotebook ?? 'Personal'}`
+        : `Deleted folder "${targetName}"`,
+      () => {
+        applyNotesUpdate(prevNotesSnapshot);
+        persistCustomFolders(prevFoldersSnapshot);
+      }
+    );
+  };
+
+  const handleMoveCardNoteToFolder = (
+    note: DaywellNote,
+    targetNotebook: string
+  ) => {
+    if (isNoteTrashed(note)) {
+      triggerFeedback('Restore note from Trash before moving folders.');
+      return;
+    }
+    if (
+      normalizeFolderComparisonKey(note.notebook) ===
+      normalizeFolderComparisonKey(targetNotebook)
+    ) {
+      return;
+    }
+    const prevSnapshot = [...notesRef.current];
+    applyNotesUpdate((prev) => {
+      const res = moveWebNoteToNotebook(prev, note.id, targetNotebook);
+      return res.ok ? res.notes : prev;
+    });
+    triggerFeedback(
+      `Moved "${getDisplayNoteTitle(note.title)}" to ${targetNotebook}`,
+      () => applyNotesUpdate(prevSnapshot)
+    );
+  };
+
+  const formatReadableNoteDate = (isoDate: string): string => {
+    const parsed = SharedDateFormatter.tryParseFlexibleToCalendarDate(isoDate);
+    if (!parsed) return isoDate.slice(0, 10);
+    const todayEthYear = CalendarDate.fromUtcInstantInEthiopia(
+      EthiopiaClock.nowUtc()
+    ).year;
+    return parsed.year === todayEthYear
+      ? `${parsed.gregorianShortMonthName} ${parsed.day}`
+      : `${parsed.gregorianShortMonthName} ${parsed.day}, ${parsed.year}`;
+  };
+
+  const formatDateFilterLabel = (mode: NoteDateFilterMode): string => {
+    switch (mode) {
+      case 'updated_7d':
+        return 'Updated last 7d';
+      case 'updated_30d':
+        return 'Updated last 30d';
+      case 'created_7d':
+        return 'Created last 7d';
+      case 'created_30d':
+        return 'Created last 30d';
+      default:
+        return 'Any date';
+    }
+  };
+
+  const formatSortLabel = (mode: NoteSortMode): string => {
+    switch (mode) {
+      case 'created':
+        return 'Recently created';
+      case 'alpha':
+        return 'A–Z';
+      case 'oldest':
+        return 'Oldest first';
+      default:
+        return 'Recently updated';
+    }
+  };
+
+  const formatActiveTabLabel = (tab: typeof activeTab): string => {
+    switch (tab) {
+      case 'pinned':
+        return 'Pinned';
+      case 'favorites':
+        return 'Favorites';
+      case 'archived':
+        return 'Archived';
+      case 'trash':
+        return 'Trash';
+      default:
+        return 'All Notes';
+    }
+  };
+
+  const deleteFolderNoteCount = confirmDeleteFolder
+    ? notes.filter(
+        (n) =>
+          !isNoteTrashed(n) &&
+          normalizeFolderComparisonKey(n.notebook) ===
+            normalizeFolderComparisonKey(confirmDeleteFolder)
+      ).length
+    : 0;
 
   return (
     <div className="space-y-4">
@@ -1047,8 +1396,8 @@ export function DaywellNotesModule({
             ariaLabel="Search notes, collections, or tags"
           />
 
-          {/* Notebook Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" role="tablist" aria-label="Note collections">
+          {/* Lifecycle Tabs */}
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5" role="tablist" aria-label="Note lifecycle views">
             <button
               type="button"
               role="tab"
@@ -1090,22 +1439,6 @@ export function DaywellNotesModule({
               <Star className="w-3 h-3" />
               Favorites{noteCounts.favorites > 0 ? ` (${noteCounts.favorites})` : ''}
             </button>
-            {notebooks.map((nb) => (
-              <button
-                key={nb}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === nb}
-                onClick={() => setActiveTab(nb)}
-                className={`min-h-[36px] text-xs px-3.5 py-1.5 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 cursor-pointer ${
-                  activeTab === nb
-                    ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
-                    : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
-                }`}
-              >
-                {nb}
-              </button>
-            ))}
             <button
               type="button"
               role="tab"
@@ -1136,6 +1469,197 @@ export function DaywellNotesModule({
             </button>
           </div>
 
+          {/* Folder Filter Strip + Management */}
+          <div className="space-y-1.5">
+            <div
+              className="flex items-center gap-1.5 overflow-x-auto pb-0.5"
+              role="group"
+              aria-label="Note folders"
+            >
+              <button
+                type="button"
+                aria-pressed={notebookFilter === 'all'}
+                onClick={() => setNotebookFilter('all')}
+                className={`min-h-[34px] text-xs px-3 py-1 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 flex items-center gap-1 cursor-pointer ${
+                  notebookFilter === 'all'
+                    ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
+                    : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                }`}
+              >
+                <Folder className="w-3 h-3" />
+                All Folders
+              </button>
+              {notebooks.map((nb) => {
+                const isSelected =
+                  normalizeFolderComparisonKey(notebookFilter) ===
+                  normalizeFolderComparisonKey(nb);
+                return (
+                  <button
+                    key={nb}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => setNotebookFilter(isSelected ? 'all' : nb)}
+                    className={`min-h-[34px] text-xs px-3 py-1 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 cursor-pointer ${
+                      isSelected
+                        ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
+                        : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                    }`}
+                  >
+                    {nb}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                onClick={() => openCreateFolderDialog('list')}
+                className="min-h-[34px] text-xs px-3 py-1 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 flex items-center gap-1 cursor-pointer bg-[var(--dw-surface-subtle)] text-[var(--dw-primary)] border border-dashed border-[var(--dw-border)] hover:border-[var(--dw-primary)]"
+              >
+                <FolderPlus className="w-3.5 h-3.5" />
+                New Folder
+              </button>
+            </div>
+
+            {notebookFilter !== 'all' && (
+              <div className="flex items-center justify-between gap-2 flex-wrap px-2.5 py-1.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-xs">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Folder className="w-3.5 h-3.5 text-[var(--dw-primary)] shrink-0" />
+                  <span className="font-semibold text-[var(--dw-text-primary)] truncate">
+                    Folder: {notebookFilter}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {!isDefaultWebNotebook(notebookFilter) && (
+                    <>
+                      <DaywellButton
+                        label="Rename"
+                        variant="outlined"
+                        size="compact"
+                        leadingIcon={<Pencil className="w-3 h-3" />}
+                        onClick={() => openRenameFolderDialog(notebookFilter)}
+                      />
+                      <DaywellButton
+                        label="Delete"
+                        variant="outlined"
+                        size="compact"
+                        leadingIcon={<Trash2 className="w-3 h-3" />}
+                        onClick={() => setConfirmDeleteFolder(notebookFilter)}
+                      />
+                    </>
+                  )}
+                  <DaywellButton
+                    label="Show All"
+                    variant="text"
+                    size="compact"
+                    onClick={() => setNotebookFilter('all')}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Tag Filter Strip */}
+          {(availableFilterTags.length > 0 || tagFilter !== 'all') && (
+            <div
+              className="flex items-center gap-1.5 overflow-x-auto pb-0.5"
+              role="group"
+              aria-label="Filter by tag"
+            >
+              <button
+                type="button"
+                aria-pressed={tagFilter === 'all'}
+                onClick={() => setTagFilter('all')}
+                className={`min-h-[32px] text-[11px] px-2.5 py-1 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 flex items-center gap-1 cursor-pointer ${
+                  tagFilter === 'all'
+                    ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
+                    : 'bg-[var(--dw-surface-subtle)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                }`}
+              >
+                <Tag className="w-3 h-3" />
+                All Tags
+              </button>
+              {availableFilterTags.map((tag) => {
+                const isSelected = tagFilter.toLowerCase() === tag.toLowerCase();
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => setTagFilter(isSelected ? 'all' : tag)}
+                    className={`min-h-[32px] text-[11px] px-2.5 py-1 rounded-[var(--dw-radius-full)] font-semibold transition-all shrink-0 cursor-pointer ${
+                      isSelected
+                        ? 'bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] border border-[var(--dw-primary)] font-bold'
+                        : 'bg-[var(--dw-card)] text-[var(--dw-text-secondary)] border border-[var(--dw-border)]'
+                    }`}
+                  >
+                    #{tag}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Date Filter, Sort & List/Grid View Controls */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                aria-label="Filter by date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value as NoteDateFilterMode)}
+                className="min-h-[36px] rounded-[var(--dw-radius-md)] bg-[var(--dw-card)] text-[var(--dw-text-primary)] border border-[var(--dw-border)] px-2.5 py-1 text-xs font-medium outline-none focus:border-[var(--dw-primary)]"
+              >
+                <option value="all">Any date</option>
+                <option value="updated_7d">Updated last 7 days</option>
+                <option value="updated_30d">Updated last 30 days</option>
+                <option value="created_7d">Created last 7 days</option>
+                <option value="created_30d">Created last 30 days</option>
+              </select>
+              <select
+                aria-label="Sort notes"
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as NoteSortMode)}
+                className="min-h-[36px] rounded-[var(--dw-radius-md)] bg-[var(--dw-card)] text-[var(--dw-text-primary)] border border-[var(--dw-border)] px-2.5 py-1 text-xs font-medium outline-none focus:border-[var(--dw-primary)]"
+              >
+                <option value="recent">Sort: Recently updated</option>
+                <option value="created">Sort: Recently created</option>
+                <option value="alpha">Sort: Alphabetical (A–Z)</option>
+                <option value="oldest">Sort: Oldest first</option>
+              </select>
+            </div>
+            <DaywellIconButton
+              label={viewMode === 'grid' ? 'Switch to List view' : 'Switch to Grid view'}
+              size="compact"
+              tone="muted"
+              onClick={() => setViewMode((m) => (m === 'grid' ? 'list' : 'grid'))}
+              icon={
+                viewMode === 'grid' ? (
+                  <List className="w-4 h-4" />
+                ) : (
+                  <LayoutGrid className="w-4 h-4" />
+                )
+              }
+            />
+          </div>
+
+          {/* Active Filter Summary */}
+          {hasActiveFilters && (
+            <div className="flex items-center justify-between gap-2 flex-wrap px-2.5 py-1.5 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-xs">
+              <span className="text-[var(--dw-text-secondary)] font-medium">
+                {filteredNotes.length} {filteredNotes.length === 1 ? 'note' : 'notes'} ·{' '}
+                {formatActiveTabLabel(activeTab)}
+                {notebookFilter !== 'all' ? ` · ${notebookFilter}` : ''}
+                {tagFilter !== 'all' ? ` · #${tagFilter}` : ''}
+                {dateFilter !== 'all' ? ` · ${formatDateFilterLabel(dateFilter)}` : ''}
+                {sortBy !== 'recent' ? ` · ${formatSortLabel(sortBy)}` : ''}
+              </span>
+              <DaywellButton
+                label="Clear filters"
+                variant="text"
+                size="compact"
+                onClick={clearAllFilters}
+              />
+            </div>
+          )}
+
           {activeTab === 'trash' && noteCounts.trash > 0 && (
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <DaywellStatusBanner
@@ -1153,16 +1677,37 @@ export function DaywellNotesModule({
             </div>
           )}
 
-          {/* Notes List */}
-          <div className="space-y-3 pt-1">
+          {/* Notes List / Grid */}
+          <div
+            className={
+              filteredNotes.length === 0 || viewMode === 'list'
+                ? 'space-y-3 pt-1'
+                : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1'
+            }
+          >
             {filteredNotes.length === 0 ? (
-              searchQuery ? (
+              searchQuery.trim() ||
+              tagFilter !== 'all' ||
+              dateFilter !== 'all' ||
+              (notebookFilter !== 'all' && activeTab !== 'all') ? (
                 <DaywellEmptyState
                   icon={<Search className="w-8 h-8" />}
-                  message={`No notes matching "${searchQuery}"`}
-                  subtitle="Check your search term or switch to another collection."
-                  actionLabel="Clear Search"
-                  onActionPressed={() => setSearchQuery('')}
+                  message={
+                    searchQuery.trim()
+                      ? `No notes matching "${searchQuery}"`
+                      : 'No notes match your active filters'
+                  }
+                  subtitle="Adjust or clear your active folder, tag, date, or search filters."
+                  actionLabel="Clear filters"
+                  onActionPressed={clearAllFilters}
+                />
+              ) : notebookFilter !== 'all' && activeTab === 'all' ? (
+                <DaywellEmptyState
+                  icon={<Folder className="w-8 h-8" />}
+                  message={`No notes in "${notebookFilter}"`}
+                  subtitle="Create a note in this folder or switch to another folder."
+                  actionLabel="Create Note"
+                  onActionPressed={handleCreateNote}
                 />
               ) : activeTab === 'pinned' ? (
                 <DaywellEmptyState
@@ -1199,7 +1744,7 @@ export function DaywellNotesModule({
               ) : (
                 <DaywellEmptyState
                   icon={<NotebookPen className="w-8 h-8" />}
-                  message={activeTab === 'all' ? 'No notes yet' : `No notes in "${activeTab}"`}
+                  message="No notes yet"
                   subtitle="Capture thoughts, meeting outlines, drafts, or reflections with offline autosave."
                   actionLabel="Create Note"
                   onActionPressed={handleCreateNote}
@@ -1209,6 +1754,14 @@ export function DaywellNotesModule({
               filteredNotes.map((note) => {
                 const trashed = isNoteTrashed(note);
                 const displayTitle = getDisplayNoteTitle(note.title);
+                const cardNotebooks = notebooks.some(
+                  (nb) =>
+                    normalizeFolderComparisonKey(nb) ===
+                    normalizeFolderComparisonKey(note.notebook)
+                )
+                  ? notebooks
+                  : [...notebooks, note.notebook];
+                const extraTagCount = note.tags.length > 2 ? note.tags.length - 2 : 0;
                 return (
                 <DaywellCard
                   key={note.id}
@@ -1218,9 +1771,12 @@ export function DaywellNotesModule({
                   className={
                     trashed
                       ? 'space-y-2'
-                      : 'hover:border-[var(--dw-primary)]/40 space-y-2 group'
+                      : `hover:border-[var(--dw-primary)]/40 space-y-2 group ${
+                          viewMode === 'grid' ? 'flex flex-col justify-between h-full' : ''
+                        }`
                   }
                 >
+                  <div className="space-y-2">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
                       {note.isPinned && !trashed && (
@@ -1281,7 +1837,11 @@ export function DaywellNotesModule({
                   </div>
 
                   {note.content && (
-                    <p className="dw-type-body-compact text-[var(--dw-text-secondary)] line-clamp-2">
+                    <p
+                      className={`dw-type-body-compact text-[var(--dw-text-secondary)] ${
+                        viewMode === 'grid' ? 'line-clamp-3' : 'line-clamp-2'
+                      }`}
+                    >
                       {markdownToPlainText(note.content) || note.content}
                     </p>
                   )}
@@ -1326,27 +1886,56 @@ export function DaywellNotesModule({
                       </div>
                     );
                   })()}
+                  </div>
 
-                  <div className="flex items-center justify-between text-[10px] text-[var(--dw-text-muted)] pt-1.5 border-t border-[var(--dw-divider)]">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <DaywellStatusBadge label={note.notebook} tone="neutral" showIcon={false} />
+                  <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--dw-text-muted)] pt-1.5 border-t border-[var(--dw-divider)]">
+                    <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                      {trashed ? (
+                        <DaywellStatusBadge label={note.notebook} tone="neutral" showIcon={false} />
+                      ) : (
+                        <div
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)]"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <Folder className="w-2.5 h-2.5 text-[var(--dw-primary)] shrink-0" />
+                          <select
+                            aria-label={`Move ${displayTitle} to folder`}
+                            value={note.notebook}
+                            onChange={(e) =>
+                              handleMoveCardNoteToFolder(note, e.target.value)
+                            }
+                            className="bg-transparent text-[11px] font-semibold text-[var(--dw-text-primary)] outline-none cursor-pointer"
+                          >
+                            {cardNotebooks.map((nb) => (
+                              <option key={nb} value={nb}>
+                                {nb}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                       {trashed && (
                         <DaywellStatusBadge label="In Trash" tone="warning" showIcon={false} />
                       )}
                       {note.isArchived && (
                         <DaywellStatusBadge label="Archived" tone="neutral" showIcon={false} />
                       )}
-                      {note.tags.length > 0 && (
-                        <span>
-                          #{note.tags.slice(0, 2).join(' #')}
+                      {note.tags.slice(0, 2).map((tag) => (
+                        <span
+                          key={tag}
+                          className="inline-flex items-center px-1.5 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] text-[10px] font-semibold"
+                        >
+                          #{tag}
+                        </span>
+                      ))}
+                      {extraTagCount > 0 && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-secondary)] text-[10px] font-semibold">
+                          +{extraTagCount}
                         </span>
                       )}
                     </div>
-                    <span>
-                      {(() => {
-                        const d = SharedDateFormatter.tryParseFlexibleToCalendarDate(note.updatedAt);
-                        return d ? `${d.gregorianShortMonthName} ${d.day}` : note.updatedAt.slice(0, 10);
-                      })()}
+                    <span className="shrink-0 font-medium">
+                      {formatReadableNoteDate(note.updatedAt)}
                     </span>
                   </div>
                 </DaywellCard>
@@ -1447,54 +2036,93 @@ export function DaywellNotesModule({
           </div>
 
           {/* Folder & Tags Bar */}
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            <div className="flex items-center gap-1.5 bg-[var(--dw-surface-subtle)] px-2.5 py-1.5 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
-              <Folder className="w-3.5 h-3.5 text-[var(--dw-text-muted)]" />
-              <select
-                aria-label="Note collection"
-                value={editNotebook}
-                onChange={(e) => setEditNotebook(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none"
-              >
-                {editorNotebooks.map((nb) => (
-                  <option key={nb} value={nb}>
-                    {nb}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {editTags.map((t) => (
-              <span
-                key={t}
-                className="inline-flex items-center gap-1 bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] px-2 py-0.5 rounded-[var(--dw-radius-sm)] text-[11px] font-semibold"
-              >
-                #{t}
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 flex-wrap text-xs">
+              <div className="flex items-center gap-1.5 bg-[var(--dw-surface-subtle)] px-2.5 py-1.5 rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                <Folder className="w-3.5 h-3.5 text-[var(--dw-text-muted)]" />
+                <select
+                  aria-label="Note collection"
+                  value={editNotebook}
+                  onChange={(e) => setEditNotebook(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none cursor-pointer"
+                >
+                  {editorNotebooks.map((nb) => (
+                    <option key={nb} value={nb}>
+                      {nb}
+                    </option>
+                  ))}
+                </select>
                 <button
                   type="button"
-                  aria-label={`Remove tag ${t}`}
-                  onClick={() => handleRemoveTag(t)}
-                  className="hover:text-[var(--dw-error)] cursor-pointer"
+                  aria-label="New folder"
+                  title="New folder"
+                  onClick={() => openCreateFolderDialog('editor')}
+                  className="ml-1 p-0.5 rounded-[var(--dw-radius-sm)] text-[var(--dw-primary)] hover:bg-[var(--dw-card)] cursor-pointer"
                 >
-                  <X className="w-3 h-3" />
+                  <FolderPlus className="w-3.5 h-3.5" />
                 </button>
-              </span>
-            ))}
+              </div>
 
-            <input
-              type="text"
-              placeholder="+ tag"
-              aria-label="Add tag"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  handleAddTag();
-                }
-              }}
-              className="w-20 px-2 py-1 text-[11px] bg-transparent border-b border-[var(--dw-border)] outline-none text-[var(--dw-text-secondary)] focus:border-[var(--dw-primary)]"
-            />
+              {editTags.map((t) => (
+                <span
+                  key={t}
+                  className="inline-flex items-center gap-1 bg-[var(--dw-primary-container)] text-[var(--dw-on-primary-container)] px-2 py-0.5 rounded-[var(--dw-radius-sm)] text-[11px] font-semibold"
+                >
+                  #{t}
+                  <button
+                    type="button"
+                    aria-label={`Remove tag ${t}`}
+                    onClick={() => handleRemoveTag(t)}
+                    className="hover:text-[var(--dw-error)] cursor-pointer"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+
+              <div className="inline-flex items-center gap-1">
+                <input
+                  type="text"
+                  placeholder="+ tag"
+                  aria-label="Add tag"
+                  value={tagInput}
+                  onChange={(e) => setTagInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleAddTag();
+                    }
+                  }}
+                  className="w-24 px-2 py-1 text-[11px] bg-transparent border-b border-[var(--dw-border)] outline-none text-[var(--dw-text-secondary)] focus:border-[var(--dw-primary)]"
+                />
+                {tagInput.trim().length > 0 && (
+                  <DaywellButton
+                    label="Add"
+                    variant="tonal"
+                    size="compact"
+                    onClick={() => handleAddTag()}
+                  />
+                )}
+              </div>
+            </div>
+
+            {reusableTagSuggestions.length > 0 && (
+              <div className="flex items-center gap-1.5 flex-wrap text-[11px]">
+                <span className="text-[var(--dw-text-muted)] font-medium">
+                  Reuse tag:
+                </span>
+                {reusableTagSuggestions.slice(0, 8).map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => handleAddTag(tag)}
+                    className="px-2 py-0.5 rounded-[var(--dw-radius-full)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-secondary)] hover:border-[var(--dw-primary)] hover:text-[var(--dw-primary)] font-medium cursor-pointer"
+                  >
+                    + #{tag}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Linked Task Bar */}
@@ -1992,6 +2620,80 @@ export function DaywellNotesModule({
         destructive
         onCancel={() => setIsConfirmEmptyTrashOpen(false)}
         onConfirm={handleConfirmEmptyTrash}
+      />
+
+      {/* Create / Rename Folder Modal */}
+      {folderDialogState && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="note-folder-dialog-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/45"
+          onClick={() => setFolderDialogState(null)}
+        >
+          <div
+            className="w-full max-w-sm rounded-[var(--dw-radius-xl)] bg-[var(--dw-elevated)] border border-[var(--dw-border)] shadow-2xl p-5 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="note-folder-dialog-title"
+              className="dw-type-title text-[var(--dw-text-primary)]"
+            >
+              {folderDialogState.mode === 'create' ? 'New Folder' : 'Rename Folder'}
+            </h3>
+            <DaywellTextField
+              label="Folder name"
+              placeholder="e.g. Research"
+              value={folderNameDraft}
+              errorText={folderDialogError ?? undefined}
+              onChange={(e) => {
+                setFolderNameDraft(e.target.value);
+                if (folderDialogError) setFolderDialogError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleSubmitFolderDialog();
+                }
+              }}
+              autoFocus
+            />
+            <div className="flex items-center justify-end gap-2">
+              <DaywellButton
+                label="Cancel"
+                variant="outlined"
+                size="compact"
+                onClick={() => setFolderDialogState(null)}
+              />
+              <DaywellButton
+                label={folderDialogState.mode === 'create' ? 'Create' : 'Rename'}
+                variant="primary"
+                size="compact"
+                onClick={handleSubmitFolderDialog}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Folder Confirmation Modal (Safe Note Reassignment) */}
+      <DaywellConfirmationDialog
+        isOpen={Boolean(confirmDeleteFolder)}
+        title="Delete Folder?"
+        description={
+          confirmDeleteFolder
+            ? deleteFolderNoteCount > 0
+              ? `Delete "${confirmDeleteFolder}"? No notes will be deleted — ${deleteFolderNoteCount} ${
+                  deleteFolderNoteCount === 1 ? 'note' : 'notes'
+                } will move safely to "Personal".`
+              : `Delete empty folder "${confirmDeleteFolder}"?`
+            : ''
+        }
+        cancelLabel="Cancel"
+        confirmLabel="Delete Folder"
+        destructive
+        onCancel={() => setConfirmDeleteFolder(null)}
+        onConfirm={handleConfirmDeleteFolder}
       />
     </div>
   );
