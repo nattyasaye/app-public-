@@ -5,10 +5,12 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
+import 'package:personal_management_app/application/tasks/tasks_controller.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/data/repositories/search_repository.dart';
+import 'package:personal_management_app/data/repositories/tasks_repository.dart';
 import 'package:personal_management_app/domain/notes/note_helpers.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
 
@@ -497,6 +499,258 @@ void main() {
         final created = controller.state.notes
             .firstWhere((n) => n.content == 'Unsaved body text');
         expect(created.title, NoteDomainHelpers.defaultTitle);
+      },
+    );
+
+    testWidgets(
+      '5. Rapid double-Back does not pop two routes and mid-flight edits are flushed before Back navigation completes',
+      (WidgetTester tester) async {
+        final repo = _ControllableNotesRepository();
+        repo.seed(
+          NoteEntity(
+            id: 'note-pop-safety',
+            title: 'Pop Safety Note',
+            content: 'Initial content',
+          ),
+        );
+        final controller = NotesController(repository: repo);
+        addTearDown(controller.dispose);
+        await controller.loadNotes();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: DaywellTheme.light,
+            home: Scaffold(
+              body: Builder(
+                builder: (ctx) => Center(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(ctx).push<void>(
+                        MaterialPageRoute<void>(
+                          builder: (_) => NotesView(controller: controller),
+                        ),
+                      );
+                    },
+                    child: const Text('Open Notes'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Open Notes'));
+        await tester.pumpAndSettle();
+        expect(find.byType(NotesView), findsOneWidget);
+
+        await tester.tap(find.text('Pop Safety Note'));
+        await tester.pumpAndSettle();
+
+        final bodyField = find.byType(TextField).last;
+        await tester.enterText(bodyField, 'Edit before Back');
+
+        final firstSaveGate = Completer<void>();
+        repo.nextUpdateGate = firstSaveGate;
+
+        // Tap Back twice rapidly while the first Back-triggered save is awaiting
+        await tester.tap(find.byType(BackButton));
+        await tester.pump();
+        await tester.tap(find.byType(BackButton));
+        await tester.pump();
+
+        // While the first Back flush is still in flight, enter another edit
+        await tester.enterText(bodyField, 'Edit during Back flush');
+        await tester.pump();
+
+        // Release first save -> editor must flush the newer edit before popping once
+        firstSaveGate.complete();
+        await tester.pumpAndSettle();
+
+        expect(find.byType(NotesView), findsOneWidget);
+        expect(find.text('Open Notes'), findsNothing);
+        expect(
+          repo.store['note-pop-safety']?.content,
+          'Edit during Back flush',
+        );
+      },
+    );
+
+    testWidgets(
+      '6. Missing or trashed note updates never show Saved, preserve unsaved text, allow Retry after restore, and discard cleanly on second Back tap',
+      (WidgetTester tester) async {
+        final repo = _ControllableNotesRepository();
+        repo.seed(
+          NoteEntity(
+            id: 'note-ext-lifecycle',
+            title: 'External Lifecycle Note',
+            content: 'Original body',
+          ),
+        );
+        final controller = NotesController(repository: repo);
+        addTearDown(controller.dispose);
+        await controller.loadNotes();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: DaywellTheme.light,
+            home: NotesView(controller: controller),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('External Lifecycle Note'));
+        await tester.pumpAndSettle();
+
+        final bodyField = find.byType(TextField).last;
+        await tester.enterText(bodyField, 'Edited before external trash');
+
+        // Trash the note outside the editor before autosave completes
+        await controller.deleteNote('note-ext-lifecycle');
+        await tester.pump(const Duration(milliseconds: 650));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Save failed'), findsOneWidget);
+        expect(find.text('Saved'), findsNothing);
+        expect(find.text('Unable to save note'), findsOneWidget);
+        expect(
+          tester.widget<TextField>(bodyField).controller?.text,
+          'Edited before external trash',
+        );
+
+        // Restore note and tap Retry -> persists cleanly and clears error
+        await controller.restoreFromTrash('note-ext-lifecycle');
+        await tester.tap(find.text('Retry'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Saved'), findsOneWidget);
+        expect(
+          repo.store['note-ext-lifecycle']?.content,
+          'Edited before external trash',
+        );
+
+        // Now delete the note permanently outside the editor and edit again
+        await tester.enterText(bodyField, 'Unsaved on missing note');
+        await controller.permanentlyDeleteNote('note-ext-lifecycle');
+        await tester.pump(const Duration(milliseconds: 650));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Save failed'), findsOneWidget);
+        expect(find.text('Saved'), findsNothing);
+
+        // First Back tap stays open and warns to tap again to discard
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+        expect(
+          find.text(
+            'Could not save changes. Tap Back again to discard unsaved edits.',
+          ),
+          findsOneWidget,
+        );
+        expect(find.byType(NotesView), findsNothing);
+
+        // Second Back tap intentionally discards and exits without recreating note
+        await tester.tap(find.byType(BackButton));
+        await tester.pumpAndSettle();
+        expect(find.byType(NotesView), findsOneWidget);
+        expect(repo.store.containsKey('note-ext-lifecycle'), isFalse);
+      },
+    );
+
+    testWidgets(
+      '7. Failed task-link and unlink saves keep UI consistent with persisted note and allow Retry without phantom link changes',
+      (WidgetTester tester) async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        addTearDown(db.close);
+
+        final tasksRepo = DriftTasksRepository(db);
+        await tasksRepo.createTask(
+          TaskEntity(
+            id: 'task-link-1',
+            title: 'Write integration tests',
+          ),
+        );
+        final tasksController = TasksController(repository: tasksRepo);
+        addTearDown(tasksController.dispose);
+        await tasksController.loadAll();
+
+        final notesRepo = _ControllableNotesRepository();
+        notesRepo.seed(
+          NoteEntity(
+            id: 'note-task-link',
+            title: 'Task Link Consistency',
+            content: 'Body text',
+          ),
+        );
+        final notesController = NotesController(repository: notesRepo);
+        addTearDown(notesController.dispose);
+        await notesController.loadNotes();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: DaywellTheme.light,
+            home: NotesView(
+              controller: notesController,
+              tasksController: tasksController,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Task Link Consistency'));
+        await tester.pumpAndSettle();
+
+        // Fail task link persistence -> UI must NOT show linked task
+        notesRepo.shouldThrowOnUpdate = true;
+        await tester.tap(find.text('Link Task'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Write integration tests'));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Linked Task: Write integration tests'), findsNothing);
+        expect(find.text('Link Task'), findsOneWidget);
+        expect(
+          find.text('Could not link task. Kept previous link state.'),
+          findsOneWidget,
+        );
+        expect(notesController.state.findById('note-task-link')?.linkedId, isNull);
+
+        // Recover DB and retry -> does NOT resurrect failed link; explicit link works
+        notesRepo.shouldThrowOnUpdate = false;
+        await tester.tap(find.text('Retry'));
+        await tester.pumpAndSettle();
+        expect(find.text('Saved'), findsOneWidget);
+        expect(find.text('Link Task'), findsOneWidget);
+        expect(notesRepo.store['note-task-link']?.linkedId, isNull);
+
+        await tester.tap(find.text('Link Task'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Write integration tests'));
+        await tester.pumpAndSettle();
+        expect(find.text('Linked Task: Write integration tests'), findsOneWidget);
+        expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
+
+        // Fail task unlink persistence -> must keep Linked Task card and NOT show Unlinked SnackBar
+        notesRepo.shouldThrowOnUpdate = true;
+        await tester.tap(find.byIcon(Icons.link_off_outlined));
+        await tester.pumpAndSettle();
+
+        expect(find.text('Unlinked task from note'), findsNothing);
+        expect(
+          find.text('Could not unlink task. Kept existing link.'),
+          findsOneWidget,
+        );
+        expect(find.text('Linked Task: Write integration tests'), findsOneWidget);
+        expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
+
+        // Recover DB and tap Retry -> link remains preserved
+        notesRepo.shouldThrowOnUpdate = false;
+        await tester.tap(find.text('Retry'));
+        await tester.pumpAndSettle();
+        expect(find.text('Saved'), findsOneWidget);
+        expect(find.text('Linked Task: Write integration tests'), findsOneWidget);
+        expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
       },
     );
   });

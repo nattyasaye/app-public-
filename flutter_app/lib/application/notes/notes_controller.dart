@@ -180,7 +180,7 @@ class NotesController extends ChangeNotifier {
     });
   }
 
-  Future<void> updateNote({
+  Future<({bool saved, String? errorMessage})> updateNote({
     required String id,
     required String title,
     required String content,
@@ -192,7 +192,14 @@ class NotesController extends ChangeNotifier {
   }) {
     return _enqueue(() async {
       final existing = _state.findById(id);
-      if (existing == null || NoteDomainHelpers.isTrashed(existing)) return;
+      if (existing == null || NoteDomainHelpers.isTrashed(existing)) {
+        final reason = existing == null
+            ? 'Note no longer exists and could not be updated.'
+            : 'Cannot update a trashed note. Restore it from Trash first.';
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (saved: false, errorMessage: reason);
+      }
 
       final safeTitle = NoteEntity.clampTitle(title);
       final normalizedTags = tags != null
@@ -212,10 +219,14 @@ class NotesController extends ChangeNotifier {
       try {
         final saved = await _repository.updateNote(updated);
         _upsertInState(saved);
+        notifyListeners();
+        return (saved: true, errorMessage: null);
       } catch (e) {
-        _state = _state.copyWith(errorMessage: e.toString());
+        final reason = e.toString();
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (saved: false, errorMessage: reason);
       }
-      notifyListeners();
     });
   }
 

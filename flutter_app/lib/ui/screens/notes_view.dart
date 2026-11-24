@@ -667,6 +667,8 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
   Future<void> _savePipeline = Future<void>.value();
   bool _isDisposed = false;
   bool _allowDiscardOnNextPop = false;
+  bool _isHandlingPop = false;
+  bool _hasPopped = false;
 
   bool get _hasPendingChanges =>
       _editRevision > _savedRevision || _saveErrorMessage != null;
@@ -694,7 +696,7 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
   void dispose() {
     _isDisposed = true;
     _autosaveTimer?.cancel();
-    if (_hasPendingChanges) {
+    if (_hasPendingChanges && !_allowDiscardOnNextPop) {
       final finalSnapshot = _captureSnapshot();
       unawaited(_enqueueSaveSnapshot(finalSnapshot, fromDispose: true));
     }
@@ -785,9 +787,9 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         linkedModule: snapshot.linkedModule,
         linkedId: snapshot.linkedId,
       );
-      final err = widget.controller.state.errorMessage;
       final persisted = widget.controller.state.findById(created.id);
-      if (err != null || persisted == null) {
+      if (persisted == null) {
+        final err = widget.controller.state.errorMessage;
         if (!fromDispose && mounted) {
           setState(() {
             _saveStatus = 'Save failed';
@@ -799,7 +801,7 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
       _noteId = persisted.id;
       _savedRevision = snapshot.revision;
     } else {
-      await widget.controller.updateNote(
+      final result = await widget.controller.updateNote(
         id: _noteId!,
         title: persistTitle,
         content: snapshot.content,
@@ -809,12 +811,11 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         linkedId: snapshot.linkedId,
         clearLink: snapshot.linkedModule == null || snapshot.linkedId == null,
       );
-      final err = widget.controller.state.errorMessage;
-      if (err != null) {
+      if (!result.saved) {
         if (!fromDispose && mounted) {
           setState(() {
             _saveStatus = 'Save failed';
-            _saveErrorMessage = err;
+            _saveErrorMessage = result.errorMessage ?? 'Unable to save note.';
           });
         }
         return false;
@@ -845,13 +846,30 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
   }
 
   Future<void> _linkTask(TaskEntity task) async {
+    final prevModule = _linkedModule;
+    final prevId = _linkedId;
     setState(() {
       _linkedModule = NoteEntity.taskLinkModule;
       _linkedId = task.id;
     });
     _markDirty(scheduleTimer: false);
     if (_noteId != null) {
-      await _flushPendingSaves();
+      final ok = await _flushPendingSaves();
+      if (!ok && mounted) {
+        setState(() {
+          if (_linkedModule == NoteEntity.taskLinkModule &&
+              _linkedId == task.id) {
+            _linkedModule = prevModule;
+            _linkedId = prevId;
+          }
+        });
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not link task. Kept previous link state.'),
+          ),
+        );
+      }
     }
   }
 
@@ -864,7 +882,24 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
     });
     _markDirty(scheduleTimer: false);
     if (_noteId != null) {
-      await _flushPendingSaves();
+      final ok = await _flushPendingSaves();
+      if (!ok) {
+        if (mounted) {
+          setState(() {
+            if (_linkedModule == null && _linkedId == null) {
+              _linkedModule = prevModule;
+              _linkedId = prevId;
+            }
+          });
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not unlink task. Kept existing link.'),
+            ),
+          );
+        }
+        return;
+      }
     }
     if (!mounted || prevModule == null || prevId == null) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -874,15 +909,24 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () {
-            if (mounted) {
-              setState(() {
-                _linkedModule = prevModule;
-                _linkedId = prevId;
-              });
-              _markDirty(scheduleTimer: false);
-              if (_noteId != null) {
-                unawaited(_flushPendingSaves());
-              }
+            if (!mounted) return;
+            setState(() {
+              _linkedModule = prevModule;
+              _linkedId = prevId;
+            });
+            _markDirty(scheduleTimer: false);
+            if (_noteId != null) {
+              unawaited(() async {
+                final restored = await _flushPendingSaves();
+                if (!restored && mounted) {
+                  setState(() {
+                    if (_linkedModule == prevModule && _linkedId == prevId) {
+                      _linkedModule = null;
+                      _linkedId = null;
+                    }
+                  });
+                }
+              }());
             }
           },
         ),
@@ -971,21 +1015,37 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
   }
 
   Future<void> _handlePopAttempt() async {
-    final ok = await _flushPendingSaves();
-    if (!mounted) return;
-    if (ok) {
-      Navigator.of(context).pop();
-      return;
-    }
-    setState(() => _allowDiscardOnNextPop = true);
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Could not save changes. Tap Back again to discard unsaved edits.',
+    if (_isHandlingPop || _hasPopped) return;
+    _isHandlingPop = true;
+    try {
+      var ok = true;
+      while (mounted && !_isDisposed && _hasPendingChanges) {
+        ok = await _flushPendingSaves();
+        if (!ok) {
+          break;
+        }
+      }
+      if (!mounted || _isDisposed || _hasPopped) return;
+      if (ok && !_hasPendingChanges) {
+        final route = ModalRoute.of(context);
+        if (route == null || route.isCurrent) {
+          _hasPopped = true;
+          Navigator.of(context).pop();
+        }
+        return;
+      }
+      setState(() => _allowDiscardOnNextPop = true);
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Could not save changes. Tap Back again to discard unsaved edits.',
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _isHandlingPop = false;
+    }
   }
 
   @override
