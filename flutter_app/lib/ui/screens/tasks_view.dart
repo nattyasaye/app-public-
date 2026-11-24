@@ -3198,6 +3198,8 @@ class _TasksViewState extends State<TasksView>
               ProjectsWorkspaceTab(
                 projectsController: projectsCtrl,
                 tasksController: controller,
+                notesController: widget.effectiveNotesController,
+                onOpenNote: widget.onOpenNote,
               ),
             ],
           ),

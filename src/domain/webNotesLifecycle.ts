@@ -558,6 +558,7 @@ export function filterAndSortWebNotes<T extends TaskNoteRecord>(
     searchQuery?: string;
     sortBy?: NoteSortMode;
     nowUtc?: Date;
+    projectTitlesById?: ReadonlyMap<string, string>;
   }
 ): T[] {
   const tab = options.activeTab || 'all';
@@ -609,7 +610,10 @@ export function filterAndSortWebNotes<T extends TaskNoteRecord>(
     }
 
     if (!query) return true;
-    return matchesNoteSearchQuery(note, query);
+    const projectTitle = note.projectId
+      ? options.projectTitlesById?.get(note.projectId)
+      : undefined;
+    return matchesNoteSearchQuery(note, query, { projectTitle });
   });
 
   return sortNotes(filtered, {
@@ -795,10 +799,18 @@ export function saveWebNoteDraft<T extends TaskNoteRecord = TaskNoteRecord>(para
   content: string;
   notebook: string;
   tags: readonly string[];
+  projectId?: string | null;
+  clearProjectId?: boolean;
   nowUtc?: Date;
 }): SaveWebNoteDraftResult<T> {
   const normalizedTags = normalizeNoteTags(params.tags);
   const normalizedNotebook = normalizeWebNoteNotebook(params.notebook);
+  const normalizedRequestedProjectId =
+    params.clearProjectId === true
+      ? undefined
+      : typeof params.projectId === 'string' && params.projectId.trim()
+        ? params.projectId.trim()
+        : undefined;
 
   if (!params.noteId) {
     if (
@@ -821,6 +833,7 @@ export function saveWebNoteDraft<T extends TaskNoteRecord = TaskNoteRecord>(para
       isFavorite: false,
       isArchived: false,
       isTrashed: false,
+      projectId: normalizedRequestedProjectId,
       nowUtc: params.nowUtc,
     });
     return {
@@ -839,15 +852,28 @@ export function saveWebNoteDraft<T extends TaskNoteRecord = TaskNoteRecord>(para
     };
   }
 
+  const existingProjectId =
+    typeof target.projectId === 'string' && target.projectId.trim()
+      ? target.projectId.trim()
+      : undefined;
+  const resolvedProjectId =
+    params.clearProjectId === true
+      ? undefined
+      : params.projectId !== undefined
+        ? normalizedRequestedProjectId
+        : existingProjectId;
+
   const nextTitle = normalizeNoteTitle(params.title);
   const tagsChanged =
     normalizedTags.length !== target.tags.length ||
     normalizedTags.some((t, i) => t !== target.tags[i]);
+  const projectChanged = resolvedProjectId !== existingProjectId;
   const hasFieldChanges =
     nextTitle !== target.title ||
     params.content !== target.content ||
     normalizedNotebook !== target.notebook ||
-    tagsChanged;
+    tagsChanged ||
+    projectChanged;
 
   if (!hasFieldChanges) {
     return {
@@ -866,6 +892,11 @@ export function saveWebNoteDraft<T extends TaskNoteRecord = TaskNoteRecord>(para
     tags: normalizedTags,
     updatedAt: nowIso,
   };
+  if (resolvedProjectId !== undefined) {
+    updated.projectId = resolvedProjectId;
+  } else {
+    delete updated.projectId;
+  }
 
   return {
     status: 'updated',

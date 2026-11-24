@@ -290,6 +290,10 @@ class DriftProjectsRepository implements IProjectsRepository {
             ..where((tbl) => tbl.projectId.equals(projectId)))
           .write(const TasksCompanion(projectId: Value(null)));
 
+      await (_db.update(_db.notes)
+            ..where((tbl) => tbl.projectId.equals(projectId)))
+          .write(const NotesCompanion(projectId: Value(null)));
+
       await _deleteRecordsForProjectBottomUp(projectId);
 
       await (_db.delete(_db.projectTrackingBlocks)

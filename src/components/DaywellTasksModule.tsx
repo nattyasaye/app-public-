@@ -2270,6 +2270,9 @@ export function DaywellTasksModule({
           selectedProjectId={selectedProjectId}
           onSelectProjectId={setSelectedProjectId}
           externalCreateTrigger={projectCreateTrigger}
+          notes={effectiveNotes}
+          onUpdateNotes={applyNotesUpdate}
+          onNavigateToNote={onNavigateToNote}
         />
       ) : (
         <>

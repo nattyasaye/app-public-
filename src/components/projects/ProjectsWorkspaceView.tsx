@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { DerivedTaskMilestoneProgress, ProjectProgressSummary } from '../../domain/projectsEngine';
 import { SharedProject } from '../../domain/sharedFoundation';
+import { TaskNoteRecord } from '../../domain/taskNotes';
 import { SharedStateBridge } from '../../services/sharedStateBridge';
 import {
   PreparedProjectPackageImport,
@@ -38,6 +39,11 @@ export interface ProjectsWorkspaceViewProps {
   selectedProjectId?: string | null;
   onSelectProjectId?: (projectId: string | null) => void;
   externalCreateTrigger?: number;
+  notes?: TaskNoteRecord[];
+  onUpdateNotes?: (
+    updater: TaskNoteRecord[] | ((prev: TaskNoteRecord[]) => TaskNoteRecord[])
+  ) => void;
+  onNavigateToNote?: (noteId: string) => void;
 }
 
 function getFilterBadgeTone(status: SharedProject['status'], isArchived: boolean): {
@@ -59,6 +65,9 @@ export function ProjectsWorkspaceView({
   selectedProjectId: controlledSelectedId,
   onSelectProjectId,
   externalCreateTrigger = 0,
+  notes,
+  onUpdateNotes,
+  onNavigateToNote,
 }: ProjectsWorkspaceViewProps) {
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null);
   const selectedId =
@@ -184,6 +193,9 @@ export function ProjectsWorkspaceView({
           selectProject(null);
           reload();
         }}
+        notes={notes}
+        onUpdateNotes={onUpdateNotes}
+        onNavigateToNote={onNavigateToNote}
       />
     );
   }
@@ -557,7 +569,7 @@ export function ProjectsWorkspaceView({
       <DaywellConfirmationDialog
         isOpen={Boolean(projectToDelete)}
         title={`Delete "${projectToDelete?.title ?? ''}" forever?`}
-        description="This permanently removes the archived project, its tracking blocks, and its progress history. Linked tasks stay intact and are safely unlinked."
+        description="This permanently removes the archived project, its tracking blocks, and its progress history. Linked tasks and notes stay intact and are safely unlinked."
         confirmLabel="Delete Forever"
         destructive
         onCancel={() => setProjectToDelete(null)}

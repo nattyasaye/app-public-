@@ -255,7 +255,7 @@ describe('STAGE N4.1 — NOTES INTEGRATION WITH SHARED DAYWELL SEARCH', () => {
 
     // requestedNoteFocus guards missing/deleted notes cleanly & clears conflicting filters
     assert.ok(webModule.includes("'This note is no longer available.'"));
-    assert.ok(webModule.includes('matchesNoteSearchQuery(target, searchQuery)'));
+    assert.ok(webModule.includes('matchesNoteSearchQuery(target, searchQuery'));
     assert.ok(
       webModule.includes('autosaveTimeoutRef.current !== null') &&
         webModule.includes('!isCurrentNewDraftBlank')

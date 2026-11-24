@@ -190,7 +190,10 @@ export function matchesNoteSearchQuery(
     notebook: string;
     tags?: readonly string[];
   },
-  rawQuery: string
+  rawQuery: string,
+  options?: {
+    projectTitle?: string | null;
+  }
 ): boolean {
   const query = rawQuery.trim().toLowerCase();
   if (!query) return true;
@@ -202,7 +205,12 @@ export function matchesNoteSearchQuery(
     .toLowerCase();
   if (plainContent.includes(query)) return true;
   if (matchesFolderSearchQuery(note.notebook, query)) return true;
-  return matchesNoteTagsSearchQuery(note.tags, query);
+  if (matchesNoteTagsSearchQuery(note.tags, query)) return true;
+  const projectTitle =
+    typeof options?.projectTitle === 'string'
+      ? options.projectTitle.trim().toLowerCase()
+      : '';
+  return projectTitle.length > 0 && projectTitle.includes(query);
 }
 
 /**

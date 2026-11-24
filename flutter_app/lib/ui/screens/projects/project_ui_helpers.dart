@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../application/notes/notes_controller.dart';
 import '../../../application/tasks/tasks_controller.dart';
 import '../../../core/date/shared_date.dart';
 import '../../../domain/projects/project_models.dart';
@@ -99,5 +100,11 @@ Future<CalendarDate?> pickProjectCalendarDate(
 void syncTasksControllerProjects(TasksController? tasksController) {
   if (tasksController != null) {
     unawaited(tasksController.loadAll());
+  }
+}
+
+void syncNotesControllerProjects(NotesController? notesController) {
+  if (notesController != null) {
+    unawaited(notesController.loadNotes());
   }
 }

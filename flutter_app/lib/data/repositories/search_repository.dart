@@ -102,14 +102,21 @@ class DriftSearchRepository implements ISearchRepository {
       final nonTrashedNotes = await (_db.select(_db.notes)
             ..where((tbl) => tbl.isTrashed.equals(false)))
           .get();
+      final allProjects = await _db.select(_db.projects).get();
+      final projectTitleById = {
+        for (final project in allProjects) project.id: project.title,
+      };
       for (final note in nonTrashedNotes) {
         final tags = _decodeNoteTags(note.tagsJson);
+        final projectTitle =
+            note.projectId != null ? projectTitleById[note.projectId!] : null;
         final matches = NoteDomainHelpers.matchesNoteSearchQuery(
           title: note.title,
           content: note.content,
           category: note.category,
           tags: tags,
           rawQuery: cleanQuery,
+          projectTitle: projectTitle,
         );
         if (!matches) continue;
         final displayTitle = NoteDomainHelpers.normalizeTitle(note.title);
@@ -120,8 +127,12 @@ class DriftSearchRepository implements ISearchRepository {
         final compactBody = plainBody.length > 80
             ? '${plainBody.substring(0, 80)}...'
             : plainBody;
+        final projectSegment =
+            projectTitle != null && projectTitle.trim().isNotEmpty
+                ? ' • Project: ${projectTitle.trim()}'
+                : '';
         final metaPrefix =
-            'Note • $folderLabel${note.isArchived ? ' (Archived)' : ''}';
+            'Note • $folderLabel${note.isArchived ? ' (Archived)' : ''}$projectSegment';
         final snippet =
             compactBody.isNotEmpty ? '$metaPrefix • $compactBody' : metaPrefix;
         results.add(

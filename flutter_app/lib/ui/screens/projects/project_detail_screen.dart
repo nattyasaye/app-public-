@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../application/notes/notes_controller.dart';
 import '../../../application/projects/projects_controller.dart';
 import '../../../application/tasks/tasks_controller.dart';
 import '../../../core/date/shared_date.dart';
@@ -15,6 +16,7 @@ import '../../../services/export/project_package_io_service.dart';
 import '../../widgets/shared_ui_widgets.dart';
 import 'project_form_sheet.dart';
 import 'project_milestones_widget.dart';
+import 'project_notes_widget.dart';
 import 'project_progress_history_widget.dart';
 import 'project_tasks_sections_widget.dart';
 import 'project_tracking_blocks_widget.dart';
@@ -24,12 +26,16 @@ class ProjectDetailScreen extends StatelessWidget {
   final String projectId;
   final ProjectsController projectsController;
   final TasksController? tasksController;
+  final NotesController? notesController;
+  final void Function(String noteId)? onOpenNote;
 
   const ProjectDetailScreen({
     super.key,
     required this.projectId,
     required this.projectsController,
     this.tasksController,
+    this.notesController,
+    this.onOpenNote,
   });
 
   Future<void> _archiveOrRestore(
@@ -85,7 +91,7 @@ class ProjectDetailScreen extends StatelessWidget {
       context,
       title: 'Delete Archived Project?',
       message:
-          'Permanently delete "${project.title}", all of its tracking blocks, and its progress history? Linked tasks will be detached and kept safely.',
+          'Permanently delete "${project.title}", all of its tracking blocks, and its progress history? Linked tasks and notes will be detached and kept safely.',
       confirmLabel: 'Delete Forever',
       isDestructive: true,
       icon: Icons.delete_forever_outlined,
@@ -93,6 +99,7 @@ class ProjectDetailScreen extends StatelessWidget {
     if (!confirmed || !context.mounted) return;
     final ok = await projectsController.deleteProject(project.id);
     syncTasksControllerProjects(tasksController);
+    syncNotesControllerProjects(notesController);
     if (ok && context.mounted) {
       Navigator.of(context).pop();
     }
@@ -375,6 +382,19 @@ class ProjectDetailScreen extends StatelessWidget {
                       tasks: linkedTasks,
                       tasksController: tasksController,
                       projectsController: projectsController,
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    ProjectNotesWidget(
+                      project: project,
+                      notesController: notesController,
+                      onOpenNote: onOpenNote == null
+                          ? null
+                          : (noteId) {
+                              if (Navigator.of(context).canPop()) {
+                                Navigator.of(context).pop();
+                              }
+                              onOpenNote!(noteId);
+                            },
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingMd),
                     ProjectTrackingBlocksWidget(

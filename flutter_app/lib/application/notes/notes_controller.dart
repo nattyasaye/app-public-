@@ -238,6 +238,8 @@ class NotesController extends ChangeNotifier {
     required String content,
     String? category,
     List<String>? tags,
+    String? projectId,
+    bool clearProjectId = false,
     String? linkedModule,
     String? linkedId,
     bool clearLink = false,
@@ -257,17 +259,64 @@ class NotesController extends ChangeNotifier {
       final normalizedTags = tags != null
           ? NoteDomainHelpers.normalizeTags(tags)
           : existing.tags;
+      final trimmedProjectId = projectId?.trim();
+      final effectiveProjectId = clearProjectId
+          ? null
+          : (trimmedProjectId != null && trimmedProjectId.isNotEmpty
+              ? trimmedProjectId
+              : existing.projectId);
       final updated = existing.copyWith(
         title: safeTitle,
         content: content,
         category: category ?? existing.category,
         tags: normalizedTags,
+        projectId: effectiveProjectId,
+        clearProjectId: clearProjectId,
         linkedModule: linkedModule,
         linkedId: linkedId,
         clearLink: clearLink,
         updatedAt: EthiopiaClock.nowUtc(),
       );
 
+      try {
+        final saved = await _repository.updateNote(updated);
+        _upsertInState(saved);
+        notifyListeners();
+        return (saved: true, errorMessage: null);
+      } catch (e) {
+        final reason = e.toString();
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (saved: false, errorMessage: reason);
+      }
+    });
+  }
+
+  Future<({bool saved, String? errorMessage})> setNoteProject({
+    required String noteId,
+    String? projectId,
+  }) {
+    return _enqueue(() async {
+      final existing = _state.findById(noteId);
+      if (existing == null || NoteDomainHelpers.isTrashed(existing)) {
+        final reason = existing == null
+            ? 'Note not found.'
+            : 'Restore note from Trash before changing its project.';
+        _state = _state.copyWith(errorMessage: reason);
+        notifyListeners();
+        return (saved: false, errorMessage: reason);
+      }
+      final trimmed = projectId?.trim();
+      final nextProjectId =
+          (trimmed == null || trimmed.isEmpty) ? null : trimmed;
+      if (existing.projectId == nextProjectId) {
+        return (saved: true, errorMessage: null);
+      }
+      final updated = existing.copyWith(
+        projectId: nextProjectId,
+        clearProjectId: nextProjectId == null,
+        updatedAt: EthiopiaClock.nowUtc(),
+      );
       try {
         final saved = await _repository.updateNote(updated);
         _upsertInState(saved);

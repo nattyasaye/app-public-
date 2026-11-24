@@ -31,6 +31,7 @@ import {
   Pencil,
   FolderPlus,
   LayoutGrid,
+  Layers,
   Tag,
 } from 'lucide-react';
 import { CalendarDate, EthiopiaClock, SharedDateFormatter } from '../domain/date';
@@ -92,8 +93,16 @@ import {
   toggleWebNoteFavorite,
   toggleWebNotePin,
 } from '../domain/webNotesLifecycle';
+import {
+  buildProjectTitlesById,
+  clearNoteProject,
+  getProjectForNote,
+  normalizeNoteProjectId,
+  setNoteProject,
+} from '../domain/projectNotes';
 import { notesService } from '../services/notesService';
-import { SHARED_DESIGN_TOKENS } from '../domain/sharedFoundation';
+import { projectsService } from '../services/projectsService';
+import { SHARED_DESIGN_TOKENS, SharedProject } from '../domain/sharedFoundation';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import {
   DaywellButton,
@@ -132,6 +141,7 @@ interface DaywellNotesModuleProps {
     updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
   ) => void;
   tasks?: DaywellTaskRecord[];
+  projects?: SharedProject[];
   requestedNoteFocus?: {
     noteId: string;
     nonce: number;
@@ -183,6 +193,7 @@ export function DaywellNotesModule({
   notes: controlledNotes,
   onUpdateNotes,
   tasks: controlledTasks,
+  projects: controlledProjects,
   requestedNoteFocus,
   layoutMode = 'auto',
   isActive = true,
@@ -258,6 +269,23 @@ export function DaywellNotesModule({
   const notesRef = useRef<DaywellNote[]>(notes);
   notesRef.current = notes;
 
+  const [internalProjects, setInternalProjects] = useState<SharedProject[]>(() =>
+    projectsService.listProjects({ includeArchived: true })
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || controlledProjects !== undefined) return;
+    const handleProjectSync = () => {
+      setInternalProjects(projectsService.listProjects({ includeArchived: true }));
+    };
+    window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleProjectSync);
+    return () =>
+      window.removeEventListener(
+        SharedStateBridge.SYNC_EVENT_NAME,
+        handleProjectSync
+      );
+  }, [controlledProjects]);
+
   const effectiveTasks = controlledTasks ?? [];
   const selectableTasks = useMemo(
     () =>
@@ -265,6 +293,16 @@ export function DaywellNotesModule({
         (t) => !t.isArchived && t.status !== 'cancelled'
       ),
     [effectiveTasks]
+  );
+
+  const effectiveProjects = controlledProjects ?? internalProjects;
+  const selectableProjects = useMemo(
+    () => effectiveProjects.filter((p) => !p.isArchived),
+    [effectiveProjects]
+  );
+  const projectTitlesById = useMemo(
+    () => buildProjectTitlesById(effectiveProjects),
+    [effectiveProjects]
   );
 
   const applyNotesUpdate = (
@@ -311,6 +349,7 @@ export function DaywellNotesModule({
   const [editContent, setEditContent] = useState('');
   const [editNotebook, setEditNotebook] = useState('Personal');
   const [editTags, setEditTags] = useState<string[]>([]);
+  const [editProjectId, setEditProjectId] = useState<string | undefined>(undefined);
   const [tagInput, setTagInput] = useState('');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving'>('saved');
   const [editorMode, setEditorMode] = useState<'write' | 'preview'>('write');
@@ -348,17 +387,25 @@ export function DaywellNotesModule({
     [editorMode, editContent, contentSelection]
   );
 
-  const draftFieldsRef = useRef({
+  const draftFieldsRef = useRef<{
+    title: string;
+    content: string;
+    notebook: string;
+    tags: string[];
+    projectId: string | undefined;
+  }>({
     title: editTitle,
     content: editContent,
     notebook: editNotebook,
     tags: editTags,
+    projectId: editProjectId,
   });
   draftFieldsRef.current = {
     title: editTitle,
     content: editContent,
     notebook: editNotebook,
     tags: editTags,
+    projectId: editProjectId,
   };
 
   const [feedbackToast, setFeedbackToast] = useState<{
@@ -442,8 +489,18 @@ export function DaywellNotesModule({
         dateFilter,
         searchQuery,
         sortBy,
+        projectTitlesById,
       }),
-    [notes, activeTab, notebookFilter, tagFilter, dateFilter, searchQuery, sortBy]
+    [
+      notes,
+      activeTab,
+      notebookFilter,
+      tagFilter,
+      dateFilter,
+      searchQuery,
+      sortBy,
+      projectTitlesById,
+    ]
   );
 
   const hasActiveFilters =
@@ -557,6 +614,7 @@ export function DaywellNotesModule({
     setEditContent(freshNote.content);
     setEditNotebook(freshNote.notebook);
     setEditTags([...freshNote.tags]);
+    setEditProjectId(normalizeNoteProjectId(freshNote.projectId));
     setTagInput('');
     setSaveStatus('saved');
     if (!options?.preserveMode) {
@@ -631,6 +689,7 @@ export function DaywellNotesModule({
         : resolveDefaultNotebookForTab(activeTab)
     );
     setEditTags([]);
+    setEditProjectId(undefined);
     setTagInput('');
     setSaveStatus('saved');
     setEditorMode('write');
@@ -654,6 +713,8 @@ export function DaywellNotesModule({
       content: fields.content,
       notebook: fields.notebook,
       tags: effectiveTags,
+      projectId: fields.projectId,
+      clearProjectId: fields.projectId === undefined,
     });
 
     if (preview.status === 'discarded_empty') {
@@ -682,6 +743,8 @@ export function DaywellNotesModule({
         content: fields.content,
         notebook: fields.notebook,
         tags: effectiveTags,
+        projectId: fields.projectId,
+        clearProjectId: fields.projectId === undefined,
       });
       return res.notes;
     });
@@ -717,6 +780,8 @@ export function DaywellNotesModule({
         content: editContent,
         notebook: editNotebook,
         tags: editTags,
+        projectId: editProjectId,
+        clearProjectId: editProjectId === undefined,
       });
       if (preview.status === 'unchanged') {
         setSaveStatus('saved');
@@ -735,12 +800,13 @@ export function DaywellNotesModule({
       clearAutosaveTimer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editTitle, editContent, editNotebook, editTags, selectedNoteId, isEditorOpen]);
+  }, [editTitle, editContent, editNotebook, editTags, editProjectId, selectedNoteId, isEditorOpen]);
 
   const flushAutosaveAndClose = () => {
     commitEditorDraftToNote();
     selectedNoteIdRef.current = null;
     setSelectedNoteId(null);
+    setEditProjectId(undefined);
     setIsEditorOpen(false);
   };
 
@@ -797,7 +863,14 @@ export function DaywellNotesModule({
     if (!noteMatchesDateFilter(target, parseNoteDateFilterMode(dateFilter))) {
       setDateFilter('all');
     }
-    if (searchQuery.trim() && !matchesNoteSearchQuery(target, searchQuery)) {
+    if (
+      searchQuery.trim() &&
+      !matchesNoteSearchQuery(target, searchQuery, {
+        projectTitle: target.projectId
+          ? projectTitlesById.get(target.projectId)
+          : undefined,
+      })
+    ) {
       setSearchQuery('');
     }
     openEditor(target, { skipFlush: true });
@@ -835,6 +908,8 @@ export function DaywellNotesModule({
         content: fields.content,
         notebook: fields.notebook,
         tags: fields.tags,
+        projectId: fields.projectId,
+        clearProjectId: fields.projectId === undefined,
       });
       if (draftPreview.status === 'discarded_empty') {
         return prevSnapshot;
@@ -873,6 +948,8 @@ export function DaywellNotesModule({
           content: fields.content,
           notebook: fields.notebook,
           tags: fields.tags,
+          projectId: fields.projectId,
+          clearProjectId: fields.projectId === undefined,
         });
         if (draftRes.status === 'discarded_empty') {
           return prevNotes;
@@ -1074,6 +1151,51 @@ export function DaywellNotesModule({
       () => {
         triggerFeedback('Unlinked task from note', () =>
           applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
+  };
+
+  const handleChangeNoteProject = (
+    noteId: string | null,
+    rawProjectId: string
+  ) => {
+    const nextProjectId = normalizeNoteProjectId(rawProjectId);
+    const prevProjectId = draftFieldsRef.current.projectId;
+    if (nextProjectId === prevProjectId) return;
+
+    setEditProjectId(nextProjectId);
+    draftFieldsRef.current.projectId = nextProjectId;
+
+    if (noteId === null && isCurrentNewDraftBlank) {
+      return;
+    }
+
+    const prevSnapshot = [...notesRef.current];
+    const targetProject = nextProjectId
+      ? effectiveProjects.find((p) => p.id === nextProjectId) ?? null
+      : null;
+
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) =>
+        nextProjectId
+          ? setNoteProject(list, id, nextProjectId)
+          : clearNoteProject(list, id),
+      () => {
+        triggerFeedback(
+          nextProjectId
+            ? targetProject
+              ? `Associated with "${targetProject.title}"`
+              : 'Associated note with project'
+            : 'Removed project from note',
+          () => {
+            applyNotesUpdate(prevSnapshot);
+            if (selectedNoteIdRef.current === noteId) {
+              setEditProjectId(prevProjectId);
+              draftFieldsRef.current.projectId = prevProjectId;
+            }
+          }
         );
       }
     );
@@ -2012,6 +2134,40 @@ export function DaywellNotesModule({
                       </div>
                     );
                   })()}
+
+                  {note.projectId && (() => {
+                    const linkedProject = getProjectForNote(
+                      note,
+                      effectiveProjects
+                    );
+                    if (linkedProject) {
+                      return (
+                        <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
+                          <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-secondary)] max-w-full">
+                            <Layers className="w-3 h-3 shrink-0 text-[var(--dw-primary)]" />
+                            <span className="truncate">
+                              Project: {linkedProject.title}
+                            </span>
+                          </span>
+                          {linkedProject.isArchived && (
+                            <DaywellStatusBadge
+                              label="Archived"
+                              tone="neutral"
+                              showIcon={false}
+                            />
+                          )}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-muted)]">
+                          <Layers className="w-3 h-3 shrink-0" />
+                          <span>Project unavailable</span>
+                        </span>
+                      </div>
+                    );
+                  })()}
                   </div>
 
                   <div className="flex items-center justify-between gap-2 text-[10px] text-[var(--dw-text-muted)] pt-1.5 border-t border-[var(--dw-divider)]">
@@ -2258,6 +2414,91 @@ export function DaywellNotesModule({
               </div>
             )}
           </div>
+
+          {/* Project Bar */}
+          {(() => {
+            const activeProject = editProjectId
+              ? effectiveProjects.find((p) => p.id === editProjectId) ?? null
+              : null;
+            const isMissingProject = Boolean(editProjectId && !activeProject);
+            const hasProjectChoices =
+              selectableProjects.length > 0 || Boolean(editProjectId);
+            if (!hasProjectChoices) return null;
+            const selectOptions =
+              activeProject && activeProject.isArchived
+                ? [activeProject, ...selectableProjects]
+                : selectableProjects;
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Layers
+                    className={`w-3.5 h-3.5 shrink-0 ${
+                      isMissingProject
+                        ? 'text-[var(--dw-text-muted)]'
+                        : 'text-[var(--dw-primary)]'
+                    }`}
+                  />
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--dw-text-muted)]">
+                      Project
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span
+                        className={`text-xs font-semibold truncate ${
+                          isMissingProject
+                            ? 'text-[var(--dw-text-muted)]'
+                            : 'text-[var(--dw-text-primary)]'
+                        }`}
+                      >
+                        {editProjectId
+                          ? activeProject
+                            ? activeProject.title
+                            : 'Project unavailable'
+                          : 'None'}
+                      </span>
+                      {activeProject?.isArchived && (
+                        <DaywellStatusBadge
+                          label="Archived"
+                          tone="neutral"
+                          showIcon={false}
+                        />
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {selectOptions.length > 0 && (
+                    <select
+                      aria-label="Associate note with project"
+                      value={activeProject ? activeProject.id : ''}
+                      onChange={(e) =>
+                        handleChangeNoteProject(selectedNoteId, e.target.value)
+                      }
+                      className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none max-w-[200px] cursor-pointer"
+                    >
+                      <option value="">No project</option>
+                      {selectOptions.map((proj) => (
+                        <option key={proj.id} value={proj.id}>
+                          {proj.isArchived
+                            ? `${proj.title} (Archived)`
+                            : proj.title}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {editProjectId && (
+                    <DaywellButton
+                      label="Remove"
+                      variant="outlined"
+                      size="compact"
+                      leadingIcon={<Unlink className="w-3 h-3" />}
+                      onClick={() => handleChangeNoteProject(selectedNoteId, '')}
+                    />
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Linked Task Bar */}
           {!isCurrentNewDraftBlank && (

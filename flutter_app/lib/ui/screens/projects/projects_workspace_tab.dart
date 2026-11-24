@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../application/notes/notes_controller.dart';
 import '../../../application/projects/projects_controller.dart';
 import '../../../application/tasks/tasks_controller.dart';
 import '../../../core/date/shared_date.dart';
@@ -21,11 +22,15 @@ import 'project_ui_helpers.dart';
 class ProjectsWorkspaceTab extends StatefulWidget {
   final ProjectsController? projectsController;
   final TasksController? tasksController;
+  final NotesController? notesController;
+  final void Function(String noteId)? onOpenNote;
 
   const ProjectsWorkspaceTab({
     super.key,
     required this.projectsController,
     this.tasksController,
+    this.notesController,
+    this.onOpenNote,
   });
 
   @override
@@ -131,7 +136,7 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
       context,
       title: 'Delete Archived Project?',
       message:
-          'Permanently delete "${project.title}" and all of its tracking blocks and progress logs? Linked tasks will remain safely in Tasks.',
+          'Permanently delete "${project.title}" and all of its tracking blocks and progress logs? Linked tasks and notes will remain safely detached.',
       confirmLabel: 'Delete Forever',
       isDestructive: true,
       icon: Icons.delete_forever_outlined,
@@ -139,6 +144,7 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
     if (!confirmed || !mounted) return;
     await ctrl.deleteProject(project.id);
     syncTasksControllerProjects(widget.tasksController);
+    syncNotesControllerProjects(widget.notesController);
   }
 
   void _openDetail(ProjectsController ctrl, ProjectEntity project) {
@@ -149,6 +155,8 @@ class _ProjectsWorkspaceTabState extends State<ProjectsWorkspaceTab> {
             projectId: project.id,
             projectsController: ctrl,
             tasksController: widget.tasksController,
+            notesController: widget.notesController,
+            onOpenNote: widget.onOpenNote,
           ),
         ),
       ),

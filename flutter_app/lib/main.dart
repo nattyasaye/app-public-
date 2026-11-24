@@ -479,6 +479,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           state: _state,
           controller: _state.notesController,
           tasksController: _state.tasksController,
+          projectsController: _state.projectsController,
           requestedNoteFocus: _requestedNoteFocus,
           onRegisterPendingSaveFlush: (handler) {
             _flushNotesPendingEdits = handler;

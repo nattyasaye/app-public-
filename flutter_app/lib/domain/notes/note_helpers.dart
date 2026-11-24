@@ -451,6 +451,7 @@ class NoteDomainHelpers {
     required String category,
     required Iterable<String> tags,
     required String rawQuery,
+    String? projectTitle,
   }) {
     final query = rawQuery.trim().toLowerCase();
     if (query.isEmpty) return true;
@@ -462,6 +463,8 @@ class NoteDomainHelpers {
         .toLowerCase();
     if (plainContent.contains(query)) return true;
     if (matchesFolderSearchQuery(category, query)) return true;
-    return matchesTagsSearchQuery(tags, query);
+    if (matchesTagsSearchQuery(tags, query)) return true;
+    final cleanProjectTitle = projectTitle?.trim().toLowerCase() ?? '';
+    return cleanProjectTitle.isNotEmpty && cleanProjectTitle.contains(query);
   }
 }

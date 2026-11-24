@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { CalendarDate, SharedDateFormatter } from '../../domain/date';
 import { SharedProject } from '../../domain/sharedFoundation';
+import { TaskNoteRecord } from '../../domain/taskNotes';
+import { createNoteForProject } from '../../domain/projectNotes';
+import { notesService } from '../../services/notesService';
 import { SharedStateBridge } from '../../services/sharedStateBridge';
 import {
   EnrichedProgressLogEntry,
@@ -34,12 +37,18 @@ import { ProjectFormModal } from './ProjectFormModal';
 import { ProjectTrackingBlocksSection } from './ProjectTrackingBlocksSection';
 import { ProjectProgressHistorySection } from './ProjectProgressHistorySection';
 import { ProjectMilestonesSection } from './ProjectMilestonesSection';
+import { ProjectNotesSection } from './ProjectNotesSection';
 import { ProjectTasksSectionsCard } from './ProjectTasksSectionsCard';
 
 export interface ProjectDetailViewProps {
   projectId: string;
   onBack: () => void;
   onDeleted: () => void;
+  notes?: TaskNoteRecord[];
+  onUpdateNotes?: (
+    updater: TaskNoteRecord[] | ((prev: TaskNoteRecord[]) => TaskNoteRecord[])
+  ) => void;
+  onNavigateToNote?: (noteId: string) => void;
 }
 
 function formatDualDateLabel(isoDate?: string): string | undefined {
@@ -70,11 +79,18 @@ export function ProjectDetailView({
   projectId,
   onBack,
   onDeleted,
+  notes: controlledNotes,
+  onUpdateNotes,
+  onNavigateToNote,
 }: ProjectDetailViewProps) {
   const [snapshot, setSnapshot] = useState<ProjectDetailSnapshot | undefined>(
     undefined
   );
   const [history, setHistory] = useState<EnrichedProgressLogEntry[]>([]);
+  const [internalNotes, setInternalNotes] = useState<TaskNoteRecord[]>(() =>
+    notesService.loadNotes()
+  );
+  const [noteActionError, setNoteActionError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [exportNotice, setExportNotice] = useState<{
     tone: 'success' | 'error' | 'info';
@@ -91,13 +107,16 @@ export function ProjectDetailView({
       setHistory(
         next ? projectsService.getChronologicalProgressHistory(projectId) : []
       );
+      if (controlledNotes === undefined) {
+        setInternalNotes(notesService.loadNotes());
+      }
       setErrorMsg(null);
     } catch (err) {
       setErrorMsg(
         err instanceof Error ? err.message : 'Unable to load project details.'
       );
     }
-  }, [projectId]);
+  }, [projectId, controlledNotes]);
 
   useEffect(() => {
     loadSnapshot();
@@ -109,6 +128,37 @@ export function ProjectDetailView({
     }
     return undefined;
   }, [loadSnapshot]);
+
+  const effectiveNotes = controlledNotes ?? internalNotes;
+
+  const handleCreateProjectNote = () => {
+    if (!snapshot?.project) return;
+    setNoteActionError(null);
+    const currentNotes = controlledNotes ?? notesService.loadNotes();
+    const res = createNoteForProject({
+      notes: currentNotes,
+      project: snapshot.project,
+    });
+    if (!res.ok || !res.note) {
+      setNoteActionError(res.error || 'Could not create project note.');
+      return;
+    }
+    const createdNote = res.note;
+    if (onUpdateNotes) {
+      onUpdateNotes(res.notes);
+    } else {
+      const saved = notesService.saveNotes(res.notes, { emitSync: true });
+      setInternalNotes(saved);
+    }
+    if (onNavigateToNote) {
+      onNavigateToNote(createdNote.id);
+    } else {
+      setExportNotice({
+        tone: 'success',
+        message: `Created note "${createdNote.title}" for "${snapshot.project.title}".`,
+      });
+    }
+  };
 
   const notifyUndo = (message: string, undoAction: () => void) => {
     setExportNotice({
@@ -586,6 +636,15 @@ export function ProjectDetailView({
               />
             )}
 
+            {/* Project Notes */}
+            <ProjectNotesSection
+              project={project}
+              notes={effectiveNotes}
+              onOpenNote={onNavigateToNote}
+              onCreateNote={handleCreateProjectNote}
+              errorMessage={noteActionError}
+            />
+
             {/* Tracking Blocks */}
             <ProjectTrackingBlocksSection
               project={project}
@@ -622,7 +681,7 @@ export function ProjectDetailView({
       <DaywellConfirmationDialog
         isOpen={confirmDeleteOpen}
         title={`Delete "${project?.title ?? ''}" forever?`}
-        description="This permanently deletes the archived project, all of its tracking blocks, and all progress logs. Any linked tasks remain safe and become unlinked."
+        description="This permanently deletes the archived project, all of its tracking blocks, and all progress logs. Any linked tasks and notes remain safe and become unlinked."
         confirmLabel="Delete Forever"
         destructive
         onCancel={() => setConfirmDeleteOpen(false)}

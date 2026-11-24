@@ -9,9 +9,12 @@ import '../../domain/notes/note_helpers.dart';
 import '../../domain/notes/note_links.dart';
 import '../../domain/notes/note_markdown.dart';
 import '../../domain/notes/note_models.dart';
+import '../../domain/notes/project_notes_helpers.dart';
 import '../../domain/notes/task_notes_helpers.dart';
+import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../application/notes/notes_controller.dart';
+import '../../application/projects/projects_controller.dart';
 import '../../application/tasks/tasks_controller.dart';
 import '../app_state.dart';
 import '../widgets/notes/note_markdown_preview.dart';
@@ -23,6 +26,7 @@ typedef _NoteDraftSnapshot = ({
   String content,
   String category,
   List<String> tags,
+  String? projectId,
   String? linkedModule,
   String? linkedId,
 });
@@ -111,6 +115,7 @@ class NotesView extends StatefulWidget {
   final AppStateManager? state;
   final NotesController? controller;
   final TasksController? tasksController;
+  final ProjectsController? projectsController;
   final ({String noteId, int nonce})? requestedNoteFocus;
   final void Function(String taskId)? onOpenTask;
   final void Function(Future<bool> Function()? flushHandler)?
@@ -121,6 +126,7 @@ class NotesView extends StatefulWidget {
     this.state,
     this.controller,
     this.tasksController,
+    this.projectsController,
     this.requestedNoteFocus,
     this.onOpenTask,
     this.onRegisterPendingSaveFlush,
@@ -132,6 +138,9 @@ class NotesView extends StatefulWidget {
 
   TasksController? get effectiveTasksController =>
       tasksController ?? state?.tasksController;
+
+  ProjectsController? get effectiveProjectsController =>
+      projectsController ?? state?.projectsController;
 
   @override
   State<NotesView> createState() => _NotesViewState();
@@ -222,8 +231,22 @@ class _NotesViewState extends State<NotesView> {
       controller.setDateFilter('all');
     }
 
+    final projectTitle = note.projectId != null
+        ? ProjectNotesHelper.findLinkedProject(
+            note,
+            widget.effectiveProjectsController?.state.projects ??
+                const <ProjectEntity>[],
+          )?.title
+        : null;
     if (state.searchQuery.trim().isNotEmpty &&
-        !note.matchesQuery(state.searchQuery)) {
+        !NoteDomainHelpers.matchesNoteSearchQuery(
+          title: note.title,
+          content: note.content,
+          category: note.category,
+          tags: note.tags,
+          rawQuery: state.searchQuery,
+          projectTitle: projectTitle,
+        )) {
       _searchController.clear();
       controller.setSearchQuery('');
     }
@@ -473,6 +496,7 @@ class _NotesViewState extends State<NotesView> {
       builder: (_) => _NoteEditorScreen(
         controller: widget.effectiveController,
         tasksController: widget.effectiveTasksController,
+        projectsController: widget.effectiveProjectsController,
         onOpenTask: widget.onOpenTask,
         existingNote: existingNote,
         initialCategory: defaultNewCategory,
@@ -939,6 +963,7 @@ class _NotesViewState extends State<NotesView> {
   Widget build(BuildContext context) {
     final controller = widget.effectiveController;
     final tasksController = widget.effectiveTasksController;
+    final projectsController = widget.effectiveProjectsController;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final textTheme = theme.textTheme;
@@ -952,6 +977,7 @@ class _NotesViewState extends State<NotesView> {
       animation: Listenable.merge([
         controller,
         if (tasksController != null) tasksController,
+        if (projectsController != null) projectsController,
       ]),
       builder: (context, _) {
         final moduleState = controller.state;
@@ -1618,6 +1644,7 @@ class _NotesViewState extends State<NotesView> {
       key: _editorSurfaceKey,
       controller: controller,
       tasksController: tasksController,
+      projectsController: widget.effectiveProjectsController,
       onOpenTask: widget.onOpenTask,
       existingNote: activeSelected,
       initialPreviewMode: _detailPreviewMode,
@@ -1771,8 +1798,14 @@ class _NotesViewState extends State<NotesView> {
   }) {
     final controller = widget.effectiveController;
     final tasksCtrl = widget.effectiveTasksController;
+    final projectsCtrl = widget.effectiveProjectsController;
     final linkedTask = tasksCtrl != null
         ? TaskNotesHelper.findLinkedTask(note, tasksCtrl.state.tasks)
+        : null;
+    final hasProjectRef =
+        ProjectNotesHelper.normalizeProjectId(note.projectId) != null;
+    final linkedProject = hasProjectRef && projectsCtrl != null
+        ? ProjectNotesHelper.findLinkedProject(note, projectsCtrl.state.projects)
         : null;
     final theme = Theme.of(context);
     final semantic = context.daywellColors;
@@ -2058,6 +2091,61 @@ class _NotesViewState extends State<NotesView> {
                 ),
               ),
             ],
+            if (hasProjectRef) ...[
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              Wrap(
+                spacing: SharedDesignTokens.spacingXs,
+                runSpacing: SharedDesignTokens.spacingXs,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: SharedDesignTokens.spacingSm,
+                      vertical: SharedDesignTokens.spacingXs,
+                    ),
+                    decoration: BoxDecoration(
+                      color: semantic.surfaceSubtle,
+                      borderRadius:
+                          BorderRadius.circular(SharedDesignTokens.radiusSm),
+                      border: Border.all(color: semantic.border),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.layers_outlined,
+                          size: DaywellIconSize.xs,
+                          color: linkedProject != null
+                              ? colorScheme.primary
+                              : semantic.textMuted,
+                        ),
+                        const SizedBox(width: SharedDesignTokens.spacingXs),
+                        Flexible(
+                          child: Text(
+                            linkedProject != null
+                                ? 'Project: ${linkedProject.title}'
+                                : 'Project unavailable',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: DaywellTypography.caption(
+                              color: linkedProject != null
+                                  ? semantic.textSecondary
+                                  : semantic.textMuted,
+                            ).copyWith(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (linkedProject?.isArchived == true)
+                    const DaywellStatusBadge(
+                      label: 'Archived',
+                      tone: DaywellStatusTone.warning,
+                      showIcon: false,
+                    ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
@@ -2068,6 +2156,7 @@ class _NotesViewState extends State<NotesView> {
 class _NoteEditorScreen extends StatelessWidget {
   final NotesController controller;
   final TasksController? tasksController;
+  final ProjectsController? projectsController;
   final void Function(String taskId)? onOpenTask;
   final NoteEntity? existingNote;
   final bool initialPreviewMode;
@@ -2077,6 +2166,7 @@ class _NoteEditorScreen extends StatelessWidget {
   const _NoteEditorScreen({
     required this.controller,
     this.tasksController,
+    this.projectsController,
     this.onOpenTask,
     required this.existingNote,
     this.initialPreviewMode = false,
@@ -2090,6 +2180,7 @@ class _NoteEditorScreen extends StatelessWidget {
       key: editorSurfaceKey,
       controller: controller,
       tasksController: tasksController,
+      projectsController: projectsController,
       onOpenTask: onOpenTask,
       existingNote: existingNote,
       initialPreviewMode: initialPreviewMode,
@@ -2102,6 +2193,7 @@ class _NoteEditorScreen extends StatelessWidget {
 class _NoteEditorSurface extends StatefulWidget {
   final NotesController controller;
   final TasksController? tasksController;
+  final ProjectsController? projectsController;
   final void Function(String taskId)? onOpenTask;
   final NoteEntity? existingNote;
   final bool initialPreviewMode;
@@ -2118,6 +2210,7 @@ class _NoteEditorSurface extends StatefulWidget {
     super.key,
     required this.controller,
     this.tasksController,
+    this.projectsController,
     this.onOpenTask,
     required this.existingNote,
     this.initialPreviewMode = false,
@@ -2143,6 +2236,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   late String _category;
   late List<String> _tags;
   String? _noteId;
+  String? _projectId;
   String? _linkedModule;
   String? _linkedId;
   Timer? _autosaveTimer;
@@ -2212,6 +2306,9 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         : NoteDomainHelpers.normalizeFlutterCategory(widget.initialCategory);
     _tags = NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
         .toList();
+    _projectId = ProjectNotesHelper.normalizeProjectId(
+      widget.existingNote?.projectId,
+    );
     _linkedModule = widget.existingNote?.linkedModule;
     _linkedId = widget.existingNote?.linkedId;
     _saveStatus = 'Saved';
@@ -2242,6 +2339,9 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         : NoteDomainHelpers.normalizeFlutterCategory(widget.initialCategory);
     _tags = NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
         .toList();
+    _projectId = ProjectNotesHelper.normalizeProjectId(
+      widget.existingNote?.projectId,
+    );
     _linkedModule = widget.existingNote?.linkedModule;
     _linkedId = widget.existingNote?.linkedId;
   }
@@ -2260,11 +2360,17 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     if (widget.existingNote != null &&
         oldWidget.existingNote != null &&
         widget.existingNote!.id == _noteId &&
-        widget.existingNote!.category != oldWidget.existingNote!.category &&
         !_hasPendingChanges) {
-      _category = NoteDomainHelpers.normalizeFlutterCategory(
-        widget.existingNote!.category,
-      );
+      if (widget.existingNote!.category != oldWidget.existingNote!.category) {
+        _category = NoteDomainHelpers.normalizeFlutterCategory(
+          widget.existingNote!.category,
+        );
+      }
+      if (widget.existingNote!.projectId != oldWidget.existingNote!.projectId) {
+        _projectId = ProjectNotesHelper.normalizeProjectId(
+          widget.existingNote!.projectId,
+        );
+      }
     }
   }
 
@@ -2289,6 +2395,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
       content: _contentController.text,
       category: _category,
       tags: List<String>.unmodifiable(_tags),
+      projectId: _projectId,
       linkedModule: _linkedModule,
       linkedId: _linkedId,
     );
@@ -2361,6 +2468,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         content: snapshot.content,
         category: snapshot.category,
         tags: snapshot.tags,
+        projectId: snapshot.projectId,
         linkedModule: snapshot.linkedModule,
         linkedId: snapshot.linkedId,
       );
@@ -2387,6 +2495,8 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         content: snapshot.content,
         category: snapshot.category,
         tags: snapshot.tags,
+        projectId: snapshot.projectId,
+        clearProjectId: snapshot.projectId == null,
         linkedModule: snapshot.linkedModule,
         linkedId: snapshot.linkedId,
         clearLink: snapshot.linkedModule == null || snapshot.linkedId == null,
@@ -2550,6 +2660,101 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
           currentTaskId:
               _linkedModule == NoteEntity.taskLinkModule ? _linkedId : null,
           onSelectTask: (task) => unawaited(_linkTask(task)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setProject(ProjectEntity project) async {
+    final prevProjectId = _projectId;
+    setState(() {
+      _projectId = project.id;
+    });
+    _markDirty(scheduleTimer: false);
+    if (_noteId != null) {
+      final ok = await _flushPendingSaves();
+      if (!ok && mounted) {
+        setState(() {
+          if (_projectId == project.id) {
+            _projectId = prevProjectId;
+          }
+        });
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not associate project. Kept previous state.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _clearProject() async {
+    final prevProjectId = _projectId;
+    setState(() {
+      _projectId = null;
+    });
+    _markDirty(scheduleTimer: false);
+    if (_noteId != null) {
+      final ok = await _flushPendingSaves();
+      if (!ok) {
+        if (mounted) {
+          setState(() {
+            if (_projectId == null) {
+              _projectId = prevProjectId;
+            }
+          });
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content:
+                  Text('Could not remove project. Kept existing association.'),
+            ),
+          );
+        }
+        return;
+      }
+    }
+    if (!mounted || prevProjectId == null) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Removed project from note'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            setState(() {
+              _projectId = prevProjectId;
+            });
+            _markDirty(scheduleTimer: false);
+            if (_noteId != null) {
+              unawaited(_flushPendingSaves());
+            }
+          },
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _openProjectPicker() {
+    final projectsCtrl = widget.projectsController;
+    if (projectsCtrl == null) return;
+    unawaited(
+      showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(SharedDesignTokens.radiusSheet),
+          ),
+        ),
+        builder: (_) => _NoteProjectPickerSheet(
+          projectsController: projectsCtrl,
+          currentProjectId: _projectId,
+          onSelectProject: (project) => unawaited(_setProject(project)),
+          onClearProject: _projectId != null ? () => unawaited(_clearProject()) : null,
         ),
       ),
     );
@@ -2987,10 +3192,12 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   @override
   Widget build(BuildContext context) {
     final tasksCtrl = widget.tasksController;
+    final projectsCtrl = widget.projectsController;
     return AnimatedBuilder(
       animation: Listenable.merge([
         widget.controller,
         if (tasksCtrl != null) tasksCtrl,
+        if (projectsCtrl != null) projectsCtrl,
       ]),
       builder: (context, _) {
         final currentNote =
@@ -3008,6 +3215,15 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                 effectiveLinkedId != null &&
                 tasksCtrl != null
             ? tasksCtrl.state.findTaskById(effectiveLinkedId)
+            : null;
+        final effectiveProjectId = ProjectNotesHelper.normalizeProjectId(
+          (_hasPendingChanges || _noteId == null)
+              ? _projectId
+              : (currentNote != null ? currentNote.projectId : _projectId),
+        );
+        final hasProject = effectiveProjectId != null;
+        final linkedProject = hasProject && projectsCtrl != null
+            ? projectsCtrl.state.findProjectById(effectiveProjectId)
             : null;
         final semantic = context.daywellColors;
         final colorScheme = Theme.of(context).colorScheme;
@@ -3346,10 +3562,98 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                                 ),
                                 onPressed: _openTaskPicker,
                               ),
+                            if (projectsCtrl != null && !hasProject)
+                              ActionChip(
+                                avatar: Icon(
+                                  Icons.layers_outlined,
+                                  size: DaywellIconSize.xs,
+                                  color: colorScheme.primary,
+                                ),
+                                label: Text(
+                                  'Add Project',
+                                  style: DaywellTypography.label(
+                                    color: semantic.textPrimary,
+                                  ),
+                                ),
+                                onPressed: _openProjectPicker,
+                              ),
                           ],
                         ),
                       ),
                     ),
+                    if (hasProject)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          SharedDesignTokens.spacingMd,
+                          SharedDesignTokens.spacingXs,
+                          SharedDesignTokens.spacingMd,
+                          SharedDesignTokens.spacingXs,
+                        ),
+                        child: DaywellCard(
+                          color: semantic.surfaceSubtle,
+                          borderColor: semantic.border,
+                          borderRadius: SharedDesignTokens.radiusMd,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: SharedDesignTokens.spacingCompact,
+                            vertical: SharedDesignTokens.spacingXs,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.layers_outlined,
+                                size: DaywellIconSize.sm,
+                                color: linkedProject != null
+                                    ? colorScheme.primary
+                                    : semantic.textMuted,
+                              ),
+                              const SizedBox(
+                                width: SharedDesignTokens.spacingSm,
+                              ),
+                              Expanded(
+                                child: Wrap(
+                                  spacing: SharedDesignTokens.spacingXs,
+                                  runSpacing: SharedDesignTokens.spacingXs,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Text(
+                                      linkedProject != null
+                                          ? 'Project: ${linkedProject.title}'
+                                          : 'Project unavailable',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: DaywellTypography.fromToken(
+                                        SharedDesignTokens.typeBodyCompact,
+                                        color: linkedProject != null
+                                            ? semantic.textPrimary
+                                            : semantic.textMuted,
+                                      ).copyWith(fontWeight: FontWeight.w600),
+                                    ),
+                                    if (linkedProject?.isArchived == true)
+                                      const DaywellStatusBadge(
+                                        label: 'Archived',
+                                        tone: DaywellStatusTone.warning,
+                                        showIcon: false,
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              if (projectsCtrl != null)
+                                DaywellIconButton(
+                                  icon: Icons.swap_horiz,
+                                  iconSize: DaywellIconSize.md,
+                                  tooltip: 'Change Project',
+                                  onPressed: _openProjectPicker,
+                                ),
+                              DaywellIconButton(
+                                icon: Icons.link_off_outlined,
+                                iconSize: DaywellIconSize.md,
+                                tooltip: 'Remove Project',
+                                onPressed: () => unawaited(_clearProject()),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     if (isTaskLinked)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(
@@ -4282,6 +4586,176 @@ class _NoteTaskPickerSheetState extends State<_NoteTaskPickerSheet> {
                                 task.description?.trim().isNotEmpty == true
                                     ? task.description!.trim()
                                     : task.status.replaceAll('_', ' '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: semantic.textSecondary),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NoteProjectPickerSheet extends StatefulWidget {
+  final ProjectsController projectsController;
+  final String? currentProjectId;
+  final void Function(ProjectEntity project) onSelectProject;
+  final VoidCallback? onClearProject;
+
+  const _NoteProjectPickerSheet({
+    required this.projectsController,
+    required this.currentProjectId,
+    required this.onSelectProject,
+    this.onClearProject,
+  });
+
+  @override
+  State<_NoteProjectPickerSheet> createState() =>
+      _NoteProjectPickerSheetState();
+}
+
+class _NoteProjectPickerSheetState extends State<_NoteProjectPickerSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
+    final q = _query.trim().toLowerCase();
+    final projects = widget.projectsController.state.projects.where((p) {
+      if (p.id == widget.currentProjectId) return false;
+      if (q.isEmpty) return true;
+      return p.title.toLowerCase().contains(q) ||
+          (p.description?.toLowerCase().contains(q) ?? false);
+    }).toList();
+    projects.sort((a, b) {
+      if (a.isArchived != b.isArchived) {
+        return a.isArchived ? 1 : -1;
+      }
+      return b.updatedAt.compareTo(a.updatedAt);
+    });
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: SharedDesignTokens.spacingMd,
+          left: SharedDesignTokens.spacingMd,
+          right: SharedDesignTokens.spacingMd,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              SharedDesignTokens.spacingMd,
+        ),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.65,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Associate Note with Project',
+                      style: DaywellTypography.fromToken(
+                        SharedDesignTokens.typeTitle,
+                        color: semantic.textPrimary,
+                      ),
+                    ),
+                  ),
+                  if (widget.onClearProject != null)
+                    DaywellButton(
+                      label: 'Remove',
+                      variant: DaywellButtonVariant.text,
+                      size: DaywellButtonSize.compact,
+                      onPressed: () {
+                        widget.onClearProject!();
+                        Navigator.pop(context);
+                      },
+                    ),
+                  DaywellIconButton(
+                    icon: Icons.close,
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              DaywellSearchField(
+                controller: _searchCtrl,
+                hintText: 'Search projects...',
+                onChanged: (val) => setState(() => _query = val),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              Expanded(
+                child: projects.isEmpty
+                    ? DaywellEmptyState(
+                        icon: Icons.layers_outlined,
+                        message: q.isNotEmpty
+                            ? 'No projects match "$q"'
+                            : 'No other projects available.',
+                      )
+                    : ListView.separated(
+                        itemCount: projects.length,
+                        separatorBuilder: (_, __) => const SizedBox(
+                          height: SharedDesignTokens.spacingXs,
+                        ),
+                        itemBuilder: (_, index) {
+                          final project = projects[index];
+                          return DaywellCard(
+                            padding: EdgeInsets.zero,
+                            child: ListTile(
+                              onTap: () {
+                                widget.onSelectProject(project);
+                                Navigator.pop(context);
+                              },
+                              leading: Icon(
+                                Icons.layers_outlined,
+                                color: colorScheme.primary,
+                              ),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      project.title,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodyMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                  if (project.isArchived) ...[
+                                    const SizedBox(
+                                      width: SharedDesignTokens.spacingXs,
+                                    ),
+                                    const DaywellStatusBadge(
+                                      label: 'Archived',
+                                      tone: DaywellStatusTone.warning,
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              subtitle: Text(
+                                project.description?.trim().isNotEmpty == true
+                                    ? project.description!.trim()
+                                    : project.status.replaceAll('_', ' '),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context)

@@ -681,6 +681,11 @@ export default function App() {
     });
   }, [tasks, financeSyncTick, activeScreen, todayCal]);
 
+  const allProjects = useMemo(
+    () => projectsService.listProjects({ includeArchived: true }),
+    [financeSyncTick, activeScreen]
+  );
+
   const activeProjectsCount = projectsOverview.totalProjectsCount;
 
   const prioritizedDashboardTasks = useMemo(() => {
@@ -2147,6 +2152,7 @@ export default function App() {
                     notes={notes}
                     onUpdateNotes={handleUpdateNotes}
                     tasks={tasks}
+                    projects={allProjects}
                     requestedNoteFocus={requestedNoteFocus}
                     layoutMode={viewMode === 'desktop' ? 'auto' : 'compact'}
                     isActive={activeScreen === 'notes'}

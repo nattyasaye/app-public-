@@ -24,6 +24,8 @@ import {
   ProjectPackageError,
   serializeProjectPackage,
 } from '../domain/projectPackage';
+import { unlinkNotesForDeletedProject } from '../domain/projectNotes';
+import { TaskNoteRecord } from '../domain/taskNotes';
 
 export interface IWebProjectsRepository {
   getProjects(options?: {
@@ -97,6 +99,7 @@ export class WebProjectsRepository implements IWebProjectsRepository {
   public static readonly MILESTONES_KEY = 'daywell_milestones';
   private static readonly GOALS_KEY = 'daywell_goals';
   private static readonly TASKS_KEY = 'daywell_tasks';
+  private static readonly NOTES_KEY = 'daywell_notes';
 
   private readArray<T>(key: string): T[] {
     if (typeof localStorage === 'undefined') return [];
@@ -250,7 +253,19 @@ export class WebProjectsRepository implements IWebProjectsRepository {
       this.writeArray(WebProjectsRepository.TASKS_KEY, nextTasks);
     }
 
-    // 2. Delete project tracking records, blocks, milestones, and project
+    // 2. Detach notes safely without deleting notes or disturbing task links/tags
+    if (
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem(WebProjectsRepository.NOTES_KEY) !== null
+    ) {
+      const notes = this.readArray<TaskNoteRecord>(
+        WebProjectsRepository.NOTES_KEY
+      );
+      const nextNotes = unlinkNotesForDeletedProject(notes, projectId).notes;
+      this.writeArray(WebProjectsRepository.NOTES_KEY, nextNotes);
+    }
+
+    // 3. Delete project tracking records, blocks, milestones, and project
     const records = this.readArray<SharedProjectTrackingRecord>(
       WebProjectsRepository.RECORDS_KEY
     ).filter((r) => r.projectId !== projectId);
