@@ -2148,6 +2148,7 @@ export default function App() {
                     onUpdateNotes={handleUpdateNotes}
                     tasks={tasks}
                     requestedNoteFocus={requestedNoteFocus}
+                    layoutMode={viewMode === 'desktop' ? 'auto' : 'compact'}
                     onNavigateToTask={(taskId) => {
                       setTasksSubTab('tasks');
                       setRequestedTaskFocus({

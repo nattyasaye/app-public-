@@ -89,6 +89,7 @@ import {
   toggleWebNotePin,
 } from '../domain/webNotesLifecycle';
 import { notesService } from '../services/notesService';
+import { SHARED_DESIGN_TOKENS } from '../domain/sharedFoundation';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import {
   DaywellButton,
@@ -131,6 +132,7 @@ interface DaywellNotesModuleProps {
     noteId: string;
     nonce: number;
   } | null;
+  layoutMode?: 'auto' | 'compact';
   onNavigateToTask?: (taskId: string) => void;
   onRequestQuickCapture?: () => void;
   onNavigateToModule?: (module: string) => void;
@@ -177,8 +179,58 @@ export function DaywellNotesModule({
   onUpdateNotes,
   tasks: controlledTasks,
   requestedNoteFocus,
+  layoutMode = 'auto',
   onNavigateToTask,
 }: DaywellNotesModuleProps) {
+  const moduleContainerRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState<number>(() =>
+    typeof window !== 'undefined' ? window.innerWidth : 0
+  );
+
+  useEffect(() => {
+    if (layoutMode === 'compact') {
+      return;
+    }
+    const element = moduleContainerRef.current;
+    const measure = () => {
+      if (!element) {
+        if (typeof window !== 'undefined') {
+          setContainerWidth(window.innerWidth);
+        }
+        return;
+      }
+      const nextWidth = Math.round(
+        element.getBoundingClientRect().width || element.clientWidth || 0
+      );
+      if (nextWidth > 0) {
+        setContainerWidth((prev) => (prev === nextWidth ? prev : nextWidth));
+      }
+    };
+
+    measure();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (element && typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => measure());
+      resizeObserver.observe(element);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', measure);
+    }
+
+    return () => {
+      resizeObserver?.disconnect();
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', measure);
+      }
+    };
+  }, [layoutMode]);
+
+  const isWideMasterDetail =
+    layoutMode !== 'compact' &&
+    containerWidth >= SHARED_DESIGN_TOKENS.breakpoints.expanded;
+
   const [internalNotes, setInternalNotes] = useState<DaywellNote[]>(() =>
     notesService.loadNotes()
   );
@@ -472,27 +524,39 @@ export function DaywellNotesModule({
 
   const openEditor = (
     note: DaywellNote,
-    options?: { preserveMode?: boolean }
+    options?: { preserveMode?: boolean; skipFlush?: boolean }
   ) => {
     if (isNoteTrashed(note)) {
       setActiveTab('trash');
       triggerFeedback('Restore note from Trash before editing.');
       return;
     }
+    if (isEditorOpen && selectedNoteIdRef.current === note.id) {
+      return;
+    }
+    if (isEditorOpen && !options?.skipFlush) {
+      commitEditorDraftToNote();
+    }
+    const freshNote = notesRef.current.find((n) => n.id === note.id) ?? note;
+    if (isNoteTrashed(freshNote)) {
+      setActiveTab('trash');
+      triggerFeedback('Restore note from Trash before editing.');
+      return;
+    }
     clearAutosaveTimer();
     setAmbiguousLinkChoice(null);
-    selectedNoteIdRef.current = note.id;
-    setSelectedNoteId(note.id);
-    setEditTitle(note.title);
-    setEditContent(note.content);
-    setEditNotebook(note.notebook);
-    setEditTags([...note.tags]);
+    selectedNoteIdRef.current = freshNote.id;
+    setSelectedNoteId(freshNote.id);
+    setEditTitle(freshNote.title);
+    setEditContent(freshNote.content);
+    setEditNotebook(freshNote.notebook);
+    setEditTags([...freshNote.tags]);
     setTagInput('');
     setSaveStatus('saved');
     if (!options?.preserveMode) {
       setEditorMode('write');
     }
-    updateTrackedSelection(note.content.length, note.content.length);
+    updateTrackedSelection(freshNote.content.length, freshNote.content.length);
     pendingContentSelectionRef.current = null;
     setIsEditorOpen(true);
   };
@@ -510,9 +574,13 @@ export function DaywellNotesModule({
       triggerFeedback('Referenced note is unavailable.', undefined, true);
       return;
     }
-    setSearchQuery('');
-    setActiveTab('all');
-    openEditor(freshTarget, { preserveMode: isEditorOpen });
+    if (activeTab === 'archived' || activeTab === 'trash') {
+      setActiveTab('all');
+    }
+    openEditor(freshTarget, {
+      preserveMode: isEditorOpen,
+      skipFlush: true,
+    });
   };
 
   const handleOpenAmbiguousInternalLink = (
@@ -535,6 +603,16 @@ export function DaywellNotesModule({
   };
 
   const handleCreateNote = () => {
+    if (
+      isEditorOpen &&
+      selectedNoteIdRef.current === null &&
+      isCurrentNewDraftBlank
+    ) {
+      return;
+    }
+    if (isEditorOpen) {
+      commitEditorDraftToNote();
+    }
     clearAutosaveTimer();
     setAmbiguousLinkChoice(null);
     selectedNoteIdRef.current = null;
@@ -678,7 +756,7 @@ export function DaywellNotesModule({
       return;
     }
     setActiveTab(isNoteArchived(target) ? 'archived' : 'all');
-    openEditor(target);
+    openEditor(target, { skipFlush: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedNoteFocus?.nonce]);
 
@@ -883,6 +961,12 @@ export function DaywellNotesModule({
     if (!confirmPermanentDeleteNote || isDeleting) return;
     setIsDeleting(true);
     const target = confirmPermanentDeleteNote;
+    if (selectedNoteIdRef.current === target.id) {
+      clearAutosaveTimer();
+      selectedNoteIdRef.current = null;
+      setSelectedNoteId(null);
+      setIsEditorOpen(false);
+    }
     applyNotesUpdate((prevNotes) => {
       const res = permanentlyDeleteWebNote(prevNotes, target.id);
       return res.ok ? res.notes : prevNotes;
@@ -898,6 +982,17 @@ export function DaywellNotesModule({
     if (isDeleting) return;
     setIsDeleting(true);
     const { deletedCount } = emptyWebNotesTrash(notesRef.current);
+    if (selectedNoteIdRef.current) {
+      const activeSelected = notesRef.current.find(
+        (n) => n.id === selectedNoteIdRef.current
+      );
+      if (!activeSelected || isNoteTrashed(activeSelected)) {
+        clearAutosaveTimer();
+        selectedNoteIdRef.current = null;
+        setSelectedNoteId(null);
+        setIsEditorOpen(false);
+      }
+    }
     applyNotesUpdate((prevNotes) => emptyWebNotesTrash(prevNotes).notes);
     setIsConfirmEmptyTrashOpen(false);
     setIsDeleting(false);
@@ -1252,6 +1347,11 @@ export function DaywellNotesModule({
     ) {
       return;
     }
+    if (isEditorOpen && selectedNoteIdRef.current === note.id) {
+      clearAutosaveTimer();
+      draftFieldsRef.current.notebook = targetNotebook;
+      setEditNotebook(targetNotebook);
+    }
     const prevSnapshot = [...notesRef.current];
     applyNotesUpdate((prev) => {
       const res = moveWebNoteToNotebook(prev, note.id, targetNotebook);
@@ -1326,49 +1426,8 @@ export function DaywellNotesModule({
       ).length
     : 0;
 
-  return (
-    <div className="space-y-4">
-      {/* Action Feedback & Undo Toast */}
-      {feedbackToast && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-20 left-4 right-4 max-w-sm mx-auto z-50 flex items-center justify-between gap-3 p-3 bg-[var(--dw-elevated)] text-[var(--dw-text-primary)] rounded-[var(--dw-radius-lg)] shadow-xl text-xs font-semibold border border-[var(--dw-border)]"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            {feedbackToast.isError ? (
-              <AlertCircle className="w-4 h-4 text-[var(--dw-error)] shrink-0" />
-            ) : (
-              <Check className="w-4 h-4 text-[var(--dw-success)] shrink-0" />
-            )}
-            <span className="truncate">{feedbackToast.message}</span>
-          </div>
-          <div className="flex items-center gap-1.5 shrink-0">
-            {feedbackToast.undoAction && (
-              <DaywellButton
-                label="Undo"
-                variant="tonal"
-                size="compact"
-                onClick={() => {
-                  feedbackToast.undoAction?.();
-                  setFeedbackToast(null);
-                }}
-              />
-            )}
-            <DaywellIconButton
-              label="Dismiss notice"
-              size="compact"
-              tone="muted"
-              onClick={() => setFeedbackToast(null)}
-              icon={<X className="w-3.5 h-3.5" />}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Main List View (when editor not full screen) */}
-      {!isEditorOpen ? (
-        <div className="space-y-4">
+  const masterListSection = (
+        <div className="space-y-4 min-w-0">
           {/* Header */}
           <div className="flex items-start justify-between pt-1">
             <div>
@@ -1682,6 +1741,8 @@ export function DaywellNotesModule({
             className={
               filteredNotes.length === 0 || viewMode === 'list'
                 ? 'space-y-3 pt-1'
+                : isWideMasterDetail
+                ? 'grid grid-cols-1 gap-3 pt-1'
                 : 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1'
             }
           >
@@ -1753,6 +1814,11 @@ export function DaywellNotesModule({
             ) : (
               filteredNotes.map((note) => {
                 const trashed = isNoteTrashed(note);
+                const isCardSelected =
+                  isWideMasterDetail &&
+                  isEditorOpen &&
+                  selectedNoteId === note.id &&
+                  !trashed;
                 const displayTitle = getDisplayNoteTitle(note.title);
                 const cardNotebooks = notebooks.some(
                   (nb) =>
@@ -1767,11 +1833,18 @@ export function DaywellNotesModule({
                   key={note.id}
                   radius="lg"
                   padding="md"
+                  variant={isCardSelected ? 'primaryContainer' : 'default'}
+                  aria-current={isCardSelected ? 'true' : undefined}
+                  data-selected={isCardSelected ? 'true' : undefined}
                   onClick={trashed ? undefined : () => openEditor(note)}
                   className={
                     trashed
                       ? 'space-y-2'
-                      : `hover:border-[var(--dw-primary)]/40 space-y-2 group ${
+                      : `${
+                          isCardSelected
+                            ? 'border-[var(--dw-primary)] ring-1 ring-[var(--dw-primary)]/30'
+                            : 'hover:border-[var(--dw-primary)]/40'
+                        } space-y-2 group ${
                           viewMode === 'grid' ? 'flex flex-col justify-between h-full' : ''
                         }`
                   }
@@ -1944,18 +2017,26 @@ export function DaywellNotesModule({
             )}
           </div>
         </div>
-      ) : (
-        /* FULL-SCREEN LIVE EDITOR */
-        <DaywellCard radius="xl" padding="lg" className="space-y-4">
+  );
+
+  const editorPanelSection = (
+        /* SHARED LIVE EDITOR PANEL (FULL-SCREEN ON NARROW, DETAIL PANE ON WIDE) */
+        <DaywellCard radius="xl" padding="lg" className="space-y-4 w-full max-w-[720px] mx-auto">
           {/* Editor Top Navigation */}
-          <div className="flex items-center justify-between border-b border-[var(--dw-divider)] pb-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap border-b border-[var(--dw-divider)] pb-3">
             <div className="flex items-center gap-2">
               <DaywellButton
-                label="Done"
+                label={isWideMasterDetail ? 'Close' : 'Done'}
                 variant="tonal"
                 size="compact"
                 onClick={flushAutosaveAndClose}
-                leadingIcon={<Check className="w-3.5 h-3.5 stroke-[2.5]" />}
+                leadingIcon={
+                  isWideMasterDetail ? (
+                    <X className="w-3.5 h-3.5" />
+                  ) : (
+                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                  )
+                }
               />
               {currentEditorNote?.isArchived && (
                 <DaywellStatusBadge label="Archived" tone="neutral" showIcon={false} />
@@ -2508,6 +2589,83 @@ export function DaywellNotesModule({
             </section>
           )}
         </DaywellCard>
+  );
+
+  return (
+    <div ref={moduleContainerRef} className="space-y-4">
+      {/* Action Feedback & Undo Toast */}
+      {feedbackToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-20 left-4 right-4 max-w-sm mx-auto z-50 flex items-center justify-between gap-3 p-3 bg-[var(--dw-elevated)] text-[var(--dw-text-primary)] rounded-[var(--dw-radius-lg)] shadow-xl text-xs font-semibold border border-[var(--dw-border)]"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            {feedbackToast.isError ? (
+              <AlertCircle className="w-4 h-4 text-[var(--dw-error)] shrink-0" />
+            ) : (
+              <Check className="w-4 h-4 text-[var(--dw-success)] shrink-0" />
+            )}
+            <span className="truncate">{feedbackToast.message}</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {feedbackToast.undoAction && (
+              <DaywellButton
+                label="Undo"
+                variant="tonal"
+                size="compact"
+                onClick={() => {
+                  feedbackToast.undoAction?.();
+                  setFeedbackToast(null);
+                }}
+              />
+            )}
+            <DaywellIconButton
+              label="Dismiss notice"
+              size="compact"
+              tone="muted"
+              onClick={() => setFeedbackToast(null)}
+              icon={<X className="w-3.5 h-3.5" />}
+            />
+          </div>
+        </div>
+      )}
+
+      {isWideMasterDetail ? (
+        <div
+          data-testid="notes-master-detail-layout"
+          className="grid grid-cols-[minmax(320px,370px)_minmax(0,1fr)] gap-5 items-start"
+        >
+          {masterListSection}
+          <div className="min-w-0 sticky top-3">
+            {isEditorOpen ? (
+              editorPanelSection
+            ) : (
+              <DaywellCard
+                radius="xl"
+                padding="lg"
+                data-testid="notes-detail-empty-state"
+                className="w-full max-w-[720px] mx-auto"
+              >
+                <DaywellEmptyState
+                  icon={<NotebookPen className="w-8 h-8" />}
+                  message="Select a note to read or edit"
+                  subtitle={
+                    filteredNotes.length === 0
+                      ? 'Create a new note or adjust filters on the left.'
+                      : 'Choose a note from the list on the left, or start a new note.'
+                  }
+                  actionLabel="Create Note"
+                  onActionPressed={handleCreateNote}
+                />
+              </DaywellCard>
+            )}
+          </div>
+        </div>
+      ) : !isEditorOpen ? (
+        masterListSection
+      ) : (
+        editorPanelSection
       )}
 
       {/* Ambiguous Internal Link Disambiguation Modal */}

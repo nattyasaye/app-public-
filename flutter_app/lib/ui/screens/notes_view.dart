@@ -146,6 +146,16 @@ class NotesView extends StatefulWidget {
 class _NotesViewState extends State<NotesView> {
   late TextEditingController _searchController;
   int? _lastHandledNoteFocusNonce;
+  String? _selectedNoteId;
+  bool _isNewDraftSelected = false;
+  String _newDraftInitialCategory = 'reflection';
+  bool _detailPreviewMode = false;
+  int _editorSessionToken = 0;
+  int _selectionSwitchSeq = 0;
+  Future<void> _selectionOperationQueue = Future<void>.value();
+  bool _isWideLayout = false;
+  final GlobalKey<_NoteEditorSurfaceState> _editorSurfaceKey =
+      GlobalKey<_NoteEditorSurfaceState>();
 
   @override
   void initState() {
@@ -180,8 +190,133 @@ class _NotesViewState extends State<NotesView> {
     super.dispose();
   }
 
+  Future<void> _selectWideDetailTarget({
+    NoteEntity? existingNote,
+    bool createNew = false,
+    bool preservePreviewMode = false,
+    bool clearSelection = false,
+  }) {
+    final seq = ++_selectionSwitchSeq;
+    final completer = Completer<void>();
+    final previousOp = _selectionOperationQueue;
+    _selectionOperationQueue = completer.future;
+
+    () async {
+      try {
+        await previousOp.catchError((Object _) {});
+        if (!mounted || seq != _selectionSwitchSeq) return;
+
+        if (existingNote != null && existingNote.isTrashed) {
+          _promptRestoreTrashedNote(existingNote);
+          return;
+        }
+
+        if (!clearSelection &&
+            !createNew &&
+            existingNote != null &&
+            !_isNewDraftSelected &&
+            _selectedNoteId == existingNote.id) {
+          return;
+        }
+
+        final currentSurface = _editorSurfaceKey.currentState;
+        if (currentSurface != null) {
+          if (createNew &&
+              _isNewDraftSelected &&
+              currentSurface.noteId == null &&
+              currentSurface.isNewBlankDraft) {
+            return;
+          }
+
+          final flushed = await currentSurface.flushPendingSaves();
+          if (!mounted || seq != _selectionSwitchSeq) return;
+          if (!flushed) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Could not save current note changes. Retry before switching notes.',
+                ),
+              ),
+            );
+            return;
+          }
+        }
+
+        if (!mounted || seq != _selectionSwitchSeq) return;
+
+        if (clearSelection) {
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = false;
+            _detailPreviewMode = false;
+            _editorSessionToken++;
+          });
+          return;
+        }
+
+        if (createNew) {
+          final activeCategoryFilter =
+              widget.effectiveController.state.categoryFilter;
+          final defaultNewCategory =
+              activeCategoryFilter != 'all' ? activeCategoryFilter : 'reflection';
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = true;
+            _newDraftInitialCategory = defaultNewCategory;
+            _detailPreviewMode = false;
+            _editorSessionToken++;
+          });
+          return;
+        }
+
+        if (existingNote == null) {
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = false;
+            _detailPreviewMode = false;
+            _editorSessionToken++;
+          });
+          return;
+        }
+
+        final fresh =
+            widget.effectiveController.state.findById(existingNote.id) ??
+                existingNote;
+        if (fresh.isTrashed) {
+          _promptRestoreTrashedNote(fresh);
+          return;
+        }
+
+        setState(() {
+          _selectedNoteId = fresh.id;
+          _isNewDraftSelected = false;
+          _detailPreviewMode = preservePreviewMode
+              ? (currentSurface?.isPreviewMode ?? false)
+              : false;
+          _editorSessionToken++;
+        });
+      } finally {
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+      }
+    }();
+
+    return completer.future;
+  }
+
   void _openNoteEditor([NoteEntity? existingNote]) {
     if (existingNote != null && existingNote.isTrashed) {
+      return;
+    }
+    if (_isWideLayout) {
+      unawaited(
+        _selectWideDetailTarget(
+          existingNote: existingNote,
+          createNew: existingNote == null,
+        ),
+      );
       return;
     }
     final activeCategoryFilter = widget.effectiveController.state.categoryFilter;
@@ -230,6 +365,13 @@ class _NotesViewState extends State<NotesView> {
         icon: Icons.delete_forever_outlined,
       ).then((confirmed) {
         if (!confirmed || !mounted) return;
+        if (_selectedNoteId == note.id) {
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = false;
+            _editorSessionToken++;
+          });
+        }
         unawaited(widget.effectiveController.permanentlyDeleteNote(note.id));
       }),
     );
@@ -248,6 +390,16 @@ class _NotesViewState extends State<NotesView> {
         icon: Icons.delete_sweep_outlined,
       ).then((confirmed) {
         if (!confirmed || !mounted) return;
+        if (_selectedNoteId != null) {
+          final current = controller.state.findById(_selectedNoteId!);
+          if (current == null || current.isTrashed) {
+            setState(() {
+              _selectedNoteId = null;
+              _isNewDraftSelected = false;
+              _editorSessionToken++;
+            });
+          }
+        }
         unawaited(controller.emptyTrash());
       }),
     );
@@ -400,6 +552,12 @@ class _NotesViewState extends State<NotesView> {
                         onTap: () {
                           Navigator.pop(ctx);
                           unawaited(() async {
+                            if (_isWideLayout && _selectedNoteId == note.id) {
+                              final ok = await _editorSurfaceKey.currentState
+                                      ?.flushPendingSaves() ??
+                                  true;
+                              if (!ok || !mounted) return;
+                            }
                             final res = await controller.moveNoteToFolder(
                               note.id,
                               folder,
@@ -663,483 +821,758 @@ class _NotesViewState extends State<NotesView> {
         final bool canManageSelectedFolder =
             moduleState.categoryFilter != 'all' &&
             !NoteEntity.defaultCategories.contains(moduleState.categoryFilter);
+        final NoteEntity? selectedWideNote = _selectedNoteId != null
+            ? moduleState.findById(_selectedNoteId!)
+            : null;
+        if (_selectedNoteId != null &&
+            (selectedWideNote == null || selectedWideNote.isTrashed)) {
+          final hasPendingInSurface =
+              _editorSurfaceKey.currentState?.hasPendingChanges ?? false;
+          if (!hasPendingInSurface) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (!mounted || _selectedNoteId == null) return;
+              final latest = controller.state.findById(_selectedNoteId!);
+              if (latest == null || latest.isTrashed) {
+                setState(() {
+                  _selectedNoteId = null;
+                  _isNewDraftSelected = false;
+                });
+              }
+            });
+          }
+        }
 
-        return Scaffold(
-          appBar: AppBar(
-            toolbarHeight: adaptiveToolbarHeight,
-            title: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'DAYWELL / NOTES',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: DaywellTypography.caption(
-                    color: semantic.textMuted,
-                  ).copyWith(fontWeight: FontWeight.w700, letterSpacing: 1.2),
-                ),
-                Text(
-                  'Notes & Knowledge',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w700,
+        Widget buildMasterColumn({required bool isWide}) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (isWide)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingCompact,
+                    SharedDesignTokens.spacingMd,
+                    0,
                   ),
-                ),
-              ],
-            ),
-            actions: [
-              if (moduleState.sectionFilter == 'trash' &&
-                  moduleState.trashedNotesCount > 0)
-                TextButton(
-                  onPressed: () => _confirmEmptyTrash(
-                    controller,
-                    moduleState.trashedNotesCount,
-                  ),
-                  style: TextButton.styleFrom(
-                    foregroundColor: colorScheme.error,
-                    minimumSize: const Size(48, 48),
-                  ),
-                  child: const Text('Empty Trash'),
-                ),
-              DaywellIconButton(
-                icon: moduleState.isGridView
-                    ? Icons.view_list_rounded
-                    : Icons.grid_view_rounded,
-                tooltip: moduleState.isGridView ? 'List View' : 'Grid View',
-                onPressed: controller.toggleGridView,
-              ),
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.sort_rounded),
-                tooltip: 'Sort notes',
-                onSelected: controller.setSortBy,
-                itemBuilder: (_) => [
-                  for (final option in const [
-                    ('recent', 'Recently Modified'),
-                    ('created', 'Recently Created'),
-                    ('alpha', 'Alphabetical (A–Z)'),
-                    ('oldest', 'Oldest First'),
-                  ])
-                    PopupMenuItem<String>(
-                      value: option.$1,
-                      child: Row(
-                        children: [
-                          Icon(
-                            moduleState.sortBy == option.$1
-                                ? Icons.check_rounded
-                                : Icons.sort_rounded,
-                            size: DaywellIconSize.sm,
-                            color: moduleState.sortBy == option.$1
-                                ? colorScheme.primary
-                                : semantic.textMuted,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${notes.length} ${notes.length == 1 ? 'note' : 'notes'} · ${_sectionDisplayLabel(moduleState.sectionFilter)}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: DaywellTypography.label(
+                            color: semantic.textSecondary,
                           ),
-                          const SizedBox(width: SharedDesignTokens.spacingSm),
-                          Text(
-                            option.$2,
-                            style: textTheme.bodyMedium?.copyWith(
-                              fontWeight: moduleState.sortBy == option.$1
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              color: moduleState.sortBy == option.$1
-                                  ? colorScheme.primary
-                                  : semantic.textPrimary,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _openNoteEditor(),
-            backgroundColor: colorScheme.primary,
-            foregroundColor: colorScheme.onPrimary,
-            icon: const Icon(Icons.add),
-            label: const Text('New Note'),
-          ),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: SharedDesignTokens.breakpointMaxWideWidth,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  DaywellSearchFilterBar(
-                    searchController: _searchController,
-                    searchHintText: 'Search notes, tags, or folders...',
-                    searchSemanticLabel: 'Search notes, tags, or folders',
-                    onSearchChanged: controller.setSearchQuery,
-                    onSearchCleared: () {
-                      _searchController.clear();
-                      controller.setSearchQuery('');
-                    },
-                    hasActiveFilters: hasActiveFilters,
-                    activeSummary: activeSummary,
-                    onClearFilters: () {
-                      _searchController.clear();
-                      controller.clearFilters();
-                    },
-                    showBottomDivider: false,
-                    padding: const EdgeInsets.fromLTRB(
-                      SharedDesignTokens.spacingMd,
-                      SharedDesignTokens.spacingSm,
-                      SharedDesignTokens.spacingMd,
-                      SharedDesignTokens.spacingXs,
-                    ),
+                      const SizedBox(width: SharedDesignTokens.spacingSm),
+                      DaywellButton(
+                        label: 'New Note',
+                        leadingIcon: Icons.add,
+                        variant: DaywellButtonVariant.primary,
+                        size: DaywellButtonSize.compact,
+                        onPressed: () => _openNoteEditor(),
+                      ),
+                    ],
                   ),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+                ),
+              DaywellSearchFilterBar(
+                searchController: _searchController,
+                searchHintText: 'Search notes, tags, or folders...',
+                searchSemanticLabel: 'Search notes, tags, or folders',
+                onSearchChanged: controller.setSearchQuery,
+                onSearchCleared: () {
+                  _searchController.clear();
+                  controller.setSearchQuery('');
+                },
+                hasActiveFilters: hasActiveFilters,
+                activeSummary: activeSummary,
+                onClearFilters: () {
+                  _searchController.clear();
+                  controller.clearFilters();
+                },
+                showBottomDivider: false,
+                padding: const EdgeInsets.fromLTRB(
+                  SharedDesignTokens.spacingMd,
+                  SharedDesignTokens.spacingSm,
+                  SharedDesignTokens.spacingMd,
+                  SharedDesignTokens.spacingXs,
+                ),
+              ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: SharedDesignTokens.spacingMd,
+                  vertical: SharedDesignTokens.spacingXs,
+                ),
+                child: Row(
+                  children: [
+                    for (final sec in const [
+                      ('active', 'All Notes'),
+                      ('pinned', 'Pinned'),
+                      ('favorites', 'Favorites'),
+                      ('archive', 'Archive'),
+                      ('trash', 'Trash'),
+                    ]) ...[
+                      ChoiceChip(
+                        label: Text(
+                          sec.$2,
+                          style: DaywellTypography.label(
+                            color: moduleState.sectionFilter == sec.$1
+                                ? colorScheme.onPrimaryContainer
+                                : semantic.textSecondary,
+                          ),
+                        ),
+                        selected: moduleState.sectionFilter == sec.$1,
+                        onSelected: (_) =>
+                            controller.setSectionFilter(sec.$1),
+                      ),
+                      const SizedBox(width: SharedDesignTokens.spacingSm),
+                    ],
+                  ],
+                ),
+              ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(
+                  SharedDesignTokens.spacingMd,
+                  0,
+                  SharedDesignTokens.spacingMd,
+                  SharedDesignTokens.spacingXs,
+                ),
+                child: Row(
+                  children: [
+                    for (final cat in categoryChips) ...[
+                      FilterChip(
+                        label: Text(
+                          _formatFolderLabel(cat),
+                          style: DaywellTypography.caption(
+                            color: moduleState.categoryFilter == cat
+                                ? colorScheme.onPrimaryContainer
+                                : semantic.textSecondary,
+                          ),
+                        ),
+                        selected: moduleState.categoryFilter == cat,
+                        onSelected: (_) => controller.setCategoryFilter(
+                          moduleState.categoryFilter == cat && cat != 'all'
+                              ? 'all'
+                              : cat,
+                        ),
+                      ),
+                      const SizedBox(width: SharedDesignTokens.spacingSm),
+                    ],
+                    ActionChip(
+                      avatar: Icon(
+                        Icons.create_new_folder_outlined,
+                        size: DaywellIconSize.xs,
+                        color: colorScheme.primary,
+                      ),
+                      label: Text(
+                        'New Folder',
+                        style: DaywellTypography.caption(
+                          color: colorScheme.primary,
+                        ).copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      onPressed: () =>
+                          _handleCreateFolderFromList(controller),
+                    ),
+                  ],
+                ),
+              ),
+              if (canManageSelectedFolder)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    SharedDesignTokens.spacingMd,
+                    0,
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingXs,
+                  ),
+                  child: Container(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: SharedDesignTokens.spacingMd,
+                      horizontal: SharedDesignTokens.spacingCompact,
                       vertical: SharedDesignTokens.spacingXs,
                     ),
-                    child: Row(
-                      children: [
-                        for (final sec in const [
-                          ('active', 'All Notes'),
-                          ('pinned', 'Pinned'),
-                          ('favorites', 'Favorites'),
-                          ('archive', 'Archive'),
-                          ('trash', 'Trash'),
-                        ]) ...[
-                          ChoiceChip(
-                            label: Text(
-                              sec.$2,
-                              style: DaywellTypography.label(
-                                color: moduleState.sectionFilter == sec.$1
-                                    ? colorScheme.onPrimaryContainer
-                                    : semantic.textSecondary,
-                              ),
-                            ),
-                            selected: moduleState.sectionFilter == sec.$1,
-                            onSelected: (_) =>
-                                controller.setSectionFilter(sec.$1),
-                          ),
-                          const SizedBox(width: SharedDesignTokens.spacingSm),
-                        ],
-                      ],
-                    ),
-                  ),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(
-                      SharedDesignTokens.spacingMd,
-                      0,
-                      SharedDesignTokens.spacingMd,
-                      SharedDesignTokens.spacingXs,
-                    ),
-                    child: Row(
-                      children: [
-                        for (final cat in categoryChips) ...[
-                          FilterChip(
-                            label: Text(
-                              _formatFolderLabel(cat),
-                              style: DaywellTypography.caption(
-                                color: moduleState.categoryFilter == cat
-                                    ? colorScheme.onPrimaryContainer
-                                    : semantic.textSecondary,
-                              ),
-                            ),
-                            selected: moduleState.categoryFilter == cat,
-                            onSelected: (_) => controller.setCategoryFilter(
-                              moduleState.categoryFilter == cat && cat != 'all'
-                                  ? 'all'
-                                  : cat,
-                            ),
-                          ),
-                          const SizedBox(width: SharedDesignTokens.spacingSm),
-                        ],
-                        ActionChip(
-                          avatar: Icon(
-                            Icons.create_new_folder_outlined,
-                            size: DaywellIconSize.xs,
-                            color: colorScheme.primary,
-                          ),
-                          label: Text(
-                            'New Folder',
-                            style: DaywellTypography.caption(
-                              color: colorScheme.primary,
-                            ).copyWith(fontWeight: FontWeight.w600),
-                          ),
-                          onPressed: () =>
-                              _handleCreateFolderFromList(controller),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (canManageSelectedFolder)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        SharedDesignTokens.spacingMd,
-                        0,
-                        SharedDesignTokens.spacingMd,
-                        SharedDesignTokens.spacingXs,
+                    decoration: BoxDecoration(
+                      color: semantic.surfaceSubtle,
+                      borderRadius: BorderRadius.circular(
+                        SharedDesignTokens.radiusMd,
                       ),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: SharedDesignTokens.spacingCompact,
-                          vertical: SharedDesignTokens.spacingXs,
-                        ),
-                        decoration: BoxDecoration(
-                          color: semantic.surfaceSubtle,
-                          borderRadius: BorderRadius.circular(
-                            SharedDesignTokens.radiusMd,
-                          ),
-                          border: Border.all(color: semantic.border),
-                        ),
-                        child: Wrap(
-                          spacing: SharedDesignTokens.spacingSm,
-                          runSpacing: SharedDesignTokens.spacingXs,
-                          crossAxisAlignment: WrapCrossAlignment.center,
+                      border: Border.all(color: semantic.border),
+                    ),
+                    child: Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      runSpacing: SharedDesignTokens.spacingXs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.folder_outlined,
-                                  size: DaywellIconSize.xs,
-                                  color: colorScheme.primary,
-                                ),
-                                const SizedBox(
-                                  width: SharedDesignTokens.spacingXs,
-                                ),
-                                Text(
-                                  'Folder: ${_formatFolderLabel(moduleState.categoryFilter)}',
-                                  style: DaywellTypography.label(
-                                    color: semantic.textPrimary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            DaywellButton(
-                              label: 'Rename',
-                              variant: DaywellButtonVariant.outlined,
-                              size: DaywellButtonSize.compact,
-                              onPressed: () => _handleRenameFolderFromList(
-                                controller,
-                                moduleState.categoryFilter,
-                              ),
-                            ),
-                            DaywellButton(
-                              label: 'Delete Folder',
-                              variant: DaywellButtonVariant.text,
-                              size: DaywellButtonSize.compact,
-                              onPressed: () => _confirmDeleteFolder(
-                                controller,
-                                moduleState.categoryFilter,
-                                moduleState,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  if (availableTags.isNotEmpty)
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.fromLTRB(
-                        SharedDesignTokens.spacingMd,
-                        0,
-                        SharedDesignTokens.spacingMd,
-                        SharedDesignTokens.spacingXs,
-                      ),
-                      child: Row(
-                        children: [
-                          FilterChip(
-                            label: Text(
-                              'All Tags',
-                              style: DaywellTypography.caption(
-                                color: moduleState.tagFilter == 'all'
-                                    ? colorScheme.onPrimaryContainer
-                                    : semantic.textSecondary,
-                              ),
-                            ),
-                            selected: moduleState.tagFilter == 'all',
-                            onSelected: (_) => controller.setTagFilter('all'),
-                          ),
-                          const SizedBox(width: SharedDesignTokens.spacingSm),
-                          for (final tag in availableTags) ...[
-                            FilterChip(
-                              label: Text(
-                                '#$tag',
-                                style: DaywellTypography.caption(
-                                  color: moduleState.tagFilter.toLowerCase() ==
-                                          tag.toLowerCase()
-                                      ? colorScheme.onPrimaryContainer
-                                      : semantic.textSecondary,
-                                ),
-                              ),
-                              selected: moduleState.tagFilter.toLowerCase() ==
-                                  tag.toLowerCase(),
-                              onSelected: (_) => controller.setTagFilter(
-                                moduleState.tagFilter.toLowerCase() ==
-                                        tag.toLowerCase()
-                                    ? 'all'
-                                    : tag,
-                              ),
+                            Icon(
+                              Icons.folder_outlined,
+                              size: DaywellIconSize.xs,
+                              color: colorScheme.primary,
                             ),
                             const SizedBox(
-                              width: SharedDesignTokens.spacingSm,
+                              width: SharedDesignTokens.spacingXs,
                             ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.fromLTRB(
-                      SharedDesignTokens.spacingMd,
-                      0,
-                      SharedDesignTokens.spacingMd,
-                      SharedDesignTokens.spacingSm,
-                    ),
-                    child: Row(
-                      children: [
-                        for (final opt in const [
-                          ('all', 'Any Date'),
-                          ('updated_7d', 'Updated 7d'),
-                          ('updated_30d', 'Updated 30d'),
-                          ('created_7d', 'Created 7d'),
-                          ('created_30d', 'Created 30d'),
-                        ]) ...[
-                          ChoiceChip(
-                            label: Text(
-                              opt.$2,
-                              style: DaywellTypography.caption(
-                                color: moduleState.dateFilter == opt.$1
-                                    ? colorScheme.onPrimaryContainer
-                                    : semantic.textSecondary,
+                            Text(
+                              'Folder: ${_formatFolderLabel(moduleState.categoryFilter)}',
+                              style: DaywellTypography.label(
+                                color: semantic.textPrimary,
                               ),
                             ),
-                            selected: moduleState.dateFilter == opt.$1,
-                            onSelected: (_) =>
-                                controller.setDateFilter(opt.$1),
+                          ],
+                        ),
+                        DaywellButton(
+                          label: 'Rename',
+                          variant: DaywellButtonVariant.outlined,
+                          size: DaywellButtonSize.compact,
+                          onPressed: () => _handleRenameFolderFromList(
+                            controller,
+                            moduleState.categoryFilter,
                           ),
-                          const SizedBox(width: SharedDesignTokens.spacingSm),
-                        ],
+                        ),
+                        DaywellButton(
+                          label: 'Delete Folder',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: () => _confirmDeleteFolder(
+                            controller,
+                            moduleState.categoryFilter,
+                            moduleState,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  if (hasError)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        SharedDesignTokens.spacingMd,
-                        SharedDesignTokens.spacingXs,
-                        SharedDesignTokens.spacingMd,
-                        SharedDesignTokens.spacingSm,
+                ),
+              if (availableTags.isNotEmpty)
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.fromLTRB(
+                    SharedDesignTokens.spacingMd,
+                    0,
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingXs,
+                  ),
+                  child: Row(
+                    children: [
+                      FilterChip(
+                        label: Text(
+                          'All Tags',
+                          style: DaywellTypography.caption(
+                            color: moduleState.tagFilter == 'all'
+                                ? colorScheme.onPrimaryContainer
+                                : semantic.textSecondary,
+                          ),
+                        ),
+                        selected: moduleState.tagFilter == 'all',
+                        onSelected: (_) => controller.setTagFilter('all'),
                       ),
-                      child: DaywellStatusBanner(
-                        tone: DaywellStatusTone.error,
-                        title: 'Notes persistence error',
-                        message: moduleState.errorMessage!,
-                        actionLabel: 'Retry',
-                        onActionPressed: () =>
-                            unawaited(controller.loadNotes()),
+                      const SizedBox(width: SharedDesignTokens.spacingSm),
+                      for (final tag in availableTags) ...[
+                        FilterChip(
+                          label: Text(
+                            '#$tag',
+                            style: DaywellTypography.caption(
+                              color: moduleState.tagFilter.toLowerCase() ==
+                                      tag.toLowerCase()
+                                  ? colorScheme.onPrimaryContainer
+                                  : semantic.textSecondary,
+                            ),
+                          ),
+                          selected: moduleState.tagFilter.toLowerCase() ==
+                              tag.toLowerCase(),
+                          onSelected: (_) => controller.setTagFilter(
+                            moduleState.tagFilter.toLowerCase() ==
+                                    tag.toLowerCase()
+                                ? 'all'
+                                : tag,
+                          ),
+                        ),
+                        const SizedBox(
+                          width: SharedDesignTokens.spacingSm,
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(
+                  SharedDesignTokens.spacingMd,
+                  0,
+                  SharedDesignTokens.spacingMd,
+                  SharedDesignTokens.spacingSm,
+                ),
+                child: Row(
+                  children: [
+                    for (final opt in const [
+                      ('all', 'Any Date'),
+                      ('updated_7d', 'Updated 7d'),
+                      ('updated_30d', 'Updated 30d'),
+                      ('created_7d', 'Created 7d'),
+                      ('created_30d', 'Created 30d'),
+                    ]) ...[
+                      ChoiceChip(
+                        label: Text(
+                          opt.$2,
+                          style: DaywellTypography.caption(
+                            color: moduleState.dateFilter == opt.$1
+                                ? colorScheme.onPrimaryContainer
+                                : semantic.textSecondary,
+                          ),
+                        ),
+                        selected: moduleState.dateFilter == opt.$1,
+                        onSelected: (_) =>
+                            controller.setDateFilter(opt.$1),
                       ),
-                    ),
-                  if (moduleState.sectionFilter == 'trash' && notes.isNotEmpty)
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(
-                        SharedDesignTokens.spacingMd,
-                        0,
-                        SharedDesignTokens.spacingMd,
-                        SharedDesignTokens.spacingSm,
-                      ),
-                      child: DaywellStatusBanner(
-                        tone: DaywellStatusTone.warning,
-                        title: 'Trash',
-                        message:
-                            'Tap a trashed note to restore it before editing, or use the menu to delete permanently.',
-                      ),
-                    ),
-                  const Divider(height: 1),
-                  Expanded(
-                    child: moduleState.isLoading && notes.isEmpty
-                        ? const DaywellLoadingIndicator(label: 'Loading notes...')
-                        : notes.isEmpty
-                            ? _buildEmptyState(context, controller, moduleState)
-                            : LayoutBuilder(
-                                builder: (context, constraints) {
-                                  if (moduleState.isGridView) {
-                                    final int crossAxisCount =
-                                        constraints.maxWidth >=
-                                                SharedDesignTokens
-                                                    .breakpointExpanded
-                                            ? 3
-                                            : constraints.maxWidth < 340
-                                                ? 1
-                                                : 2;
-                                    final double cardExtent = (256.0 *
-                                            textScale.clamp(1.0, 2.0))
-                                        .ceilToDouble();
-                                    return GridView.builder(
-                                      padding: const EdgeInsets.fromLTRB(
-                                        SharedDesignTokens.spacingMd,
+                      const SizedBox(width: SharedDesignTokens.spacingSm),
+                    ],
+                  ],
+                ),
+              ),
+              if (hasError)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingXs,
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingSm,
+                  ),
+                  child: DaywellStatusBanner(
+                    tone: DaywellStatusTone.error,
+                    title: 'Notes persistence error',
+                    message: moduleState.errorMessage!,
+                    actionLabel: 'Retry',
+                    onActionPressed: () =>
+                        unawaited(controller.loadNotes()),
+                  ),
+                ),
+              if (moduleState.sectionFilter == 'trash' && notes.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    SharedDesignTokens.spacingMd,
+                    0,
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingSm,
+                  ),
+                  child: DaywellStatusBanner(
+                    tone: DaywellStatusTone.warning,
+                    title: 'Trash',
+                    message:
+                        'Tap a trashed note to restore it before editing, or use the menu to delete permanently.',
+                  ),
+                ),
+              const Divider(height: 1),
+              Expanded(
+                child: moduleState.isLoading && notes.isEmpty
+                    ? const DaywellLoadingIndicator(label: 'Loading notes...')
+                    : notes.isEmpty
+                        ? _buildEmptyState(context, controller, moduleState)
+                        : LayoutBuilder(
+                            builder: (context, listConstraints) {
+                              final bottomPad = isWide
+                                  ? SharedDesignTokens.spacingMd
+                                  : 88.0;
+                              if (moduleState.isGridView) {
+                                final int crossAxisCount =
+                                    listConstraints.maxWidth >=
+                                            SharedDesignTokens
+                                                .breakpointExpanded
+                                        ? 3
+                                        : listConstraints.maxWidth < 400
+                                            ? 1
+                                            : 2;
+                                final double cardExtent = (256.0 *
+                                        textScale.clamp(1.0, 2.0))
+                                    .ceilToDouble();
+                                return GridView.builder(
+                                  padding: EdgeInsets.fromLTRB(
+                                    SharedDesignTokens.spacingMd,
+                                    SharedDesignTokens.spacingCompact,
+                                    SharedDesignTokens.spacingMd,
+                                    bottomPad,
+                                  ),
+                                  gridDelegate:
+                                      SliverGridDelegateWithFixedCrossAxisCount(
+                                    crossAxisCount: crossAxisCount,
+                                    crossAxisSpacing:
                                         SharedDesignTokens.spacingCompact,
-                                        SharedDesignTokens.spacingMd,
-                                        88.0,
-                                      ),
-                                      gridDelegate:
-                                          SliverGridDelegateWithFixedCrossAxisCount(
-                                        crossAxisCount: crossAxisCount,
-                                        crossAxisSpacing:
-                                            SharedDesignTokens.spacingCompact,
-                                        mainAxisSpacing:
-                                            SharedDesignTokens.spacingCompact,
-                                        mainAxisExtent: cardExtent,
-                                      ),
-                                      itemCount: notes.length,
-                                      itemBuilder: (_, i) => _buildNoteCard(
-                                        notes[i],
-                                        true,
-                                      ),
-                                    );
-                                  }
+                                    mainAxisSpacing:
+                                        SharedDesignTokens.spacingCompact,
+                                    mainAxisExtent: cardExtent,
+                                  ),
+                                  itemCount: notes.length,
+                                  itemBuilder: (_, i) => _buildNoteCard(
+                                    notes[i],
+                                    true,
+                                    isSelected: isWide &&
+                                        !_isNewDraftSelected &&
+                                        _selectedNoteId == notes[i].id,
+                                  ),
+                                );
+                              }
 
-                                  return ListView.builder(
-                                    padding: const EdgeInsets.fromLTRB(
-                                      SharedDesignTokens.spacingMd,
-                                      SharedDesignTokens.spacingCompact,
-                                      SharedDesignTokens.spacingMd,
-                                      88.0,
+                              return ListView.builder(
+                                padding: EdgeInsets.fromLTRB(
+                                  SharedDesignTokens.spacingMd,
+                                  SharedDesignTokens.spacingCompact,
+                                  SharedDesignTokens.spacingMd,
+                                  bottomPad,
+                                ),
+                                itemCount: notes.length,
+                                itemBuilder: (_, i) => Center(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: SharedDesignTokens
+                                          .breakpointMaxContentWidth,
                                     ),
-                                    itemCount: notes.length,
-                                    itemBuilder: (_, i) => Center(
-                                      child: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxWidth: SharedDesignTokens
-                                              .breakpointMaxContentWidth,
-                                        ),
-                                        child: Padding(
-                                          padding: const EdgeInsets.only(
-                                            bottom:
-                                                SharedDesignTokens.spacingSm,
-                                          ),
-                                          child: _buildNoteCard(
-                                            notes[i],
-                                            false,
-                                          ),
-                                        ),
+                                    child: Padding(
+                                      padding: const EdgeInsets.only(
+                                        bottom:
+                                            SharedDesignTokens.spacingSm,
+                                      ),
+                                      child: _buildNoteCard(
+                                        notes[i],
+                                        false,
+                                        isSelected: isWide &&
+                                            !_isNewDraftSelected &&
+                                            _selectedNoteId == notes[i].id,
                                       ),
                                     ),
-                                  );
-                                },
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          );
+        }
+
+        return LayoutBuilder(
+          builder: (context, viewportConstraints) {
+            final bool isWide = viewportConstraints.maxWidth >=
+                SharedDesignTokens.breakpointExpanded;
+            _isWideLayout = isWide;
+
+            return Scaffold(
+              appBar: AppBar(
+                toolbarHeight: adaptiveToolbarHeight,
+                title: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'DAYWELL / NOTES',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: DaywellTypography.caption(
+                        color: semantic.textMuted,
+                      ).copyWith(fontWeight: FontWeight.w700, letterSpacing: 1.2),
+                    ),
+                    Text(
+                      'Notes & Knowledge',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                actions: [
+                  if (moduleState.sectionFilter == 'trash' &&
+                      moduleState.trashedNotesCount > 0)
+                    TextButton(
+                      onPressed: () => _confirmEmptyTrash(
+                        controller,
+                        moduleState.trashedNotesCount,
+                      ),
+                      style: TextButton.styleFrom(
+                        foregroundColor: colorScheme.error,
+                        minimumSize: const Size(48, 48),
+                      ),
+                      child: const Text('Empty Trash'),
+                    ),
+                  DaywellIconButton(
+                    icon: moduleState.isGridView
+                        ? Icons.view_list_rounded
+                        : Icons.grid_view_rounded,
+                    tooltip: moduleState.isGridView ? 'List View' : 'Grid View',
+                    onPressed: controller.toggleGridView,
+                  ),
+                  PopupMenuButton<String>(
+                    icon: const Icon(Icons.sort_rounded),
+                    tooltip: 'Sort notes',
+                    onSelected: controller.setSortBy,
+                    itemBuilder: (_) => [
+                      for (final option in const [
+                        ('recent', 'Recently Modified'),
+                        ('created', 'Recently Created'),
+                        ('alpha', 'Alphabetical (A–Z)'),
+                        ('oldest', 'Oldest First'),
+                      ])
+                        PopupMenuItem<String>(
+                          value: option.$1,
+                          child: Row(
+                            children: [
+                              Icon(
+                                moduleState.sortBy == option.$1
+                                    ? Icons.check_rounded
+                                    : Icons.sort_rounded,
+                                size: DaywellIconSize.sm,
+                                color: moduleState.sortBy == option.$1
+                                    ? colorScheme.primary
+                                    : semantic.textMuted,
                               ),
+                              const SizedBox(width: SharedDesignTokens.spacingSm),
+                              Text(
+                                option.$2,
+                                style: textTheme.bodyMedium?.copyWith(
+                                  fontWeight: moduleState.sortBy == option.$1
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
+                                  color: moduleState.sortBy == option.$1
+                                      ? colorScheme.primary
+                                      : semantic.textPrimary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
+              floatingActionButton: isWide
+                  ? null
+                  : FloatingActionButton.extended(
+                      onPressed: () => _openNoteEditor(),
+                      backgroundColor: colorScheme.primary,
+                      foregroundColor: colorScheme.onPrimary,
+                      icon: const Icon(Icons.add),
+                      label: const Text('New Note'),
+                    ),
+              body: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: SharedDesignTokens.breakpointMaxWideWidth,
+                  ),
+                  child: isWide
+                      ? Row(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            SizedBox(
+                              width: (viewportConstraints.maxWidth * 0.36)
+                                  .clamp(320.0, 380.0)
+                                  .toDouble(),
+                              child: buildMasterColumn(isWide: true),
+                            ),
+                            VerticalDivider(
+                              width: 1,
+                              thickness: 1,
+                              color: semantic.divider,
+                            ),
+                            Expanded(
+                              child: _buildWideDetailPane(
+                                context,
+                                controller,
+                                tasksController,
+                                selectedWideNote,
+                                notes.isEmpty,
+                              ),
+                            ),
+                          ],
+                        )
+                      : buildMasterColumn(isWide: false),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildWideDetailPane(
+    BuildContext context,
+    NotesController controller,
+    TasksController? tasksController,
+    NoteEntity? selectedNote,
+    bool isFilteredListEmpty,
+  ) {
+    final activeSelected =
+        selectedNote != null && !selectedNote.isTrashed ? selectedNote : null;
+    if (activeSelected == null && !_isNewDraftSelected) {
+      return DaywellEmptyState(
+        icon: Icons.note_alt_outlined,
+        message: 'Select a note to read or edit',
+        subtitle: isFilteredListEmpty
+            ? 'Create a new note or adjust filters on the left.'
+            : 'Choose a note from the list on the left, or start a new note.',
+        actionLabel: 'Create Note',
+        onActionPressed: () => _openNoteEditor(),
+      );
+    }
+
+    return _NoteEditorSurface(
+      key: _editorSurfaceKey,
+      controller: controller,
+      tasksController: tasksController,
+      onOpenTask: widget.onOpenTask,
+      existingNote: activeSelected,
+      initialPreviewMode: _detailPreviewMode,
+      initialCategory: _newDraftInitialCategory,
+      isEmbedded: true,
+      editorSessionToken: _editorSessionToken,
+      onNoteCreated: (NoteEntity created) {
+        if (!mounted) return;
+        setState(() {
+          _selectedNoteId = created.id;
+          _isNewDraftSelected = false;
+        });
+      },
+      onSelectInternalNote: (NoteEntity targetNote) => _selectWideDetailTarget(
+        existingNote: targetNote,
+        preservePreviewMode: true,
+      ),
+      onCloseEmbedded: () {
+        unawaited(_selectWideDetailTarget(clearSelection: true));
+      },
+      onNoteArchivedToggled: (String noteId) {
+        if (!mounted) return;
+        final updated = controller.state.findById(noteId);
+        final section = controller.state.sectionFilter;
+        final leftSection = updated == null ||
+            (section == 'archive' ? !updated.isArchived : updated.isArchived);
+        if (leftSection && _selectedNoteId == noteId) {
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = false;
+            _editorSessionToken++;
+          });
+        }
+        if (updated != null) {
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                updated.isArchived
+                    ? 'Note moved to archive'
+                    : 'Note restored from archive',
+              ),
+              action: SnackBarAction(
+                label: 'Undo',
+                onPressed: () => unawaited(controller.toggleArchive(noteId)),
+              ),
+              duration: const Duration(seconds: 4),
             ),
+          );
+        }
+      },
+      onNoteMovedToTrash: (String noteId) {
+        if (!mounted) return;
+        if (_selectedNoteId == noteId || _isNewDraftSelected) {
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = false;
+            _editorSessionToken++;
+          });
+        }
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Moved note to Trash'),
+            action: SnackBarAction(
+              label: 'Undo',
+              onPressed: () => unawaited(controller.restoreFromTrash(noteId)),
+            ),
+            duration: const Duration(seconds: 4),
           ),
         );
       },
     );
   }
 
-  Widget _buildNoteCard(NoteEntity note, bool isGridView) {
+  Future<void> _handleCardMenuAction(
+    NotesController controller,
+    NoteEntity note,
+    String action,
+  ) async {
+    if (_isWideLayout && _selectedNoteId == note.id) {
+      if (action == 'pin' ||
+          action == 'fav' ||
+          action == 'duplicate' ||
+          action == 'archive' ||
+          action == 'trash') {
+        final flushed =
+            await _editorSurfaceKey.currentState?.flushPendingSaves() ?? true;
+        if (!flushed || !mounted) return;
+      }
+    }
+
+    if (action == 'pin') {
+      await controller.togglePin(note.id);
+    } else if (action == 'fav') {
+      await controller.toggleFavorite(note.id);
+    } else if (action == 'move_folder') {
+      _showMoveNoteFolderDialog(controller, note);
+    } else if (action == 'duplicate') {
+      await controller.duplicateNote(note.id);
+    } else if (action == 'copy') {
+      await Clipboard.setData(
+        ClipboardData(
+          text: '${note.title}\n\n${note.content}',
+        ),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Note copied to clipboard'),
+        ),
+      );
+    } else if (action == 'archive') {
+      await controller.toggleArchive(note.id);
+      if (!mounted) return;
+      if (_selectedNoteId == note.id) {
+        final updated = controller.state.findById(note.id);
+        final section = controller.state.sectionFilter;
+        final leftSection = updated == null ||
+            (section == 'archive' ? !updated.isArchived : updated.isArchived);
+        if (leftSection) {
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = false;
+            _editorSessionToken++;
+          });
+        }
+      }
+    } else if (action == 'trash') {
+      if (note.isTrashed) {
+        await controller.restoreFromTrash(note.id);
+      } else {
+        if (_selectedNoteId == note.id) {
+          setState(() {
+            _selectedNoteId = null;
+            _isNewDraftSelected = false;
+            _editorSessionToken++;
+          });
+        }
+        await controller.deleteNote(note.id);
+      }
+    } else if (action == 'delete') {
+      _confirmPermanentDelete(note);
+    }
+  }
+
+  Widget _buildNoteCard(
+    NoteEntity note,
+    bool isGridView, {
+    bool isSelected = false,
+  }) {
     final controller = widget.effectiveController;
     final tasksCtrl = widget.effectiveTasksController;
     final linkedTask = tasksCtrl != null
@@ -1167,9 +1600,14 @@ class _NotesViewState extends State<NotesView> {
     return DaywellCard(
       padding: EdgeInsets.zero,
       borderRadius: SharedDesignTokens.radiusLg,
-      borderColor: isPinnedActive
-          ? colorScheme.primary.withOpacity(0.45)
-          : semantic.border,
+      color: isSelected
+          ? colorScheme.primaryContainer.withOpacity(0.45)
+          : null,
+      borderColor: isSelected
+          ? colorScheme.primary
+          : isPinnedActive
+              ? colorScheme.primary.withOpacity(0.45)
+              : semantic.border,
       onTap: note.isTrashed
           ? () => _promptRestoreTrashedNote(note)
           : () => _openNoteEditor(note),
@@ -1184,6 +1622,15 @@ class _NotesViewState extends State<NotesView> {
           children: [
             Row(
               children: [
+                if (isSelected) ...[
+                  Icon(
+                    Icons.arrow_right_rounded,
+                    size: DaywellIconSize.sm,
+                    color: colorScheme.primary,
+                    semanticLabel: 'Selected note',
+                  ),
+                  const SizedBox(width: 2),
+                ],
                 Expanded(
                   child: Text(
                     note.displayTitle,
@@ -1191,7 +1638,9 @@ class _NotesViewState extends State<NotesView> {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: semantic.textPrimary,
+                      color: isSelected
+                          ? colorScheme.primary
+                          : semantic.textPrimary,
                     ),
                   ),
                 ),
@@ -1218,40 +1667,8 @@ class _NotesViewState extends State<NotesView> {
                   iconSize: DaywellIconSize.md,
                   iconColor: semantic.textSecondary,
                   tooltip: 'Note actions',
-                  onSelected: (action) {
-                    if (action == 'pin') {
-                      unawaited(controller.togglePin(note.id));
-                    } else if (action == 'fav') {
-                      unawaited(controller.toggleFavorite(note.id));
-                    } else if (action == 'move_folder') {
-                      _showMoveNoteFolderDialog(controller, note);
-                    } else if (action == 'duplicate') {
-                      unawaited(controller.duplicateNote(note.id));
-                    } else if (action == 'copy') {
-                      unawaited(
-                        Clipboard.setData(
-                          ClipboardData(
-                            text: '${note.title}\n\n${note.content}',
-                          ),
-                        ),
-                      );
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Note copied to clipboard'),
-                        ),
-                      );
-                    } else if (action == 'archive') {
-                      unawaited(controller.toggleArchive(note.id));
-                    } else if (action == 'trash') {
-                      if (note.isTrashed) {
-                        unawaited(controller.restoreFromTrash(note.id));
-                      } else {
-                        unawaited(controller.deleteNote(note.id));
-                      }
-                    } else if (action == 'delete') {
-                      _confirmPermanentDelete(note);
-                    }
-                  },
+                  onSelected: (action) =>
+                      unawaited(_handleCardMenuAction(controller, note, action)),
                   itemBuilder: (_) => [
                     if (!note.isTrashed && !note.isArchived) ...[
                       PopupMenuItem(
@@ -1452,7 +1869,7 @@ class _NotesViewState extends State<NotesView> {
   }
 }
 
-class _NoteEditorScreen extends StatefulWidget {
+class _NoteEditorScreen extends StatelessWidget {
   final NotesController controller;
   final TasksController? tasksController;
   final void Function(String taskId)? onOpenTask;
@@ -1470,10 +1887,56 @@ class _NoteEditorScreen extends StatefulWidget {
   });
 
   @override
-  State<_NoteEditorScreen> createState() => _NoteEditorScreenState();
+  Widget build(BuildContext context) {
+    return _NoteEditorSurface(
+      controller: controller,
+      tasksController: tasksController,
+      onOpenTask: onOpenTask,
+      existingNote: existingNote,
+      initialPreviewMode: initialPreviewMode,
+      initialCategory: initialCategory,
+      isEmbedded: false,
+    );
+  }
 }
 
-class _NoteEditorScreenState extends State<_NoteEditorScreen> {
+class _NoteEditorSurface extends StatefulWidget {
+  final NotesController controller;
+  final TasksController? tasksController;
+  final void Function(String taskId)? onOpenTask;
+  final NoteEntity? existingNote;
+  final bool initialPreviewMode;
+  final String initialCategory;
+  final bool isEmbedded;
+  final int editorSessionToken;
+  final void Function(NoteEntity createdNote)? onNoteCreated;
+  final Future<void> Function(NoteEntity targetNote)? onSelectInternalNote;
+  final VoidCallback? onCloseEmbedded;
+  final void Function(String noteId)? onNoteArchivedToggled;
+  final void Function(String noteId)? onNoteMovedToTrash;
+
+  const _NoteEditorSurface({
+    super.key,
+    required this.controller,
+    this.tasksController,
+    this.onOpenTask,
+    required this.existingNote,
+    this.initialPreviewMode = false,
+    this.initialCategory = 'reflection',
+    this.isEmbedded = false,
+    this.editorSessionToken = 0,
+    this.onNoteCreated,
+    this.onSelectInternalNote,
+    this.onCloseEmbedded,
+    this.onNoteArchivedToggled,
+    this.onNoteMovedToTrash,
+  });
+
+  @override
+  State<_NoteEditorSurface> createState() => _NoteEditorSurfaceState();
+}
+
+class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   late TextEditingController _titleController;
   late TextEditingController _contentController;
   late TextEditingValue _previousContentValue;
@@ -1497,8 +1960,22 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
   bool _isWriteBacklinksExpanded = false;
   NoteChecklistLineStatus? _activeWriteChecklist;
 
+  String? get noteId => _noteId;
+
+  bool get isPreviewMode => _isPreviewMode;
+
+  bool get isNewBlankDraft =>
+      _noteId == null &&
+      _titleController.text.trim().isEmpty &&
+      _contentController.text.trim().isEmpty &&
+      _tags.isEmpty;
+
+  bool get hasPendingChanges => _hasPendingChanges;
+
   bool get _hasPendingChanges =>
       _editRevision > _savedRevision || _saveErrorMessage != null;
+
+  Future<bool> flushPendingSaves() => _flushPendingSaves();
 
   NoteChecklistLineStatus? _resolveActiveWriteChecklist(
     TextEditingValue value,
@@ -1507,6 +1984,43 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
     final start = sel.isValid && sel.start >= 0 ? sel.start : value.text.length;
     final end = sel.isValid && sel.end >= 0 ? sel.end : start;
     return NoteMarkdownParser.getChecklistAtSelection(value.text, start, end);
+  }
+
+  void _loadFromWidget() {
+    _autosaveTimer?.cancel();
+    _isPreviewMode = widget.initialPreviewMode;
+    _noteId = widget.existingNote?.id;
+    final nextTitle = widget.existingNote?.title ?? '';
+    final nextContent = widget.existingNote?.content ?? '';
+    _isApplyingProgrammaticContentEdit = true;
+    _titleController.value = TextEditingValue(
+      text: nextTitle,
+      selection: TextSelection.collapsed(offset: nextTitle.length),
+    );
+    _contentController.value = TextEditingValue(
+      text: nextContent,
+      selection: TextSelection.collapsed(offset: nextContent.length),
+    );
+    _previousContentValue = _contentController.value;
+    _activeWriteChecklist =
+        _resolveActiveWriteChecklist(_contentController.value);
+    _isApplyingProgrammaticContentEdit = false;
+
+    _category = widget.existingNote != null
+        ? NoteDomainHelpers.normalizeFlutterCategory(
+            widget.existingNote!.category,
+          )
+        : NoteDomainHelpers.normalizeFlutterCategory(widget.initialCategory);
+    _tags = NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
+        .toList();
+    _linkedModule = widget.existingNote?.linkedModule;
+    _linkedId = widget.existingNote?.linkedId;
+    _saveStatus = 'Saved';
+    _saveErrorMessage = null;
+    _editRevision = 0;
+    _savedRevision = 0;
+    _allowDiscardOnNextPop = false;
+    _isWriteBacklinksExpanded = false;
   }
 
   @override
@@ -1531,6 +2045,28 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
         .toList();
     _linkedModule = widget.existingNote?.linkedModule;
     _linkedId = widget.existingNote?.linkedId;
+  }
+
+  @override
+  void didUpdateWidget(covariant _NoteEditorSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.editorSessionToken != oldWidget.editorSessionToken ||
+        (widget.isEmbedded &&
+            widget.existingNote?.id != oldWidget.existingNote?.id &&
+            widget.existingNote?.id != _noteId)) {
+      _loadFromWidget();
+      return;
+    }
+
+    if (widget.existingNote != null &&
+        oldWidget.existingNote != null &&
+        widget.existingNote!.id == _noteId &&
+        widget.existingNote!.category != oldWidget.existingNote!.category &&
+        !_hasPendingChanges) {
+      _category = NoteDomainHelpers.normalizeFlutterCategory(
+        widget.existingNote!.category,
+      );
+    }
   }
 
   @override
@@ -1642,6 +2178,9 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
       }
       _noteId = persisted.id;
       _savedRevision = snapshot.revision;
+      if (!fromDispose) {
+        widget.onNoteCreated?.call(persisted);
+      }
     } else {
       final result = await widget.controller.updateNote(
         id: _noteId!,
@@ -1685,6 +2224,24 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
     final ok = await _flushPendingSaves();
     if (!ok || _noteId == null) return;
     await widget.controller.toggleFavorite(_noteId!);
+  }
+
+  Future<void> _handleEmbeddedToggleArchive() async {
+    final ok = await _flushPendingSaves();
+    if (!ok || _noteId == null || !mounted || _isDisposed) return;
+    final id = _noteId!;
+    await widget.controller.toggleArchive(id);
+    if (!mounted || _isDisposed) return;
+    widget.onNoteArchivedToggled?.call(id);
+  }
+
+  Future<void> _handleEmbeddedMoveToTrash() async {
+    final ok = await _flushPendingSaves();
+    if (!ok || _noteId == null || !mounted || _isDisposed) return;
+    final id = _noteId!;
+    await widget.controller.deleteNote(id);
+    if (!mounted || _isDisposed) return;
+    widget.onNoteMovedToTrash?.call(id);
   }
 
   Future<void> _linkTask(TaskEntity task) async {
@@ -2116,6 +2673,11 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
       return;
     }
 
+    if (widget.onSelectInternalNote != null) {
+      await widget.onSelectInternalNote!(freshTarget);
+      return;
+    }
+
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => _NoteEditorScreen(
@@ -2304,110 +2866,123 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
             _category,
         ];
 
-        return PopScope<Object?>(
-          canPop: !_hasPendingChanges || _allowDiscardOnNextPop,
-          onPopInvokedWithResult: (bool didPop, Object? _) {
-            if (!didPop) {
-              unawaited(_handlePopAttempt());
-            }
-          },
-          child: Scaffold(
-            appBar: AppBar(
-              toolbarHeight: adaptiveToolbarHeight,
-              title: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: SharedDesignTokens.spacingSm,
-                  vertical: SharedDesignTokens.spacingXs,
-                ),
-                decoration: BoxDecoration(
-                  color: _saveStatus == 'Save failed'
-                      ? semantic.errorContainer
-                      : semantic.surfaceSubtle,
-                  borderRadius:
-                      BorderRadius.circular(SharedDesignTokens.radiusSm),
-                  border: Border.all(
+        final Widget saveStatusBadge = Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: SharedDesignTokens.spacingSm,
+            vertical: SharedDesignTokens.spacingXs,
+          ),
+          decoration: BoxDecoration(
+            color: _saveStatus == 'Save failed'
+                ? semantic.errorContainer
+                : semantic.surfaceSubtle,
+            borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
+            border: Border.all(
+              color: _saveStatus == 'Save failed'
+                  ? colorScheme.error.withOpacity(0.4)
+                  : semantic.border,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _saveStatus == 'Save failed'
+                    ? Icons.error_outline
+                    : _saveStatus == 'Saving...'
+                        ? Icons.sync_rounded
+                        : Icons.cloud_done_outlined,
+                size: DaywellIconSize.xs,
+                color: _saveStatus == 'Save failed'
+                    ? colorScheme.error
+                    : _saveStatus == 'Saving...'
+                        ? colorScheme.primary
+                        : semantic.textMuted,
+              ),
+              const SizedBox(width: SharedDesignTokens.spacingXs),
+              Flexible(
+                child: Text(
+                  _saveStatus,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: DaywellTypography.label(
                     color: _saveStatus == 'Save failed'
-                        ? colorScheme.error.withOpacity(0.4)
-                        : semantic.border,
+                        ? colorScheme.error
+                        : _saveStatus == 'Saving...'
+                            ? colorScheme.primary
+                            : semantic.textSecondary,
                   ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      _saveStatus == 'Save failed'
-                          ? Icons.error_outline
-                          : _saveStatus == 'Saving...'
-                              ? Icons.sync_rounded
-                              : Icons.cloud_done_outlined,
-                      size: DaywellIconSize.xs,
-                      color: _saveStatus == 'Save failed'
-                          ? colorScheme.error
-                          : _saveStatus == 'Saving...'
-                              ? colorScheme.primary
-                              : semantic.textMuted,
-                    ),
-                    const SizedBox(width: SharedDesignTokens.spacingXs),
-                    Flexible(
-                      child: Text(
-                        _saveStatus,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: DaywellTypography.label(
-                          color: _saveStatus == 'Save failed'
-                              ? colorScheme.error
-                              : _saveStatus == 'Saving...'
-                                  ? colorScheme.primary
-                                  : semantic.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               ),
-              actions: [
-                if (_noteId != null) ...[
-                  DaywellIconButton(
-                    icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
-                    isSelected: isPinned,
-                    tooltip: isPinned ? 'Unpin note' : 'Pin note',
-                    onPressed: () => unawaited(_handleTogglePin()),
-                  ),
-                  DaywellIconButton(
-                    icon: isFavorite ? Icons.star : Icons.star_border,
-                    isSelected: isFavorite,
-                    foregroundColor:
-                        isFavorite ? semantic.warning : semantic.textSecondary,
-                    tooltip: isFavorite ? 'Remove favorite' : 'Favorite note',
-                    onPressed: () => unawaited(_handleToggleFavorite()),
-                  ),
-                ],
-                DaywellIconButton(
-                  icon: Icons.copy_rounded,
-                  tooltip: 'Copy note',
-                  onPressed: () {
-                    unawaited(
-                      Clipboard.setData(
-                        ClipboardData(
-                          text:
-                              '${_titleController.text}\n\n${_contentController.text}',
-                        ),
-                      ),
-                    );
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Note copied to clipboard')),
-                    );
-                  },
-                ),
-              ],
+            ],
+          ),
+        );
+
+        final bool isArchivedNote = currentNote?.isArchived ?? false;
+        final List<Widget> editorActionButtons = [
+          if (_noteId != null) ...[
+            DaywellIconButton(
+              icon: isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+              isSelected: isPinned,
+              tooltip: isPinned ? 'Unpin note' : 'Pin note',
+              onPressed: () => unawaited(_handleTogglePin()),
             ),
-            body: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: SharedDesignTokens.breakpointMaxContentWidth,
+            DaywellIconButton(
+              icon: isFavorite ? Icons.star : Icons.star_border,
+              isSelected: isFavorite,
+              foregroundColor:
+                  isFavorite ? semantic.warning : semantic.textSecondary,
+              tooltip: isFavorite ? 'Remove favorite' : 'Favorite note',
+              onPressed: () => unawaited(_handleToggleFavorite()),
+            ),
+            if (widget.isEmbedded) ...[
+              DaywellIconButton(
+                icon: isArchivedNote
+                    ? Icons.unarchive_outlined
+                    : Icons.archive_outlined,
+                isSelected: isArchivedNote,
+                tooltip: isArchivedNote ? 'Unarchive note' : 'Archive note',
+                onPressed: () => unawaited(_handleEmbeddedToggleArchive()),
+              ),
+              DaywellIconButton(
+                icon: Icons.delete_outline_rounded,
+                foregroundColor: colorScheme.error,
+                tooltip: 'Move to Trash',
+                onPressed: () => unawaited(_handleEmbeddedMoveToTrash()),
+              ),
+            ],
+          ],
+          DaywellIconButton(
+            icon: Icons.copy_rounded,
+            tooltip: 'Copy note',
+            onPressed: () {
+              unawaited(
+                Clipboard.setData(
+                  ClipboardData(
+                    text:
+                        '${_titleController.text}\n\n${_contentController.text}',
+                  ),
                 ),
-                child: Column(
-                  children: [
+              );
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Note copied to clipboard')),
+              );
+            },
+          ),
+          if (widget.isEmbedded && widget.onCloseEmbedded != null)
+            DaywellIconButton(
+              icon: Icons.close_rounded,
+              tooltip: 'Close note',
+              onPressed: widget.onCloseEmbedded,
+            ),
+        ];
+
+        final Widget editorBody = Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: SharedDesignTokens.breakpointMaxContentWidth,
+            ),
+            child: Column(
+              children: [
                     if (_saveErrorMessage != null)
                       Padding(
                         padding: const EdgeInsets.fromLTRB(
@@ -2630,7 +3205,9 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
                                   onPressed: () async {
                                     final ok = await _flushPendingSaves();
                                     if (!ok || !context.mounted) return;
-                                    Navigator.pop(context);
+                                    if (!widget.isEmbedded) {
+                                      Navigator.pop(context);
+                                    }
                                     widget.onOpenTask!(linkedTask.id);
                                   },
                                 ),
@@ -2996,7 +3573,79 @@ class _NoteEditorScreenState extends State<_NoteEditorScreen> {
                   ],
                 ),
               ),
+            );
+
+        if (widget.isEmbedded) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: SharedDesignTokens.spacingMd,
+                  vertical: SharedDesignTokens.spacingSm,
+                ),
+                decoration: BoxDecoration(
+                  color: semantic.card,
+                  border: Border(
+                    bottom: BorderSide(color: semantic.divider),
+                  ),
+                ),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: SharedDesignTokens.spacingSm,
+                    runSpacing: SharedDesignTokens.spacingXs,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          saveStatusBadge,
+                          if (isArchivedNote) ...[
+                            const SizedBox(width: SharedDesignTokens.spacingSm),
+                            const DaywellStatusBadge(
+                              label: 'Archived',
+                              tone: DaywellStatusTone.warning,
+                              showIcon: false,
+                            ),
+                          ] else if (_noteId == null) ...[
+                            const SizedBox(width: SharedDesignTokens.spacingSm),
+                            const DaywellStatusBadge(
+                              label: 'Draft',
+                              tone: DaywellStatusTone.info,
+                              showIcon: false,
+                            ),
+                          ],
+                        ],
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: editorActionButtons,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(child: editorBody),
+            ],
+          );
+        }
+
+        return PopScope<Object?>(
+          canPop: !_hasPendingChanges || _allowDiscardOnNextPop,
+          onPopInvokedWithResult: (bool didPop, Object? _) {
+            if (!didPop) {
+              unawaited(_handlePopAttempt());
+            }
+          },
+          child: Scaffold(
+            appBar: AppBar(
+              toolbarHeight: adaptiveToolbarHeight,
+              title: saveStatusBadge,
+              actions: editorActionButtons,
             ),
+            body: editorBody,
           ),
         );
       },
