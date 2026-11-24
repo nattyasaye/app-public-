@@ -1469,8 +1469,7 @@ class _CalendarCellIndicators extends StatelessWidget {
     final colorScheme = Theme.of(context).colorScheme;
     final rhythm = cellRhythm;
     DailyRhythmCalendarDayInspection? visibleRhythm;
-    if (rhythm != null &&
-        DailyRhythmCalendarCellMarker.shouldDisplay(rhythm)) {
+    if (rhythm != null && DailyRhythmCalendarCellMarker.shouldDisplay(rhythm)) {
       visibleRhythm = rhythm;
     }
     final bool hasDots = hasEvents || hasStoredTasks || hasProjectedTasks;

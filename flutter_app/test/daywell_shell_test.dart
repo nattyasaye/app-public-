@@ -762,6 +762,7 @@ void main() {
 
       expect(find.byType(DaywellRadioTile<ThemeMode>), findsNWidgets(3));
       await tester.ensureVisible(find.text('Dark'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Dark'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Done'));

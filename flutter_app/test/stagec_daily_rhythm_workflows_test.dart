@@ -408,8 +408,10 @@ void main() {
         await tester.tap(find.text('Prayer'));
         await tester.tap(find.text('Confirm clear day'));
         await tester.ensureVisible(find.text('View Today'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('View Today'));
         await tester.ensureVisible(find.text('Confirm no transactions today'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Confirm no transactions today'));
         await tester.pump();
 

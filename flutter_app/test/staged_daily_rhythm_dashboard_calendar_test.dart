@@ -99,6 +99,34 @@ class _StageDWidgetState extends ChangeNotifier implements AppStateManager {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
+Future<void> _disposeStageDWidgetHarness(
+  WidgetTester tester,
+  _StageDWidgetState state,
+  AppDatabase db,
+) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 20));
+  state.dispose();
+  var closed = false;
+  final closeFuture = db.close().whenComplete(() {
+    closed = true;
+  });
+  final watch = Stopwatch()..start();
+  while (!closed && watch.elapsed < const Duration(seconds: 10)) {
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+  }
+  if (closed) {
+    await closeFuture;
+  } else {
+    await tester.runAsync(
+      () => closeFuture.timeout(const Duration(seconds: 5)),
+    );
+  }
+}
+
 DailyRhythmDayEntity _makeQualifyingDay(String dateIso) {
   return DailyRhythmDayEntity(
     dateIso: dateIso,
@@ -191,10 +219,7 @@ void main() {
         final db = AppDatabase(NativeDatabase.memory());
         await db.ensureInitialized();
         final state = _StageDWidgetState(db: db);
-        addTearDown(() async {
-          state.dispose();
-          await db.close();
-        });
+        addTearDown(() => _disposeStageDWidgetHarness(tester, state, db));
 
         final todayIso = CalendarDate.today().toIsoString();
         final repo = DriftDailyRhythmRepository(db);
@@ -231,7 +256,17 @@ void main() {
         // Tap direct Faith action -> Prayer completes without creating tasks
         final prayerBtn = find.text('Complete prayer').first;
         await tester.ensureVisible(prayerBtn);
+        await tester.pumpAndSettle();
         await tester.tap(prayerBtn);
+        await tester.pumpAndSettle();
+        final saveWatch = Stopwatch()..start();
+        while (!state.dailyRhythmController.state.todayRecord.prayerDone &&
+            saveWatch.elapsed < const Duration(seconds: 5)) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 5)),
+          );
+        }
         await tester.pumpAndSettle();
         final todayRecord = state.dailyRhythmController.state.todayRecord;
         expect(todayRecord.prayerDone, isTrue);
@@ -240,6 +275,7 @@ void main() {
         // Route to Tasks daily review
         final tasksBtn = find.text('Open daily review').first;
         await tester.ensureVisible(tasksBtn);
+        await tester.pumpAndSettle();
         await tester.tap(tasksBtn);
         await tester.pumpAndSettle();
         expect(openedTasksSubTab, 0);
@@ -248,6 +284,7 @@ void main() {
         // Route to Finance Transactions tab
         final financeBtn = find.text('Review & close').first;
         await tester.ensureVisible(financeBtn);
+        await tester.pumpAndSettle();
         await tester.tap(financeBtn);
         await tester.pumpAndSettle();
         expect(openedFinanceTab, 1);
@@ -255,6 +292,7 @@ void main() {
         // Route to Calendar history
         final historyBtn = find.text('Calendar history');
         await tester.ensureVisible(historyBtn);
+        await tester.pumpAndSettle();
         await tester.tap(historyBtn);
         await tester.pumpAndSettle();
         expect(selectedTab, DaywellTabId.calendar);
@@ -267,10 +305,7 @@ void main() {
         final db = AppDatabase(NativeDatabase.memory());
         await db.ensureInitialized();
         final state = _StageDWidgetState(db: db);
-        addTearDown(() async {
-          state.dispose();
-          await db.close();
-        });
+        addTearDown(() => _disposeStageDWidgetHarness(tester, state, db));
 
         final today = CalendarDate.today();
         final startOfMonth = today.startOfGregorianMonth;
@@ -327,10 +362,7 @@ void main() {
         final db = AppDatabase(NativeDatabase.memory());
         await db.ensureInitialized();
         final state = _StageDWidgetState(db: db);
-        addTearDown(() async {
-          state.dispose();
-          await db.close();
-        });
+        addTearDown(() => _disposeStageDWidgetHarness(tester, state, db));
 
         final fixedToday = CalendarDate(year: 2026, month: 11, day: 23);
         final summary = DailyRhythmEngine.evaluateTimeline(
@@ -395,6 +427,7 @@ void main() {
 
         // Expand freeze rules without overflow
         await tester.ensureVisible(find.text('How streak freezes work'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('How streak freezes work'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
