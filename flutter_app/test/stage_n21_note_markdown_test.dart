@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
+import 'package:personal_management_app/domain/notes/note_contracts.dart';
 import 'package:personal_management_app/domain/notes/note_markdown.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
@@ -231,7 +232,7 @@ void main() {
       expect(NoteMarkdownParser.parse('').blocks, isEmpty);
       expect(NoteMarkdownParser.toPlainText('  \n\n\t '), '');
 
-      final malformed =
+      const malformed =
           '***unclosed **bold *italic ~~strike `code\n```dart\nfinal x = 1;';
       final doc = NoteMarkdownParser.parse(malformed);
       expect(doc.blocks.length, 2);

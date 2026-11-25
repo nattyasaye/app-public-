@@ -9,7 +9,7 @@ import '../../../core/theme/daywell_theme.dart';
 import '../../../domain/notes/note_helpers.dart';
 import '../../../domain/notes/note_models.dart';
 import '../../../domain/notes/project_notes_helpers.dart';
-import '../../../domain/projects/project_models.dart';
+import '../../../domain/tasks/task_models.dart';
 import '../../widgets/shared_ui_widgets.dart';
 
 class ProjectNotesWidget extends StatelessWidget {
@@ -98,7 +98,7 @@ class ProjectNotesWidget extends StatelessWidget {
                   ),
                   DaywellButton(
                     label: 'New Note',
-                    variant: DaywellButtonVariant.tonal,
+                    variant: DaywellButtonVariant.secondary,
                     size: DaywellButtonSize.compact,
                     leadingIcon: Icons.add,
                     onPressed: () => unawaited(_createProjectNote(context)),

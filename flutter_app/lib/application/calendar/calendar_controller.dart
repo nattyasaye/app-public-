@@ -119,7 +119,7 @@ class CalendarController extends ChangeNotifier {
     try {
       await _repository.deleteEvent(id);
       if (_onEventDeleted != null) {
-        await _onEventDeleted!(id);
+        await _onEventDeleted(id);
       }
       final remaining = _state.events.where((e) => e.id != id).toList();
       _state = _state.copyWith(

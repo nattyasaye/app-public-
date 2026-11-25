@@ -14,9 +14,7 @@ import 'package:personal_management_app/data/repositories/calendar_repository.da
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/data/repositories/search_repository.dart';
 import 'package:personal_management_app/data/repositories/tasks_repository.dart';
-import 'package:personal_management_app/domain/calendar/calendar_models.dart';
 import 'package:personal_management_app/domain/notes/calendar_notes_helpers.dart';
-import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/ui/screens/calendar_view.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
 

@@ -1,4 +1,4 @@
-import '../projects/project_models.dart';
+import '../tasks/task_models.dart';
 import 'note_helpers.dart';
 import 'note_markdown.dart';
 import 'note_models.dart';
@@ -70,6 +70,20 @@ abstract final class ProjectNotesHelper {
       if (project.id == cleanProjectId) return project;
     }
     return null;
+  }
+
+  static Map<String, String> buildProjectTitlesById(
+    Iterable<ProjectEntity> projects,
+  ) {
+    final map = <String, String>{};
+    for (final project in projects) {
+      final cleanId = project.id.trim();
+      final cleanTitle = project.title.trim();
+      if (cleanId.isNotEmpty && cleanTitle.isNotEmpty) {
+        map[cleanId] = cleanTitle;
+      }
+    }
+    return Map<String, String>.unmodifiable(map);
   }
 
   static String buildDefaultProjectNoteTitle(ProjectEntity project) {

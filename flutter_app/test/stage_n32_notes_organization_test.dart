@@ -2,12 +2,10 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
-import 'package:personal_management_app/application/notes/notes_state.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/domain/notes/note_helpers.dart';
-import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
 import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
 

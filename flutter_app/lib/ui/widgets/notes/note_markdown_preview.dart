@@ -381,9 +381,11 @@ class NoteMarkdownPreview extends StatelessWidget {
                 tooltip: item.checked
                     ? 'Mark item incomplete'
                     : 'Mark item complete',
+                style: IconButton.styleFrom(
+                  tapTargetSize: MaterialTapTargetSize.padded,
+                ),
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
-                tapTargetSize: MaterialTapTargetSize.padded,
                 constraints: const BoxConstraints(
                   minWidth: 36,
                   minHeight: 36,
@@ -470,7 +472,7 @@ class NoteMarkdownPreview extends StatelessWidget {
                 borderRadius:
                     BorderRadius.circular(SharedDesignTokens.radiusSm),
                 border: Border.all(
-                  color: colorScheme.primary.withValues(alpha: 0.35),
+                  color: colorScheme.primary.withOpacity(0.35),
                 ),
               ),
               child: Row(
@@ -543,7 +545,7 @@ class NoteMarkdownPreview extends StatelessWidget {
                 borderRadius:
                     BorderRadius.circular(SharedDesignTokens.radiusSm),
                 border: Border.all(
-                  color: semantic.warning.withValues(alpha: 0.45),
+                  color: semantic.warning.withOpacity(0.45),
                 ),
               ),
               child: Row(

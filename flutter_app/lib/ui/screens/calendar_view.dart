@@ -772,7 +772,7 @@ class _CalendarViewState extends State<CalendarView> {
                   ),
                   DaywellButton(
                     label: 'New Note',
-                    variant: DaywellButtonVariant.tonal,
+                    variant: DaywellButtonVariant.secondary,
                     size: DaywellButtonSize.compact,
                     leadingIcon: Icons.note_add_outlined,
                     onPressed: () => unawaited(handleCreateNote()),

@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
-import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
 
 class _StageN33InMemoryNotesRepository implements INotesRepository {

@@ -137,7 +137,7 @@ class NotesController extends ChangeNotifier {
         if (_loadCustomFolders != null) {
           try {
             loadedCustomFolders = _normalizeFolderList(
-              await _loadCustomFolders!(),
+              await _loadCustomFolders(),
             );
           } catch (_) {
             // Keep existing folders if optional settings lookup is unavailable.
@@ -455,7 +455,7 @@ class NotesController extends ChangeNotifier {
           _normalizeFolderList([..._state.customFolders, normalized]);
       try {
         if (_saveCustomFolders != null) {
-          await _saveCustomFolders!(nextCustomFolders);
+          await _saveCustomFolders(nextCustomFolders);
         }
         _state = _state.copyWith(
           customFolders: nextCustomFolders,
@@ -544,7 +544,7 @@ class NotesController extends ChangeNotifier {
           newNorm,
         ]);
         if (_saveCustomFolders != null) {
-          await _saveCustomFolders!(nextCustomFolders);
+          await _saveCustomFolders(nextCustomFolders);
         }
         _state = _state.copyWith(
           notes: List<NoteEntity>.unmodifiable(nextNotes),
@@ -623,7 +623,7 @@ class NotesController extends ChangeNotifier {
           _state.customFolders.where((f) => f != targetNorm),
         );
         if (_saveCustomFolders != null) {
-          await _saveCustomFolders!(nextCustomFolders);
+          await _saveCustomFolders(nextCustomFolders);
         }
         _state = _state.copyWith(
           notes: List<NoteEntity>.unmodifiable(nextNotes),

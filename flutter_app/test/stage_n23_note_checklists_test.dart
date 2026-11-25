@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
+import 'package:personal_management_app/domain/notes/note_contracts.dart';
 import 'package:personal_management_app/domain/notes/note_markdown.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
@@ -157,7 +158,7 @@ void main() {
     test(
         'handles rapid sequential toggles and leaves bullets, fenced blocks, and malformed syntax untouched',
         () {
-      const source = [
+      final source = [
         '# Plan',
         '',
         '- [ ] One',
@@ -201,7 +202,7 @@ void main() {
     testWidgets(
       'Preview checkboxes toggle items independently, handle rapid taps, preserve surrounding Markdown, and autosave',
       (WidgetTester tester) async {
-        const initialMarkdown = [
+        final initialMarkdown = [
           '# Daily Checklist',
           '',
           '- [ ] First open',
@@ -262,7 +263,7 @@ void main() {
         await tester.pump(const Duration(milliseconds: 700));
         await tester.pumpAndSettle();
 
-        const expectedAfterPreview = [
+        final expectedAfterPreview = [
           '# Daily Checklist',
           '',
           '- [x] First open',

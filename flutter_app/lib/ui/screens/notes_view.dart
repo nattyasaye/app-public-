@@ -13,10 +13,10 @@ import '../../domain/notes/note_markdown.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/notes/project_notes_helpers.dart';
 import '../../domain/notes/task_notes_helpers.dart';
-import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../application/calendar/calendar_controller.dart';
 import '../../application/notes/notes_controller.dart';
+import '../../application/notes/notes_state.dart';
 import '../../application/projects/projects_controller.dart';
 import '../../application/tasks/tasks_controller.dart';
 import '../../services/export/note_markdown_io_service.dart';
@@ -759,7 +759,8 @@ class _NotesViewState extends State<NotesView> {
                         ),
                         title: Text(
                           _formatFolderLabel(folder),
-                          style: DaywellTypography.body(
+                          style: DaywellTypography.fromToken(
+                            SharedDesignTokens.typeBody,
                             color: semantic.textPrimary,
                           ).copyWith(
                             fontWeight: folder == note.category
@@ -808,7 +809,8 @@ class _NotesViewState extends State<NotesView> {
                       ),
                       title: Text(
                         'New Folder...',
-                        style: DaywellTypography.body(
+                        style: DaywellTypography.fromToken(
+                          SharedDesignTokens.typeBody,
                           color: colorScheme.primary,
                         ).copyWith(fontWeight: FontWeight.w600),
                       ),
@@ -3124,9 +3126,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
       if (!ok) {
         if (mounted) {
           setState(() {
-            if (_projectId == null) {
-              _projectId = prevProjectId;
-            }
+            _projectId ??= prevProjectId;
           });
           ScaffoldMessenger.of(context).clearSnackBars();
           ScaffoldMessenger.of(context).showSnackBar(
@@ -3561,8 +3561,10 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                         NoteMarkdownParser.toPlainText(match.content)
                             .replaceAll(RegExp(r'\s+'), ' ')
                             .trim();
-                    final ethDate =
-                        EthiopiaClock.toEthiopianDate(match.updatedAt);
+                    final updatedDay = CalendarDate.fromUtcInstantInEthiopia(
+                      match.updatedAt,
+                    );
+                    final ethDate = updatedDay.toEthiopian();
                     final dateLabel = SharedDateFormatter.formatEthiopian(
                       ethDate,
                       useAmharic: false,
@@ -3776,9 +3778,6 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
 
         final bool isArchivedNote = currentNote?.isArchived ?? false;
         final bool isTrashedNote = currentNote?.isTrashed ?? false;
-        final bool isNewBlankDraft = _noteId == null &&
-            _titleController.text.trim().isEmpty &&
-            _contentController.text.trim().isEmpty;
         final List<Widget> editorActionButtons = [
           if (_noteId != null) ...[
             DaywellIconButton(
