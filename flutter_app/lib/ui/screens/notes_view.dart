@@ -43,75 +43,109 @@ Future<String?> _showNotesFolderNameDialog(
   BuildContext context,
   NotesController controller, {
   String? oldName,
-}) async {
-  final isRename = oldName != null;
-  final ctrl = TextEditingController(
-    text: isRename ? _formatFolderLabel(oldName) : '',
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (_) => _NotesFolderNameDialog(
+      controller: controller,
+      oldName: oldName,
+    ),
   );
-  String? errorText;
-  try {
-    return await showDialog<String>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: Text(isRename ? 'Rename Folder' : 'New Folder'),
-          content: SingleChildScrollView(
-            child: DaywellTextField(
-              controller: ctrl,
-              label: 'Folder name',
-              hintText: 'e.g. Research',
-              errorText: errorText,
-              autofocus: true,
-              onChanged: (_) {
-                if (errorText != null) {
-                  setDialogState(() => errorText = null);
-                }
-              },
-            ),
-          ),
-          actions: [
-            DaywellButton(
-              label: 'Cancel',
-              variant: DaywellButtonVariant.text,
-              size: DaywellButtonSize.compact,
-              onPressed: () => Navigator.pop(ctx),
-            ),
-            DaywellButton(
-              label: isRename ? 'Rename' : 'Create',
-              variant: DaywellButtonVariant.primary,
-              size: DaywellButtonSize.compact,
-              onPressed: () async {
-                if (isRename) {
-                  final res = await controller.renameFolder(oldName, ctrl.text);
-                  if (!ctx.mounted) return;
-                  if (!res.ok || res.folder == null) {
-                    setDialogState(
-                      () => errorText =
-                          res.errorMessage ?? 'Could not rename folder.',
-                    );
-                    return;
-                  }
-                  Navigator.pop(ctx, res.folder);
-                } else {
-                  final res = await controller.createFolder(ctrl.text);
-                  if (!ctx.mounted) return;
-                  if (!res.ok || res.folder == null) {
-                    setDialogState(
-                      () => errorText =
-                          res.errorMessage ?? 'Could not create folder.',
-                    );
-                    return;
-                  }
-                  Navigator.pop(ctx, res.folder);
-                }
-              },
-            ),
-          ],
+}
+
+class _NotesFolderNameDialog extends StatefulWidget {
+  final NotesController controller;
+  final String? oldName;
+
+  const _NotesFolderNameDialog({
+    required this.controller,
+    this.oldName,
+  });
+
+  @override
+  State<_NotesFolderNameDialog> createState() => _NotesFolderNameDialogState();
+}
+
+class _NotesFolderNameDialogState extends State<_NotesFolderNameDialog> {
+  late final TextEditingController _ctrl;
+  String? _errorText;
+
+  bool get _isRename => widget.oldName != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(
+      text: _isRename ? _formatFolderLabel(widget.oldName!) : '',
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(_isRename ? 'Rename Folder' : 'New Folder'),
+      content: SingleChildScrollView(
+        child: DaywellTextField(
+          controller: _ctrl,
+          label: 'Folder name',
+          hintText: 'e.g. Research',
+          errorText: _errorText,
+          autofocus: true,
+          onChanged: (_) {
+            if (_errorText != null) {
+              setState(() => _errorText = null);
+            }
+          },
         ),
       ),
+      actions: [
+        DaywellButton(
+          label: 'Cancel',
+          variant: DaywellButtonVariant.text,
+          size: DaywellButtonSize.compact,
+          onPressed: () => Navigator.pop(context),
+        ),
+        DaywellButton(
+          label: _isRename ? 'Rename' : 'Create',
+          variant: DaywellButtonVariant.primary,
+          size: DaywellButtonSize.compact,
+          onPressed: () async {
+            if (_isRename) {
+              final res = await widget.controller.renameFolder(
+                widget.oldName!,
+                _ctrl.text,
+              );
+              if (!mounted) return;
+              if (!res.ok || res.folder == null) {
+                setState(
+                  () => _errorText =
+                      res.errorMessage ?? 'Could not rename folder.',
+                );
+                return;
+              }
+              Navigator.pop(context, res.folder);
+            } else {
+              final res = await widget.controller.createFolder(_ctrl.text);
+              if (!mounted) return;
+              if (!res.ok || res.folder == null) {
+                setState(
+                  () => _errorText =
+                      res.errorMessage ?? 'Could not create folder.',
+                );
+                return;
+              }
+              Navigator.pop(context, res.folder);
+            }
+          },
+        ),
+      ],
     );
-  } finally {
-    ctrl.dispose();
   }
 }
 
@@ -3199,6 +3233,17 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     // _previousContentValue while onChanged inspects a just-committed edit.
     if (curr.text == _previousContentValue.text) {
       _previousContentValue = curr;
+    } else {
+      final scheduledCurr = curr;
+      scheduleMicrotask(() {
+        if (!mounted || _isDisposed || _isApplyingProgrammaticContentEdit) {
+          return;
+        }
+        if (_contentController.value == scheduledCurr &&
+            _previousContentValue != scheduledCurr) {
+          _previousContentValue = scheduledCurr;
+        }
+      });
     }
     final nextChecklist = _resolveActiveWriteChecklist(curr);
     if (nextChecklist?.lineIndex != _activeWriteChecklist?.lineIndex ||
@@ -3376,7 +3421,6 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   }
 
   void _addTagDialog() {
-    final ctrl = TextEditingController();
     final existingSuggestions = widget.controller.state.availableTags
         .where(
           (tag) => !_tags.any(
@@ -3387,75 +3431,11 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     unawaited(
       showDialog<void>(
         context: context,
-        builder: (ctx) {
-          final semantic = ctx.daywellColors;
-          return AlertDialog(
-            title: const Text('Add Tag'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  DaywellTextField(
-                    controller: ctrl,
-                    label: 'Tag name',
-                    hintText: 'e.g. architecture',
-                    autofocus: true,
-                  ),
-                  if (existingSuggestions.isNotEmpty) ...[
-                    const SizedBox(height: SharedDesignTokens.spacingCompact),
-                    Text(
-                      'Existing tags',
-                      style: DaywellTypography.caption(
-                        color: semantic.textMuted,
-                      ).copyWith(fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: SharedDesignTokens.spacingXs),
-                    Wrap(
-                      spacing: SharedDesignTokens.spacingXs,
-                      runSpacing: SharedDesignTokens.spacingXs,
-                      children: [
-                        for (final suggestion in existingSuggestions)
-                          ActionChip(
-                            label: Text(
-                              '#$suggestion',
-                              style: DaywellTypography.caption(
-                                color: semantic.onTransferContainer,
-                              ).copyWith(fontWeight: FontWeight.w600),
-                            ),
-                            backgroundColor: semantic.transferContainer,
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _applyTagCandidate(suggestion);
-                            },
-                          ),
-                      ],
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              DaywellButton(
-                label: 'Cancel',
-                variant: DaywellButtonVariant.text,
-                size: DaywellButtonSize.compact,
-                onPressed: () => Navigator.pop(ctx),
-              ),
-              DaywellButton(
-                label: 'Add',
-                variant: DaywellButtonVariant.primary,
-                size: DaywellButtonSize.compact,
-                onPressed: () {
-                  final candidate = ctrl.text;
-                  Navigator.pop(ctx);
-                  _applyTagCandidate(candidate);
-                },
-              ),
-            ],
-          );
-        },
-      ).whenComplete(ctrl.dispose),
+        builder: (_) => _NoteAddTagDialog(
+          existingSuggestions: existingSuggestions,
+          onSubmit: _applyTagCandidate,
+        ),
+      ),
     );
   }
 
@@ -5477,6 +5457,99 @@ class _NoteCalendarEventPickerSheetState
           ),
         ),
       ),
+    );
+  }
+}
+
+class _NoteAddTagDialog extends StatefulWidget {
+  final List<String> existingSuggestions;
+  final ValueChanged<String> onSubmit;
+
+  const _NoteAddTagDialog({
+    required this.existingSuggestions,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_NoteAddTagDialog> createState() => _NoteAddTagDialogState();
+}
+
+class _NoteAddTagDialogState extends State<_NoteAddTagDialog> {
+  final TextEditingController _ctrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    return AlertDialog(
+      title: const Text('Add Tag'),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            DaywellTextField(
+              controller: _ctrl,
+              label: 'Tag name',
+              hintText: 'e.g. architecture',
+              autofocus: true,
+            ),
+            if (widget.existingSuggestions.isNotEmpty) ...[
+              const SizedBox(height: SharedDesignTokens.spacingCompact),
+              Text(
+                'Existing tags',
+                style: DaywellTypography.caption(
+                  color: semantic.textMuted,
+                ).copyWith(fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingXs),
+              Wrap(
+                spacing: SharedDesignTokens.spacingXs,
+                runSpacing: SharedDesignTokens.spacingXs,
+                children: [
+                  for (final suggestion in widget.existingSuggestions)
+                    ActionChip(
+                      label: Text(
+                        '#$suggestion',
+                        style: DaywellTypography.caption(
+                          color: semantic.onTransferContainer,
+                        ).copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      backgroundColor: semantic.transferContainer,
+                      onPressed: () {
+                        Navigator.pop(context);
+                        widget.onSubmit(suggestion);
+                      },
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+      actions: [
+        DaywellButton(
+          label: 'Cancel',
+          variant: DaywellButtonVariant.text,
+          size: DaywellButtonSize.compact,
+          onPressed: () => Navigator.pop(context),
+        ),
+        DaywellButton(
+          label: 'Add',
+          variant: DaywellButtonVariant.primary,
+          size: DaywellButtonSize.compact,
+          onPressed: () {
+            final candidate = _ctrl.text;
+            Navigator.pop(context);
+            widget.onSubmit(candidate);
+          },
+        ),
+      ],
     );
   }
 }

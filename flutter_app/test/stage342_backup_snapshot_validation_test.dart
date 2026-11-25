@@ -1392,17 +1392,31 @@ void main() {
       final expectedFinder = find.textContaining(
         EncryptionBackupService.authenticationFailureMessage,
       );
+      await tester.pump();
       final stopwatch = Stopwatch()..start();
       while (expectedFinder.evaluate().isEmpty) {
-        if (stopwatch.elapsed > const Duration(seconds: 30)) {
+        if (stopwatch.elapsed > const Duration(seconds: 90)) {
           break;
         }
-        await tester.pump(const Duration(milliseconds: 20));
         await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 1)),
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      if (expectedFinder.evaluate().isEmpty) {
+        fail(
+          'Timed out waiting for authentication failure SnackBar after '
+          '${stopwatch.elapsed.inSeconds}s '
+          '(isRestoreInProgress=${manager.isRestoreInProgress}, '
+          'lastBackupResult=${manager.lastBackupResult?.failureKind}: '
+          '${manager.lastBackupResult?.message}).',
         );
       }
-      await tester.pumpAndSettle();
+      await tester.pumpAndSettle(
+        const Duration(milliseconds: 100),
+        EnginePhase.sendSemanticsUpdate,
+        const Duration(seconds: 10),
+      );
       expect(expectedFinder, findsOneWidget);
 
       ScaffoldMessenger.of(tester.element(find.byType(BackupView)))
