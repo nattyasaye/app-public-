@@ -1575,7 +1575,7 @@ class DoubleEntryEngine {
             ? 'Voided: ${entry.voidReason}'
             : 'Voided journal entry.',
       );
-      cache?[entry.id] = res;
+      if (cache != null) cache[entry.id] = res;
       return res;
     }
 
@@ -1595,7 +1595,7 @@ class DoubleEntryEngine {
         status: EntryCurrencyStatus.mixedOrAmbiguous,
         reason: 'Entry has fewer than 2 postings.',
       );
-      if (!ignoreVoidFlag) cache?[entry.id] = res;
+      if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
       return res;
     }
 
@@ -1608,7 +1608,7 @@ class DoubleEntryEngine {
         touchedCurrencies: scanned.financialCurrencies.toSet(),
         reason: 'References legacy clearing offset account.',
       );
-      if (!ignoreVoidFlag) cache?[entry.id] = res;
+      if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
       return res;
     }
 
@@ -1620,7 +1620,7 @@ class DoubleEntryEngine {
         reason:
             'References missing or unknown account "${scanned.missingAccountId}".',
       );
-      if (!ignoreVoidFlag) cache?[entry.id] = res;
+      if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
       return res;
     }
 
@@ -1634,7 +1634,7 @@ class DoubleEntryEngine {
           reason:
               'References financial account with missing or unverified currency code.',
         );
-        if (!ignoreVoidFlag) cache?[entry.id] = res;
+        if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
         return res;
       }
 
@@ -1646,7 +1646,7 @@ class DoubleEntryEngine {
           reason:
               'Cross-currency entry (${scanned.financialCurrencies.join(' / ')}).',
         );
-        if (!ignoreVoidFlag) cache?[entry.id] = res;
+        if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
         return res;
       }
 
@@ -1666,10 +1666,11 @@ class DoubleEntryEngine {
               touchedCurrencies: scanned.financialCurrencies.toSet(),
               reason: 'Settlement references missing debt record.',
             );
-            if (!ignoreVoidFlag) cache?[entry.id] = res;
+            if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
             return res;
           }
-          final originEntry = entryById?[debt.originEntryId];
+          final originEntry =
+              entryById != null ? entryById[debt.originEntryId] : null;
           if (originEntry == null || originEntry.isVoided) {
             final res = EntryCurrencyClassification(
               entryId: entry.id,
@@ -1678,7 +1679,7 @@ class DoubleEntryEngine {
               reason:
                   'Settlement references debt with missing or voided origin entry.',
             );
-            if (!ignoreVoidFlag) cache?[entry.id] = res;
+            if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
             return res;
           }
           final originClass = _classifyEntryCurrencyInternal(
@@ -1704,7 +1705,7 @@ class DoubleEntryEngine {
               reason:
                   'Settlement linked to debt with ambiguous origin currency.',
             );
-            if (!ignoreVoidFlag) cache?[entry.id] = res;
+            if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
             return res;
           }
           if (originClass.nativeCurrencyCode != primaryCurrency) {
@@ -1718,7 +1719,7 @@ class DoubleEntryEngine {
               reason:
                   'Cross-currency debt settlement: settled in $primaryCurrency for ${originClass.nativeCurrencyCode} debt.',
             );
-            if (!ignoreVoidFlag) cache?[entry.id] = res;
+            if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
             return res;
           }
         }
@@ -1738,13 +1739,14 @@ class DoubleEntryEngine {
               touchedCurrencies: {primaryCurrency},
               reason: 'Non-ETB ($primaryCurrency) native transaction.',
             );
-      if (!ignoreVoidFlag) cache?[entry.id] = res;
+      if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
       return res;
     }
 
     // [3B] System-only entry (financialLegCount == 0)
     // 1) Write-off entry -> inherit Debt.originEntryId
-    final writeOffDebt = debtByWriteOffEntryId?[entry.id];
+    final writeOffDebt =
+        debtByWriteOffEntryId != null ? debtByWriteOffEntryId[entry.id] : null;
     if (entry.entryType == EntryType.writeOff || writeOffDebt != null) {
       if (writeOffDebt == null || entryById == null) {
         final res = EntryCurrencyClassification(
@@ -1752,7 +1754,7 @@ class DoubleEntryEngine {
           status: EntryCurrencyStatus.mixedOrAmbiguous,
           reason: 'Write-off entry has no verifiable linked debt.',
         );
-        if (!ignoreVoidFlag) cache?[entry.id] = res;
+        if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
         return res;
       }
       final originEntry = entryById[writeOffDebt.originEntryId];
@@ -1763,7 +1765,7 @@ class DoubleEntryEngine {
           reason:
               'Write-off references debt with missing or voided origin entry.',
         );
-        if (!ignoreVoidFlag) cache?[entry.id] = res;
+        if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
         return res;
       }
       final originClass = _classifyEntryCurrencyInternal(
@@ -1804,21 +1806,22 @@ class DoubleEntryEngine {
           reason: 'Write-off inherits ambiguous debt origin currency.',
         );
       }
-      if (!ignoreVoidFlag) cache?[entry.id] = res;
+      if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
       return res;
     }
 
     // 2) Corrected replacement entry -> inherit original entry's economic legs
     if (entry.correctedFromEntryId != null &&
         entry.correctedFromEntryId!.isNotEmpty) {
-      final original = entryById?[entry.correctedFromEntryId!];
+      final original =
+          entryById != null ? entryById[entry.correctedFromEntryId!] : null;
       if (original == null) {
         final res = EntryCurrencyClassification(
           entryId: entry.id,
           status: EntryCurrencyStatus.mixedOrAmbiguous,
           reason: 'Correction entry references missing original entry.',
         );
-        if (!ignoreVoidFlag) cache?[entry.id] = res;
+        if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
         return res;
       }
       final origClass = _classifyEntryCurrencyInternal(
@@ -1860,17 +1863,22 @@ class DoubleEntryEngine {
           reason: origClass.reason ?? 'Correction inherits ambiguous currency.',
         );
       }
-      if (!ignoreVoidFlag) cache?[entry.id] = res;
+      if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
       return res;
     }
 
     // 3) Third-party-paid expense backed by Debt(originEntryId == entry.id)
-    final originDebt = debtByOriginEntryId?[entry.id];
+    final originDebt =
+        debtByOriginEntryId != null ? debtByOriginEntryId[entry.id] : null;
     if (originDebt != null && entry.entryType == EntryType.debtIssuance) {
-      final linkedAllocs = allocationsByDebtId?[originDebt.id] ?? const [];
+      final List<SettlementAllocationModel> linkedAllocs =
+          allocationsByDebtId != null
+              ? (allocationsByDebtId[originDebt.id] ?? const [])
+              : const [];
       final settlementCurrencies = <String>{};
       for (final alloc in linkedAllocs) {
-        final settleEntry = entryById?[alloc.settlementEntryId];
+        final settleEntry =
+            entryById != null ? entryById[alloc.settlementEntryId] : null;
         if (settleEntry == null || settleEntry.isVoided) continue;
         final settlePostings =
             postingsByEntry[settleEntry.id] ?? const <PostingModel>[];
@@ -1886,7 +1894,7 @@ class DoubleEntryEngine {
             touchedCurrencies: settleScan.financialCurrencies.toSet(),
             reason: 'Third-party expense has ambiguous settlement currency.',
           );
-          if (!ignoreVoidFlag) cache?[entry.id] = res;
+          if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
           return res;
         }
         settlementCurrencies.add(settleScan.financialCurrencies.first);
@@ -1901,7 +1909,7 @@ class DoubleEntryEngine {
           reason:
               'Third-party expense has conflicting settlement currencies (${list.join(' / ')}).',
         );
-        if (!ignoreVoidFlag) cache?[entry.id] = res;
+        if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
         return res;
       }
 
@@ -1921,7 +1929,7 @@ class DoubleEntryEngine {
                 touchedCurrencies: {sc},
                 reason: 'Third-party expense settled in $sc.',
               );
-        if (!ignoreVoidFlag) cache?[entry.id] = res;
+        if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
         return res;
       }
 
@@ -1932,7 +1940,7 @@ class DoubleEntryEngine {
         status: EntryCurrencyStatus.mixedOrAmbiguous,
         reason: 'Unsettled third-party entry requires Currency Review.',
       );
-      if (!ignoreVoidFlag) cache?[entry.id] = res;
+      if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
       return res;
     }
 
@@ -1942,7 +1950,7 @@ class DoubleEntryEngine {
       status: EntryCurrencyStatus.mixedOrAmbiguous,
       reason: 'Unlinked system-only entry without financial account leg.',
     );
-    if (!ignoreVoidFlag) cache?[entry.id] = res;
+    if (!ignoreVoidFlag && cache != null) cache[entry.id] = res;
     return res;
   }
 

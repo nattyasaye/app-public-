@@ -114,17 +114,22 @@ const cents = 4200;
           NoteMarkdownExportHelper.buildFilename('///\\\\***???'),
           'Untitled Note.md',
         );
-        expect(NoteMarkdownExportHelper.buildFilename('.md'), 'Untitled Note.md');
+        expect(
+          NoteMarkdownExportHelper.buildFilename('.md'),
+          'Untitled Note.md',
+        );
         expect(
           NoteMarkdownExportHelper.buildFilename('Q1/Q2: Plan? <Final>|"*'),
           'Q1-Q2- Plan- -Final.md',
         );
-        expect(NoteMarkdownExportHelper.buildFilename('Spec.MD.md'), 'Spec.md');
+        expect(
+          NoteMarkdownExportHelper.buildFilename('Spec.MD.md'),
+          'Spec.md',
+        );
         expect(NoteMarkdownExportHelper.buildFilename('CON'), 'CON-note.md');
         expect(NoteMarkdownExportHelper.buildFilename('com3'), 'com3-note.md');
 
-        final longFilename =
-            NoteMarkdownExportHelper.buildFilename('A' * 160);
+        final longFilename = NoteMarkdownExportHelper.buildFilename('A' * 160);
         expect(longFilename.endsWith('.md'), isTrue);
         expect(
           longFilename.length,
@@ -260,8 +265,7 @@ const cents = 4200;
         // Enter unsaved content edits and export immediately before autosave timer fires.
         final contentField = find.byWidgetPredicate(
           (Widget w) =>
-              w is TextField &&
-              w.controller?.text == '- [ ] Initial task',
+              w is TextField && w.controller?.text == '- [ ] Initial task',
         );
         expect(contentField, findsOneWidget);
         await tester.enterText(

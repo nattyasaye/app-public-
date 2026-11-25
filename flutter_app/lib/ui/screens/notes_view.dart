@@ -1808,7 +1808,7 @@ class _NotesViewState extends State<NotesView> {
                 ? (outcome.usedTextFallback
                     ? 'Shared "${outcome.filename}" Markdown content'
                     : 'Prepared "${outcome.filename}" for export/share')
-                : (outcome.error ?? 'Unable to export "${outcome.filename}".'),
+                : (outcome.error ?? 'Unable to export note.'),
           ),
         ),
       );
@@ -2740,7 +2740,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
               ? (outcome.usedTextFallback
                   ? 'Shared "${outcome.filename}" Markdown content'
                   : 'Prepared "${outcome.filename}" for export/share')
-              : (outcome.error ?? 'Unable to export "${outcome.filename}".'),
+              : (outcome.error ?? 'Unable to export note.'),
         ),
       ),
     );

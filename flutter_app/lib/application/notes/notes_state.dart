@@ -104,11 +104,13 @@ class NotesModuleState {
         return false;
       }
 
-      final projectTitle =
-          note.projectId != null ? projectTitlesById?[note.projectId!] : null;
-      final linkedEventTitle = note.linkedCalendarEventId != null
-          ? eventTitlesById?[note.linkedCalendarEventId!]
+      final projectTitle = note.projectId != null && projectTitlesById != null
+          ? projectTitlesById[note.projectId!]
           : null;
+      final linkedEventTitle =
+          note.linkedCalendarEventId != null && eventTitlesById != null
+              ? eventTitlesById[note.linkedCalendarEventId!]
+              : null;
       if (!note.matchesQuery(
         searchQuery,
         projectTitle: projectTitle,
