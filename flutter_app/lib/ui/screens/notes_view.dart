@@ -2575,8 +2575,15 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   }) {
     final completer = Completer<bool>();
     _savePipeline = _savePipeline.catchError((Object _) {}).then((_) async {
-      final ok = await _persistSnapshot(snapshot, fromDispose: fromDispose);
-      completer.complete(ok);
+      var ok = false;
+      try {
+        ok = await _persistSnapshot(snapshot, fromDispose: fromDispose);
+      } catch (_) {
+        ok = false;
+      }
+      if (!completer.isCompleted) {
+        completer.complete(ok);
+      }
     });
     return completer.future;
   }

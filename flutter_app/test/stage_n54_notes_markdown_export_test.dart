@@ -6,8 +6,11 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
+import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
+import 'package:personal_management_app/data/database/raw_database_recovery_exporter.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/domain/notes/note_markdown_export.dart';
 import 'package:personal_management_app/services/export/note_markdown_io_service.dart';
@@ -16,6 +19,29 @@ import 'package:personal_management_app/ui/screens/notes_view.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'support/sqlite_test_helper.dart';
+
+class _NoOpNotificationService implements INotificationService {
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<bool> requestPermissions() async => true;
+
+  @override
+  Future<void> scheduleReminder({
+    required String id,
+    required String title,
+    required String body,
+    required DateTime scheduledDateUtc,
+    String? payload,
+  }) async {}
+
+  @override
+  Future<void> cancelReminder(String id) async {}
+
+  @override
+  Future<void> cancelAllReminders() async {}
+}
 
 NoteEntity _makeNote({
   required String id,
@@ -46,27 +72,18 @@ NoteEntity _makeNote({
 
 Future<void> disposeTestState(
   WidgetTester tester,
-  AppStateManager state,
-) async {
+  AppStateManager state, {
+  Directory? tempDir,
+}) async {
   await tester.pumpWidget(const SizedBox.shrink());
-  await tester.pump(const Duration(milliseconds: 20));
-  var disposed = false;
-  final disposeFuture = state.disposeAsync().whenComplete(() {
-    disposed = true;
-  });
-  final stopwatch = Stopwatch()..start();
-  while (!disposed && stopwatch.elapsed < const Duration(seconds: 10)) {
-    await tester.pump(const Duration(milliseconds: 20));
+  await tester.pump();
+  if (!state.isDisposed) {
     await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      () => state.disposeAsync().timeout(const Duration(seconds: 10)),
     );
   }
-  if (disposed) {
-    await disposeFuture;
-  } else {
-    await tester.runAsync(
-      () => disposeFuture.timeout(const Duration(seconds: 5)),
-    );
+  if (tempDir != null && tempDir.existsSync()) {
+    tempDir.deleteSync(recursive: true);
   }
 }
 
@@ -239,31 +256,99 @@ const cents = 4200;
       '4. Flushes pending editor changes before exporting/sharing in NotesView and hides export from trashed cards while surfacing feedback SnackBars',
       (WidgetTester tester) async {
         await tester.binding.setSurfaceSize(const Size(1024, 800));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
-        final db = AppDatabase(NativeDatabase.memory());
-        final appState = AppStateManager(db: db);
-        final notesRepo = DriftNotesRepository(db);
-        await tester.runAsync(() async {
-          await appState.initialize();
-          await notesRepo.createNote(
-            _makeNote(
-              id: 'n-live',
-              title: 'Initial Export Title',
-              content: '- [ ] Initial task',
-            ),
+        final setup = await tester.runAsync(() async {
+          final tempDir = Directory.systemTemp.createTempSync(
+            'daywell_n54_state_',
           );
-          await notesRepo.createNote(
-            _makeNote(
-              id: 'n-trash',
-              title: 'Trashed Hidden Note',
-              content: 'Deleted note',
-              isTrashed: true,
+          final docsDir = Directory(p.join(tempDir.path, 'docs'));
+          docsDir.createSync();
+          final supportDir = Directory(p.join(tempDir.path, 'support'));
+          supportDir.createSync();
+          final db = AppDatabase(NativeDatabase.memory());
+          final appState = AppStateManager(
+            db: db,
+            recoveryExporter: RawDatabaseRecoveryExporter(
+              documentsDirProvider: () async => docsDir,
+              supportDirProvider: () async => supportDir,
             ),
+            notificationService: _NoOpNotificationService(),
           );
-          await appState.notesController.loadNotes();
+          try {
+            await db.ensureInitialized().timeout(
+                  const Duration(seconds: 15),
+                  onTimeout: () => throw TimeoutException(
+                    'db.ensureInitialized() timed out after 15s',
+                  ),
+                );
+            await appState.initialize().timeout(
+                  const Duration(seconds: 15),
+                  onTimeout: () => throw TimeoutException(
+                    'appState.initialize() timed out after 15s',
+                  ),
+                );
+            final notesRepo = DriftNotesRepository(db);
+            await notesRepo.createNote(
+              _makeNote(
+                id: 'n-live',
+                title: 'Initial Export Title',
+                content: '- [ ] Initial task',
+              ),
+            );
+            await notesRepo.createNote(
+              _makeNote(
+                id: 'n-trash',
+                title: 'Trashed Hidden Note',
+                content: 'Deleted note',
+                isTrashed: true,
+              ),
+            );
+            await appState.notesController.loadNotes();
+            return (appState: appState, tempDir: tempDir);
+          } catch (_) {
+            try {
+              if (!appState.isDisposed) {
+                final disposeFuture = appState.disposeAsync();
+                await disposeFuture.timeout(const Duration(seconds: 3));
+              }
+            } catch (_) {}
+            if (tempDir.existsSync()) {
+              tempDir.deleteSync(recursive: true);
+            }
+            rethrow;
+          }
         });
-        addTearDown(() => disposeTestState(tester, appState));
+        final appState = setup!.appState;
+        final tempDir = setup.tempDir;
+        addTearDown(
+          () => disposeTestState(tester, appState, tempDir: tempDir),
+        );
+
+        Future<void> settle() {
+          return tester.pumpAndSettle(
+            const Duration(milliseconds: 100),
+            EnginePhase.sendSemanticsUpdate,
+            const Duration(seconds: 5),
+          );
+        }
+
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await settle();
+        }
 
         final exportedSnapshots = <NoteEntity>[];
         NoteMarkdownIoService.debugExportOverride = (NoteEntity note) async {
@@ -283,11 +368,11 @@ const cents = 4200;
             home: NotesView(state: appState),
           ),
         );
-        await tester.pumpAndSettle();
+        await settle();
 
         // Select the active note to open the wide master-detail editor pane.
         await tester.tap(find.text('Initial Export Title'));
-        await tester.pumpAndSettle();
+        await settle();
 
         // Enter unsaved content edits and export immediately before autosave timer fires.
         final contentField = find.byWidgetPredicate(
@@ -301,29 +386,33 @@ const cents = 4200;
         );
         await tester.pump();
 
+        const expectedSnack =
+            'Prepared "Initial Export Title.md" for export/share';
         await tester.tap(find.byTooltip('Export / Share Markdown (.md)'));
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              exportedSnapshots.length == 1 &&
+              find.text(expectedSnack).evaluate().isNotEmpty,
+          reason: 'Export did not flush pending note edits.',
+        );
 
         expect(exportedSnapshots.length, 1);
         expect(
           exportedSnapshots.single.content,
           '- [x] Unsaved edited item [[Next Note]]',
         );
-        expect(
-          find.text('Prepared "Initial Export Title.md" for export/share'),
-          findsOneWidget,
-        );
+        expect(find.text(expectedSnack), findsOneWidget);
 
         // Switch to Trash section: Export / Share (.md) must NOT appear in trashed card menu.
         final trashChip = find.text('Trash').first;
         await tester.ensureVisible(trashChip);
-        await tester.pumpAndSettle();
+        await settle();
         await tester.tap(trashChip);
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.text('Trashed Hidden Note'), findsOneWidget);
 
         await tester.tap(find.byTooltip('Note actions').first);
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.text('Export / Share (.md)'), findsNothing);
         expect(find.text('Restore from Trash'), findsOneWidget);
       },
