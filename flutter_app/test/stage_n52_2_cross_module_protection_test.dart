@@ -29,6 +29,22 @@ void main() {
         await db.ensureInitialized();
         addTearDown(db.close);
 
+        final nowUtc = DateTime.utc(2026, 3, 20);
+        await db.into(db.goals).insert(
+              GoalsCompanion.insert(
+                id: 'goal-1',
+                title: 'Governance Goal',
+                createdAt: nowUtc,
+              ),
+            );
+        await db.into(db.projects).insert(
+              ProjectsCompanion.insert(
+                id: 'proj-gov',
+                title: 'Governance Project',
+                createdAt: nowUtc,
+              ),
+            );
+
         final notesCtrl = NotesController(repository: DriftNotesRepository(db));
         addTearDown(notesCtrl.dispose);
 
@@ -158,6 +174,13 @@ void main() {
           id: 'task-other',
           title: 'Other Task',
         );
+        await db.into(db.projects).insert(
+              ProjectsCompanion.insert(
+                id: 'proj-core',
+                title: 'Core Architecture',
+                createdAt: DateTime.utc(2026, 3, 20),
+              ),
+            );
         await notesCtrl.createNote(
           id: 'note-cal-live',
           title: 'Review Talking Points',

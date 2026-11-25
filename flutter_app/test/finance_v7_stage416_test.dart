@@ -46,6 +46,32 @@ class _RecordingNotificationService implements INotificationService {
   Future<void> cancelAllReminders() async {}
 }
 
+Future<void> disposeTestState(
+  WidgetTester tester,
+  AppStateManager state,
+) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 20));
+  var disposed = false;
+  final disposeFuture = state.disposeAsync().whenComplete(() {
+    disposed = true;
+  });
+  final stopwatch = Stopwatch()..start();
+  while (!disposed && stopwatch.elapsed < const Duration(seconds: 10)) {
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+  }
+  if (disposed) {
+    await disposeFuture;
+  } else {
+    await tester.runAsync(
+      () => disposeFuture.timeout(const Duration(seconds: 5)),
+    );
+  }
+}
+
 void main() {
   configureSqliteForHostTests();
 
@@ -110,7 +136,7 @@ void main() {
           notificationService: _RecordingNotificationService(),
         );
         await tester.runAsync(() => manager.initialize());
-        addTearDown(() => tester.runAsync(() => manager.disposeAsync()));
+        addTearDown(() => disposeTestState(tester, manager));
 
         String? receivedText;
         await tester.pumpWidget(
@@ -159,7 +185,7 @@ void main() {
           notificationService: _RecordingNotificationService(),
         );
         await tester.runAsync(() => manager.initialize());
-        addTearDown(() => tester.runAsync(() => manager.disposeAsync()));
+        addTearDown(() => disposeTestState(tester, manager));
 
         await tester.runAsync(() async {
           await manager.financeController.addAccount(

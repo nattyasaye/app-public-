@@ -44,6 +44,32 @@ NoteEntity _makeNote({
   );
 }
 
+Future<void> disposeTestState(
+  WidgetTester tester,
+  AppStateManager state,
+) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 20));
+  var disposed = false;
+  final disposeFuture = state.disposeAsync().whenComplete(() {
+    disposed = true;
+  });
+  final stopwatch = Stopwatch()..start();
+  while (!disposed && stopwatch.elapsed < const Duration(seconds: 10)) {
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+  }
+  if (disposed) {
+    await disposeFuture;
+  } else {
+    await tester.runAsync(
+      () => disposeFuture.timeout(const Duration(seconds: 5)),
+    );
+  }
+}
+
 void main() {
   setUpAll(configureSqliteForHostTests);
 
@@ -237,7 +263,7 @@ const cents = 4200;
           );
           await appState.notesController.loadNotes();
         });
-        addTearDown(() => appState.dispose());
+        addTearDown(() => disposeTestState(tester, appState));
 
         final exportedSnapshots = <NoteEntity>[];
         NoteMarkdownIoService.debugExportOverride = (NoteEntity note) async {
@@ -289,7 +315,10 @@ const cents = 4200;
         );
 
         // Switch to Trash section: Export / Share (.md) must NOT appear in trashed card menu.
-        await tester.tap(find.textContaining('Trash'));
+        final trashChip = find.text('Trash').first;
+        await tester.ensureVisible(trashChip);
+        await tester.pumpAndSettle();
+        await tester.tap(trashChip);
         await tester.pumpAndSettle();
         expect(find.text('Trashed Hidden Note'), findsOneWidget);
 

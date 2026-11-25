@@ -253,11 +253,13 @@ void main() {
         await tester.pump();
 
         await tester.tap(find.text('Alpha Architecture').first);
-        await tester.pumpAndSettle();
+        await tester.pump();
         expect(find.text('Unsaved Alpha draft body'), findsOneWidget);
 
         // Switch to Beta Roadmap -> flushes Alpha edits cleanly with zero duplicates
         final initialCount = controller.state.notes.length;
+        await tester.ensureVisible(find.text('Beta Roadmap'));
+        await tester.pump();
         await tester.tap(find.text('Beta Roadmap'));
         await tester.pumpAndSettle();
 
@@ -305,6 +307,8 @@ void main() {
         await tester.enterText(bodyField, 'Must not be lost on failure');
         await tester.pump();
 
+        await tester.ensureVisible(find.text('Beta Roadmap'));
+        await tester.pump();
         await tester.tap(find.text('Beta Roadmap'));
         await tester.pumpAndSettle();
 
@@ -317,6 +321,8 @@ void main() {
 
         // Recover & switch cleanly
         repo.failUpdates = false;
+        await tester.ensureVisible(find.text('Beta Roadmap'));
+        await tester.pump();
         await tester.tap(find.text('Beta Roadmap'));
         await tester.pumpAndSettle();
         expect(
@@ -343,7 +349,10 @@ void main() {
         await tester.pumpAndSettle();
 
         // Apply folder filter ('Reference') -> keeps Alpha & Gamma, hides Beta from list
-        await tester.tap(find.text('Reference').first);
+        final referenceChip = find.text('Reference').first;
+        await tester.ensureVisible(referenceChip);
+        await tester.pumpAndSettle();
+        await tester.tap(referenceChip);
         await tester.pumpAndSettle();
         expect(find.text('Alpha Architecture'), findsOneWidget);
         expect(find.text('Beta Roadmap'), findsNothing);
@@ -370,7 +379,10 @@ void main() {
 
         // Backlinks section on Beta lists Alpha Architecture and jumps back into detail pane
         expect(find.textContaining('BACKLINKS (1)'), findsOneWidget);
-        await tester.tap(find.text('Alpha Architecture').last);
+        final backlinkAlpha = find.text('Alpha Architecture').last;
+        await tester.ensureVisible(backlinkAlpha);
+        await tester.pumpAndSettle();
+        await tester.tap(backlinkAlpha);
         await tester.pumpAndSettle();
         expect(
           find.textContaining(
@@ -381,7 +393,10 @@ void main() {
         );
 
         // Clear filters before Quick Capture focus test
-        await tester.tap(find.text('Clear filters'));
+        final clearFilters = find.text('Clear filters');
+        await tester.ensureVisible(clearFilters);
+        await tester.pumpAndSettle();
+        await tester.tap(clearFilters);
         await tester.pumpAndSettle();
 
         // requestedNoteFocus opens target note directly in wide detail pane
@@ -434,7 +449,12 @@ void main() {
         expect(find.text('Select a note to read or edit'), findsOneWidget);
 
         // Trashed note cannot be opened in detail pane directly
-        await tester.tap(find.text('Trash').first);
+        final trashChip = find.text('Trash').first;
+        await tester.ensureVisible(trashChip);
+        await tester.pumpAndSettle();
+        await tester.tap(trashChip);
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Trashed Scratchpad'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Trashed Scratchpad'));
         await tester.pumpAndSettle();
