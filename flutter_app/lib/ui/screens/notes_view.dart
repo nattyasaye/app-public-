@@ -3193,17 +3193,17 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   }
 
   void _handleContentControllerSelectionTrack() {
-    if (_isApplyingProgrammaticContentEdit) return;
+    if (_isApplyingProgrammaticContentEdit || !mounted || _isDisposed) return;
     final curr = _contentController.value;
     // Track cursor/selection moves before the next text edit without touching
     // _previousContentValue while onChanged inspects a just-committed edit.
     if (curr.text == _previousContentValue.text) {
       _previousContentValue = curr;
-      final nextChecklist = _resolveActiveWriteChecklist(curr);
-      if (nextChecklist?.lineIndex != _activeWriteChecklist?.lineIndex ||
-          nextChecklist?.checked != _activeWriteChecklist?.checked) {
-        setState(() => _activeWriteChecklist = nextChecklist);
-      }
+    }
+    final nextChecklist = _resolveActiveWriteChecklist(curr);
+    if (nextChecklist?.lineIndex != _activeWriteChecklist?.lineIndex ||
+        nextChecklist?.checked != _activeWriteChecklist?.checked) {
+      setState(() => _activeWriteChecklist = nextChecklist);
     }
   }
 

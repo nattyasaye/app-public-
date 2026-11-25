@@ -364,7 +364,11 @@ void main() {
         expect(repo.store['note-md-1']?.content, rawMarkdown);
 
         // Open existing note in Write mode
-        await tester.tap(find.text('Reflection'));
+        final noteCardTitle = find.descendant(
+          of: find.byType(ListView),
+          matching: find.text('Reflection'),
+        );
+        await tester.tap(noteCardTitle.first);
         await tester.pumpAndSettle();
 
         expect(find.text('Write'), findsOneWidget);

@@ -411,7 +411,8 @@ void main() {
             onRegisterPendingSaveFlush: (handler) => registeredFlush = handler,
           ),
         );
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
         expect(find.text('This note is no longer available.'), findsOneWidget);
         expect(find.text('Dirty edit before navigation'), findsOneWidget);
 
@@ -424,7 +425,8 @@ void main() {
             onRegisterPendingSaveFlush: (handler) => registeredFlush = handler,
           ),
         );
-        await tester.pumpAndSettle();
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 50));
         expect(find.text('Restore note from Trash before editing'),
             findsOneWidget);
         expect(find.text('Dirty edit before navigation'), findsOneWidget);
