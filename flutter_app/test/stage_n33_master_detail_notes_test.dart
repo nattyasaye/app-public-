@@ -385,7 +385,7 @@ void main() {
         await tester.tap(backlinkAlpha);
         await tester.pumpAndSettle();
         expect(
-          find.textContaining(
+          find.text(
             'Initial architecture notes.',
             findRichText: true,
           ),
