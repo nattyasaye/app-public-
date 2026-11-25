@@ -429,7 +429,7 @@ void main() {
         await tester.binding.setSurfaceSize(const Size(360, 760));
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: NotesView(controller: controller),
           ),
         );

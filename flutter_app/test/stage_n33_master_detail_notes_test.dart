@@ -156,7 +156,7 @@ Widget _wrapNotesApp({
   ({String noteId, int nonce})? requestedNoteFocus,
 }) {
   return MaterialApp(
-    theme: theme ?? DaywellTheme.light(),
+    theme: theme ?? DaywellTheme.light,
     home: MediaQuery(
       data: MediaQueryData(
         size: surfaceSize,
@@ -463,7 +463,7 @@ void main() {
           _wrapNotesApp(
             controller: controller,
             surfaceSize: size,
-            theme: DaywellTheme.dark(),
+            theme: DaywellTheme.dark,
             textScale: 1.6,
           ),
         );

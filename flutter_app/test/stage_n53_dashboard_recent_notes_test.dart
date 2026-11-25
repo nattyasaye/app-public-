@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -130,47 +131,47 @@ void main() {
         final t4 = DateTime.utc(2026, 3, 22, 9);
 
         await tester.runAsync(() async {
-          await appState.notesRepository.saveNote(
-            NoteEntity(
-              id: 'n-old-pin',
-              title: 'Older Pinned Reference',
-              content: 'Should sit after newer notes',
-              category: 'work',
-              isPinned: true,
-              createdAt: t1,
-              updatedAt: t1,
-            ),
-          );
-          await appState.notesRepository.saveNote(
-            NoteEntity(
-              id: 'n-fresh',
-              title: 'Fresh Strategy Note',
-              content: '## Summary\nAlign **Milestones** for release.',
-              category: 'study',
-              createdAt: t2,
-              updatedAt: t3,
-            ),
-          );
-          await appState.notesRepository.saveNote(
-            NoteEntity(
-              id: 'n-arch',
-              title: 'Archived Quarterly Note',
-              content: 'Archived body',
-              isArchived: true,
-              createdAt: t1,
-              updatedAt: t4,
-            ),
-          );
-          await appState.notesRepository.saveNote(
-            NoteEntity(
-              id: 'n-trash',
-              title: 'Trashed Scratch Note',
-              content: 'Deleted body',
-              isTrashed: true,
-              createdAt: t1,
-              updatedAt: t4,
-            ),
-          );
+          await db.into(db.notes).insert(
+                NotesCompanion.insert(
+                  id: 'n-old-pin',
+                  title: 'Older Pinned Reference',
+                  content: 'Should sit after newer notes',
+                  category: const Value('work'),
+                  isPinned: const Value(true),
+                  createdAt: t1,
+                  updatedAt: t1,
+                ),
+              );
+          await db.into(db.notes).insert(
+                NotesCompanion.insert(
+                  id: 'n-fresh',
+                  title: 'Fresh Strategy Note',
+                  content: '## Summary\nAlign **Milestones** for release.',
+                  category: const Value('study'),
+                  createdAt: t2,
+                  updatedAt: t3,
+                ),
+              );
+          await db.into(db.notes).insert(
+                NotesCompanion.insert(
+                  id: 'n-arch',
+                  title: 'Archived Quarterly Note',
+                  content: 'Archived body',
+                  isArchived: const Value(true),
+                  createdAt: t1,
+                  updatedAt: t4,
+                ),
+              );
+          await db.into(db.notes).insert(
+                NotesCompanion.insert(
+                  id: 'n-trash',
+                  title: 'Trashed Scratch Note',
+                  content: 'Deleted body',
+                  isTrashed: const Value(true),
+                  createdAt: t1,
+                  updatedAt: t4,
+                ),
+              );
           await appState.notesController.loadNotes();
         });
 
@@ -179,7 +180,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: Scaffold(
               body: SingleChildScrollView(
                 child: DashboardNotesSection(
@@ -224,15 +225,9 @@ void main() {
         // Updating Older Pinned Reference content/title updates Dashboard live.
         await tester.runAsync(() async {
           await appState.notesController.updateNote(
-            NoteEntity(
-              id: 'n-old-pin',
-              title: 'Updated Pinned Reference',
-              content: 'Now freshly revised',
-              category: 'work',
-              isPinned: true,
-              createdAt: t1,
-              updatedAt: DateTime.utc(2026, 3, 25, 9),
-            ),
+            id: 'n-old-pin',
+            title: 'Updated Pinned Reference',
+            content: 'Now freshly revised',
           );
         });
         await tester.pumpAndSettle();
@@ -245,8 +240,8 @@ void main() {
 
         // Trashing both active notes leaves only Archive-aware empty state.
         await tester.runAsync(() async {
-          await appState.notesController.trashNote('n-old-pin');
-          await appState.notesController.trashNote('n-fresh');
+          await appState.notesController.deleteNote('n-old-pin');
+          await appState.notesController.deleteNote('n-fresh');
         });
         await tester.pumpAndSettle();
 
@@ -274,15 +269,15 @@ void main() {
         final narrowState = AppStateManager(db: dbNarrow);
         await tester.runAsync(() async {
           await narrowState.initialize();
-          await narrowState.notesRepository.saveNote(
-            NoteEntity(
-              id: 'n-target',
-              title: 'Mobile Focus Note',
-              content: 'Opened directly from Dashboard on phone width.',
-              createdAt: DateTime.utc(2026, 3, 18, 9),
-              updatedAt: DateTime.utc(2026, 3, 19, 9),
-            ),
-          );
+          await dbNarrow.into(dbNarrow.notes).insert(
+                NotesCompanion.insert(
+                  id: 'n-target',
+                  title: 'Mobile Focus Note',
+                  content: 'Opened directly from Dashboard on phone width.',
+                  createdAt: DateTime.utc(2026, 3, 18, 9),
+                  updatedAt: DateTime.utc(2026, 3, 19, 9),
+                ),
+              );
           await narrowState.notesController.loadNotes();
         });
         addTearDown(() => narrowState.dispose());
@@ -309,15 +304,15 @@ void main() {
         final wideState = AppStateManager(db: dbWide);
         await tester.runAsync(() async {
           await wideState.initialize();
-          await wideState.notesRepository.saveNote(
-            NoteEntity(
-              id: 'n-wide',
-              title: 'Master Detail Note',
-              content: 'Detail pane body loaded from Dashboard.',
-              createdAt: DateTime.utc(2026, 3, 18, 9),
-              updatedAt: DateTime.utc(2026, 3, 20, 9),
-            ),
-          );
+          await dbWide.into(dbWide.notes).insert(
+                NotesCompanion.insert(
+                  id: 'n-wide',
+                  title: 'Master Detail Note',
+                  content: 'Detail pane body loaded from Dashboard.',
+                  createdAt: DateTime.utc(2026, 3, 18, 9),
+                  updatedAt: DateTime.utc(2026, 3, 20, 9),
+                ),
+              );
           await wideState.notesController.loadNotes();
         });
         addTearDown(() => wideState.dispose());
@@ -350,18 +345,18 @@ void main() {
         await tester.runAsync(() async {
           await appState.initialize();
           for (var i = 1; i <= 5; i++) {
-            await appState.notesRepository.saveNote(
-              NoteEntity(
-                id: 'n-$i',
-                title: 'Very Long Strategy And Operations Note Title #$i',
-                content:
-                    'Multi-word Markdown preview that truncates cleanly under 2.0x accessibility scale.',
-                category: 'work_projects',
-                isPinned: i == 1,
-                createdAt: DateTime.utc(2026, 3, i, 9),
-                updatedAt: DateTime.utc(2026, 3, i, 9),
-              ),
-            );
+            await db.into(db.notes).insert(
+                  NotesCompanion.insert(
+                    id: 'n-$i',
+                    title: 'Very Long Strategy And Operations Note Title #$i',
+                    content:
+                        'Multi-word Markdown preview that truncates cleanly under 2.0x accessibility scale.',
+                    category: const Value('work_projects'),
+                    isPinned: Value(i == 1),
+                    createdAt: DateTime.utc(2026, 3, i, 9),
+                    updatedAt: DateTime.utc(2026, 3, i, 9),
+                  ),
+                );
           }
           await appState.notesController.loadNotes();
         });
@@ -369,7 +364,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: MediaQuery(
               data: const MediaQueryData(
                 size: Size(320, 720),

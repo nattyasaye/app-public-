@@ -99,8 +99,8 @@ describe('STAGE N3.1 — FLUTTER NOTES UI DESIGN-SYSTEM COMPLIANCE', () => {
 
   it('5. Stage N3.1 Flutter compliance widget test suite covers theme modes, viewports, text scaling, and primitives', () => {
     const flutterTestSrc = readRepoFile(flutterTestPath);
-    assert.ok(flutterTestSrc.includes('DaywellTheme.light()'));
-    assert.ok(flutterTestSrc.includes('DaywellTheme.dark()'));
+    assert.ok(flutterTestSrc.includes('DaywellTheme.light'));
+    assert.ok(flutterTestSrc.includes('DaywellTheme.dark'));
     assert.ok(flutterTestSrc.includes('TextScaler.linear(1.6)'));
     assert.ok(flutterTestSrc.includes('Size(320, 720)'));
     assert.ok(flutterTestSrc.includes('Size(960, 800)'));

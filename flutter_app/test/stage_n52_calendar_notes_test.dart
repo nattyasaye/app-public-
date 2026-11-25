@@ -17,7 +17,6 @@ import 'package:personal_management_app/data/repositories/tasks_repository.dart'
 import 'package:personal_management_app/domain/calendar/calendar_models.dart';
 import 'package:personal_management_app/domain/notes/calendar_notes_helpers.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
-import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/ui/screens/calendar_view.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
 
@@ -78,6 +77,7 @@ void main() {
           NoteEntity(
             id: 'n-trash',
             title: 'Discarded Draft',
+            content: '',
             linkedModule: NoteEntity.calendarLinkModule,
             linkedId: 'evt-1',
             isTrashed: true,
@@ -85,12 +85,14 @@ void main() {
           NoteEntity(
             id: 'n-task',
             title: 'Task Note',
+            content: '',
             linkedModule: NoteEntity.taskLinkModule,
             linkedId: 'task-42',
           ),
           NoteEntity(
             id: 'n-free',
             title: 'Standalone Note',
+            content: '',
           ),
         ];
 
@@ -167,7 +169,8 @@ void main() {
           dateIso: '2026-03-20',
           startTime: '10:00',
         );
-        await calendarCtrl.addEvent(event);
+        await calendarRepo.createEvent(event);
+        await calendarCtrl.loadAll();
 
         final created = await notesCtrl.createNote(
           id: 'note-summit',
@@ -246,8 +249,10 @@ void main() {
           ],
         });
 
-        final restoreRes = await coordinator.importCanonicalJson(payload);
-        expect(restoreRes.isSuccess, isTrue);
+        final report = await coordinator.importSnapshotDetailed(
+          jsonDecode(payload) as Map<String, dynamic>,
+        );
+        expect(report.restoredRecordCounts['notes'], 1);
 
         final notesRepo = DriftNotesRepository(db);
         final restored = await notesRepo.getNoteById('note-cal-backup');
@@ -281,7 +286,7 @@ void main() {
           dateIso: targetDate.toIsoString(),
           startTime: '11:00',
         );
-        await calendarCtrl.addEvent(ev);
+        await calendarRepo.createEvent(ev);
         await calendarCtrl.loadAll();
         await notesCtrl.loadNotes();
 
@@ -289,7 +294,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: CalendarView(
               calendarController: calendarCtrl,
               notesController: notesCtrl,
@@ -329,7 +334,7 @@ void main() {
         CalendarEventEntity? openedEvent;
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: MediaQuery(
               data: const MediaQueryData(size: Size(1000, 800)),
               child: NotesView(
@@ -387,7 +392,8 @@ void main() {
           title: 'Budget Alignment Call',
           dateIso: '2026-03-22',
         );
-        await calendarCtrl.addEvent(ev);
+        await calendarRepo.createEvent(ev);
+        await calendarCtrl.loadAll();
 
         final taskNote = await notesCtrl.createNote(
           id: 'note-task-guard',
@@ -450,13 +456,15 @@ void main() {
         await notesCtrl.createNote(
           id: 'note-cal-trashed',
           title: 'Discarded Event Draft',
+          content: '',
           linkedModule: NoteEntity.calendarLinkModule,
           linkedId: ev.id,
-          isTrashed: true,
         );
+        await notesCtrl.deleteNote('note-cal-trashed');
         await notesCtrl.createNote(
           id: 'note-cal-orphan',
           title: 'Historical Missing Event Note',
+          content: '',
           linkedModule: NoteEntity.calendarLinkModule,
           linkedId: 'evt-deleted-earlier',
         );
@@ -465,6 +473,7 @@ void main() {
         await notesCtrl.createNote(
           id: 'note-colliding-task',
           title: 'Untouched Task Note',
+          content: '',
           linkedModule: NoteEntity.taskLinkModule,
           linkedId: 'evt-shared-id',
         );
@@ -520,6 +529,7 @@ void main() {
           NoteEntity(
             id: 'note-bk-cal',
             title: 'Offsite Brief',
+            content: '',
             projectId: 'proj-missing-or-untracked',
             tags: const ['board'],
             linkedModule: NoteEntity.calendarLinkModule,
@@ -530,6 +540,7 @@ void main() {
           NoteEntity(
             id: 'note-bk-orphan-cal',
             title: 'Orphan Event Memo',
+            content: '',
             linkedModule: NoteEntity.calendarLinkModule,
             linkedId: 'evt-historical-missing',
           ),
@@ -538,6 +549,7 @@ void main() {
           NoteEntity(
             id: 'note-bk-task',
             title: 'Task Memo',
+            content: '',
             linkedModule: NoteEntity.taskLinkModule,
             linkedId: 'task-bk-1',
           ),
@@ -604,8 +616,8 @@ void main() {
         await db.ensureInitialized();
         addTearDown(db.close);
 
-        final calendarCtrl =
-            CalendarController(repository: DriftCalendarRepository(db));
+        final calendarRepo = DriftCalendarRepository(db);
+        final calendarCtrl = CalendarController(repository: calendarRepo);
         final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
         final notesCtrl = NotesController(repository: DriftNotesRepository(db));
         addTearDown(() {
@@ -621,7 +633,7 @@ void main() {
           title: 'Quarterly Sync',
           dateIso: targetDate.toIsoString(),
         );
-        await calendarCtrl.addEvent(ev);
+        await calendarRepo.createEvent(ev);
         await tasksCtrl.createTask(
           id: 'task-confirm-1',
           title: 'Prepare Budget Brief',
@@ -629,6 +641,7 @@ void main() {
         await notesCtrl.createNote(
           id: 'note-task-linked-ui',
           title: 'Budget Figures',
+          content: '',
           projectId: 'proj-keep',
           linkedModule: NoteEntity.taskLinkModule,
           linkedId: 'task-confirm-1',
@@ -639,7 +652,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: CalendarView(
               calendarController: calendarCtrl,
               tasksController: tasksCtrl,

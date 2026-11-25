@@ -73,6 +73,39 @@ class _InMemoryNotesRepository implements INotesRepository {
       return true;
     }).toList();
   }
+
+  @override
+  Future<List<NoteEntity>> getNotesByLink({
+    required String linkedModule,
+    required String linkedId,
+    bool includeArchived = true,
+    bool includeTrashed = false,
+  }) async {
+    return store.values
+        .where(
+          (n) =>
+              n.linkedModule == linkedModule &&
+              n.linkedId == linkedId &&
+              (includeArchived || !n.isArchived) &&
+              (includeTrashed || !n.isTrashed),
+        )
+        .toList();
+  }
+
+  @override
+  Future<int> clearLinksForTarget({
+    required String linkedModule,
+    required String linkedId,
+  }) async {
+    return 0;
+  }
+
+  @override
+  Future<List<NoteEntity>> searchNotes(String query) async {
+    return store.values
+        .where((n) => !n.isTrashed && n.matchesQuery(query))
+        .toList();
+  }
 }
 
 void main() {

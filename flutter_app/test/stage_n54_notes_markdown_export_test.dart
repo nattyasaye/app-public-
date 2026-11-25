@@ -8,8 +8,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
+import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/domain/notes/note_markdown_export.dart';
-import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/services/export/note_markdown_io_service.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
@@ -197,7 +197,7 @@ const cents = 4200;
           _makeNote(id: 'n-fb', title: 'Fallback Test', content: 'Body line'),
           tempDirProvider: () async => tempDir,
           shareFileOverride: (XFile _, String __) async {
-            throw const MissingPluginException('No platform share plugin');
+            throw MissingPluginException('No platform share plugin');
           },
           shareTextOverride: (String text, String subject) async {
             fallbackText = text;
@@ -217,16 +217,17 @@ const cents = 4200;
 
         final db = AppDatabase(NativeDatabase.memory());
         final appState = AppStateManager(db: db);
+        final notesRepo = DriftNotesRepository(db);
         await tester.runAsync(() async {
           await appState.initialize();
-          await appState.notesRepository.saveNote(
+          await notesRepo.createNote(
             _makeNote(
               id: 'n-live',
               title: 'Initial Export Title',
               content: '- [ ] Initial task',
             ),
           );
-          await appState.notesRepository.saveNote(
+          await notesRepo.createNote(
             _makeNote(
               id: 'n-trash',
               title: 'Trashed Hidden Note',
@@ -252,7 +253,7 @@ const cents = 4200;
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: NotesView(state: appState),
           ),
         );

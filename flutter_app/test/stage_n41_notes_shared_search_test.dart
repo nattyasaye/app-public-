@@ -112,7 +112,7 @@ Widget _wrapNotesApp({
       onRegisterPendingSaveFlush,
 }) {
   return MaterialApp(
-    theme: DaywellTheme.light(),
+    theme: DaywellTheme.light,
     home: MediaQuery(
       data: MediaQueryData(size: surfaceSize),
       child: NotesView(

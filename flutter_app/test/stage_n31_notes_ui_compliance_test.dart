@@ -3,9 +3,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
 import 'package:personal_management_app/application/notes/notes_state.dart';
 import 'package:personal_management_app/application/tasks/tasks_controller.dart';
-import 'package:personal_management_app/application/tasks/tasks_state.dart';
+import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
+import 'package:personal_management_app/domain/notes/note_contracts.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
+import 'package:personal_management_app/domain/tasks/task_contracts.dart';
 import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
 import 'package:personal_management_app/ui/widgets/notes/note_markdown_preview.dart';
@@ -25,15 +27,8 @@ class _InMemoryNotesRepository implements INotesRepository {
   }
 
   @override
-  Future<void> deleteNote(String id, {DateTime? now}) async {
-    final existing = store[id];
-    if (existing != null) {
-      store[id] = existing.copyWith(
-        isTrashed: true,
-        isPinned: false,
-        updatedAt: now ?? DateTime.utc(2026, 2, 1),
-      );
-    }
+  Future<void> deleteNote(String id) async {
+    store.remove(id);
   }
 
   @override
@@ -41,10 +36,20 @@ class _InMemoryNotesRepository implements INotesRepository {
 
   @override
   Future<List<NoteEntity>> getNotes({
+    String? category,
+    String? projectId,
+    String? goalId,
+    String? linkedModule,
+    String? linkedId,
     bool includeArchived = false,
     bool includeTrashed = false,
   }) async {
     return store.values.where((n) {
+      if (category != null &&
+          category != 'all' &&
+          n.category != NoteEntity.normalizeCategory(category)) {
+        return false;
+      }
       if (!includeTrashed && n.isTrashed) return false;
       if (!includeArchived && n.isArchived) return false;
       return true;
@@ -52,24 +57,36 @@ class _InMemoryNotesRepository implements INotesRepository {
   }
 
   @override
-  Future<void> permanentlyDeleteNote(String id) async {
-    store.remove(id);
+  Future<List<NoteEntity>> getNotesByLink({
+    required String linkedModule,
+    required String linkedId,
+    bool includeArchived = true,
+    bool includeTrashed = false,
+  }) async {
+    return store.values
+        .where(
+          (n) =>
+              n.linkedModule == linkedModule &&
+              n.linkedId == linkedId &&
+              (includeArchived || !n.isArchived) &&
+              (includeTrashed || !n.isTrashed),
+        )
+        .toList();
   }
 
   @override
-  Future<void> restoreNote(String id, {DateTime? now}) async {
-    final existing = store[id];
-    if (existing != null) {
-      store[id] = existing.copyWith(
-        isTrashed: false,
-        updatedAt: now ?? DateTime.utc(2026, 2, 1),
-      );
-    }
+  Future<int> clearLinksForTarget({
+    required String linkedModule,
+    required String linkedId,
+  }) async {
+    return 0;
   }
 
   @override
   Future<List<NoteEntity>> searchNotes(String query) async {
-    return store.values.where((n) => n.matchesQuery(query)).toList();
+    return store.values
+        .where((n) => !n.isTrashed && n.matchesQuery(query))
+        .toList();
   }
 
   @override
@@ -94,14 +111,13 @@ class _InMemoryTasksRepository implements ITasksRepository {
   }
 
   @override
-  Future<List<MilestoneEntity>> getMilestones({String? projectId}) async =>
-      const <MilestoneEntity>[];
-
-  @override
-  Future<List<TaskEntity>> getTasks({bool includeArchived = false}) async {
-    return includeArchived
-        ? List<TaskEntity>.from(store)
-        : store.where((t) => !t.isArchived).toList();
+  Future<List<TaskEntity>> getTasks({
+    String? status,
+    String? priority,
+    String? projectId,
+    bool? isOverdue,
+  }) async {
+    return List<TaskEntity>.from(store);
   }
 
   @override
@@ -113,14 +129,109 @@ class _InMemoryTasksRepository implements ITasksRepository {
   }
 
   @override
-  Future<void> saveMilestone(MilestoneEntity milestone) async {}
-
-  @override
   Future<TaskEntity> updateTask(TaskEntity task) async {
     final idx = store.indexWhere((t) => t.id == task.id);
     if (idx >= 0) store[idx] = task;
     return task;
   }
+
+  @override
+  Future<void> updateTaskStatus(String id, String newStatus) async {}
+
+  @override
+  Future<void> rescheduleTask(String id, CalendarDate? newDueDate) async {}
+
+  @override
+  Future<void> postponeTaskDays(String id, int days) async {}
+
+  @override
+  Future<List<TaskEntity>> getTasksForProject(String projectId) async =>
+      const <TaskEntity>[];
+
+  @override
+  Future<List<DailyPlanningEntryEntity>> getDailyPlanningEntries({
+    CalendarDate? planDate,
+    String? taskId,
+  }) async =>
+      const <DailyPlanningEntryEntity>[];
+
+  @override
+  Future<DailyPlanningEntryEntity> upsertDailyPlanningEntry(
+    DailyPlanningEntryEntity entry,
+  ) async =>
+      entry;
+
+  @override
+  Future<void> deleteDailyPlanningEntry(String id) async {}
+
+  @override
+  Future<void> deleteDailyPlanningEntriesForTask(String taskId) async {}
+
+  @override
+  Future<List<TaskReminderEntity>> getTaskReminders() async =>
+      const <TaskReminderEntity>[];
+
+  @override
+  Future<TaskReminderEntity?> getTaskReminderForTask(String taskId) async =>
+      null;
+
+  @override
+  Future<TaskReminderEntity> upsertTaskReminder(
+    TaskReminderEntity reminder,
+  ) async =>
+      reminder;
+
+  @override
+  Future<void> deleteTaskReminderForTask(String taskId) async {}
+
+  @override
+  Future<List<ProjectEntity>> getProjects({String? status}) async =>
+      const <ProjectEntity>[];
+
+  @override
+  Future<ProjectEntity?> getProjectById(String id) async => null;
+
+  @override
+  Future<ProjectEntity> createProject(ProjectEntity project) async => project;
+
+  @override
+  Future<ProjectEntity> updateProject(ProjectEntity project) async => project;
+
+  @override
+  Future<void> deleteProject(String id) async {}
+
+  @override
+  Future<List<MilestoneEntity>> getAllMilestones() async =>
+      const <MilestoneEntity>[];
+
+  @override
+  Future<List<MilestoneEntity>> getMilestonesForProject(
+    String projectId,
+  ) async =>
+      const <MilestoneEntity>[];
+
+  @override
+  Future<MilestoneEntity> createMilestone(MilestoneEntity milestone) async =>
+      milestone;
+
+  @override
+  Future<MilestoneEntity> updateMilestone(MilestoneEntity milestone) async =>
+      milestone;
+
+  @override
+  Future<void> toggleMilestone(String milestoneId, bool isCompleted) async {}
+
+  @override
+  Future<void> deleteMilestone(String milestoneId) async {}
+
+  @override
+  Future<
+      ({
+        ProjectEntity project,
+        List<TaskEntity> tasks,
+        List<MilestoneEntity> milestones,
+        int progressPercentage,
+      })?> getProjectWithProgress(String projectId) async => null;
 }
 
 List<NoteEntity> _sampleNotes() {
@@ -198,7 +309,7 @@ void main() {
         await tester.binding.setSurfaceSize(const Size(320, 720));
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: MediaQuery(
               data: const MediaQueryData(
                 size: Size(320, 720),
@@ -231,7 +342,7 @@ void main() {
         await tester.binding.setSurfaceSize(const Size(960, 800));
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.dark(),
+            theme: DaywellTheme.dark,
             home: NotesView(
               controller: controller,
               tasksController: tasksController,
@@ -274,7 +385,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: NotesView(controller: controller),
           ),
         );
@@ -327,7 +438,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.dark(),
+            theme: DaywellTheme.dark,
             home: NotesView(controller: controller),
           ),
         );

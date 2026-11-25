@@ -166,7 +166,7 @@ describe('STAGE N3.3 — RESPONSIVE MASTER-DETAIL NOTES EXPERIENCE', () => {
         (dartTest.includes('TextScaler.linear(textScale)') &&
           dartTest.includes('textScale: 1.6'))
     );
-    assert.ok(dartTest.includes('DaywellTheme.dark()'));
+    assert.ok(dartTest.includes('DaywellTheme.dark'));
     assert.ok(dartTest.includes('requestedNoteFocus'));
   });
 });

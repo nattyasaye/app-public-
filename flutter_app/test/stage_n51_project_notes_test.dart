@@ -11,7 +11,6 @@ import 'package:personal_management_app/data/database/database_persistence_coord
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/data/repositories/projects_repository.dart';
 import 'package:personal_management_app/data/repositories/search_repository.dart';
-import 'package:personal_management_app/domain/notes/note_helpers.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/domain/notes/project_notes_helpers.dart';
 import 'package:personal_management_app/domain/tasks/task_models.dart';
@@ -64,12 +63,14 @@ void main() {
           NoteEntity(
             id: 'n-trash',
             title: 'Deleted Quote',
+            content: '',
             projectId: 'proj-1',
             isTrashed: true,
           ),
           NoteEntity(
             id: 'n-other',
             title: 'Other Note',
+            content: '',
             projectId: 'proj-2',
           ),
         ];
@@ -234,8 +235,10 @@ void main() {
           ],
         });
 
-        final restoreRes = await coordinator.importCanonicalJson(payload);
-        expect(restoreRes.isSuccess, isTrue);
+        final report = await coordinator.importSnapshotDetailed(
+          jsonDecode(payload) as Map<String, dynamic>,
+        );
+        expect(report.restoredRecordCounts['notes'], 2);
 
         final notesRepo = DriftNotesRepository(db);
         final validNote = await notesRepo.getNoteById('note-valid-proj');
@@ -272,7 +275,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: Scaffold(
               body: SingleChildScrollView(
                 child: ProjectNotesWidget(
@@ -310,7 +313,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: MediaQuery(
               data: const MediaQueryData(size: Size(1000, 800)),
               child: NotesView(
@@ -327,7 +330,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: ProjectDetailScreen(
               projectId: project.id,
               projectsController: projectsCtrl,

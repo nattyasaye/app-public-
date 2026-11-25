@@ -1,24 +1,26 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:daywell/application/calendar/calendar_controller.dart';
-import 'package:daywell/application/notes/notes_controller.dart';
-import 'package:daywell/application/projects/projects_controller.dart';
-import 'package:daywell/application/tasks/tasks_controller.dart';
-import 'package:daywell/core/date/shared_date.dart';
-import 'package:daywell/core/theme/daywell_theme.dart';
-import 'package:daywell/data/database/app_database.dart';
-import 'package:daywell/data/repositories/calendar_repository.dart';
-import 'package:daywell/data/repositories/notes_repository.dart';
-import 'package:daywell/data/repositories/projects_repository.dart';
-import 'package:daywell/data/repositories/tasks_repository.dart';
-import 'package:daywell/domain/calendar/calendar_models.dart';
-import 'package:daywell/domain/notes/note_models.dart';
-import 'package:daywell/ui/screens/calendar_view.dart';
-import 'package:daywell/ui/screens/notes_view.dart';
-import 'package:daywell/ui/screens/tasks_view.dart';
+import 'package:personal_management_app/application/calendar/calendar_controller.dart';
+import 'package:personal_management_app/application/notes/notes_controller.dart';
+import 'package:personal_management_app/application/projects/projects_controller.dart';
+import 'package:personal_management_app/application/tasks/tasks_controller.dart';
+import 'package:personal_management_app/core/date/shared_date.dart';
+import 'package:personal_management_app/core/theme/daywell_theme.dart';
+import 'package:personal_management_app/data/database/app_database.dart';
+import 'package:personal_management_app/data/repositories/calendar_repository.dart';
+import 'package:personal_management_app/data/repositories/notes_repository.dart';
+import 'package:personal_management_app/data/repositories/projects_repository.dart';
+import 'package:personal_management_app/data/repositories/tasks_repository.dart';
+import 'package:personal_management_app/ui/screens/calendar_view.dart';
+import 'package:personal_management_app/ui/screens/notes_view.dart';
+import 'package:personal_management_app/ui/screens/tasks_view.dart';
+
+import 'support/sqlite_test_helper.dart';
 
 void main() {
+  setUpAll(configureSqliteForHostTests);
+
   group('Stage N5.2.2 — Cross-Module Note Relationship Protection', () {
     test(
       '1. NotesController blocks silent cross-module & Calendar link overwrites by default while keeping Stage 8 Task->Task reassignment and strict allowReassign=false',
@@ -72,6 +74,7 @@ void main() {
         final taskNote = await notesCtrl.createNote(
           id: 'n-task-existing',
           title: 'Task Checklist',
+          content: '',
           linkedModule: NoteEntity.taskLinkModule,
           linkedId: 'task-a',
         );
@@ -127,8 +130,8 @@ void main() {
         await db.ensureInitialized();
         addTearDown(db.close);
 
-        final calendarCtrl =
-            CalendarController(repository: DriftCalendarRepository(db));
+        final calendarRepo = DriftCalendarRepository(db);
+        final calendarCtrl = CalendarController(repository: calendarRepo);
         final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
         final projectsCtrl =
             ProjectsController(repository: DriftProjectsRepository(db));
@@ -140,7 +143,7 @@ void main() {
           notesCtrl.dispose();
         });
 
-        await calendarCtrl.addEvent(
+        await calendarRepo.createEvent(
           CalendarEventEntity(
             id: 'evt-review-1',
             title: 'Architecture Review',
@@ -167,12 +170,14 @@ void main() {
         await notesCtrl.createNote(
           id: 'note-cal-missing',
           title: 'Orphan Event Note',
+          content: '',
           linkedModule: NoteEntity.calendarLinkModule,
           linkedId: 'evt-missing-999',
         );
         await notesCtrl.createNote(
           id: 'note-task-other',
           title: 'Other Task Note',
+          content: '',
           linkedModule: NoteEntity.taskLinkModule,
           linkedId: 'task-other',
         );
@@ -183,7 +188,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: TasksView(
               controller: tasksCtrl,
               projectsController: projectsCtrl,
@@ -279,8 +284,8 @@ void main() {
         await db.ensureInitialized();
         addTearDown(db.close);
 
-        final calendarCtrl =
-            CalendarController(repository: DriftCalendarRepository(db));
+        final calendarRepo = DriftCalendarRepository(db);
+        final calendarCtrl = CalendarController(repository: calendarRepo);
         final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
         final projectsCtrl =
             ProjectsController(repository: DriftProjectsRepository(db));
@@ -292,7 +297,7 @@ void main() {
           notesCtrl.dispose();
         });
 
-        await calendarCtrl.addEvent(
+        await calendarRepo.createEvent(
           CalendarEventEntity(
             id: 'evt-undo-guard',
             title: 'Sprint Demo',
@@ -306,6 +311,7 @@ void main() {
         await notesCtrl.createNote(
           id: 'note-undo-1',
           title: 'Demo Outline',
+          content: '',
           linkedModule: NoteEntity.taskLinkModule,
           linkedId: 'task-undo-1',
         );
@@ -316,7 +322,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: TasksView(
               controller: tasksCtrl,
               projectsController: projectsCtrl,
@@ -362,8 +368,8 @@ void main() {
         await db.ensureInitialized();
         addTearDown(db.close);
 
-        final calendarCtrl =
-            CalendarController(repository: DriftCalendarRepository(db));
+        final calendarRepo = DriftCalendarRepository(db);
+        final calendarCtrl = CalendarController(repository: calendarRepo);
         final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
         final notesCtrl = NotesController(repository: DriftNotesRepository(db));
         addTearDown(() {
@@ -374,7 +380,7 @@ void main() {
 
         final targetDate = CalendarDate(year: 2026, month: 3, day: 25);
         calendarCtrl.setSelectedCalendarDate(targetDate);
-        await calendarCtrl.addEvent(
+        await calendarRepo.createEvent(
           CalendarEventEntity(
             id: 'evt-cal-undo',
             title: 'Design Critique',
@@ -385,6 +391,7 @@ void main() {
         await notesCtrl.createNote(
           id: 'note-cal-undo',
           title: 'Critique Feedback',
+          content: '',
           linkedModule: NoteEntity.calendarLinkModule,
           linkedId: 'evt-cal-undo',
         );
@@ -394,7 +401,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: CalendarView(
               calendarController: calendarCtrl,
               tasksController: tasksCtrl,
@@ -436,8 +443,8 @@ void main() {
         await db.ensureInitialized();
         addTearDown(db.close);
 
-        final calendarCtrl =
-            CalendarController(repository: DriftCalendarRepository(db));
+        final calendarRepo = DriftCalendarRepository(db);
+        final calendarCtrl = CalendarController(repository: calendarRepo);
         final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
         final projectsCtrl =
             ProjectsController(repository: DriftProjectsRepository(db));
@@ -449,14 +456,14 @@ void main() {
           notesCtrl.dispose();
         });
 
-        await calendarCtrl.addEvent(
+        await calendarRepo.createEvent(
           CalendarEventEntity(
             id: 'evt-one',
             title: 'First Meeting',
             dateIso: '2026-03-26',
           ),
         );
-        await calendarCtrl.addEvent(
+        await calendarRepo.createEvent(
           CalendarEventEntity(
             id: 'evt-two',
             title: 'Second Meeting',
@@ -466,6 +473,7 @@ void main() {
         await notesCtrl.createNote(
           id: 'note-editor-1',
           title: 'Meeting Brief',
+          content: '',
           linkedModule: NoteEntity.calendarLinkModule,
           linkedId: 'evt-one',
         );
@@ -476,7 +484,7 @@ void main() {
 
         await tester.pumpWidget(
           MaterialApp(
-            theme: DaywellTheme.light(),
+            theme: DaywellTheme.light,
             home: NotesView(
               controller: notesCtrl,
               tasksController: tasksCtrl,
