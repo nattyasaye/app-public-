@@ -48,28 +48,37 @@ class _RecordingNotificationService implements INotificationService {
 
 Future<void> disposeTestState(
   WidgetTester tester,
-  AppStateManager state,
-) async {
+  AppStateManager state, {
+  Directory? tempDir,
+}) async {
   await tester.pumpWidget(const SizedBox.shrink());
-  await tester.pump(const Duration(milliseconds: 20));
-  var disposed = false;
-  final disposeFuture = state.disposeAsync().whenComplete(() {
-    disposed = true;
-  });
-  final stopwatch = Stopwatch()..start();
-  while (!disposed && stopwatch.elapsed < const Duration(seconds: 10)) {
-    await tester.pump(const Duration(milliseconds: 20));
+  await tester.pump();
+  if (!state.isDisposed) {
     await tester.runAsync(
-      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      () => state.disposeAsync().timeout(const Duration(seconds: 10)),
     );
   }
-  if (disposed) {
-    await disposeFuture;
-  } else {
-    await tester.runAsync(
-      () => disposeFuture.timeout(const Duration(seconds: 5)),
-    );
+  if (tempDir != null && tempDir.existsSync()) {
+    tempDir.deleteSync(recursive: true);
   }
+}
+
+({AppStateManager manager, Directory tempDir}) _createIsolatedManager(
+  AppDatabase db, {
+  _RecordingNotificationService? recorder,
+}) {
+  final tempDir = Directory.systemTemp.createTempSync('daywell_s416_state_');
+  final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
+  final supportDir = Directory(p.join(tempDir.path, 'support'))..createSync();
+  final manager = AppStateManager(
+    db: db,
+    recoveryExporter: RawDatabaseRecoveryExporter(
+      documentsDirProvider: () async => docsDir,
+      supportDirProvider: () async => supportDir,
+    ),
+    notificationService: recorder ?? _RecordingNotificationService(),
+  );
+  return (manager: manager, tempDir: tempDir);
 }
 
 void main() {
@@ -80,11 +89,18 @@ void main() {
         () async {
       final db = AppDatabase(NativeDatabase.memory());
       final recorder = _RecordingNotificationService();
-      final manager = AppStateManager(
-        db: db,
-        notificationService: recorder,
-      );
-      await manager.initialize();
+      final isolated = _createIsolatedManager(db, recorder: recorder);
+      final manager = isolated.manager;
+      final tempDir = isolated.tempDir;
+      addTearDown(() async {
+        if (!manager.isDisposed) {
+          await manager.disposeAsync().timeout(const Duration(seconds: 10));
+        }
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+      await manager.initialize().timeout(const Duration(seconds: 15));
 
       final today = CalendarDate.today();
       await manager.financeController.addCommitment(
@@ -124,19 +140,26 @@ void main() {
         isTrue,
       );
 
-      await manager.disposeAsync();
+      await manager.disposeAsync().timeout(const Duration(seconds: 10));
     });
 
     testWidgets(
       'QuickCaptureDialog hands off expense text to Finance Composer',
       (tester) async {
         final db = AppDatabase(NativeDatabase.memory());
-        final manager = AppStateManager(
-          db: db,
-          notificationService: _RecordingNotificationService(),
+        final isolated = _createIsolatedManager(db);
+        final manager = isolated.manager;
+        final tempDir = isolated.tempDir;
+        await tester.runAsync(
+          () => manager.initialize().timeout(const Duration(seconds: 15)),
         );
-        await tester.runAsync(() => manager.initialize());
-        addTearDown(() => disposeTestState(tester, manager));
+        addTearDown(() => disposeTestState(tester, manager, tempDir: tempDir));
+
+        Future<void> settle() => tester.pumpAndSettle(
+              const Duration(milliseconds: 100),
+              EnginePhase.sendSemanticsUpdate,
+              const Duration(seconds: 5),
+            );
 
         String? receivedText;
         await tester.pumpWidget(
@@ -162,17 +185,18 @@ void main() {
         );
 
         await tester.tap(find.text('Open'));
-        await tester.pumpAndSettle();
+        await settle();
 
         await tester.enterText(find.byType(TextField), 'Coffee 125.50');
         await tester.tap(find.text('Expense'));
-        await tester.pumpAndSettle();
+        await settle();
 
         expect(find.text('Open in Composer'), findsOneWidget);
         await tester.tap(find.text('Open in Composer'));
-        await tester.pumpAndSettle();
+        await settle();
 
         expect(receivedText, 'Coffee 125.50');
+        await disposeTestState(tester, manager, tempDir: tempDir);
       },
     );
 
@@ -180,12 +204,19 @@ void main() {
       'Overview & Reports display Option 1 Prepaid Card Credit and v7 audit info',
       (tester) async {
         final db = AppDatabase(NativeDatabase.memory());
-        final manager = AppStateManager(
-          db: db,
-          notificationService: _RecordingNotificationService(),
+        final isolated = _createIsolatedManager(db);
+        final manager = isolated.manager;
+        final tempDir = isolated.tempDir;
+        await tester.runAsync(
+          () => manager.initialize().timeout(const Duration(seconds: 15)),
         );
-        await tester.runAsync(() => manager.initialize());
-        addTearDown(() => disposeTestState(tester, manager));
+        addTearDown(() => disposeTestState(tester, manager, tempDir: tempDir));
+
+        Future<void> settle() => tester.pumpAndSettle(
+              const Duration(milliseconds: 100),
+              EnginePhase.sendSemanticsUpdate,
+              const Duration(seconds: 5),
+            );
 
         await tester.runAsync(() async {
           await manager.financeController.addAccount(
@@ -216,10 +247,12 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.textContaining('Prepaid Card Credit'), findsWidgets);
         expect(
-            find.textContaining('Non-ETB Accounts Excluded'), findsOneWidget);
+          find.textContaining('Non-ETB Accounts Excluded'),
+          findsOneWidget,
+        );
         expect(find.text('Breakdown'), findsOneWidget);
 
         await tester.pumpWidget(
@@ -230,7 +263,7 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await settle();
         final reportsScrollable = find.byType(Scrollable).first;
         final auditTitle = find.textContaining('Ledger Integrity & v7 Audit');
         await tester.scrollUntilVisible(
@@ -246,6 +279,7 @@ void main() {
           scrollable: reportsScrollable,
         );
         expect(prepaidText, findsOneWidget);
+        await disposeTestState(tester, manager, tempDir: tempDir);
       },
     );
 
@@ -253,9 +287,6 @@ void main() {
         'restoreFromEncryptedBackup uses quarantine swap when builder is present',
         () async {
       final tempDir = Directory.systemTemp.createTempSync('daywell_s416_');
-      addTearDown(() {
-        if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-      });
       final dbFile = File(p.join(tempDir.path, 'live.sqlite'));
       final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
       final supportDir = Directory(p.join(tempDir.path, 'support'))
@@ -269,7 +300,15 @@ void main() {
         ),
         notificationService: _RecordingNotificationService(),
       );
-      await manager.initialize();
+      addTearDown(() async {
+        if (!manager.isDisposed) {
+          await manager.disposeAsync().timeout(const Duration(seconds: 10));
+        }
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+      });
+      await manager.initialize().timeout(const Duration(seconds: 15));
       await manager.financeController.addAccount(
         name: 'Primary Cash',
         type: AccountType.asset,
@@ -290,7 +329,7 @@ void main() {
           await manager.restoreFromEncryptedBackup(backupEnvelope, 'secret123');
       expect(restored, isTrue);
       expect(manager.liquidCashCents, 100000);
-      await manager.disposeAsync();
+      await manager.disposeAsync().timeout(const Duration(seconds: 10));
     });
   });
 }
