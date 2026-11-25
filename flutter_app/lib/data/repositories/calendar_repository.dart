@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import '../../core/date/shared_date.dart';
 import '../../domain/calendar/calendar_contracts.dart';
 import '../../domain/calendar/calendar_models.dart';
+import '../../domain/notes/note_models.dart';
 import '../database/app_database.dart';
 
 export '../../domain/calendar/calendar_contracts.dart';
@@ -118,7 +119,23 @@ class DriftCalendarRepository implements ICalendarRepository {
 
   @override
   Future<void> deleteEvent(String id) async {
-    await (_db.delete(_db.calendarEvents)..where((tbl) => tbl.id.equals(id)))
-        .go();
+    final now = EthiopiaClock.nowUtc();
+    await _db.transaction(() async {
+      await (_db.update(_db.notes)
+            ..where(
+              (tbl) =>
+                  tbl.linkedModule.equals(NoteEntity.calendarLinkModule) &
+                  tbl.linkedId.equals(id),
+            ))
+          .write(
+        NotesCompanion(
+          linkedModule: const Value(null),
+          linkedId: const Value(null),
+          updatedAt: Value(now),
+        ),
+      );
+      await (_db.delete(_db.calendarEvents)..where((tbl) => tbl.id.equals(id)))
+          .go();
+    });
   }
 }

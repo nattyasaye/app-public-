@@ -106,10 +106,18 @@ class DriftSearchRepository implements ISearchRepository {
       final projectTitleById = {
         for (final project in allProjects) project.id: project.title,
       };
+      final allEvents = await _db.select(_db.calendarEvents).get();
+      final eventTitleById = {
+        for (final ev in allEvents) ev.id: ev.title,
+      };
       for (final note in nonTrashedNotes) {
         final tags = _decodeNoteTags(note.tagsJson);
         final projectTitle =
             note.projectId != null ? projectTitleById[note.projectId!] : null;
+        final linkedEventTitle =
+            note.linkedModule == 'calendar' && note.linkedId != null
+                ? eventTitleById[note.linkedId!]
+                : null;
         final matches = NoteDomainHelpers.matchesNoteSearchQuery(
           title: note.title,
           content: note.content,
@@ -117,6 +125,7 @@ class DriftSearchRepository implements ISearchRepository {
           tags: tags,
           rawQuery: cleanQuery,
           projectTitle: projectTitle,
+          linkedEventTitle: linkedEventTitle,
         );
         if (!matches) continue;
         final displayTitle = NoteDomainHelpers.normalizeTitle(note.title);
@@ -131,8 +140,12 @@ class DriftSearchRepository implements ISearchRepository {
             projectTitle != null && projectTitle.trim().isNotEmpty
                 ? ' • Project: ${projectTitle.trim()}'
                 : '';
+        final eventSegment =
+            linkedEventTitle != null && linkedEventTitle.trim().isNotEmpty
+                ? ' • Event: ${linkedEventTitle.trim()}'
+                : '';
         final metaPrefix =
-            'Note • $folderLabel${note.isArchived ? ' (Archived)' : ''}$projectSegment';
+            'Note • $folderLabel${note.isArchived ? ' (Archived)' : ''}$projectSegment$eventSegment';
         final snippet =
             compactBody.isNotEmpty ? '$metaPrefix • $compactBody' : metaPrefix;
         results.add(

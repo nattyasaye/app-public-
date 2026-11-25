@@ -33,6 +33,7 @@ import {
   LayoutGrid,
   Layers,
   Tag,
+  Calendar as CalendarIcon,
 } from 'lucide-react';
 import { CalendarDate, EthiopiaClock, SharedDateFormatter } from '../domain/date';
 import {
@@ -100,6 +101,13 @@ import {
   normalizeNoteProjectId,
   setNoteProject,
 } from '../domain/projectNotes';
+import {
+  buildCalendarEventTitlesById,
+  CalendarEventNoteTarget,
+  getLinkedCalendarEventForNote,
+  linkNoteToCalendarEvent,
+  unlinkNoteFromCalendarEvent,
+} from '../domain/calendarNotes';
 import { notesService } from '../services/notesService';
 import { projectsService } from '../services/projectsService';
 import { SHARED_DESIGN_TOKENS, SharedProject } from '../domain/sharedFoundation';
@@ -142,6 +150,7 @@ interface DaywellNotesModuleProps {
   ) => void;
   tasks?: DaywellTaskRecord[];
   projects?: SharedProject[];
+  calendarEvents?: CalendarEventNoteTarget[];
   requestedNoteFocus?: {
     noteId: string;
     nonce: number;
@@ -149,6 +158,7 @@ interface DaywellNotesModuleProps {
   layoutMode?: 'auto' | 'compact';
   isActive?: boolean;
   onNavigateToTask?: (taskId: string) => void;
+  onNavigateToCalendarEvent?: (event: CalendarEventNoteTarget) => void;
   onRequestQuickCapture?: () => void;
   onNavigateToModule?: (module: string) => void;
 }
@@ -194,10 +204,12 @@ export function DaywellNotesModule({
   onUpdateNotes,
   tasks: controlledTasks,
   projects: controlledProjects,
+  calendarEvents: controlledCalendarEvents,
   requestedNoteFocus,
   layoutMode = 'auto',
   isActive = true,
   onNavigateToTask,
+  onNavigateToCalendarEvent,
 }: DaywellNotesModuleProps) {
   const moduleContainerRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState<number>(() =>
@@ -303,6 +315,56 @@ export function DaywellNotesModule({
   const projectTitlesById = useMemo(
     () => buildProjectTitlesById(effectiveProjects),
     [effectiveProjects]
+  );
+
+  const [internalCalendarEvents, setInternalCalendarEvents] = useState<
+    CalendarEventNoteTarget[]
+  >(() => {
+    try {
+      const saved = localStorage.getItem('daywell_calendar_events');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  useEffect(() => {
+    if (
+      typeof window === 'undefined' ||
+      controlledCalendarEvents !== undefined
+    ) {
+      return;
+    }
+    const handleCalendarSync = () => {
+      try {
+        const saved = localStorage.getItem('daywell_calendar_events');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setInternalCalendarEvents(parsed);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleCalendarSync);
+    return () =>
+      window.removeEventListener(
+        SharedStateBridge.SYNC_EVENT_NAME,
+        handleCalendarSync
+      );
+  }, [controlledCalendarEvents]);
+
+  const effectiveCalendarEvents =
+    controlledCalendarEvents ?? internalCalendarEvents;
+  const calendarEventTitlesById = useMemo(
+    () => buildCalendarEventTitlesById(effectiveCalendarEvents),
+    [effectiveCalendarEvents]
   );
 
   const applyNotesUpdate = (
@@ -490,6 +552,7 @@ export function DaywellNotesModule({
         searchQuery,
         sortBy,
         projectTitlesById,
+        calendarEventTitlesById,
       }),
     [
       notes,
@@ -500,6 +563,7 @@ export function DaywellNotesModule({
       searchQuery,
       sortBy,
       projectTitlesById,
+      calendarEventTitlesById,
     ]
   );
 
@@ -869,6 +933,10 @@ export function DaywellNotesModule({
         projectTitle: target.projectId
           ? projectTitlesById.get(target.projectId)
           : undefined,
+        linkedEventTitle:
+          target.linkedModule === 'calendar' && target.linkedId
+            ? calendarEventTitlesById.get(target.linkedId)
+            : undefined,
       })
     ) {
       setSearchQuery('');
@@ -1150,6 +1218,43 @@ export function DaywellNotesModule({
       (list, id) => unlinkNoteFromTask(list, id),
       () => {
         triggerFeedback('Unlinked task from note', () =>
+          applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
+  };
+
+  const handleLinkCalendarEventToNote = (
+    noteId: string | null,
+    eventId: string
+  ) => {
+    const cleanEventId = eventId.trim();
+    if (!cleanEventId) return;
+    const prevSnapshot = [...notesRef.current];
+    const targetEvent = effectiveCalendarEvents.find(
+      (ev) => ev.id === cleanEventId
+    );
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => linkNoteToCalendarEvent(list, id, cleanEventId),
+      () => {
+        triggerFeedback(
+          targetEvent
+            ? `Linked note to "${targetEvent.title}"`
+            : 'Linked note to event',
+          () => applyNotesUpdate(prevSnapshot)
+        );
+      }
+    );
+  };
+
+  const handleUnlinkCalendarEventFromNote = (noteId: string) => {
+    const prevSnapshot = [...notesRef.current];
+    applyEditorAwareMutation(
+      noteId,
+      (list, id) => unlinkNoteFromCalendarEvent(list, id),
+      () => {
+        triggerFeedback('Unlinked event from note', () =>
           applyNotesUpdate(prevSnapshot)
         );
       }
@@ -2135,6 +2240,58 @@ export function DaywellNotesModule({
                     );
                   })()}
 
+                  {note.linkedModule === 'calendar' && note.linkedId && (() => {
+                    const linkedEvent = getLinkedCalendarEventForNote(
+                      note,
+                      effectiveCalendarEvents
+                    );
+                    if (linkedEvent) {
+                      return (
+                        <div className="flex items-center flex-wrap gap-1.5 pt-0.5">
+                          {onNavigateToCalendarEvent ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onNavigateToCalendarEvent(linkedEvent);
+                              }}
+                              className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-info-container)] text-[var(--dw-on-info-container)] hover:opacity-90 cursor-pointer max-w-full"
+                              title={`Open linked event: ${linkedEvent.title}`}
+                            >
+                              <CalendarIcon className="w-3 h-3 shrink-0" />
+                              <span className="truncate">
+                                Event: {linkedEvent.title}
+                              </span>
+                              <ArrowUpRight className="w-3 h-3 shrink-0" />
+                            </button>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-secondary)] max-w-full">
+                              <CalendarIcon className="w-3 h-3 shrink-0 text-[var(--dw-primary)]" />
+                              <span className="truncate">
+                                Event: {linkedEvent.title}
+                              </span>
+                            </span>
+                          )}
+                          {linkedEvent.date && (
+                            <DaywellStatusBadge
+                              label={linkedEvent.date}
+                              tone="neutral"
+                              showIcon={false}
+                            />
+                          )}
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="flex items-center gap-1.5 pt-0.5">
+                        <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-[var(--dw-text-muted)]">
+                          <CalendarIcon className="w-3 h-3 shrink-0" />
+                          <span>Linked event unavailable</span>
+                        </span>
+                      </div>
+                    );
+                  })()}
+
                   {note.projectId && (() => {
                     const linkedProject = getProjectForNote(
                       note,
@@ -2500,7 +2657,7 @@ export function DaywellNotesModule({
             );
           })()}
 
-          {/* Linked Task Bar */}
+          {/* Linked Task / Linked Calendar Event Bar */}
           {!isCurrentNewDraftBlank && (
             currentEditorNote?.linkedModule === 'tasks' && currentEditorNote.linkedId ? (() => {
               const linkedTask = getLinkedTaskForNote(currentEditorNote, effectiveTasks);
@@ -2548,29 +2705,115 @@ export function DaywellNotesModule({
                   </div>
                 </div>
               );
-            })() : selectableTasks.length > 0 ? (
-              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs">
-                <div className="flex items-center gap-1.5 text-[var(--dw-text-secondary)] font-medium">
-                  <Link2 className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
-                  <span>Task link</span>
+            })() : currentEditorNote?.linkedModule === 'calendar' && currentEditorNote.linkedId ? (() => {
+              const linkedEvent = getLinkedCalendarEventForNote(
+                currentEditorNote,
+                effectiveCalendarEvents
+              );
+              return (
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <CalendarIcon className="w-4 h-4 text-[var(--dw-primary)] shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-[10px] font-bold uppercase tracking-wider text-[var(--dw-text-muted)]">
+                        Linked Event
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-semibold text-[var(--dw-text-primary)] truncate">
+                          {linkedEvent
+                            ? linkedEvent.title
+                            : 'Linked event unavailable'}
+                        </span>
+                        {linkedEvent?.date && (
+                          <DaywellStatusBadge
+                            label={linkedEvent.date}
+                            tone="neutral"
+                            showIcon={false}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {linkedEvent && onNavigateToCalendarEvent && (
+                      <DaywellButton
+                        label="Open Event"
+                        variant="tonal"
+                        size="compact"
+                        trailingIcon={<ArrowUpRight className="w-3.5 h-3.5" />}
+                        onClick={() => {
+                          commitEditorDraftToNote();
+                          onNavigateToCalendarEvent(linkedEvent);
+                        }}
+                      />
+                    )}
+                    <DaywellButton
+                      label="Unlink"
+                      variant="outlined"
+                      size="compact"
+                      leadingIcon={<Unlink className="w-3 h-3" />}
+                      onClick={() =>
+                        handleUnlinkCalendarEventFromNote(currentEditorNote.id)
+                      }
+                    />
+                  </div>
                 </div>
-                <select
-                  aria-label="Link note to task"
-                  value=""
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      handleLinkTaskToNote(selectedNoteId, e.target.value);
-                    }
-                  }}
-                  className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none max-w-[230px] cursor-pointer"
-                >
-                  <option value="">Link to a task...</option>
-                  {selectableTasks.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.title}
-                    </option>
-                  ))}
-                </select>
+              );
+            })() : !currentEditorNote?.linkedModule && (selectableTasks.length > 0 || effectiveCalendarEvents.length > 0) ? (
+              <div className="space-y-2">
+                {selectableTasks.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs">
+                    <div className="flex items-center gap-1.5 text-[var(--dw-text-secondary)] font-medium">
+                      <Link2 className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
+                      <span>Task link</span>
+                    </div>
+                    <select
+                      aria-label="Link note to task"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          handleLinkTaskToNote(selectedNoteId, e.target.value);
+                        }
+                      }}
+                      className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none max-w-[230px] cursor-pointer"
+                    >
+                      <option value="">Link to a task...</option>
+                      {selectableTasks.map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                {effectiveCalendarEvents.length > 0 && (
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 bg-[var(--dw-surface-subtle)] rounded-[var(--dw-radius-md)] border border-[var(--dw-border)] text-xs">
+                    <div className="flex items-center gap-1.5 text-[var(--dw-text-secondary)] font-medium">
+                      <CalendarIcon className="w-3.5 h-3.5 text-[var(--dw-text-muted)] shrink-0" />
+                      <span>Event link</span>
+                    </div>
+                    <select
+                      aria-label="Link note to calendar event"
+                      value=""
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          handleLinkCalendarEventToNote(
+                            selectedNoteId,
+                            e.target.value
+                          );
+                        }
+                      }}
+                      className="bg-transparent text-xs font-semibold text-[var(--dw-text-primary)] outline-none max-w-[230px] cursor-pointer"
+                    >
+                      <option value="">Link to an event...</option>
+                      {effectiveCalendarEvents.map((ev) => (
+                        <option key={ev.id} value={ev.id}>
+                          {ev.title} ({ev.date})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
             ) : null
           )}

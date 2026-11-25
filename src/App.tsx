@@ -76,7 +76,7 @@ import {
 } from './domain/financeV7Engine';
 import { FinanceComposerPrefill } from './components/finance/financeV7Types';
 import { DaywellFinanceModule } from './components/DaywellFinanceModule';
-import { DaywellCalendarModule } from './components/DaywellCalendarModule';
+import { DaywellCalendarModule, CalendarEvent } from './components/DaywellCalendarModule';
 import { DaywellTasksModule, DaywellTask, DEFAULT_SAMPLE_TASKS } from './components/DaywellTasksModule';
 import { DaywellNotesModule, DaywellNote } from './components/DaywellNotesModule';
 import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWizard';
@@ -234,6 +234,7 @@ export default function App() {
   } | null>(null);
   const [requestedCalendarFocus, setRequestedCalendarFocus] = useState<{
     dateStr: string;
+    eventId?: string;
     nonce: number;
   } | null>(null);
   const [requestedNoteFocus, setRequestedNoteFocus] = useState<{
@@ -335,6 +336,19 @@ export default function App() {
   const [notes, setNotes] = useState<DaywellNote[]>(() =>
     notesService.loadNotes()
   );
+
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem('daywell_calendar_events');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
 
   const [dailyRhythmDays, setDailyRhythmDays] = useState<DailyRhythmDayRecord[]>(
     () => dailyRhythmService.loadDays()
@@ -438,12 +452,17 @@ export default function App() {
         detail !== null &&
         'dailyRhythmDays' in detail &&
         !('tasks' in detail);
+      const isCalendarOnly =
+        detail !== null &&
+        'calendarEvents' in detail &&
+        !('tasks' in detail);
 
       if (
         !isDailyPlanningOnly &&
         !isInboxOnly &&
         !isNotesOnly &&
-        !isDailyRhythmOnly
+        !isDailyRhythmOnly &&
+        !isCalendarOnly
       ) {
         try {
           const saved = localStorage.getItem('daywell_tasks');
@@ -458,17 +477,30 @@ export default function App() {
         }
         setFinanceSyncTick((n) => n + 1);
       }
-      if (!isDailyPlanningOnly && !isNotesOnly && !isDailyRhythmOnly) {
+      if (!isDailyPlanningOnly && !isNotesOnly && !isDailyRhythmOnly && !isCalendarOnly) {
         setInboxItems(inboxService.loadInboxItems());
       }
-      if (!isInboxOnly && !isNotesOnly && !isDailyRhythmOnly) {
+      if (!isInboxOnly && !isNotesOnly && !isDailyRhythmOnly && !isCalendarOnly) {
         setDailyPlanningEntries(dailyPlanningService.loadDailyPlanningEntries());
       }
-      if (!isDailyPlanningOnly && !isInboxOnly && !isDailyRhythmOnly) {
+      if (!isDailyPlanningOnly && !isInboxOnly && !isDailyRhythmOnly && !isCalendarOnly) {
         setNotes(notesService.loadNotes());
       }
-      if (!isDailyPlanningOnly && !isInboxOnly && !isNotesOnly) {
+      if (!isDailyPlanningOnly && !isInboxOnly && !isNotesOnly && !isCalendarOnly) {
         setDailyRhythmDays(dailyRhythmService.loadDays());
+      }
+      if (!isDailyPlanningOnly && !isInboxOnly && !isNotesOnly && !isDailyRhythmOnly) {
+        try {
+          const savedEvents = localStorage.getItem('daywell_calendar_events');
+          if (savedEvents) {
+            const parsed = JSON.parse(savedEvents);
+            if (Array.isArray(parsed)) {
+              setCalendarEvents(parsed);
+            }
+          }
+        } catch {
+          // ignore
+        }
       }
       setActiveTaskReminderCount(
         taskRemindersService.loadTaskReminders().filter((r) => r.isActive).length
@@ -991,7 +1023,7 @@ export default function App() {
       try {
         const savedEvents = localStorage.getItem('daywell_calendar_events');
         const eventsList = savedEvents ? JSON.parse(savedEvents) : [];
-        const newEvent = {
+        const newEvent: CalendarEvent = {
           id: `evt-${Date.now()}`,
           title: text,
           date: CalendarDate.today().toIsoString(),
@@ -1000,7 +1032,14 @@ export default function App() {
           colorHex: SHARED_DESIGN_TOKENS.colors.semantic.info,
           hasReminder: true,
         };
-        localStorage.setItem('daywell_calendar_events', JSON.stringify([newEvent, ...eventsList]));
+        const nextEvents = [newEvent, ...eventsList];
+        localStorage.setItem('daywell_calendar_events', JSON.stringify(nextEvents));
+        setCalendarEvents(nextEvents);
+        window.dispatchEvent(
+          new CustomEvent(SharedStateBridge.SYNC_EVENT_NAME, {
+            detail: { calendarEvents: nextEvents, source: 'quick_capture' },
+          })
+        );
       } catch (err) {
         console.error(err);
       }
@@ -2066,6 +2105,8 @@ export default function App() {
                         projectName: t.projectName,
                       };
                     })}
+                  notes={notes}
+                  onUpdateNotes={handleUpdateNotes}
                   onToggleTask={toggleTask}
                   onNavigateToTask={(taskId) => {
                     setTasksSubTab('tasks');
@@ -2076,6 +2117,11 @@ export default function App() {
                     });
                     navigateTo('tasks');
                   }}
+                  onNavigateToNote={(noteId) => {
+                    setRequestedNoteFocus({ noteId, nonce: Date.now() });
+                    navigateTo('notes');
+                  }}
+                  onEventsChange={setCalendarEvents}
                   requestedFocusDate={requestedCalendarFocus}
                   dailyRhythmDays={dailyRhythmDays}
                   onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
@@ -2153,6 +2199,7 @@ export default function App() {
                     onUpdateNotes={handleUpdateNotes}
                     tasks={tasks}
                     projects={allProjects}
+                    calendarEvents={calendarEvents}
                     requestedNoteFocus={requestedNoteFocus}
                     layoutMode={viewMode === 'desktop' ? 'auto' : 'compact'}
                     isActive={activeScreen === 'notes'}
@@ -2164,6 +2211,14 @@ export default function App() {
                         nonce: Date.now(),
                       });
                       navigateTo('tasks');
+                    }}
+                    onNavigateToCalendarEvent={(ev) => {
+                      setRequestedCalendarFocus({
+                        dateStr: ev.date,
+                        eventId: ev.id,
+                        nonce: Date.now(),
+                      });
+                      navigateTo('calendar');
                     }}
                     onRequestQuickCapture={() => setIsQuickCaptureOpen(true)}
                     onNavigateToModule={(mod) => navigateTo(mod as ScreenId)}

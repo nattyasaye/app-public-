@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'core/date/shared_date.dart';
 import 'core/theme/daywell_theme.dart';
+import 'domain/calendar/calendar_models.dart';
 import 'ui/app_state.dart';
 import 'ui/screens/backup_view.dart';
 import 'ui/screens/calendar_view.dart';
@@ -466,12 +467,19 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           tasksController: _state.tasksController,
           projectsController: _state.projectsController,
           dailyRhythmController: _state.dailyRhythmController,
+          notesController: _state.notesController,
           onOpenTasks: () => _shellController.selectTab(DaywellTabId.tasks),
           onOpenTask: (String taskId) {
             setState(() {
               _requestedTaskFocus = (taskId: taskId, nonce: ++_taskFocusNonce);
             });
             _shellController.selectTab(DaywellTabId.tasks);
+          },
+          onOpenNote: (String noteId) {
+            setState(() {
+              _requestedNoteFocus = (noteId: noteId, nonce: ++_noteFocusNonce);
+            });
+            _shellController.selectTab(DaywellTabId.notes);
           },
         );
       case DaywellTabId.notes:
@@ -480,6 +488,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           controller: _state.notesController,
           tasksController: _state.tasksController,
           projectsController: _state.projectsController,
+          calendarController: _state.calendarController,
           requestedNoteFocus: _requestedNoteFocus,
           onRegisterPendingSaveFlush: (handler) {
             _flushNotesPendingEdits = handler;
@@ -489,6 +498,10 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
               _requestedTaskFocus = (taskId: taskId, nonce: ++_taskFocusNonce);
             });
             _shellController.selectTab(DaywellTabId.tasks);
+          },
+          onOpenCalendarEvent: (CalendarEventEntity event) {
+            _state.calendarController.setSelectedCalendarDate(event.startDate);
+            _shellController.selectTab(DaywellTabId.calendar);
           },
         );
       case DaywellTabId.finance:

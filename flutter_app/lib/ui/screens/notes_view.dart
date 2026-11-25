@@ -4,6 +4,8 @@ import 'package:flutter/services.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
+import '../../domain/calendar/calendar_models.dart';
+import '../../domain/notes/calendar_notes_helpers.dart';
 import '../../domain/notes/note_editor_formatting.dart';
 import '../../domain/notes/note_helpers.dart';
 import '../../domain/notes/note_links.dart';
@@ -13,6 +15,7 @@ import '../../domain/notes/project_notes_helpers.dart';
 import '../../domain/notes/task_notes_helpers.dart';
 import '../../domain/projects/project_models.dart';
 import '../../domain/tasks/task_models.dart';
+import '../../application/calendar/calendar_controller.dart';
 import '../../application/notes/notes_controller.dart';
 import '../../application/projects/projects_controller.dart';
 import '../../application/tasks/tasks_controller.dart';
@@ -116,8 +119,10 @@ class NotesView extends StatefulWidget {
   final NotesController? controller;
   final TasksController? tasksController;
   final ProjectsController? projectsController;
+  final CalendarController? calendarController;
   final ({String noteId, int nonce})? requestedNoteFocus;
   final void Function(String taskId)? onOpenTask;
+  final void Function(CalendarEventEntity event)? onOpenCalendarEvent;
   final void Function(Future<bool> Function()? flushHandler)?
       onRegisterPendingSaveFlush;
 
@@ -127,8 +132,10 @@ class NotesView extends StatefulWidget {
     this.controller,
     this.tasksController,
     this.projectsController,
+    this.calendarController,
     this.requestedNoteFocus,
     this.onOpenTask,
+    this.onOpenCalendarEvent,
     this.onRegisterPendingSaveFlush,
   }) : assert(state != null || controller != null,
             'Either state or controller must be provided to NotesView');
@@ -141,6 +148,9 @@ class NotesView extends StatefulWidget {
 
   ProjectsController? get effectiveProjectsController =>
       projectsController ?? state?.projectsController;
+
+  CalendarController? get effectiveCalendarController =>
+      calendarController ?? state?.calendarController;
 
   @override
   State<NotesView> createState() => _NotesViewState();
@@ -238,6 +248,13 @@ class _NotesViewState extends State<NotesView> {
                 const <ProjectEntity>[],
           )?.title
         : null;
+    final linkedEventTitle = note.isLinkedToCalendarEvent
+        ? CalendarNotesHelper.findLinkedEvent(
+            note,
+            widget.effectiveCalendarController?.state.events ??
+                const <CalendarEventEntity>[],
+          )?.title
+        : null;
     if (state.searchQuery.trim().isNotEmpty &&
         !NoteDomainHelpers.matchesNoteSearchQuery(
           title: note.title,
@@ -246,6 +263,7 @@ class _NotesViewState extends State<NotesView> {
           tags: note.tags,
           rawQuery: state.searchQuery,
           projectTitle: projectTitle,
+          linkedEventTitle: linkedEventTitle,
         )) {
       _searchController.clear();
       controller.setSearchQuery('');
@@ -497,7 +515,9 @@ class _NotesViewState extends State<NotesView> {
         controller: widget.effectiveController,
         tasksController: widget.effectiveTasksController,
         projectsController: widget.effectiveProjectsController,
+        calendarController: widget.effectiveCalendarController,
         onOpenTask: widget.onOpenTask,
+        onOpenCalendarEvent: widget.onOpenCalendarEvent,
         existingNote: existingNote,
         initialCategory: defaultNewCategory,
         editorSurfaceKey: surfaceKey,
@@ -964,6 +984,7 @@ class _NotesViewState extends State<NotesView> {
     final controller = widget.effectiveController;
     final tasksController = widget.effectiveTasksController;
     final projectsController = widget.effectiveProjectsController;
+    final calendarController = widget.effectiveCalendarController;
     final theme = Theme.of(context);
     final colorScheme = theme.colorScheme;
     final textTheme = theme.textTheme;
@@ -978,10 +999,24 @@ class _NotesViewState extends State<NotesView> {
         controller,
         if (tasksController != null) tasksController,
         if (projectsController != null) projectsController,
+        if (calendarController != null) calendarController,
       ]),
       builder: (context, _) {
         final moduleState = controller.state;
-        final notes = moduleState.filteredNotes;
+        final projectTitlesById = projectsController != null
+            ? ProjectNotesHelper.buildProjectTitlesById(
+                projectsController.state.projects,
+              )
+            : const <String, String>{};
+        final eventTitlesById = calendarController != null
+            ? CalendarNotesHelper.buildEventTitlesById(
+                calendarController.state.events,
+              )
+            : const <String, String>{};
+        final notes = moduleState.filterNotes(
+          projectTitlesById: projectTitlesById,
+          eventTitlesById: eventTitlesById,
+        );
         const defaultOrder = ['reflection', 'reference', 'learning', 'general'];
         final knownCategories = moduleState.sectionFilter == 'trash'
             ? moduleState.availableAllCategories
@@ -1645,7 +1680,9 @@ class _NotesViewState extends State<NotesView> {
       controller: controller,
       tasksController: tasksController,
       projectsController: widget.effectiveProjectsController,
+      calendarController: widget.effectiveCalendarController,
       onOpenTask: widget.onOpenTask,
+      onOpenCalendarEvent: widget.onOpenCalendarEvent,
       existingNote: activeSelected,
       initialPreviewMode: _detailPreviewMode,
       initialCategory: _newDraftInitialCategory,
@@ -1799,8 +1836,12 @@ class _NotesViewState extends State<NotesView> {
     final controller = widget.effectiveController;
     final tasksCtrl = widget.effectiveTasksController;
     final projectsCtrl = widget.effectiveProjectsController;
+    final calendarCtrl = widget.effectiveCalendarController;
     final linkedTask = tasksCtrl != null
         ? TaskNotesHelper.findLinkedTask(note, tasksCtrl.state.tasks)
+        : null;
+    final linkedEvent = calendarCtrl != null
+        ? CalendarNotesHelper.findLinkedEvent(note, calendarCtrl.state.events)
         : null;
     final hasProjectRef =
         ProjectNotesHelper.normalizeProjectId(note.projectId) != null;
@@ -2091,6 +2132,59 @@ class _NotesViewState extends State<NotesView> {
                 ),
               ),
             ],
+            if (note.isLinkedToCalendarEvent) ...[
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              InkWell(
+                borderRadius:
+                    BorderRadius.circular(SharedDesignTokens.radiusSm),
+                onTap: linkedEvent != null && widget.onOpenCalendarEvent != null
+                    ? () => widget.onOpenCalendarEvent!(linkedEvent)
+                    : null,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: SharedDesignTokens.spacingSm,
+                    vertical: SharedDesignTokens.spacingXs,
+                  ),
+                  decoration: BoxDecoration(
+                    color: linkedEvent != null
+                        ? semantic.transferContainer
+                        : semantic.surfaceSubtle,
+                    borderRadius:
+                        BorderRadius.circular(SharedDesignTokens.radiusSm),
+                    border: linkedEvent == null
+                        ? Border.all(color: semantic.border)
+                        : null,
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.event_note_outlined,
+                        size: DaywellIconSize.xs,
+                        color: linkedEvent != null
+                            ? semantic.transfer
+                            : semantic.textMuted,
+                      ),
+                      const SizedBox(width: SharedDesignTokens.spacingXs),
+                      Flexible(
+                        child: Text(
+                          linkedEvent != null
+                              ? 'Event: ${linkedEvent.title}'
+                              : 'Linked event unavailable',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: DaywellTypography.caption(
+                            color: linkedEvent != null
+                                ? semantic.onTransferContainer
+                                : semantic.textMuted,
+                          ).copyWith(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (hasProjectRef) ...[
               const SizedBox(height: SharedDesignTokens.spacingSm),
               Wrap(
@@ -2157,7 +2251,9 @@ class _NoteEditorScreen extends StatelessWidget {
   final NotesController controller;
   final TasksController? tasksController;
   final ProjectsController? projectsController;
+  final CalendarController? calendarController;
   final void Function(String taskId)? onOpenTask;
+  final void Function(CalendarEventEntity event)? onOpenCalendarEvent;
   final NoteEntity? existingNote;
   final bool initialPreviewMode;
   final String initialCategory;
@@ -2167,7 +2263,9 @@ class _NoteEditorScreen extends StatelessWidget {
     required this.controller,
     this.tasksController,
     this.projectsController,
+    this.calendarController,
     this.onOpenTask,
+    this.onOpenCalendarEvent,
     required this.existingNote,
     this.initialPreviewMode = false,
     this.initialCategory = 'reflection',
@@ -2181,7 +2279,9 @@ class _NoteEditorScreen extends StatelessWidget {
       controller: controller,
       tasksController: tasksController,
       projectsController: projectsController,
+      calendarController: calendarController,
       onOpenTask: onOpenTask,
+      onOpenCalendarEvent: onOpenCalendarEvent,
       existingNote: existingNote,
       initialPreviewMode: initialPreviewMode,
       initialCategory: initialCategory,
@@ -2194,7 +2294,9 @@ class _NoteEditorSurface extends StatefulWidget {
   final NotesController controller;
   final TasksController? tasksController;
   final ProjectsController? projectsController;
+  final CalendarController? calendarController;
   final void Function(String taskId)? onOpenTask;
+  final void Function(CalendarEventEntity event)? onOpenCalendarEvent;
   final NoteEntity? existingNote;
   final bool initialPreviewMode;
   final String initialCategory;
@@ -2211,7 +2313,9 @@ class _NoteEditorSurface extends StatefulWidget {
     required this.controller,
     this.tasksController,
     this.projectsController,
+    this.calendarController,
     this.onOpenTask,
+    this.onOpenCalendarEvent,
     required this.existingNote,
     this.initialPreviewMode = false,
     this.initialCategory = 'reflection',
@@ -2370,6 +2474,12 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         _projectId = ProjectNotesHelper.normalizeProjectId(
           widget.existingNote!.projectId,
         );
+      }
+      if (widget.existingNote!.linkedModule !=
+              oldWidget.existingNote!.linkedModule ||
+          widget.existingNote!.linkedId != oldWidget.existingNote!.linkedId) {
+        _linkedModule = widget.existingNote!.linkedModule;
+        _linkedId = widget.existingNote!.linkedId;
       }
     }
   }
@@ -2660,6 +2770,118 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
           currentTaskId:
               _linkedModule == NoteEntity.taskLinkModule ? _linkedId : null,
           onSelectTask: (task) => unawaited(_linkTask(task)),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _linkCalendarEvent(CalendarEventEntity event) async {
+    final prevModule = _linkedModule;
+    final prevId = _linkedId;
+    setState(() {
+      _linkedModule = NoteEntity.calendarLinkModule;
+      _linkedId = event.id;
+    });
+    _markDirty(scheduleTimer: false);
+    if (_noteId != null) {
+      final ok = await _flushPendingSaves();
+      if (!ok && mounted) {
+        setState(() {
+          if (_linkedModule == NoteEntity.calendarLinkModule &&
+              _linkedId == event.id) {
+            _linkedModule = prevModule;
+            _linkedId = prevId;
+          }
+        });
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not link event. Kept previous link state.'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _unlinkCalendarEvent() async {
+    final prevModule = _linkedModule;
+    final prevId = _linkedId;
+    setState(() {
+      _linkedModule = null;
+      _linkedId = null;
+    });
+    _markDirty(scheduleTimer: false);
+    if (_noteId != null) {
+      final ok = await _flushPendingSaves();
+      if (!ok) {
+        if (mounted) {
+          setState(() {
+            if (_linkedModule == null && _linkedId == null) {
+              _linkedModule = prevModule;
+              _linkedId = prevId;
+            }
+          });
+          ScaffoldMessenger.of(context).clearSnackBars();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not unlink event. Kept existing link.'),
+            ),
+          );
+        }
+        return;
+      }
+    }
+    if (!mounted || prevModule == null || prevId == null) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Unlinked event from note'),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            if (!mounted) return;
+            setState(() {
+              _linkedModule = prevModule;
+              _linkedId = prevId;
+            });
+            _markDirty(scheduleTimer: false);
+            if (_noteId != null) {
+              unawaited(() async {
+                final restored = await _flushPendingSaves();
+                if (!restored && mounted) {
+                  setState(() {
+                    if (_linkedModule == prevModule && _linkedId == prevId) {
+                      _linkedModule = null;
+                      _linkedId = null;
+                    }
+                  });
+                }
+              }());
+            }
+          },
+        ),
+        duration: const Duration(seconds: 4),
+      ),
+    );
+  }
+
+  void _openCalendarEventPicker() {
+    final calendarCtrl = widget.calendarController;
+    if (calendarCtrl == null) return;
+    unawaited(
+      showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(
+            top: Radius.circular(SharedDesignTokens.radiusSheet),
+          ),
+        ),
+        builder: (_) => _NoteCalendarEventPickerSheet(
+          calendarController: calendarCtrl,
+          currentEventId:
+              _linkedModule == NoteEntity.calendarLinkModule ? _linkedId : null,
+          onSelectEvent: (event) => unawaited(_linkCalendarEvent(event)),
         ),
       ),
     );
@@ -3087,7 +3309,10 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         builder: (_) => _NoteEditorScreen(
           controller: widget.controller,
           tasksController: widget.tasksController,
+          projectsController: widget.projectsController,
+          calendarController: widget.calendarController,
           onOpenTask: widget.onOpenTask,
+          onOpenCalendarEvent: widget.onOpenCalendarEvent,
           existingNote: freshTarget,
           initialPreviewMode: _isPreviewMode,
         ),
@@ -3193,11 +3418,13 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   Widget build(BuildContext context) {
     final tasksCtrl = widget.tasksController;
     final projectsCtrl = widget.projectsController;
+    final calendarCtrl = widget.calendarController;
     return AnimatedBuilder(
       animation: Listenable.merge([
         widget.controller,
         if (tasksCtrl != null) tasksCtrl,
         if (projectsCtrl != null) projectsCtrl,
+        if (calendarCtrl != null) calendarCtrl,
       ]),
       builder: (context, _) {
         final currentNote =
@@ -3205,9 +3432,13 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         final isPinned = currentNote?.isPinned ?? false;
         final isFavorite = currentNote?.isFavorite ?? false;
         final effectiveLinkedModule =
-            currentNote != null ? currentNote.linkedModule : _linkedModule;
+            (_hasPendingChanges || _noteId == null)
+                ? _linkedModule
+                : (currentNote != null ? currentNote.linkedModule : _linkedModule);
         final effectiveLinkedId =
-            currentNote != null ? currentNote.linkedId : _linkedId;
+            (_hasPendingChanges || _noteId == null)
+                ? _linkedId
+                : (currentNote != null ? currentNote.linkedId : _linkedId);
         final isTaskLinked =
             effectiveLinkedModule == NoteEntity.taskLinkModule &&
                 effectiveLinkedId != null;
@@ -3215,6 +3446,15 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                 effectiveLinkedId != null &&
                 tasksCtrl != null
             ? tasksCtrl.state.findTaskById(effectiveLinkedId)
+            : null;
+        final isEventLinked =
+            effectiveLinkedModule == NoteEntity.calendarLinkModule &&
+                effectiveLinkedId != null;
+        final linkedEvent = isEventLinked && calendarCtrl != null
+            ? calendarCtrl.state.events.cast<CalendarEventEntity?>().firstWhere(
+                  (e) => e?.id == effectiveLinkedId,
+                  orElse: () => null,
+                )
             : null;
         final effectiveProjectId = ProjectNotesHelper.normalizeProjectId(
           (_hasPendingChanges || _noteId == null)
@@ -3547,7 +3787,10 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                               ),
                               onPressed: _addTagDialog,
                             ),
-                            if (tasksCtrl != null && !isTaskLinked)
+                            if (tasksCtrl != null &&
+                                !isTaskLinked &&
+                                !isEventLinked &&
+                                effectiveLinkedModule == null)
                               ActionChip(
                                 avatar: Icon(
                                   Icons.add_link,
@@ -3561,6 +3804,24 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                                   ),
                                 ),
                                 onPressed: _openTaskPicker,
+                              ),
+                            if (calendarCtrl != null &&
+                                !isTaskLinked &&
+                                !isEventLinked &&
+                                effectiveLinkedModule == null)
+                              ActionChip(
+                                avatar: Icon(
+                                  Icons.event_note_outlined,
+                                  size: DaywellIconSize.xs,
+                                  color: semantic.transfer,
+                                ),
+                                label: Text(
+                                  'Link Event',
+                                  style: DaywellTypography.label(
+                                    color: semantic.textPrimary,
+                                  ),
+                                ),
+                                onPressed: _openCalendarEventPicker,
                               ),
                             if (projectsCtrl != null && !hasProject)
                               ActionChip(
@@ -3726,6 +3987,84 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                                 iconSize: DaywellIconSize.md,
                                 tooltip: 'Unlink Task',
                                 onPressed: () => unawaited(_unlinkTask()),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    if (isEventLinked)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          SharedDesignTokens.spacingMd,
+                          SharedDesignTokens.spacingXs,
+                          SharedDesignTokens.spacingMd,
+                          SharedDesignTokens.spacingXs,
+                        ),
+                        child: DaywellCard(
+                          color: linkedEvent != null
+                              ? semantic.transferContainer
+                              : semantic.surfaceSubtle,
+                          borderColor: semantic.border,
+                          borderRadius: SharedDesignTokens.radiusMd,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: SharedDesignTokens.spacingCompact,
+                            vertical: SharedDesignTokens.spacingXs,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                Icons.event_note_outlined,
+                                size: DaywellIconSize.sm,
+                                color: linkedEvent != null
+                                    ? semantic.transfer
+                                    : semantic.textMuted,
+                              ),
+                              const SizedBox(
+                                width: SharedDesignTokens.spacingSm,
+                              ),
+                              Expanded(
+                                child: Text(
+                                  linkedEvent != null
+                                      ? 'Linked Event: ${linkedEvent.title}'
+                                      : 'Linked event unavailable',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: DaywellTypography.fromToken(
+                                    SharedDesignTokens.typeBodyCompact,
+                                    color: linkedEvent != null
+                                        ? semantic.onTransferContainer
+                                        : semantic.textMuted,
+                                  ).copyWith(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                              if (linkedEvent != null &&
+                                  widget.onOpenCalendarEvent != null)
+                                DaywellButton(
+                                  label: 'Open',
+                                  variant: DaywellButtonVariant.text,
+                                  size: DaywellButtonSize.compact,
+                                  onPressed: () async {
+                                    final ok = await _flushPendingSaves();
+                                    if (!ok || !context.mounted) return;
+                                    if (!widget.isEmbedded) {
+                                      Navigator.pop(context);
+                                    }
+                                    widget.onOpenCalendarEvent!(linkedEvent);
+                                  },
+                                ),
+                              if (calendarCtrl != null)
+                                DaywellIconButton(
+                                  icon: Icons.swap_horiz,
+                                  iconSize: DaywellIconSize.md,
+                                  tooltip: 'Change Linked Event',
+                                  onPressed: _openCalendarEventPicker,
+                                ),
+                              DaywellIconButton(
+                                icon: Icons.link_off_outlined,
+                                iconSize: DaywellIconSize.md,
+                                tooltip: 'Unlink Event',
+                                onPressed: () =>
+                                    unawaited(_unlinkCalendarEvent()),
                               ),
                             ],
                           ),
@@ -4775,3 +5114,159 @@ class _NoteProjectPickerSheetState extends State<_NoteProjectPickerSheet> {
     );
   }
 }
+
+class _NoteCalendarEventPickerSheet extends StatefulWidget {
+  final CalendarController calendarController;
+  final String? currentEventId;
+  final void Function(CalendarEventEntity event) onSelectEvent;
+
+  const _NoteCalendarEventPickerSheet({
+    required this.calendarController,
+    required this.currentEventId,
+    required this.onSelectEvent,
+  });
+
+  @override
+  State<_NoteCalendarEventPickerSheet> createState() =>
+      _NoteCalendarEventPickerSheetState();
+}
+
+class _NoteCalendarEventPickerSheetState
+    extends State<_NoteCalendarEventPickerSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final q = _query.trim().toLowerCase();
+    final events = widget.calendarController.state.events.where((ev) {
+      if (ev.id == widget.currentEventId) return false;
+      if (q.isEmpty) return true;
+      return ev.title.toLowerCase().contains(q) ||
+          ev.dateIso.toLowerCase().contains(q) ||
+          ev.category.toLowerCase().contains(q) ||
+          (ev.notes?.toLowerCase().contains(q) ?? false);
+    }).toList();
+    events.sort((a, b) {
+      final byDate = b.dateIso.compareTo(a.dateIso);
+      if (byDate != 0) return byDate;
+      return (b.startTime ?? '').compareTo(a.startTime ?? '');
+    });
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: SharedDesignTokens.spacingMd,
+          left: SharedDesignTokens.spacingMd,
+          right: SharedDesignTokens.spacingMd,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              SharedDesignTokens.spacingMd,
+        ),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.65,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Link Note to Calendar Event',
+                      style: DaywellTypography.fromToken(
+                        SharedDesignTokens.typeTitle,
+                        color: semantic.textPrimary,
+                      ),
+                    ),
+                  ),
+                  DaywellIconButton(
+                    icon: Icons.close,
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              DaywellSearchField(
+                controller: _searchCtrl,
+                hintText: 'Search calendar events...',
+                onChanged: (val) => setState(() => _query = val),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              Expanded(
+                child: events.isEmpty
+                    ? DaywellEmptyState(
+                        icon: Icons.event_note_outlined,
+                        message: q.isNotEmpty
+                            ? 'No calendar events match "$q"'
+                            : 'No calendar events available to link.',
+                      )
+                    : ListView.separated(
+                        itemCount: events.length,
+                        separatorBuilder: (_, __) => const SizedBox(
+                          height: SharedDesignTokens.spacingXs,
+                        ),
+                        itemBuilder: (_, index) {
+                          final ev = events[index];
+                          final ethDate = ev.ethiopianStartDate;
+                          final ethLabel = SharedDateFormatter.formatEthiopian(
+                            ethDate,
+                            useAmharic: false,
+                            includeEra: false,
+                          );
+                          final timeLabel = ev.isAllDay
+                              ? 'All Day'
+                              : (ev.startTime ?? '');
+                          final subtitleParts = <String>[
+                            '${ev.dateIso} ($ethLabel)',
+                            if (timeLabel.isNotEmpty) timeLabel,
+                            ev.category,
+                          ];
+                          return DaywellCard(
+                            padding: EdgeInsets.zero,
+                            child: ListTile(
+                              onTap: () {
+                                widget.onSelectEvent(ev);
+                                Navigator.pop(context);
+                              },
+                              leading: Icon(
+                                Icons.event_note_outlined,
+                                color: semantic.transfer,
+                              ),
+                              title: Text(
+                                ev.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodyMedium
+                                    ?.copyWith(fontWeight: FontWeight.w600),
+                              ),
+                              subtitle: Text(
+                                subtitleParts.join(' · '),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: semantic.textSecondary),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+

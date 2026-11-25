@@ -8,13 +8,16 @@ import 'calendar_state.dart';
 /// Module-scoped application controller for Daywell Calendar events.
 class CalendarController extends ChangeNotifier {
   final ICalendarRepository _repository;
+  final Future<void> Function(String eventId)? _onEventDeleted;
   CalendarModuleState _state;
   bool _isDisposed = false;
 
   CalendarController({
     required ICalendarRepository repository,
     CalendarModuleState? initialState,
+    Future<void> Function(String eventId)? onEventDeleted,
   })  : _repository = repository,
+        _onEventDeleted = onEventDeleted,
         _state = initialState ?? CalendarModuleState();
 
   CalendarModuleState get state => _state;
@@ -115,6 +118,9 @@ class CalendarController extends ChangeNotifier {
   Future<void> deleteEvent(String id) async {
     try {
       await _repository.deleteEvent(id);
+      if (_onEventDeleted != null) {
+        await _onEventDeleted!(id);
+      }
       final remaining = _state.events.where((e) => e.id != id).toList();
       _state = _state.copyWith(
         events: List<CalendarEventEntity>.unmodifiable(remaining),

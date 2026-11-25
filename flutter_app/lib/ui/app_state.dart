@@ -335,6 +335,7 @@ class AppStateManager extends ChangeNotifier {
     );
     calendarController = CalendarController(
       repository: DriftCalendarRepository(db),
+      onEventDeleted: _handleCalendarEventDeleted,
     );
     searchRepository = DriftSearchRepository(db);
 
@@ -393,6 +394,13 @@ class AppStateManager extends ChangeNotifier {
     await notesController.clearLinksForTarget(
       module: NoteEntity.taskLinkModule,
       targetId: taskId,
+    );
+  }
+
+  Future<void> _handleCalendarEventDeleted(String eventId) async {
+    await notesController.clearLinksForTarget(
+      module: NoteEntity.calendarLinkModule,
+      targetId: eventId,
     );
   }
 

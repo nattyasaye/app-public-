@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../application/calendar/calendar_controller.dart';
 import '../../application/daily_rhythm/daily_rhythm_controller.dart';
+import '../../application/notes/notes_controller.dart';
 import '../../application/projects/projects_controller.dart';
 import '../../application/tasks/tasks_controller.dart';
 import '../../core/date/shared_date.dart';
@@ -10,6 +11,9 @@ import '../../core/theme/daywell_theme.dart';
 import '../../domain/calendar/calendar_models.dart';
 import '../../domain/daily_rhythm/daily_rhythm_models.dart';
 import '../../domain/daily_rhythm/daily_rhythm_workflows.dart';
+import '../../domain/notes/calendar_notes_helpers.dart';
+import '../../domain/notes/note_helpers.dart';
+import '../../domain/notes/note_models.dart';
 import '../../domain/tasks/task_calendar_engine.dart';
 import '../../domain/tasks/task_models.dart';
 import '../widgets/daily_rhythm_dashboard_widgets.dart';
@@ -23,7 +27,9 @@ class CalendarView extends StatefulWidget {
   final TasksController? tasksController;
   final ProjectsController? projectsController;
   final DailyRhythmController? dailyRhythmController;
+  final NotesController? notesController;
   final void Function(String taskId)? onOpenTask;
+  final void Function(String noteId)? onOpenNote;
   final VoidCallback? onOpenTasks;
 
   const CalendarView({
@@ -32,7 +38,9 @@ class CalendarView extends StatefulWidget {
     this.tasksController,
     this.projectsController,
     this.dailyRhythmController,
+    this.notesController,
     this.onOpenTask,
+    this.onOpenNote,
     this.onOpenTasks,
   });
 
@@ -479,6 +487,15 @@ class _CalendarViewState extends State<CalendarView> {
                     value: hasReminder,
                     onChanged: (val) => setModalState(() => hasReminder = val),
                   ),
+                  if (isEditing && widget.notesController != null) ...[
+                    const SizedBox(height: SharedDesignTokens.spacingSm),
+                    _buildModalLinkedNotesSection(
+                      modalContext: modalContext,
+                      sheetNavigatorContext: ctx,
+                      event: existing,
+                      notesController: widget.notesController!,
+                    ),
+                  ],
                   const SizedBox(height: SharedDesignTokens.spacingMd),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -593,6 +610,281 @@ class _CalendarViewState extends State<CalendarView> {
     notesCtrl.dispose();
   }
 
+  String _formatReadableNoteDate(DateTime utcUpdatedAt) {
+    final eth = CalendarDate.fromUtcInstantInEthiopia(utcUpdatedAt).toEthiopian();
+    return SharedDateFormatter.formatEthiopian(
+      eth,
+      useAmharic: false,
+      includeEra: false,
+    );
+  }
+
+  Widget _buildModalLinkedNotesSection({
+    required BuildContext modalContext,
+    required BuildContext sheetNavigatorContext,
+    required CalendarEventEntity event,
+    required NotesController notesController,
+  }) {
+    final semantic = modalContext.daywellColors;
+    final colorScheme = Theme.of(modalContext).colorScheme;
+    final textTheme = Theme.of(modalContext).textTheme;
+
+    return ListenableBuilder(
+      listenable: notesController,
+      builder: (context, _) {
+        final linkedNotes = CalendarNotesHelper.getNotesForEvent(
+          notesController.state.notes,
+          event.id,
+          includeArchived: true,
+          includeTrashed: false,
+        );
+
+        Future<void> handleCreateNote() async {
+          final created = await notesController.createNote(
+            title: CalendarNotesHelper.buildDefaultEventNoteTitle(event),
+            content: '',
+            linkedModule: NoteEntity.calendarLinkModule,
+            linkedId: event.id,
+          );
+          if (!sheetNavigatorContext.mounted) return;
+          if (widget.onOpenNote != null) {
+            Navigator.pop(sheetNavigatorContext);
+            widget.onOpenNote!(created.id);
+          } else {
+            ScaffoldMessenger.of(sheetNavigatorContext).clearSnackBars();
+            ScaffoldMessenger.of(sheetNavigatorContext).showSnackBar(
+              SnackBar(
+                content: Text('Created linked note "${created.displayTitle}"'),
+              ),
+            );
+          }
+        }
+
+        void handleOpenLinkPicker() {
+          unawaited(
+            showModalBottomSheet<void>(
+              context: modalContext,
+              isScrollControlled: true,
+              shape: const RoundedRectangleBorder(
+                borderRadius: BorderRadius.vertical(
+                  top: Radius.circular(SharedDesignTokens.radiusSheet),
+                ),
+              ),
+              builder: (_) => _LinkExistingEventNoteSheet(
+                notesController: notesController,
+                event: event,
+              ),
+            ),
+          );
+        }
+
+        Future<void> handleUnlinkNote(NoteEntity note) async {
+          final res = await notesController.unlinkNote(note.id);
+          if (!mounted || res == null) return;
+          ScaffoldMessenger.of(this.context).clearSnackBars();
+          ScaffoldMessenger.of(this.context).showSnackBar(
+            SnackBar(
+              content: Text('Unlinked "${note.displayTitle}" from event'),
+              action: SnackBarAction(
+                label: 'Undo',
+                onPressed: () {
+                  unawaited(
+                    notesController.linkNoteToEntity(
+                      note.id,
+                      module: NoteEntity.calendarLinkModule,
+                      entityId: event.id,
+                    ),
+                  );
+                },
+              ),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+
+        return DaywellCard(
+          color: semantic.surfaceSubtle,
+          padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.note_alt_outlined,
+                    size: DaywellIconSize.sm,
+                    color: colorScheme.primary,
+                  ),
+                  const SizedBox(width: SharedDesignTokens.spacingXs),
+                  Expanded(
+                    child: Text(
+                      'LINKED NOTES (${linkedNotes.length})',
+                      style: DaywellTypography.caption(
+                        color: semantic.textMuted,
+                      ).copyWith(
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              Wrap(
+                spacing: SharedDesignTokens.spacingSm,
+                runSpacing: SharedDesignTokens.spacingXs,
+                children: [
+                  DaywellButton(
+                    label: 'Link Existing',
+                    variant: DaywellButtonVariant.outlined,
+                    size: DaywellButtonSize.compact,
+                    leadingIcon: Icons.add_link,
+                    onPressed: handleOpenLinkPicker,
+                  ),
+                  DaywellButton(
+                    label: 'New Note',
+                    variant: DaywellButtonVariant.tonal,
+                    size: DaywellButtonSize.compact,
+                    leadingIcon: Icons.note_add_outlined,
+                    onPressed: () => unawaited(handleCreateNote()),
+                  ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              if (linkedNotes.isEmpty)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(SharedDesignTokens.spacingSm),
+                  decoration: BoxDecoration(
+                    color: semantic.card,
+                    borderRadius:
+                        BorderRadius.circular(SharedDesignTokens.radiusSm),
+                    border: Border.all(color: semantic.border),
+                  ),
+                  child: Text(
+                    'No notes linked to this event yet. Create a new note or link an existing note for prep and follow-ups.',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: semantic.textSecondary,
+                    ),
+                  ),
+                )
+              else
+                Column(
+                  children: [
+                    for (var i = 0; i < linkedNotes.length; i++) ...[
+                      if (i > 0)
+                        const SizedBox(height: SharedDesignTokens.spacingXs),
+                      Builder(
+                        builder: (_) {
+                          final note = linkedNotes[i];
+                          final preview =
+                              CalendarNotesHelper.buildContentPreview(
+                            note.content,
+                          );
+                          return DaywellCard(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: SharedDesignTokens.spacingSm,
+                              vertical: SharedDesignTokens.spacingXs,
+                            ),
+                            onTap: widget.onOpenNote != null
+                                ? () {
+                                    Navigator.pop(sheetNavigatorContext);
+                                    widget.onOpenNote!(note.id);
+                                  }
+                                : null,
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Wrap(
+                                        spacing: SharedDesignTokens.spacingXs,
+                                        runSpacing: 2,
+                                        crossAxisAlignment:
+                                            WrapCrossAlignment.center,
+                                        children: [
+                                          Text(
+                                            note.displayTitle,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: textTheme.bodyMedium
+                                                ?.copyWith(
+                                              color: semantic.textPrimary,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                          DaywellStatusBadge(
+                                            label: NoteDomainHelpers
+                                                .formatFolderLabel(
+                                              note.category,
+                                            ),
+                                            tone: DaywellStatusTone.info,
+                                            showIcon: false,
+                                          ),
+                                          if (note.isArchived)
+                                            const DaywellStatusBadge(
+                                              label: 'Archived',
+                                              tone: DaywellStatusTone.warning,
+                                              showIcon: false,
+                                            ),
+                                        ],
+                                      ),
+                                      if (preview.isNotEmpty) ...[
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          preview,
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: textTheme.bodySmall?.copyWith(
+                                            color: semantic.textSecondary,
+                                          ),
+                                        ),
+                                      ],
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        'Updated ${_formatReadableNoteDate(note.updatedAt)}',
+                                        style: textTheme.labelSmall?.copyWith(
+                                          color: semantic.textMuted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (widget.onOpenNote != null)
+                                  DaywellIconButton(
+                                    icon: Icons.open_in_new,
+                                    iconSize: DaywellIconSize.sm,
+                                    tooltip: 'Open ${note.displayTitle}',
+                                    onPressed: () {
+                                      Navigator.pop(sheetNavigatorContext);
+                                      widget.onOpenNote!(note.id);
+                                    },
+                                  ),
+                                DaywellIconButton(
+                                  icon: Icons.link_off_outlined,
+                                  iconSize: DaywellIconSize.sm,
+                                  tooltip: 'Unlink ${note.displayTitle}',
+                                  onPressed: () =>
+                                      unawaited(handleUnlinkNote(note)),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ],
+                  ],
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildEventCard(
     BuildContext context,
     CalendarEventEntity ev, {
@@ -605,6 +897,13 @@ class _CalendarViewState extends State<CalendarView> {
         ? 'All Day'
         : '${ev.startTime ?? ''}${ev.endTime != null ? ' – ${ev.endTime}' : ''}'
             .trim();
+
+    final linkedNotesCount = widget.notesController != null
+        ? CalendarNotesHelper.countNotesForEvent(
+            widget.notesController!.state.notes,
+            ev.id,
+          )
+        : 0;
 
     return Padding(
       padding: const EdgeInsets.only(bottom: SharedDesignTokens.spacingSm),
@@ -691,22 +990,50 @@ class _CalendarViewState extends State<CalendarView> {
                       ),
                     ),
                   ],
-                  if (timeLabel.isNotEmpty) ...[
+                  if (timeLabel.isNotEmpty || linkedNotesCount > 0) ...[
                     const SizedBox(height: SharedDesignTokens.spacingXs),
-                    Row(
+                    Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      runSpacing: SharedDesignTokens.spacingXs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Icon(
-                          Icons.schedule_outlined,
-                          size: DaywellIconSize.xs,
-                          color: semantic.textMuted,
-                        ),
-                        const SizedBox(width: SharedDesignTokens.spacingXs),
-                        Text(
-                          timeLabel,
-                          style: textTheme.labelSmall?.copyWith(
-                            color: semantic.textMuted,
+                        if (timeLabel.isNotEmpty)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.schedule_outlined,
+                                size: DaywellIconSize.xs,
+                                color: semantic.textMuted,
+                              ),
+                              const SizedBox(width: SharedDesignTokens.spacingXs),
+                              Text(
+                                timeLabel,
+                                style: textTheme.labelSmall?.copyWith(
+                                  color: semantic.textMuted,
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
+                        if (linkedNotesCount > 0)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.note_alt_outlined,
+                                size: DaywellIconSize.xs,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              const SizedBox(width: SharedDesignTokens.spacingXs),
+                              Text(
+                                '$linkedNotesCount ${linkedNotesCount == 1 ? 'note' : 'notes'}',
+                                style: textTheme.labelSmall?.copyWith(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
                   ],
@@ -898,6 +1225,7 @@ class _CalendarViewState extends State<CalendarView> {
       widget.calendarController,
       if (widget.tasksController != null) widget.tasksController!,
       if (widget.dailyRhythmController != null) widget.dailyRhythmController!,
+      if (widget.notesController != null) widget.notesController!,
     ]);
 
     return Scaffold(
@@ -1522,6 +1850,222 @@ class _CalendarCellIndicators extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _LinkExistingEventNoteSheet extends StatefulWidget {
+  final NotesController notesController;
+  final CalendarEventEntity event;
+
+  const _LinkExistingEventNoteSheet({
+    required this.notesController,
+    required this.event,
+  });
+
+  @override
+  State<_LinkExistingEventNoteSheet> createState() =>
+      _LinkExistingEventNoteSheetState();
+}
+
+class _LinkExistingEventNoteSheetState
+    extends State<_LinkExistingEventNoteSheet> {
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleSelectCandidate(
+    BuildContext context,
+    CalendarNoteLinkCandidate candidate,
+  ) async {
+    if (candidate.hasExistingPrimaryLink) {
+      final existingTarget = candidate.linkedTaskId != null
+          ? 'a task'
+          : candidate.linkedEventId != null
+              ? 'another Calendar event'
+              : (candidate.note.linkedModule ?? 'another item');
+      final confirmed = await DaywellConfirmationDialog.show(
+        context,
+        title: 'Replace existing link?',
+        message:
+            '"${candidate.note.displayTitle}" is currently linked to $existingTarget. Replace that link with "${widget.event.title}"?',
+        confirmLabel: 'Replace link',
+        cancelLabel: 'Cancel',
+        icon: Icons.swap_horiz,
+      );
+      if (!confirmed || !context.mounted) return;
+    }
+
+    await widget.notesController.linkNoteToEntity(
+      candidate.note.id,
+      module: NoteEntity.calendarLinkModule,
+      entityId: widget.event.id,
+    );
+    if (!context.mounted) return;
+    Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final semantic = context.daywellColors;
+    final colorScheme = Theme.of(context).colorScheme;
+    final candidates = CalendarNotesHelper.getAvailableNotesForEventLink(
+      widget.notesController.state.notes,
+      widget.event.id,
+      query: _query,
+    );
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          top: SharedDesignTokens.spacingMd,
+          left: SharedDesignTokens.spacingMd,
+          right: SharedDesignTokens.spacingMd,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              SharedDesignTokens.spacingMd,
+        ),
+        child: SizedBox(
+          height: MediaQuery.of(context).size.height * 0.65,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Link Existing Note',
+                      style: DaywellTypography.fromToken(
+                        SharedDesignTokens.typeTitle,
+                        color: semantic.textPrimary,
+                      ),
+                    ),
+                  ),
+                  DaywellIconButton(
+                    icon: Icons.close,
+                    tooltip: 'Close',
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              DaywellSearchField(
+                controller: _searchCtrl,
+                hintText: 'Search notes to link...',
+                onChanged: (val) => setState(() => _query = val),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              Expanded(
+                child: candidates.isEmpty
+                    ? DaywellEmptyState(
+                        icon: Icons.note_alt_outlined,
+                        message: _query.trim().isNotEmpty
+                            ? 'No matching notes available to link.'
+                            : 'No other notes available to link.',
+                      )
+                    : ListView.separated(
+                        itemCount: candidates.length,
+                        separatorBuilder: (_, __) => const SizedBox(
+                          height: SharedDesignTokens.spacingXs,
+                        ),
+                        itemBuilder: (_, index) {
+                          final candidate = candidates[index];
+                          final note = candidate.note;
+                          final preview =
+                              CalendarNotesHelper.buildContentPreview(
+                            note.content,
+                            maxLength: 90,
+                          );
+                          final linkWarning = candidate.linkedTaskId != null
+                              ? 'Currently linked to a task'
+                              : candidate.linkedEventId != null
+                                  ? 'Currently linked to another event'
+                                  : candidate.isLinkedToOtherModule
+                                      ? 'Currently linked to ${note.linkedModule}'
+                                      : null;
+
+                          return DaywellCard(
+                            padding: EdgeInsets.zero,
+                            child: ListTile(
+                              onTap: () => unawaited(
+                                _handleSelectCandidate(context, candidate),
+                              ),
+                              leading: Icon(
+                                Icons.description_outlined,
+                                color: candidate.hasExistingPrimaryLink
+                                    ? semantic.warning
+                                    : colorScheme.primary,
+                              ),
+                              title: Wrap(
+                                spacing: SharedDesignTokens.spacingXs,
+                                runSpacing: 2,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Text(
+                                    note.displayTitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodyMedium
+                                        ?.copyWith(fontWeight: FontWeight.w600),
+                                  ),
+                                  DaywellStatusBadge(
+                                    label: NoteDomainHelpers.formatFolderLabel(
+                                      note.category,
+                                    ),
+                                    tone: DaywellStatusTone.info,
+                                    showIcon: false,
+                                  ),
+                                  if (note.isArchived)
+                                    const DaywellStatusBadge(
+                                      label: 'Archived',
+                                      tone: DaywellStatusTone.warning,
+                                      showIcon: false,
+                                    ),
+                                ],
+                              ),
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  if (preview.isNotEmpty)
+                                    Text(
+                                      preview,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .bodySmall
+                                          ?.copyWith(
+                                            color: semantic.textSecondary,
+                                          ),
+                                    ),
+                                  if (linkWarning != null)
+                                    Text(
+                                      linkWarning,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(color: semantic.warning),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

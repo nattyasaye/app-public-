@@ -559,6 +559,7 @@ export function filterAndSortWebNotes<T extends TaskNoteRecord>(
     sortBy?: NoteSortMode;
     nowUtc?: Date;
     projectTitlesById?: ReadonlyMap<string, string>;
+    calendarEventTitlesById?: ReadonlyMap<string, string>;
   }
 ): T[] {
   const tab = options.activeTab || 'all';
@@ -613,7 +614,14 @@ export function filterAndSortWebNotes<T extends TaskNoteRecord>(
     const projectTitle = note.projectId
       ? options.projectTitlesById?.get(note.projectId)
       : undefined;
-    return matchesNoteSearchQuery(note, query, { projectTitle });
+    const linkedEventTitle =
+      note.linkedModule === 'calendar' && note.linkedId
+        ? options.calendarEventTitlesById?.get(note.linkedId)
+        : undefined;
+    return matchesNoteSearchQuery(note, query, {
+      projectTitle,
+      linkedEventTitle,
+    });
   });
 
   return sortNotes(filtered, {

@@ -9,6 +9,7 @@ import 'note_helpers.dart';
 
 class NoteEntity {
   static const String taskLinkModule = 'tasks';
+  static const String calendarLinkModule = 'calendar';
   static const Set<String> allowedLinkedModules = <String>{
     'tasks',
     'finance',
@@ -84,15 +85,29 @@ class NoteEntity {
 
   String? get linkedTaskId => isLinkedToTask ? linkedId : null;
 
+  bool get isLinkedToCalendarEvent =>
+      linkedModule == calendarLinkModule &&
+      linkedId != null &&
+      linkedId!.isNotEmpty;
+
+  String? get linkedCalendarEventId =>
+      isLinkedToCalendarEvent ? linkedId : null;
+
   String get displayTitle => title.trim().isEmpty ? 'Untitled Note' : title;
 
-  bool matchesQuery(String rawQuery) {
+  bool matchesQuery(
+    String rawQuery, {
+    String? projectTitle,
+    String? linkedEventTitle,
+  }) {
     return NoteDomainHelpers.matchesNoteSearchQuery(
       title: title,
       content: content,
       category: category,
       tags: tags,
       rawQuery: rawQuery,
+      projectTitle: projectTitle,
+      linkedEventTitle: linkedEventTitle,
     );
   }
 

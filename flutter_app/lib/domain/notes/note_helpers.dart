@@ -452,6 +452,7 @@ class NoteDomainHelpers {
     required Iterable<String> tags,
     required String rawQuery,
     String? projectTitle,
+    String? linkedEventTitle,
   }) {
     final query = rawQuery.trim().toLowerCase();
     if (query.isEmpty) return true;
@@ -465,6 +466,10 @@ class NoteDomainHelpers {
     if (matchesFolderSearchQuery(category, query)) return true;
     if (matchesTagsSearchQuery(tags, query)) return true;
     final cleanProjectTitle = projectTitle?.trim().toLowerCase() ?? '';
-    return cleanProjectTitle.isNotEmpty && cleanProjectTitle.contains(query);
+    if (cleanProjectTitle.isNotEmpty && cleanProjectTitle.contains(query)) {
+      return true;
+    }
+    final cleanEventTitle = linkedEventTitle?.trim().toLowerCase() ?? '';
+    return cleanEventTitle.isNotEmpty && cleanEventTitle.contains(query);
   }
 }

@@ -72,7 +72,12 @@ class NotesModuleState {
 
   // --- Derived Calculations & Filtered Notes ---
 
-  List<NoteEntity> get filteredNotes {
+  List<NoteEntity> get filteredNotes => filterNotes();
+
+  List<NoteEntity> filterNotes({
+    Map<String, String>? projectTitlesById,
+    Map<String, String>? eventTitlesById,
+  }) {
     final parsedDateFilter = NoteDomainHelpers.parseDateFilterMode(dateFilter);
     final list = notes.where((note) {
       if (sectionFilter == 'trash') {
@@ -99,7 +104,16 @@ class NotesModuleState {
         return false;
       }
 
-      if (!note.matchesQuery(searchQuery)) {
+      final projectTitle =
+          note.projectId != null ? projectTitlesById?[note.projectId!] : null;
+      final linkedEventTitle = note.linkedCalendarEventId != null
+          ? eventTitlesById?[note.linkedCalendarEventId!]
+          : null;
+      if (!note.matchesQuery(
+        searchQuery,
+        projectTitle: projectTitle,
+        linkedEventTitle: linkedEventTitle,
+      )) {
         return false;
       }
 

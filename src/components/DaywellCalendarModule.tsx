@@ -16,6 +16,7 @@ import {
   Sun,
   Loader2,
   AlertTriangle,
+  NotebookPen,
 } from 'lucide-react';
 import {
   CalendarDate,
@@ -42,6 +43,17 @@ import {
 } from '../domain/dailyRhythmWorkflows';
 import { DailyRhythmCalendarDetailCard } from './daily-rhythm';
 import { UnsavedChangesDialog } from './UnsavedChangesDialog';
+import { CalendarEventNotesSection } from './calendar/CalendarEventNotesSection';
+import type { DaywellNote } from './DaywellNotesModule';
+import {
+  countNotesLinkedToCalendarEvent,
+  createNoteForCalendarEvent,
+  linkNoteToCalendarEvent,
+  unlinkNoteFromCalendarEvent,
+  unlinkNotesForDeletedCalendarEvent,
+} from '../domain/calendarNotes';
+import { notesService } from '../services/notesService';
+import { SharedStateBridge } from '../services/sharedStateBridge';
 import {
   DaywellButton,
   DaywellCard,
@@ -90,9 +102,15 @@ export interface CalendarTaskRef {
 
 interface DaywellCalendarModuleProps {
   tasks?: CalendarTaskRef[];
+  notes?: DaywellNote[];
+  onUpdateNotes?: (
+    updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
+  ) => void;
   onToggleTask?: (taskId: string) => void;
   onNavigateToTask?: (taskId: string) => void;
-  requestedFocusDate?: { dateStr: string; nonce: number } | null;
+  onNavigateToNote?: (noteId: string) => void;
+  onEventsChange?: (events: CalendarEvent[]) => void;
+  requestedFocusDate?: { dateStr: string; eventId?: string; nonce: number } | null;
   dailyRhythmDays?: DailyRhythmDayRecord[];
   onRequestQuickCapture?: () => void;
 }
@@ -176,14 +194,19 @@ function getRhythmCellIndicator(
 
 export function DaywellCalendarModule({
   tasks = [],
+  notes: controlledNotes,
+  onUpdateNotes,
   onToggleTask,
   onNavigateToTask,
+  onNavigateToNote,
+  onEventsChange,
   requestedFocusDate,
   dailyRhythmDays = [],
 }: DaywellCalendarModuleProps) {
   const [viewMode, setViewMode] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   const [currentDate, setCurrentDate] = useState<CalendarDate>(() => CalendarDate.today());
   const [selectedDateStr, setSelectedDateStr] = useState<string>(() => CalendarDate.today().toIsoString());
+  const [highlightedEventId, setHighlightedEventId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!requestedFocusDate?.dateStr) return;
@@ -191,8 +214,43 @@ export function DaywellCalendarModule({
     if (!parsed) return;
     setCurrentDate(parsed);
     setSelectedDateStr(parsed.toIsoString());
+    setHighlightedEventId(requestedFocusDate.eventId ?? null);
     setViewMode((prev) => (prev === 'agenda' ? 'month' : prev));
-  }, [requestedFocusDate?.nonce, requestedFocusDate?.dateStr]);
+  }, [requestedFocusDate?.nonce, requestedFocusDate?.dateStr, requestedFocusDate?.eventId]);
+
+  const [internalNotes, setInternalNotes] = useState<DaywellNote[]>(() =>
+    notesService.loadNotes()
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || controlledNotes !== undefined) return;
+    const handleNotesSync = () => {
+      setInternalNotes(notesService.loadNotes());
+    };
+    window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleNotesSync);
+    return () =>
+      window.removeEventListener(
+        SharedStateBridge.SYNC_EVENT_NAME,
+        handleNotesSync
+      );
+  }, [controlledNotes]);
+
+  const effectiveNotes = controlledNotes ?? internalNotes;
+  const notesRef = useRef<DaywellNote[]>(effectiveNotes);
+  notesRef.current = effectiveNotes;
+
+  const applyNotesUpdate = (
+    updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
+  ) => {
+    if (onUpdateNotes) {
+      onUpdateNotes(updater);
+    } else {
+      setInternalNotes((prev) => {
+        const nextRaw = typeof updater === 'function' ? updater(prev) : updater;
+        return notesService.saveNotes(nextRaw, { emitSync: true });
+      });
+    }
+  };
 
   const [events, setEvents] = useState<CalendarEvent[]>(() => {
     try {
@@ -206,6 +264,53 @@ export function DaywellCalendarModule({
     }
     return [];
   });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleCalendarSync = (event: Event) => {
+      const detail =
+        event instanceof CustomEvent &&
+        event.detail &&
+        typeof event.detail === 'object'
+          ? (event.detail as Record<string, unknown>)
+          : null;
+      if (detail?.source === 'calendar_module') return;
+      try {
+        const saved = localStorage.getItem('daywell_calendar_events');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setEvents(parsed);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleCalendarSync);
+    return () =>
+      window.removeEventListener(
+        SharedStateBridge.SYNC_EVENT_NAME,
+        handleCalendarSync
+      );
+  }, []);
+
+  const commitEvents = (nextEvents: CalendarEvent[]) => {
+    setEvents(nextEvents);
+    try {
+      localStorage.setItem('daywell_calendar_events', JSON.stringify(nextEvents));
+    } catch (e) {
+      console.error(e);
+    }
+    onEventsChange?.(nextEvents);
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent(SharedStateBridge.SYNC_EVENT_NAME, {
+          detail: { calendarEvents: nextEvents, source: 'calendar_module' },
+        })
+      );
+    }
+  };
 
   useEffect(() => {
     try {
@@ -583,11 +688,11 @@ export function DaywellCalendarModule({
             }
           : ev
       );
-      setEvents(updated);
+      commitEvents(updated);
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
-      triggerUndo('Event updated', () => setEvents(previousEvents));
+      triggerUndo('Event updated', () => commitEvents(previousEvents));
     } else {
       const newEvent: CalendarEvent = {
         id: `evt-${Date.now()}`,
@@ -609,21 +714,34 @@ export function DaywellCalendarModule({
         recurrence: formRecurrence,
         hasReminder: formHasReminder,
       };
-      setEvents([newEvent, ...events]);
+      commitEvents([newEvent, ...events]);
       setSelectedDateStr(formDate);
       setIsSubmitting(false);
       setIsModalOpen(false);
       setFormErrors({});
-      triggerUndo(`Added "${newEvent.title}"`, () => setEvents(previousEvents));
+      triggerUndo(`Added "${newEvent.title}"`, () => commitEvents(previousEvents));
     }
   };
 
   const handleDeleteEvent = (id: string) => {
     const previous = [...events];
+    const previousNotes = [...notesRef.current];
     const target = events.find((e) => e.id === id);
-    setEvents(events.filter((e) => e.id !== id));
+    const unlinkRes = unlinkNotesForDeletedCalendarEvent(previousNotes, id);
+    if (unlinkRes.unlinkedCount > 0) {
+      applyNotesUpdate(unlinkRes.notes);
+    }
+    commitEvents(events.filter((e) => e.id !== id));
+    if (highlightedEventId === id) {
+      setHighlightedEventId(null);
+    }
     setIsModalOpen(false);
-    triggerUndo(`Deleted "${target?.title || 'event'}"`, () => setEvents(previous));
+    triggerUndo(`Deleted "${target?.title || 'event'}"`, () => {
+      commitEvents(previous);
+      if (unlinkRes.unlinkedCount > 0) {
+        applyNotesUpdate(previousNotes);
+      }
+    });
   };
 
   const todayIsoStr = CalendarDate.today().toIsoString();
@@ -901,13 +1019,22 @@ export function DaywellCalendarModule({
             <div className="space-y-2">
               {selectedDayItems.events.map((ev) => {
                 const color = CATEGORY_COLORS[ev.category];
+                const linkedNotesCount = countNotesLinkedToCalendarEvent(
+                  effectiveNotes,
+                  ev.id
+                );
+                const isHighlighted = highlightedEventId === ev.id;
                 return (
                   <DaywellCard
                     key={ev.id}
                     radius="lg"
                     padding="sm"
                     onClick={() => handleOpenEdit(ev)}
-                    className="hover:border-[var(--dw-primary)]/40 flex items-start justify-between gap-3 group"
+                    className={`hover:border-[var(--dw-primary)]/40 flex items-start justify-between gap-3 group ${
+                      isHighlighted
+                        ? 'border-[var(--dw-primary)] ring-2 ring-[var(--dw-primary)]/20'
+                        : ''
+                    }`}
                   >
                     <div className="flex items-start gap-3">
                       <div className="w-2.5 h-2.5 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: ev.colorHex }} />
@@ -940,6 +1067,13 @@ export function DaywellCalendarModule({
                             <span className="flex items-center gap-1 text-[var(--dw-success)]">
                               <Repeat className="w-3 h-3" />
                               {ev.recurrence}
+                            </span>
+                          )}
+                          {linkedNotesCount > 0 && (
+                            <span className="inline-flex items-center gap-1 font-medium text-[var(--dw-primary)]">
+                              <NotebookPen className="w-3 h-3" />
+                              {linkedNotesCount}{' '}
+                              {linkedNotesCount === 1 ? 'note' : 'notes'}
                             </span>
                           )}
                         </div>
@@ -1107,6 +1241,10 @@ export function DaywellCalendarModule({
                   const color = CATEGORY_COLORS[ev.category];
                   const parsedEvDate =
                     CalendarDate.tryParse(ev.date) ?? selectedCalendarDate;
+                  const linkedNotesCount = countNotesLinkedToCalendarEvent(
+                    effectiveNotes,
+                    ev.id
+                  );
                   return (
                     <DaywellCard
                       key={ev.id}
@@ -1128,11 +1266,20 @@ export function DaywellCalendarModule({
                           <h4 className="text-xs font-bold text-[var(--dw-text-primary)] truncate">
                             {ev.title}
                           </h4>
-                          <p className="text-[11px] text-[var(--dw-text-muted)] truncate">
-                            {ev.isAllDay
-                              ? 'All Day'
-                              : `${ev.startTime} – ${ev.endTime || ''}`}{' '}
-                            {ev.location ? `· ${ev.location}` : ''}
+                          <p className="text-[11px] text-[var(--dw-text-muted)] truncate flex items-center gap-2">
+                            <span>
+                              {ev.isAllDay
+                                ? 'All Day'
+                                : `${ev.startTime} – ${ev.endTime || ''}`}{' '}
+                              {ev.location ? `· ${ev.location}` : ''}
+                            </span>
+                            {linkedNotesCount > 0 && (
+                              <span className="inline-flex items-center gap-1 font-medium text-[var(--dw-primary)] shrink-0">
+                                <NotebookPen className="w-3 h-3" />
+                                {linkedNotesCount}{' '}
+                                {linkedNotesCount === 1 ? 'note' : 'notes'}
+                              </span>
+                            )}
                           </p>
                         </div>
                       </div>
@@ -1480,6 +1627,83 @@ export function DaywellCalendarModule({
                 </div>
               </div>
             </form>
+
+            {editingEventId && (() => {
+              const editingEvent =
+                events.find((ev) => ev.id === editingEventId) ?? null;
+              if (!editingEvent) return null;
+              return (
+                <div className="pt-2 border-t border-[var(--dw-divider)]">
+                  <CalendarEventNotesSection
+                    event={editingEvent}
+                    notes={effectiveNotes}
+                    tasks={tasks}
+                    allEvents={events}
+                    onOpenNote={
+                      onNavigateToNote
+                        ? (noteId) => {
+                            setIsModalOpen(false);
+                            setFormErrors({});
+                            onNavigateToNote(noteId);
+                          }
+                        : undefined
+                    }
+                    onCreateNote={() => {
+                      const res = createNoteForCalendarEvent<DaywellNote>({
+                        notes: notesRef.current,
+                        event: editingEvent,
+                      });
+                      if (!res.ok || !res.note) return;
+                      applyNotesUpdate(res.notes);
+                      if (onNavigateToNote) {
+                        setIsModalOpen(false);
+                        setFormErrors({});
+                        onNavigateToNote(res.note.id);
+                      } else {
+                        triggerUndo(
+                          `Created note "${res.note.title}"`,
+                          () =>
+                            applyNotesUpdate((prev) =>
+                              prev.filter((n) => n.id !== res.note?.id)
+                            )
+                        );
+                      }
+                    }}
+                    onLinkExistingNote={(noteId, options) => {
+                      const prevNotes = [...notesRef.current];
+                      const res = linkNoteToCalendarEvent(
+                        prevNotes,
+                        noteId,
+                        editingEvent.id,
+                        undefined,
+                        options
+                      );
+                      if (!res.ok) {
+                        return { ok: false, error: res.error };
+                      }
+                      applyNotesUpdate(res.notes);
+                      triggerUndo('Linked note to event', () =>
+                        applyNotesUpdate(prevNotes)
+                      );
+                      return { ok: true };
+                    }}
+                    onUnlinkNote={(noteId) => {
+                      const prevNotes = [...notesRef.current];
+                      const res = unlinkNoteFromCalendarEvent(
+                        prevNotes,
+                        noteId,
+                        editingEvent.id
+                      );
+                      if (!res.ok) return;
+                      applyNotesUpdate(res.notes);
+                      triggerUndo('Unlinked note from event', () =>
+                        applyNotesUpdate(prevNotes)
+                      );
+                    }}
+                  />
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

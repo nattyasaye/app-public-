@@ -193,6 +193,7 @@ export function matchesNoteSearchQuery(
   rawQuery: string,
   options?: {
     projectTitle?: string | null;
+    linkedEventTitle?: string | null;
   }
 ): boolean {
   const query = rawQuery.trim().toLowerCase();
@@ -210,7 +211,12 @@ export function matchesNoteSearchQuery(
     typeof options?.projectTitle === 'string'
       ? options.projectTitle.trim().toLowerCase()
       : '';
-  return projectTitle.length > 0 && projectTitle.includes(query);
+  if (projectTitle.length > 0 && projectTitle.includes(query)) return true;
+  const linkedEventTitle =
+    typeof options?.linkedEventTitle === 'string'
+      ? options.linkedEventTitle.trim().toLowerCase()
+      : '';
+  return linkedEventTitle.length > 0 && linkedEventTitle.includes(query);
 }
 
 /**
