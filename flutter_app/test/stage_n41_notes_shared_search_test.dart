@@ -402,6 +402,15 @@ void main() {
         );
         await tester.pump();
 
+        Future<void> pumpUntilText(String text) async {
+          for (var i = 0; i < 10; i++) {
+            await tester.pump(const Duration(milliseconds: 40));
+            if (find.text(text).evaluate().isNotEmpty) {
+              return;
+            }
+          }
+        }
+
         // Non-existent / permanently deleted noteId -> warning without discarding dirty draft
         await tester.pumpWidget(
           _wrapNotesApp(
@@ -411,8 +420,7 @@ void main() {
             onRegisterPendingSaveFlush: (handler) => registeredFlush = handler,
           ),
         );
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 50));
+        await pumpUntilText('This note is no longer available.');
         expect(find.text('This note is no longer available.'), findsOneWidget);
         expect(find.text('Dirty edit before navigation'), findsOneWidget);
 
@@ -425,8 +433,7 @@ void main() {
             onRegisterPendingSaveFlush: (handler) => registeredFlush = handler,
           ),
         );
-        await tester.pump();
-        await tester.pump(const Duration(milliseconds: 50));
+        await pumpUntilText('Restore note from Trash before editing');
         expect(find.text('Restore note from Trash before editing'),
             findsOneWidget);
         expect(find.text('Dirty edit before navigation'), findsOneWidget);
