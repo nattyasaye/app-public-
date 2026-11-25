@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
@@ -81,6 +82,59 @@ Future<void> disposeTestState(
   return (manager: manager, tempDir: tempDir);
 }
 
+class _IsolatedWidgetState {
+  final AppDatabase db;
+  final AppStateManager manager;
+  final Directory tempDir;
+
+  const _IsolatedWidgetState({
+    required this.db,
+    required this.manager,
+    required this.tempDir,
+  });
+}
+
+Future<_IsolatedWidgetState> _initializeIsolatedWidgetState(
+  WidgetTester tester,
+) async {
+  final result = await tester.runAsync(() async {
+    final db = AppDatabase(NativeDatabase.memory());
+    final isolated = _createIsolatedManager(db);
+    final manager = isolated.manager;
+    final tempDir = isolated.tempDir;
+    try {
+      await db.ensureInitialized().timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => throw TimeoutException(
+              'db.ensureInitialized() timed out after 15s',
+            ),
+          );
+      await manager.initialize().timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => throw TimeoutException(
+              'manager.initialize() timed out after 15s',
+            ),
+          );
+      return _IsolatedWidgetState(
+        db: db,
+        manager: manager,
+        tempDir: tempDir,
+      );
+    } catch (_) {
+      try {
+        if (!manager.isDisposed) {
+          await manager.disposeAsync().timeout(const Duration(seconds: 3));
+        }
+      } catch (_) {}
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+      rethrow;
+    }
+  });
+  return result!;
+}
+
 void main() {
   configureSqliteForHostTests();
 
@@ -146,13 +200,9 @@ void main() {
     testWidgets(
       'QuickCaptureDialog hands off expense text to Finance Composer',
       (tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        final isolated = _createIsolatedManager(db);
-        final manager = isolated.manager;
-        final tempDir = isolated.tempDir;
-        await tester.runAsync(
-          () => manager.initialize().timeout(const Duration(seconds: 15)),
-        );
+        final setup = await _initializeIsolatedWidgetState(tester);
+        final manager = setup.manager;
+        final tempDir = setup.tempDir;
         addTearDown(() => disposeTestState(tester, manager, tempDir: tempDir));
 
         Future<void> settle() => tester.pumpAndSettle(
@@ -203,13 +253,10 @@ void main() {
     testWidgets(
       'Overview & Reports display Option 1 Prepaid Card Credit and v7 audit info',
       (tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        final isolated = _createIsolatedManager(db);
-        final manager = isolated.manager;
-        final tempDir = isolated.tempDir;
-        await tester.runAsync(
-          () => manager.initialize().timeout(const Duration(seconds: 15)),
-        );
+        final setup = await _initializeIsolatedWidgetState(tester);
+        final db = setup.db;
+        final manager = setup.manager;
+        final tempDir = setup.tempDir;
         addTearDown(() => disposeTestState(tester, manager, tempDir: tempDir));
 
         Future<void> settle() => tester.pumpAndSettle(
