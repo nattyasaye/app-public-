@@ -86,6 +86,33 @@ class _NotesFolderNameDialogState extends State<_NotesFolderNameDialog> {
     super.dispose();
   }
 
+  Future<void> _submit() async {
+    if (_isRename) {
+      final res = await widget.controller.renameFolder(
+        widget.oldName!,
+        _ctrl.text,
+      );
+      if (!mounted) return;
+      if (!res.ok || res.folder == null) {
+        setState(
+          () => _errorText = res.errorMessage ?? 'Could not rename folder.',
+        );
+        return;
+      }
+      Navigator.pop(context, res.folder);
+    } else {
+      final res = await widget.controller.createFolder(_ctrl.text);
+      if (!mounted) return;
+      if (!res.ok || res.folder == null) {
+        setState(
+          () => _errorText = res.errorMessage ?? 'Could not create folder.',
+        );
+        return;
+      }
+      Navigator.pop(context, res.folder);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
@@ -115,34 +142,7 @@ class _NotesFolderNameDialogState extends State<_NotesFolderNameDialog> {
           label: _isRename ? 'Rename' : 'Create',
           variant: DaywellButtonVariant.primary,
           size: DaywellButtonSize.compact,
-          onPressed: () async {
-            if (_isRename) {
-              final res = await widget.controller.renameFolder(
-                widget.oldName!,
-                _ctrl.text,
-              );
-              if (!mounted) return;
-              if (!res.ok || res.folder == null) {
-                setState(
-                  () => _errorText =
-                      res.errorMessage ?? 'Could not rename folder.',
-                );
-                return;
-              }
-              Navigator.pop(context, res.folder);
-            } else {
-              final res = await widget.controller.createFolder(_ctrl.text);
-              if (!mounted) return;
-              if (!res.ok || res.folder == null) {
-                setState(
-                  () => _errorText =
-                      res.errorMessage ?? 'Could not create folder.',
-                );
-                return;
-              }
-              Navigator.pop(context, res.folder);
-            }
-          },
+          onPressed: () => unawaited(_submit()),
         ),
       ],
     );
