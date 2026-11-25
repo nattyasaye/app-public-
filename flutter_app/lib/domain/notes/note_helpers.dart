@@ -42,11 +42,24 @@ class NoteTitleValidationResult {
   });
 }
 
+class DashboardRecentNotesSummary {
+  final List<NoteEntity> recentNotes;
+  final int totalActiveCount;
+  final int archivedCount;
+
+  const DashboardRecentNotesSummary({
+    required this.recentNotes,
+    required this.totalActiveCount,
+    required this.archivedCount,
+  });
+}
+
 class NoteDomainHelpers {
   const NoteDomainHelpers._();
 
   static const String defaultTitle = 'Untitled Note';
   static const int maxTitleLength = SharedNoteContracts.maxTitleLength;
+  static const int defaultDashboardRecentNotesLimit = 4;
   static const Set<String> reservedFolderNames = <String>{
     'all',
     'pinned',
@@ -399,6 +412,63 @@ class NoteDomainHelpers {
       ),
     );
     return List<NoteEntity>.unmodifiable(sorted);
+  }
+
+  static String buildContentPreview(String content, {int maxLength = 140}) {
+    final plain = NoteMarkdownParser.toPlainText(content)
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (plain.isEmpty) return '';
+    if (plain.length <= maxLength) return plain;
+    final safeLimit = maxLength <= 1 ? 1 : maxLength - 1;
+    return '${plain.substring(0, safeLimit).trimRight()}…';
+  }
+
+  /// Builds the Dashboard Recent Notes summary:
+  /// - Deduplicates by note ID (retaining the latest updatedAt entry)
+  /// - Excludes trashed notes unconditionally
+  /// - Excludes archived notes by default (`includeArchived = false`)
+  /// - Orders strictly by most recent `updatedAt` descending (`pinFirst: false`)
+  static DashboardRecentNotesSummary buildDashboardRecentNotesSummary(
+    Iterable<NoteEntity> notes, {
+    int limit = defaultDashboardRecentNotesLimit,
+    bool includeArchived = false,
+  }) {
+    final safeLimit = limit < 0 ? 0 : limit;
+    final deduplicated = <String, NoteEntity>{};
+    for (final note in notes) {
+      final cleanId = note.id.trim();
+      if (cleanId.isEmpty) continue;
+      final existing = deduplicated[cleanId];
+      if (existing == null ||
+          compareNotes(note, existing, sortBy: NoteSortMode.recent, pinFirst: false) <
+              0) {
+        deduplicated[cleanId] = note;
+      }
+    }
+
+    var archivedCount = 0;
+    final eligible = <NoteEntity>[];
+    for (final note in deduplicated.values) {
+      if (isTrashed(note)) continue;
+      if (isArchived(note)) {
+        archivedCount += 1;
+        if (!includeArchived) continue;
+      }
+      eligible.add(note);
+    }
+
+    final ordered = sortNotes(
+      eligible,
+      sortBy: NoteSortMode.recent,
+      pinFirst: false,
+    );
+
+    return DashboardRecentNotesSummary(
+      recentNotes: List<NoteEntity>.unmodifiable(ordered.take(safeLimit)),
+      totalActiveCount: ordered.length,
+      archivedCount: archivedCount,
+    );
   }
 
   static String formatFolderLabel(String rawFolder) {

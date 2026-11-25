@@ -19,6 +19,7 @@ import '../../application/calendar/calendar_controller.dart';
 import '../../application/notes/notes_controller.dart';
 import '../../application/projects/projects_controller.dart';
 import '../../application/tasks/tasks_controller.dart';
+import '../../services/export/note_markdown_io_service.dart';
 import '../app_state.dart';
 import '../widgets/notes/note_markdown_preview.dart';
 import '../widgets/shared_ui_widgets.dart';
@@ -1766,6 +1767,7 @@ class _NotesViewState extends State<NotesView> {
       if (action == 'pin' ||
           action == 'fav' ||
           action == 'duplicate' ||
+          action == 'export_md' ||
           action == 'archive' ||
           action == 'trash') {
         final flushed =
@@ -1782,6 +1784,34 @@ class _NotesViewState extends State<NotesView> {
       _showMoveNoteFolderDialog(controller, note);
     } else if (action == 'duplicate') {
       await controller.duplicateNote(note.id);
+    } else if (action == 'export_md') {
+      final latestNote = controller.state.findById(note.id) ?? note;
+      if (latestNote.isTrashed) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Cannot export a note in Trash. Restore it from Trash first.',
+            ),
+          ),
+        );
+        return;
+      }
+      final outcome = await NoteMarkdownIoService.exportAndShareNote(latestNote);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            outcome.ok
+                ? (outcome.usedTextFallback
+                    ? 'Shared "${outcome.filename}" Markdown content'
+                    : 'Prepared "${outcome.filename}" for export/share')
+                : (outcome.error ?? 'Unable to export "${outcome.filename}".'),
+          ),
+        ),
+      );
     } else if (action == 'copy') {
       await Clipboard.setData(
         ClipboardData(
@@ -1961,6 +1991,11 @@ class _NotesViewState extends State<NotesView> {
                       const PopupMenuItem(
                         value: 'duplicate',
                         child: Text('Duplicate'),
+                      ),
+                    if (!note.isTrashed)
+                      const PopupMenuItem(
+                        value: 'export_md',
+                        child: Text('Export / Share (.md)'),
                       ),
                     const PopupMenuItem(
                       value: 'copy',
@@ -2663,7 +2698,108 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     widget.onNoteMovedToTrash?.call(id);
   }
 
+  Future<void> _handleExportAndShareMarkdown() async {
+    final ok = await _flushPendingSaves();
+    if (!ok || !mounted || _isDisposed) return;
+
+    final isBlankDraft = _noteId == null &&
+        _titleController.text.trim().isEmpty &&
+        _contentController.text.trim().isEmpty;
+    if (_noteId == null || isBlankDraft) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add a title or content before exporting this draft.'),
+        ),
+      );
+      return;
+    }
+
+    final note = widget.controller.state.findById(_noteId!);
+    if (note == null || note.isTrashed) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            note?.isTrashed == true
+                ? 'Cannot export a note in Trash. Restore it from Trash first.'
+                : 'Note is unavailable for export.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    final outcome = await NoteMarkdownIoService.exportAndShareNote(note);
+    if (!mounted || _isDisposed) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          outcome.ok
+              ? (outcome.usedTextFallback
+                  ? 'Shared "${outcome.filename}" Markdown content'
+                  : 'Prepared "${outcome.filename}" for export/share')
+              : (outcome.error ?? 'Unable to export "${outcome.filename}".'),
+        ),
+      ),
+    );
+  }
+
+  String _describeCurrentPrimaryLinkTarget(String module, String id) {
+    if (module == NoteEntity.calendarLinkModule) {
+      final events = widget.calendarController?.state.events ??
+          const <CalendarEventEntity>[];
+      for (final ev in events) {
+        if (ev.id == id && ev.title.trim().isNotEmpty) {
+          return 'Calendar event "${ev.title.trim()}"';
+        }
+      }
+      return 'an unavailable Calendar event';
+    }
+    if (module == NoteEntity.taskLinkModule) {
+      final taskTitle =
+          widget.tasksController?.state.findTaskById(id)?.title.trim();
+      if (taskTitle != null && taskTitle.isNotEmpty) {
+        return 'task "$taskTitle"';
+      }
+      return 'an unavailable task';
+    }
+    return module;
+  }
+
+  (String?, String?) _resolveActivePrimaryLink() {
+    final liveNote =
+        _noteId != null ? widget.controller.state.findById(_noteId!) : null;
+    if (_hasPendingChanges || _noteId == null || liveNote == null) {
+      return (_linkedModule, _linkedId);
+    }
+    return (liveNote.linkedModule, liveNote.linkedId);
+  }
+
   Future<void> _linkTask(TaskEntity task) async {
+    final (activeModule, activeId) = _resolveActivePrimaryLink();
+    if (activeModule == NoteEntity.taskLinkModule && activeId == task.id) {
+      return;
+    }
+    if (activeModule != null &&
+        activeId != null &&
+        activeModule != NoteEntity.taskLinkModule) {
+      final noteTitle = NoteDomainHelpers.normalizeTitle(_titleController.text);
+      final existingTarget =
+          _describeCurrentPrimaryLinkTarget(activeModule, activeId);
+      final confirmed = await DaywellConfirmationDialog.show(
+        context,
+        title: 'Replace existing link?',
+        message:
+            '"$noteTitle" is currently linked to $existingTarget. Replace that link with "${task.title}"?',
+        confirmLabel: 'Replace link',
+        cancelLabel: 'Cancel',
+        icon: Icons.swap_horiz,
+      );
+      if (!confirmed || !mounted) return;
+    }
+
     final prevModule = _linkedModule;
     final prevId = _linkedId;
     setState(() {
@@ -2728,6 +2864,30 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
           label: 'Undo',
           onPressed: () {
             if (!mounted) return;
+            final liveNote = _noteId != null
+                ? widget.controller.state.findById(_noteId!)
+                : null;
+            final (curModule, curId) = _resolveActivePrimaryLink();
+            final targetExists = widget.tasksController == null ||
+                widget.tasksController!.state.findTaskById(prevId) != null;
+            final hasConflict = curModule != null &&
+                curId != null &&
+                !(curModule == prevModule && curId == prevId);
+            if ((liveNote != null && liveNote.isTrashed) ||
+                !targetExists ||
+                hasConflict) {
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    !targetExists
+                        ? 'Could not undo: linked task is no longer available.'
+                        : 'Could not undo: note relationship changed.',
+                  ),
+                ),
+              );
+              return;
+            }
             setState(() {
               _linkedModule = prevModule;
               _linkedId = prevId;
@@ -2776,6 +2936,26 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   }
 
   Future<void> _linkCalendarEvent(CalendarEventEntity event) async {
+    final (activeModule, activeId) = _resolveActivePrimaryLink();
+    if (activeModule == NoteEntity.calendarLinkModule && activeId == event.id) {
+      return;
+    }
+    if (activeModule != null && activeId != null) {
+      final noteTitle = NoteDomainHelpers.normalizeTitle(_titleController.text);
+      final existingTarget =
+          _describeCurrentPrimaryLinkTarget(activeModule, activeId);
+      final confirmed = await DaywellConfirmationDialog.show(
+        context,
+        title: 'Replace existing link?',
+        message:
+            '"$noteTitle" is currently linked to $existingTarget. Replace that link with "${event.title}"?',
+        confirmLabel: 'Replace link',
+        cancelLabel: 'Cancel',
+        icon: Icons.swap_horiz,
+      );
+      if (!confirmed || !mounted) return;
+    }
+
     final prevModule = _linkedModule;
     final prevId = _linkedId;
     setState(() {
@@ -2840,6 +3020,31 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
           label: 'Undo',
           onPressed: () {
             if (!mounted) return;
+            final liveNote = _noteId != null
+                ? widget.controller.state.findById(_noteId!)
+                : null;
+            final (curModule, curId) = _resolveActivePrimaryLink();
+            final targetExists = widget.calendarController == null ||
+                widget.calendarController!.state.events
+                    .any((e) => e.id == prevId);
+            final hasConflict = curModule != null &&
+                curId != null &&
+                !(curModule == prevModule && curId == prevId);
+            if ((liveNote != null && liveNote.isTrashed) ||
+                !targetExists ||
+                hasConflict) {
+              ScaffoldMessenger.of(context).clearSnackBars();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    !targetExists
+                        ? 'Could not undo: linked event is no longer available.'
+                        : 'Could not undo: note relationship changed.',
+                  ),
+                ),
+              );
+              return;
+            }
             setState(() {
               _linkedModule = prevModule;
               _linkedId = prevId;
@@ -3573,6 +3778,10 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         );
 
         final bool isArchivedNote = currentNote?.isArchived ?? false;
+        final bool isTrashedNote = currentNote?.isTrashed ?? false;
+        final bool isNewBlankDraft = _noteId == null &&
+            _titleController.text.trim().isEmpty &&
+            _contentController.text.trim().isEmpty;
         final List<Widget> editorActionButtons = [
           if (_noteId != null) ...[
             DaywellIconButton(
@@ -3606,6 +3815,12 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
               ),
             ],
           ],
+          if (!isTrashedNote && !isNewBlankDraft)
+            DaywellIconButton(
+              icon: Icons.share_outlined,
+              tooltip: 'Export / Share Markdown (.md)',
+              onPressed: () => unawaited(_handleExportAndShareMarkdown()),
+            ),
           DaywellIconButton(
             icon: Icons.copy_rounded,
             tooltip: 'Copy note',

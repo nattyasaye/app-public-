@@ -438,6 +438,12 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
             });
             _shellController.selectTab(DaywellTabId.finance);
           },
+          onOpenNote: (String noteId) {
+            setState(() {
+              _requestedNoteFocus = (noteId: noteId, nonce: ++_noteFocusNonce);
+            });
+            _shellController.selectTab(DaywellTabId.notes);
+          },
           onOpenBackup: () =>
               _shellController.openSecondaryRoute(DaywellSecondaryRoute.backup),
         );
@@ -448,6 +454,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           projectsController: _state.projectsController,
           inboxController: _state.inboxController,
           notesController: _state.notesController,
+          calendarController: _state.calendarController,
           requestedTaskFocus: _requestedTaskFocus,
           requestedSubTab: _requestedTasksSubTab,
           onOpenCalendarDate: (CalendarDate date) {

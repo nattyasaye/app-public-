@@ -534,3 +534,110 @@ export function sortNotes<T extends NoteSortItemShape>(
 ): T[] {
   return [...notes].sort((a, b) => compareNotes(a, b, options));
 }
+
+export const DEFAULT_DASHBOARD_RECENT_NOTES_LIMIT = 4;
+
+export interface DashboardRecentNoteShape
+  extends NoteSortItemShape,
+    NoteLifecycleShape {}
+
+export interface DashboardRecentNotesSummary<
+  T extends DashboardRecentNoteShape = DashboardRecentNoteShape,
+> {
+  recentNotes: T[];
+  totalActiveCount: number;
+  archivedCount: number;
+}
+
+/**
+ * Produces a single-line collapsed plain-text preview with Markdown syntax
+ * stripped and clean ellipsis truncation when exceeding `maxLength`.
+ */
+export function getNoteContentPreview(
+  content: string,
+  maxLength = 140
+): string {
+  const plain = markdownToPlainText(content)
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!plain) return '';
+  if (plain.length <= maxLength) return plain;
+  return `${plain.slice(0, Math.max(1, maxLength - 1)).trimEnd()}…`;
+}
+
+/**
+ * Formats an ISO-8601 note timestamp into a readable Ethiopia-civil date label.
+ */
+export function formatReadableNoteDate(
+  isoDate: string,
+  nowUtc?: Date
+): string {
+  const parsed = SharedDateFormatter.tryParseFlexibleToCalendarDate(isoDate);
+  if (!parsed) return isoDate.slice(0, 10);
+  const todayYear = CalendarDate.fromUtcInstantInEthiopia(
+    nowUtc ?? EthiopiaClock.nowUtc()
+  ).year;
+  return parsed.year === todayYear
+    ? `${parsed.gregorianShortMonthName} ${parsed.day}`
+    : `${parsed.gregorianShortMonthName} ${parsed.day}, ${parsed.year}`;
+}
+
+/**
+ * Builds the Dashboard Recent Notes summary:
+ * - Deduplicates records by `id` (keeping the most recently updated entry)
+ * - Always excludes trashed notes
+ * - Follows Dashboard active-module convention (`includeArchived = false` by default)
+ * - Orders strictly by most recent `updatedAt` descending (`pinFirst: false`)
+ */
+export function buildDashboardRecentNotesSummary<
+  T extends DashboardRecentNoteShape,
+>(
+  notes: readonly T[],
+  options?: {
+    limit?: number;
+    includeArchived?: boolean;
+  }
+): DashboardRecentNotesSummary<T> {
+  const rawLimit = options?.limit ?? DEFAULT_DASHBOARD_RECENT_NOTES_LIMIT;
+  const limit = Number.isFinite(rawLimit) ? Math.max(0, Math.floor(rawLimit)) : DEFAULT_DASHBOARD_RECENT_NOTES_LIMIT;
+  const includeArchived = options?.includeArchived ?? false;
+
+  const deduplicatedById = new Map<string, T>();
+  for (const note of notes) {
+    const cleanId = typeof note.id === 'string' ? note.id.trim() : '';
+    if (!cleanId) continue;
+    const existing = deduplicatedById.get(cleanId);
+    if (!existing) {
+      deduplicatedById.set(cleanId, note);
+      continue;
+    }
+    if (
+      compareNotes(note, existing, { sortBy: 'recent', pinFirst: false }) < 0
+    ) {
+      deduplicatedById.set(cleanId, note);
+    }
+  }
+
+  let archivedCount = 0;
+  const eligible: T[] = [];
+  for (const note of deduplicatedById.values()) {
+    if (isNoteTrashed(note)) continue;
+    if (isNoteArchived(note)) {
+      archivedCount += 1;
+      if (!includeArchived) continue;
+    }
+    eligible.push(note);
+  }
+
+  const ordered = sortNotes(eligible, {
+    sortBy: 'recent',
+    pinFirst: false,
+  });
+
+  return {
+    recentNotes: ordered.slice(0, limit),
+    totalActiveCount: ordered.length,
+    archivedCount,
+  };
+}
+

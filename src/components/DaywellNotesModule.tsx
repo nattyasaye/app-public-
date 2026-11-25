@@ -34,6 +34,8 @@ import {
   Layers,
   Tag,
   Calendar as CalendarIcon,
+  Download,
+  Share2,
 } from 'lucide-react';
 import { CalendarDate, EthiopiaClock, SharedDateFormatter } from '../domain/date';
 import {
@@ -71,6 +73,7 @@ import {
   getLinkedTaskForNote,
   linkNoteToTask,
   MAX_NOTE_TITLE_LENGTH,
+  undoTaskNoteLink,
   unlinkNoteFromTask,
 } from '../domain/taskNotes';
 import {
@@ -106,9 +109,14 @@ import {
   CalendarEventNoteTarget,
   getLinkedCalendarEventForNote,
   linkNoteToCalendarEvent,
+  undoCalendarEventNoteLink,
   unlinkNoteFromCalendarEvent,
 } from '../domain/calendarNotes';
 import { notesService } from '../services/notesService';
+import {
+  exportNoteAsMarkdown,
+  shareNoteAsMarkdown,
+} from '../services/noteExportService';
 import { projectsService } from '../services/projectsService';
 import { SHARED_DESIGN_TOKENS, SharedProject } from '../domain/sharedFoundation';
 import { SharedStateBridge } from '../services/sharedStateBridge';
@@ -366,6 +374,12 @@ export function DaywellNotesModule({
     () => buildCalendarEventTitlesById(effectiveCalendarEvents),
     [effectiveCalendarEvents]
   );
+  const tasksRef = useRef<DaywellTaskRecord[]>(effectiveTasks);
+  tasksRef.current = effectiveTasks;
+  const calendarEventsRef = useRef<CalendarEventNoteTarget[]>(
+    effectiveCalendarEvents
+  );
+  calendarEventsRef.current = effectiveCalendarEvents;
 
   const applyNotesUpdate = (
     updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
@@ -493,6 +507,14 @@ export function DaywellNotesModule({
     useState<DaywellNote | null>(null);
   const [isConfirmEmptyTrashOpen, setIsConfirmEmptyTrashOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [pendingCrossModuleLink, setPendingCrossModuleLink] = useState<{
+    noteId: string | null;
+    noteTitle: string;
+    targetModule: 'tasks' | 'calendar';
+    targetId: string;
+    targetLabel: string;
+    existingSummary: string;
+  } | null>(null);
   const [ambiguousLinkChoice, setAmbiguousLinkChoice] = useState<{
     targetTitle: string;
     matches: DaywellNote[];
@@ -1118,6 +1140,124 @@ export function DaywellNotesModule({
     );
   };
 
+  const resolveNoteForMarkdownAction = (
+    noteId: string | null
+  ): DaywellNote | null => {
+    const isEditingTarget =
+      isEditorOpen &&
+      (noteId === null || selectedNoteIdRef.current === noteId);
+
+    if (isEditingTarget) {
+      const fields = draftFieldsRef.current;
+      const startingNoteId = selectedNoteIdRef.current;
+      const preview = saveWebNoteDraft({
+        notes: notesRef.current,
+        noteId: startingNoteId,
+        title: fields.title,
+        content: fields.content,
+        notebook: fields.notebook,
+        tags: fields.tags,
+        projectId: fields.projectId,
+        clearProjectId: fields.projectId === undefined,
+      });
+      const committed = commitEditorDraftToNote();
+      if (!committed.noteId || committed.status === 'discarded_empty') {
+        triggerFeedback(
+          'Add a title or content before exporting this draft.',
+          undefined,
+          true
+        );
+        return null;
+      }
+      const target =
+        preview.note ??
+        notesRef.current.find((n) => n.id === committed.noteId) ??
+        null;
+      if (!target) {
+        triggerFeedback('Note is unavailable for export.', undefined, true);
+        return null;
+      }
+      return target;
+    }
+
+    if (!noteId) {
+      triggerFeedback(
+        'Add a title or content before exporting this draft.',
+        undefined,
+        true
+      );
+      return null;
+    }
+
+    const target = notesRef.current.find((n) => n.id === noteId) ?? null;
+    if (!target) {
+      triggerFeedback('Note is unavailable for export.', undefined, true);
+      return null;
+    }
+    return target;
+  };
+
+  const handleExportNoteMarkdown = (
+    noteId: string | null,
+    e?: React.MouseEvent
+  ) => {
+    e?.stopPropagation();
+    const target = resolveNoteForMarkdownAction(noteId);
+    if (!target) return;
+    if (isNoteTrashed(target)) {
+      triggerFeedback(
+        'Cannot export a note in Trash. Restore it from Trash first.',
+        undefined,
+        true
+      );
+      return;
+    }
+    const result = exportNoteAsMarkdown(target);
+    if (result.ok) {
+      triggerFeedback(`Exported ${result.filename}`);
+    } else {
+      triggerFeedback(
+        result.error || 'Unable to export note as Markdown.',
+        undefined,
+        true
+      );
+    }
+  };
+
+  const handleShareNoteMarkdown = async (
+    noteId: string | null,
+    e?: React.MouseEvent
+  ) => {
+    e?.stopPropagation();
+    const target = resolveNoteForMarkdownAction(noteId);
+    if (!target) return;
+    if (isNoteTrashed(target)) {
+      triggerFeedback(
+        'Cannot share a note in Trash. Restore it from Trash first.',
+        undefined,
+        true
+      );
+      return;
+    }
+    const result = await shareNoteAsMarkdown(target);
+    if (result.cancelled) {
+      return;
+    }
+    if (result.ok) {
+      triggerFeedback(
+        result.method === 'web_share'
+          ? `Shared ${result.filename}`
+          : `Downloaded ${result.filename} to share`
+      );
+    } else {
+      triggerFeedback(
+        result.error || 'Unable to share note as Markdown.',
+        undefined,
+        true
+      );
+    }
+  };
+
   const handleRestoreFromTrash = (noteId: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
     const prevSnapshot = [...notesRef.current];
@@ -1192,71 +1332,279 @@ export function DaywellNotesModule({
     }
   };
 
-  const handleLinkTaskToNote = (noteId: string | null, taskId: string) => {
+  const describeConflictingLink = (note: DaywellNote): string => {
+    if (note.linkedModule === 'calendar' && note.linkedId) {
+      const eventTitle = calendarEventTitlesById.get(note.linkedId);
+      return eventTitle
+        ? `Calendar event "${eventTitle}"`
+        : 'an unavailable Calendar event that no longer exists';
+    }
+    if (note.linkedModule === 'tasks' && note.linkedId) {
+      const taskTitle = effectiveTasks.find((t) => t.id === note.linkedId)?.title;
+      return taskTitle ? `task "${taskTitle}"` : 'another task';
+    }
+    return note.linkedModule ?? 'another item';
+  };
+
+  const handleLinkTaskToNote = (
+    noteId: string | null,
+    taskId: string,
+    options?: { allowReassign?: boolean }
+  ) => {
     const cleanTaskId = taskId.trim();
     if (!cleanTaskId) return;
-    const prevSnapshot = [...notesRef.current];
+    const resolvedId = noteId ?? selectedNoteIdRef.current;
+    const preNote = resolvedId
+      ? notesRef.current.find((n) => n.id === resolvedId)
+      : undefined;
     const targetTask = effectiveTasks.find((t) => t.id === cleanTaskId);
+    if (
+      !options?.allowReassign &&
+      preNote &&
+      preNote.linkedModule &&
+      preNote.linkedModule !== 'tasks' &&
+      preNote.linkedId
+    ) {
+      setPendingCrossModuleLink({
+        noteId,
+        noteTitle: getDisplayNoteTitle(preNote.title),
+        targetModule: 'tasks',
+        targetId: cleanTaskId,
+        targetLabel: targetTask ? `task "${targetTask.title}"` : 'this task',
+        existingSummary: describeConflictingLink(preNote),
+      });
+      return;
+    }
+
+    const prevMod = preNote?.linkedModule;
+    const prevId = preNote?.linkedId;
     applyEditorAwareMutation(
       noteId,
-      (list, id) => linkNoteToTask(list, id, cleanTaskId),
-      () => {
+      (list, id) => linkNoteToTask(list, id, cleanTaskId, undefined, options),
+      (updated) => {
+        if (!updated) return;
         triggerFeedback(
           targetTask
             ? `Linked note to "${targetTask.title}"`
             : 'Linked note to task',
-          () => applyNotesUpdate(prevSnapshot)
+          () => {
+            const previousTargetExists =
+              prevMod === 'tasks' && prevId
+                ? tasksRef.current.some((t) => t.id === prevId)
+                : prevMod === 'calendar' && prevId
+                  ? calendarEventsRef.current.some((ev) => ev.id === prevId)
+                  : undefined;
+            const preCheck = undoTaskNoteLink({
+              notes: notesRef.current,
+              noteId: updated.id,
+              appliedTaskId: cleanTaskId,
+              previousLinkedModule: prevMod,
+              previousLinkedId: prevId,
+              previousTargetExists,
+            });
+            if (!preCheck.ok) {
+              triggerFeedback(
+                preCheck.error || 'Undo skipped: note relationship changed.',
+                undefined,
+                true
+              );
+              return;
+            }
+            applyNotesUpdate((cur) => {
+              const undoRes = undoTaskNoteLink({
+                notes: cur,
+                noteId: updated.id,
+                appliedTaskId: cleanTaskId,
+                previousLinkedModule: prevMod,
+                previousLinkedId: prevId,
+                previousTargetExists,
+              });
+              return undoRes.ok ? undoRes.notes : cur;
+            });
+          }
         );
       }
     );
   };
 
   const handleUnlinkTaskFromNote = (noteId: string) => {
-    const prevSnapshot = [...notesRef.current];
+    const preNote = notesRef.current.find((n) => n.id === noteId);
+    const prevTaskId =
+      preNote?.linkedModule === 'tasks' ? preNote.linkedId : undefined;
     applyEditorAwareMutation(
       noteId,
       (list, id) => unlinkNoteFromTask(list, id),
       () => {
-        triggerFeedback('Unlinked task from note', () =>
-          applyNotesUpdate(prevSnapshot)
-        );
+        triggerFeedback('Unlinked task from note', () => {
+          if (!prevTaskId) return;
+          if (!tasksRef.current.some((t) => t.id === prevTaskId)) {
+            triggerFeedback(
+              'Undo skipped: task is no longer available.',
+              undefined,
+              true
+            );
+            return;
+          }
+          const preCheck = linkNoteToTask(
+            notesRef.current,
+            noteId,
+            prevTaskId,
+            undefined,
+            { allowReassign: false }
+          );
+          if (!preCheck.ok) {
+            triggerFeedback(
+              preCheck.error || 'Undo skipped: note relationship changed.',
+              undefined,
+              true
+            );
+            return;
+          }
+          applyNotesUpdate((cur) => {
+            const restored = linkNoteToTask(
+              cur,
+              noteId,
+              prevTaskId,
+              undefined,
+              { allowReassign: false }
+            );
+            return restored.ok ? restored.notes : cur;
+          });
+        });
       }
     );
   };
 
   const handleLinkCalendarEventToNote = (
     noteId: string | null,
-    eventId: string
+    eventId: string,
+    options?: { allowReassign?: boolean }
   ) => {
     const cleanEventId = eventId.trim();
     if (!cleanEventId) return;
-    const prevSnapshot = [...notesRef.current];
+    const resolvedId = noteId ?? selectedNoteIdRef.current;
+    const preNote = resolvedId
+      ? notesRef.current.find((n) => n.id === resolvedId)
+      : undefined;
     const targetEvent = effectiveCalendarEvents.find(
       (ev) => ev.id === cleanEventId
     );
+    if (
+      !options?.allowReassign &&
+      preNote &&
+      preNote.linkedModule &&
+      preNote.linkedId &&
+      !(preNote.linkedModule === 'calendar' && preNote.linkedId === cleanEventId)
+    ) {
+      setPendingCrossModuleLink({
+        noteId,
+        noteTitle: getDisplayNoteTitle(preNote.title),
+        targetModule: 'calendar',
+        targetId: cleanEventId,
+        targetLabel: targetEvent
+          ? `Calendar event "${targetEvent.title}"`
+          : 'this Calendar event',
+        existingSummary: describeConflictingLink(preNote),
+      });
+      return;
+    }
+
+    const prevMod = preNote?.linkedModule;
+    const prevId = preNote?.linkedId;
     applyEditorAwareMutation(
       noteId,
-      (list, id) => linkNoteToCalendarEvent(list, id, cleanEventId),
-      () => {
+      (list, id) =>
+        linkNoteToCalendarEvent(list, id, cleanEventId, undefined, options),
+      (updated) => {
+        if (!updated) return;
         triggerFeedback(
           targetEvent
             ? `Linked note to "${targetEvent.title}"`
             : 'Linked note to event',
-          () => applyNotesUpdate(prevSnapshot)
+          () => {
+            const previousTargetExists =
+              prevMod === 'tasks' && prevId
+                ? tasksRef.current.some((t) => t.id === prevId)
+                : prevMod === 'calendar' && prevId
+                  ? calendarEventsRef.current.some((ev) => ev.id === prevId)
+                  : undefined;
+            const preCheck = undoCalendarEventNoteLink({
+              notes: notesRef.current,
+              noteId: updated.id,
+              appliedEventId: cleanEventId,
+              previousLinkedModule: prevMod,
+              previousLinkedId: prevId,
+              previousTargetExists,
+            });
+            if (!preCheck.ok) {
+              triggerFeedback(
+                preCheck.error || 'Undo skipped: note relationship changed.',
+                undefined,
+                true
+              );
+              return;
+            }
+            applyNotesUpdate((cur) => {
+              const undoRes = undoCalendarEventNoteLink({
+                notes: cur,
+                noteId: updated.id,
+                appliedEventId: cleanEventId,
+                previousLinkedModule: prevMod,
+                previousLinkedId: prevId,
+                previousTargetExists,
+              });
+              return undoRes.ok ? undoRes.notes : cur;
+            });
+          }
         );
       }
     );
   };
 
   const handleUnlinkCalendarEventFromNote = (noteId: string) => {
-    const prevSnapshot = [...notesRef.current];
+    const preNote = notesRef.current.find((n) => n.id === noteId);
+    const prevEventId =
+      preNote?.linkedModule === 'calendar' ? preNote.linkedId : undefined;
     applyEditorAwareMutation(
       noteId,
       (list, id) => unlinkNoteFromCalendarEvent(list, id),
       () => {
-        triggerFeedback('Unlinked event from note', () =>
-          applyNotesUpdate(prevSnapshot)
-        );
+        triggerFeedback('Unlinked event from note', () => {
+          if (!prevEventId) return;
+          if (!calendarEventsRef.current.some((ev) => ev.id === prevEventId)) {
+            triggerFeedback(
+              'Undo skipped: event is no longer available.',
+              undefined,
+              true
+            );
+            return;
+          }
+          const preCheck = linkNoteToCalendarEvent(
+            notesRef.current,
+            noteId,
+            prevEventId,
+            undefined,
+            { allowReassign: false }
+          );
+          if (!preCheck.ok) {
+            triggerFeedback(
+              preCheck.error || 'Undo skipped: note relationship changed.',
+              undefined,
+              true
+            );
+            return;
+          }
+          applyNotesUpdate((cur) => {
+            const restored = linkNoteToCalendarEvent(
+              cur,
+              noteId,
+              prevEventId,
+              undefined,
+              { allowReassign: false }
+            );
+            return restored.ok ? restored.notes : cur;
+          });
+        });
       }
     );
   };
@@ -2177,6 +2525,13 @@ export function DaywellNotesModule({
                           }
                         />
                         <DaywellIconButton
+                          label={`Export ${displayTitle} as Markdown (.md)`}
+                          size="compact"
+                          tone="muted"
+                          onClick={(e) => handleExportNoteMarkdown(note.id, e)}
+                          icon={<Download className="w-3.5 h-3.5" />}
+                        />
+                        <DaywellIconButton
                           label={note.isPinned ? 'Unpin note' : 'Pin note to top'}
                           aria-pressed={Boolean(note.isPinned)}
                           size="compact"
@@ -2469,6 +2824,20 @@ export function DaywellNotesModule({
                     tone={currentEditorNote?.isArchived ? 'primary' : 'muted'}
                     onClick={() => toggleArchive(selectedNoteId)}
                     icon={<Archive className="w-4 h-4" />}
+                  />
+                  <DaywellIconButton
+                    label="Export Markdown (.md)"
+                    size="compact"
+                    tone="muted"
+                    onClick={() => handleExportNoteMarkdown(selectedNoteId)}
+                    icon={<Download className="w-4 h-4" />}
+                  />
+                  <DaywellIconButton
+                    label="Share Markdown (.md)"
+                    size="compact"
+                    tone="muted"
+                    onClick={() => void handleShareNoteMarkdown(selectedNoteId)}
+                    icon={<Share2 className="w-4 h-4" />}
                   />
                   <DaywellIconButton
                     label="Move Note to Trash"
@@ -3389,6 +3758,34 @@ export function DaywellNotesModule({
         destructive
         onCancel={() => setConfirmDeleteFolder(null)}
         onConfirm={handleConfirmDeleteFolder}
+      />
+
+      {/* Cross-Module Note Link Replacement Confirmation Modal */}
+      <DaywellConfirmationDialog
+        isOpen={Boolean(pendingCrossModuleLink)}
+        title="Replace existing link?"
+        description={
+          pendingCrossModuleLink
+            ? `"${pendingCrossModuleLink.noteTitle}" is currently linked to ${pendingCrossModuleLink.existingSummary}. Replace that link with ${pendingCrossModuleLink.targetLabel}?`
+            : ''
+        }
+        cancelLabel="Cancel"
+        confirmLabel="Replace link"
+        onCancel={() => setPendingCrossModuleLink(null)}
+        onConfirm={() => {
+          const pending = pendingCrossModuleLink;
+          setPendingCrossModuleLink(null);
+          if (!pending) return;
+          if (pending.targetModule === 'tasks') {
+            handleLinkTaskToNote(pending.noteId, pending.targetId, {
+              allowReassign: true,
+            });
+          } else {
+            handleLinkCalendarEventToNote(pending.noteId, pending.targetId, {
+              allowReassign: true,
+            });
+          }
+        }}
       />
     </div>
   );

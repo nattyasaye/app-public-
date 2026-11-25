@@ -281,6 +281,83 @@ export function linkNoteToCalendarEvent<T extends TaskNoteRecord>(
   };
 }
 
+export function undoCalendarEventNoteLink<T extends TaskNoteRecord>(params: {
+  notes: readonly T[];
+  noteId: string;
+  appliedEventId: string;
+  previousLinkedModule?: NoteLinkedModule;
+  previousLinkedId?: string;
+  previousTargetExists?: boolean;
+  nowUtc?: Date;
+}): CalendarNoteLinkMutationResult<T> {
+  const cleanNoteId = params.noteId.trim();
+  const cleanAppliedEventId = params.appliedEventId.trim();
+  if (!cleanNoteId || !cleanAppliedEventId) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      error: 'Undo skipped: invalid note or Calendar event identifier.',
+    };
+  }
+
+  const target = params.notes.find((n) => n.id === cleanNoteId);
+  if (!target || isNoteTrashed(target)) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      error: 'Undo skipped: note is no longer available.',
+    };
+  }
+
+  if (
+    target.linkedModule !== 'calendar' ||
+    target.linkedId !== cleanAppliedEventId
+  ) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      error: 'Undo skipped: note relationship changed.',
+    };
+  }
+
+  const hasPreviousPair = Boolean(
+    params.previousLinkedModule &&
+      params.previousLinkedId &&
+      params.previousLinkedId.trim().length > 0
+  );
+  if (hasPreviousPair && params.previousTargetExists === false) {
+    return {
+      ok: false,
+      notes: [...params.notes],
+      error: 'Undo skipped: previous linked target is no longer available.',
+    };
+  }
+
+  const updatedIso = (params.nowUtc ?? EthiopiaClock.nowUtc()).toISOString();
+  const { linkedModule: _lm, linkedId: _li, ...rest } = target;
+  const updatedNote = (
+    hasPreviousPair
+      ? {
+          ...rest,
+          linkedModule: params.previousLinkedModule,
+          linkedId: params.previousLinkedId!.trim(),
+          updatedAt: updatedIso,
+        }
+      : {
+          ...rest,
+          updatedAt: updatedIso,
+        }
+  ) as T;
+
+  return {
+    ok: true,
+    notes: params.notes.map((n) => (n.id === cleanNoteId ? updatedNote : n)),
+    updatedNote,
+    previousLinkedModule: target.linkedModule,
+    previousLinkedId: target.linkedId,
+  };
+}
+
 export function unlinkNoteFromCalendarEvent<T extends TaskNoteRecord>(
   notes: readonly T[],
   noteId: string,

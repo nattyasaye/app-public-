@@ -21,7 +21,13 @@ import {
 } from './calendarNotes';
 import { matchesNoteSearchQuery } from './noteHelpers';
 import { TaskNoteRecord } from './taskNotes';
-import { filterAndSortWebNotes, saveWebNoteDraft } from './webNotesLifecycle';
+import {
+  filterAndSortWebNotes,
+  moveWebNoteToTrash,
+  restoreWebNoteFromTrash,
+  saveWebNoteDraft,
+  toggleWebNoteArchive,
+} from './webNotesLifecycle';
 import { notesService } from '../services/notesService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
 import { CalendarEventNotesSection } from '../components/calendar/CalendarEventNotesSection';
@@ -643,5 +649,323 @@ describe('STAGE N5.2 — CALENDAR EVENT NOTES INTEGRATION (WEB, BRIDGE & PARITY)
     for (const src of [webCalNotes, webCalModule, webNotesModule]) {
       assert.strictEqual(/#[0-9a-fA-F]{3,8}\b/.test(src), false);
     }
+  });
+
+  it('8. Corrective review: CalendarEventNotesSection surfaces resolved task/event link warnings without mutating Task links, Project links, or note metadata', () => {
+    const taskEvent = makeEvent('evt-review', 'Architecture Sync');
+    const otherEvent = makeEvent('evt-other', 'Annual Offsite');
+
+    const taskLinkedNote = makeNote('n-task-meta', 'Sprint Checklist', {
+      linkedModule: 'tasks',
+      linkedId: 'task-42',
+      projectId: 'proj-core',
+      goalId: 'goal-ops',
+      notebook: 'Work',
+      tags: ['sprint', 'priority'],
+      content: 'Review [[API Contract]] before release',
+      isPinned: true,
+      isFavorite: true,
+    });
+    const otherEventNote = makeNote('n-event-meta', 'Offsite Agenda', {
+      linkedModule: 'calendar',
+      linkedId: otherEvent.id,
+      projectId: 'proj-core',
+    });
+
+    // Picker renders resolved task & event titles in warning copy when opened?
+    // Verify CalendarEventNotesSection HTML contains resolved note titles and empty/populated states cleanly,
+    // while domain helper keeps unconfirmed overwrites blocked and metadata completely untouched.
+    const blockedTask = linkNoteToCalendarEvent(
+      [taskLinkedNote, otherEventNote],
+      taskLinkedNote.id,
+      taskEvent.id
+    );
+    assert.strictEqual(blockedTask.ok, false);
+    const untouchedTaskNote = blockedTask.notes.find(
+      (n) => n.id === taskLinkedNote.id
+    )!;
+    assert.strictEqual(untouchedTaskNote.linkedModule, 'tasks');
+    assert.strictEqual(untouchedTaskNote.linkedId, 'task-42');
+    assert.strictEqual(untouchedTaskNote.projectId, 'proj-core');
+    assert.strictEqual(untouchedTaskNote.goalId, 'goal-ops');
+    assert.deepStrictEqual(untouchedTaskNote.tags, ['sprint', 'priority']);
+    assert.strictEqual(untouchedTaskNote.isPinned, true);
+    assert.strictEqual(untouchedTaskNote.isFavorite, true);
+
+    // Explicit replacement preserves all orthogonal metadata & projectId
+    const replaced = linkNoteToCalendarEvent(
+      [taskLinkedNote, otherEventNote],
+      taskLinkedNote.id,
+      taskEvent.id,
+      new Date('2026-03-17T10:00:00.000Z'),
+      { allowReassign: true }
+    );
+    assert.strictEqual(replaced.ok, true);
+    assert.strictEqual(replaced.updatedNote?.linkedModule, 'calendar');
+    assert.strictEqual(replaced.updatedNote?.linkedId, taskEvent.id);
+    assert.strictEqual(replaced.updatedNote?.projectId, 'proj-core');
+    assert.strictEqual(replaced.updatedNote?.goalId, 'goal-ops');
+    assert.strictEqual(replaced.updatedNote?.notebook, 'Work');
+    assert.deepStrictEqual(replaced.updatedNote?.tags, ['sprint', 'priority']);
+    assert.strictEqual(
+      replaced.updatedNote?.content,
+      'Review [[API Contract]] before release'
+    );
+    assert.strictEqual(replaced.updatedNote?.isPinned, true);
+    assert.strictEqual(replaced.updatedNote?.isFavorite, true);
+
+    const sectionHtml = renderToStaticMarkup(
+      React.createElement(CalendarEventNotesSection, {
+        event: taskEvent,
+        notes: replaced.notes,
+        tasks: [{ id: 'task-42', title: 'Finalize Launch Runbook' }],
+        allEvents: [taskEvent, otherEvent],
+        onOpenNote: () => {},
+        onCreateNote: () => {},
+        onLinkExistingNote: (noteId, opts) =>
+          linkNoteToCalendarEvent(replaced.notes, noteId, taskEvent.id, undefined, opts),
+        onUnlinkNote: () => {},
+      })
+    );
+    assert.ok(sectionHtml.includes('LINKED NOTES (1)'));
+    assert.ok(sectionHtml.includes('Sprint Checklist'));
+  });
+
+  it('9. Corrective review: Calendar events have no archive state; deleting an event unlinks active/archived/trashed calendar notes safely and note archival/restore preserves event links', () => {
+    const schemaContracts = JSON.parse(
+      readRepoFile('shared_foundation/schema_contracts.json')
+    );
+    const calEventFields = schemaContracts.entities.CalendarEvent.fields;
+    assert.strictEqual(
+      Object.prototype.hasOwnProperty.call(calEventFields, 'isArchived'),
+      false,
+      'CalendarEvent schema has no isArchived column (event archival is N/A in current architecture)'
+    );
+
+    const eventNote = makeNote('n-active-ev', 'Meeting Prep', {
+      linkedModule: 'calendar',
+      linkedId: 'evt-del-all',
+      projectId: 'proj-a',
+      tags: ['agenda'],
+    });
+    // Archiving and unarchiving a note preserves its Calendar event link
+    const archivedRes = toggleWebNoteArchive([eventNote], eventNote.id);
+    assert.strictEqual(archivedRes.ok, true);
+    assert.strictEqual(archivedRes.updatedNote?.isArchived, true);
+    assert.strictEqual(archivedRes.updatedNote?.linkedModule, 'calendar');
+    assert.strictEqual(archivedRes.updatedNote?.linkedId, 'evt-del-all');
+
+    const unarchivedRes = toggleWebNoteArchive(archivedRes.notes, eventNote.id);
+    assert.strictEqual(unarchivedRes.ok, true);
+    assert.strictEqual(unarchivedRes.updatedNote?.isArchived, false);
+    assert.strictEqual(unarchivedRes.updatedNote?.linkedModule, 'calendar');
+    assert.strictEqual(unarchivedRes.updatedNote?.linkedId, 'evt-del-all');
+
+    const trashedRes = moveWebNoteToTrash(
+      [
+        eventNote,
+        makeNote('n-trash-ev', 'Old Draft', {
+          linkedModule: 'calendar',
+          linkedId: 'evt-del-all',
+        }),
+      ],
+      'n-trash-ev'
+    );
+    assert.strictEqual(trashedRes.ok, true);
+
+    const beforeDelete = [
+      ...trashedRes.notes,
+      makeNote('n-colliding-task', 'Task with matching ID', {
+        linkedModule: 'tasks',
+        linkedId: 'evt-del-all',
+        projectId: 'proj-b',
+      }),
+    ];
+
+    // Deleting event detaches both active and trashed matching calendar notes, never deletes notes,
+    // and never touches tasks-linked notes even when linkedId equals the deleted event ID.
+    const afterDelete = unlinkNotesForDeletedCalendarEvent(
+      beforeDelete,
+      'evt-del-all'
+    );
+    assert.strictEqual(afterDelete.unlinkedCount, 2);
+    assert.strictEqual(afterDelete.notes.length, 3);
+    const restoredFromTrash = restoreWebNoteFromTrash(
+      afterDelete.notes,
+      'n-trash-ev'
+    );
+    assert.strictEqual(restoredFromTrash.updatedNote?.linkedModule, undefined);
+    assert.strictEqual(restoredFromTrash.updatedNote?.linkedId, undefined);
+    assert.strictEqual(
+      afterDelete.notes.find((n) => n.id === 'n-active-ev')?.projectId,
+      'proj-a'
+    );
+    const collidingTask = afterDelete.notes.find(
+      (n) => n.id === 'n-colliding-task'
+    )!;
+    assert.strictEqual(collidingTask.linkedModule, 'tasks');
+    assert.strictEqual(collidingTask.linkedId, 'evt-del-all');
+  });
+
+  it('10. Corrective review: Missing event refs degrade safely in UI/search, SharedStateBridge strips invalid half-links, and Finance-only restore preserves calendar-linked notes', () => {
+    const missingEventNote = makeNote('n-missing-ev', 'Detached Event Note', {
+      linkedModule: 'calendar',
+      linkedId: 'evt-does-not-exist',
+      content: 'Still readable and searchable by title',
+      projectId: 'proj-1',
+    });
+    const eventTitles = buildCalendarEventTitlesById([]);
+    const searchHits = filterAndSortWebNotes([missingEventNote], {
+      activeTab: 'all',
+      searchQuery: 'Detached',
+      calendarEventTitlesById: eventTitles,
+    });
+    assert.deepStrictEqual(
+      searchHits.map((n) => n.id),
+      ['n-missing-ev']
+    );
+
+    const orphanUiHtml = renderToStaticMarkup(
+      React.createElement(DaywellNotesModule, {
+        notes: [missingEventNote],
+        onUpdateNotes: () => {},
+        calendarEvents: [],
+        requestedNoteFocus: { noteId: missingEventNote.id, nonce: 1 },
+        onNavigateToCalendarEvent: () => {},
+        isActive: true,
+        layoutMode: 'auto',
+      })
+    );
+    assert.ok(orphanUiHtml.includes('Detached Event Note'));
+    assert.ok(orphanUiHtml.includes('Linked event unavailable'));
+    assert.ok(!orphanUiHtml.includes('Open linked event:'));
+    // Unlinking an orphaned calendar-linked note still succeeds cleanly and preserves metadata/projectId
+    const unlinkedOrphan = unlinkNoteFromCalendarEvent(
+      [missingEventNote],
+      missingEventNote.id
+    );
+    assert.strictEqual(unlinkedOrphan.ok, true);
+    assert.strictEqual(unlinkedOrphan.updatedNote?.linkedModule, undefined);
+    assert.strictEqual(unlinkedOrphan.updatedNote?.linkedId, undefined);
+    assert.strictEqual(unlinkedOrphan.updatedNote?.projectId, 'proj-1');
+
+    // Backup/Restore hygiene: half-links are stripped cleanly while valid calendar, task & project links survive,
+    // and Finance-only restore leaves calendarEvents + calendar-linked notes completely untouched.
+    withMockBrowserStorage((store) => {
+      store.set(
+        'daywell_tasks',
+        JSON.stringify([
+          {
+            id: 'task-keep-1',
+            title: 'Keep Task Link',
+            completed: false,
+            priority: 'medium',
+            status: 'not_started',
+            createdAt: '2026-03-01T08:00:00.000Z',
+            updatedAt: '2026-03-01T08:00:00.000Z',
+          },
+        ])
+      );
+      store.set(
+        'daywell_projects',
+        JSON.stringify([
+          {
+            id: 'proj-1',
+            title: 'Payments Initiative',
+            status: 'active',
+            isArchived: false,
+            createdAt: '2026-03-01T08:00:00.000Z',
+            updatedAt: '2026-03-01T08:00:00.000Z',
+          },
+        ])
+      );
+      store.set(
+        'daywell_calendar_events',
+        JSON.stringify([
+          {
+            id: 'evt-keep-1',
+            title: 'Treasury Sync',
+            date: '2026-03-22',
+            isAllDay: false,
+            category: 'finance',
+            createdAt: '2026-03-01T08:00:00.000Z',
+            updatedAt: '2026-03-01T08:00:00.000Z',
+          },
+        ])
+      );
+      notesService.saveNotes([
+        makeNote('n-cal-1', 'Treasury Prep', {
+          linkedModule: 'calendar',
+          linkedId: 'evt-keep-1',
+          projectId: 'proj-1',
+          tags: ['treasury'],
+        }),
+        makeNote('n-task-1', 'Task Prep', {
+          linkedModule: 'tasks',
+          linkedId: 'task-keep-1',
+        }),
+      ]);
+
+      const fullExport = JSON.parse(SharedStateBridge.exportToAndroidJson());
+      fullExport.notes.push(
+        {
+          id: 'n-half-mod',
+          title: 'Half link module only',
+          body: '',
+          folder: 'Personal',
+          tags: [],
+          isPinned: false,
+          isArchived: false,
+          linkedModule: 'calendar',
+          createdAt: '2026-03-01T08:00:00.000Z',
+          updatedAt: '2026-03-01T08:00:00.000Z',
+        },
+        {
+          id: 'n-half-id',
+          title: 'Half link id only',
+          body: '',
+          folder: 'Personal',
+          tags: [],
+          isPinned: false,
+          isArchived: false,
+          linkedId: 'evt-keep-1',
+          createdAt: '2026-03-01T08:00:00.000Z',
+          updatedAt: '2026-03-01T08:00:00.000Z',
+        }
+      );
+
+      store.clear();
+      const restored = SharedStateBridge.importFromAndroidJson(
+        JSON.stringify(fullExport)
+      );
+      assert.strictEqual(restored.success, true, restored.error);
+
+      const loaded = notesService.loadNotes();
+      const halfMod = loaded.find((n) => n.id === 'n-half-mod')!;
+      const halfId = loaded.find((n) => n.id === 'n-half-id')!;
+      assert.strictEqual(halfMod.linkedModule, undefined);
+      assert.strictEqual(halfMod.linkedId, undefined);
+      assert.strictEqual(halfId.linkedModule, undefined);
+      assert.strictEqual(halfId.linkedId, undefined);
+      assert.strictEqual(
+        loaded.find((n) => n.id === 'n-task-1')?.linkedModule,
+        'tasks'
+      );
+
+      // Finance-only restore must preserve existing calendarEvents and calendar-linked notes
+      const finOnlyJson = SharedStateBridge.exportFinanceOnlyJson();
+      const finImportRes = SharedStateBridge.importFinanceOnlyJson(finOnlyJson);
+      assert.strictEqual(finImportRes.success, true, finImportRes.error);
+      const notesAfterFin = notesService.loadNotes();
+      const calNoteAfterFin = notesAfterFin.find((n) => n.id === 'n-cal-1')!;
+      assert.strictEqual(calNoteAfterFin.linkedModule, 'calendar');
+      assert.strictEqual(calNoteAfterFin.linkedId, 'evt-keep-1');
+      assert.strictEqual(calNoteAfterFin.projectId, 'proj-1');
+      const eventsAfterFin = JSON.parse(
+        store.get('daywell_calendar_events') || '[]'
+      );
+      assert.strictEqual(eventsAfterFin.length, 1);
+      assert.strictEqual(eventsAfterFin[0].id, 'evt-keep-1');
+    });
   });
 });

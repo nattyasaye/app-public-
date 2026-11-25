@@ -11,6 +11,7 @@ import '../../domain/daily_rhythm/daily_rhythm_workflows.dart';
 import '../../domain/finance/double_entry_engine.dart';
 import '../../domain/finance/financial_engine.dart';
 import '../../domain/inbox/inbox_models.dart';
+import '../../domain/notes/note_helpers.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_recurrence_engine.dart';
@@ -31,6 +32,7 @@ class DashboardView extends StatefulWidget {
   final void Function(DaywellTabId tab)? onSelectTab;
   final void Function(int tabIndex)? onOpenTasksSubTab;
   final void Function(int tabIndex)? onOpenFinanceTab;
+  final void Function(String noteId)? onOpenNote;
   final VoidCallback? onOpenBackup;
 
   const DashboardView({
@@ -41,6 +43,7 @@ class DashboardView extends StatefulWidget {
     this.onSelectTab,
     this.onOpenTasksSubTab,
     this.onOpenFinanceTab,
+    this.onOpenNote,
     this.onOpenBackup,
   });
 
@@ -259,6 +262,7 @@ class _DashboardViewState extends State<DashboardView> {
                             DashboardNotesSection(
                               state: widget.state,
                               onOpenNotes: () => _goToTab(DaywellTabId.notes),
+                              onOpenNote: widget.onOpenNote,
                             ),
                             const SizedBox(
                                 height: SharedDesignTokens.spacingLg),
@@ -300,6 +304,7 @@ class _DashboardViewState extends State<DashboardView> {
                   DashboardNotesSection(
                     state: widget.state,
                     onOpenNotes: () => _goToTab(DaywellTabId.notes),
+                    onOpenNote: widget.onOpenNote,
                   ),
                   const SizedBox(height: SharedDesignTokens.spacingLg),
                   DashboardInboxSection(
@@ -2587,22 +2592,14 @@ class DashboardCalendarSection extends StatelessWidget {
 class DashboardNotesSection extends StatelessWidget {
   final AppStateManager state;
   final VoidCallback onOpenNotes;
+  final void Function(String noteId)? onOpenNote;
 
   const DashboardNotesSection({
     super.key,
     required this.state,
     required this.onOpenNotes,
+    this.onOpenNote,
   });
-
-  List<NoteEntity> _recentActiveNotes(List<NoteEntity> notes) {
-    final active =
-        notes.where((NoteEntity n) => !n.isTrashed && !n.isArchived).toList();
-    active.sort((NoteEntity a, NoteEntity b) {
-      if (a.isPinned != b.isPinned) return a.isPinned ? -1 : 1;
-      return b.updatedAt.compareTo(a.updatedAt);
-    });
-    return active;
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -2610,10 +2607,14 @@ class DashboardNotesSection extends StatelessWidget {
       listenable: state.notesController,
       builder: (BuildContext context, Widget? _) {
         final notesState = state.notesController.state;
-        final activeNotes = _recentActiveNotes(notesState.notes);
-        final hasData = activeNotes.isNotEmpty;
+        final summary = NoteDomainHelpers.buildDashboardRecentNotesSummary(
+          notesState.notes,
+        );
+        final recentNotes = summary.recentNotes;
+        final hasData = recentNotes.isNotEmpty;
         final hasError = notesState.errorMessage != null &&
             notesState.errorMessage!.trim().isNotEmpty;
+        final remainingCount = summary.totalActiveCount - recentNotes.length;
 
         final DaywellContentStatus status;
         if (notesState.isLoading && !hasData) {
@@ -2628,7 +2629,8 @@ class DashboardNotesSection extends StatelessWidget {
 
         return DaywellSectionContainer(
           title: 'Recent Notes',
-          count: activeNotes.isNotEmpty ? activeNotes.length : null,
+          count:
+              summary.totalActiveCount > 0 ? summary.totalActiveCount : null,
           actionLabel: 'All Notes',
           onActionPressed: onOpenNotes,
           child: DaywellContentState(
@@ -2639,13 +2641,16 @@ class DashboardNotesSection extends StatelessWidget {
             onRetry: () => unawaited(state.notesController.loadNotes()),
             emptyIcon: Icons.menu_book_outlined,
             emptyMessage: 'No active notes yet',
-            emptySubtitle:
-                'Capture ideas, references, and reflections in Notes.',
+            emptySubtitle: summary.archivedCount > 0
+                ? 'All recorded notes are archived. Open Notes to view your Archive.'
+                : 'Capture ideas, references, and reflections in Notes.',
             emptyActionLabel: 'Open Notes',
             onEmptyAction: onOpenNotes,
             contentBuilder: (BuildContext context) {
               final semantic = context.daywellColors;
-              final textTheme = Theme.of(context).textTheme;
+              final theme = Theme.of(context);
+              final colorScheme = theme.colorScheme;
+              final textTheme = theme.textTheme;
 
               return DaywellCard(
                 padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
@@ -2663,49 +2668,32 @@ class DashboardNotesSection extends StatelessWidget {
                       ),
                       const SizedBox(height: SharedDesignTokens.spacingCompact),
                     ],
-                    ...activeNotes.take(3).map((NoteEntity note) {
-                      final snippet = note.content.trim();
-                      return Padding(
-                        padding: const EdgeInsets.only(
-                          bottom: SharedDesignTokens.spacingSm,
+                    for (var i = 0; i < recentNotes.length; i++) ...[
+                      if (i > 0)
+                        const SizedBox(height: SharedDesignTokens.spacingSm),
+                      _DashboardRecentNoteCard(
+                        note: recentNotes[i],
+                        onTap: () => onOpenNote != null
+                            ? onOpenNote!(recentNotes[i].id)
+                            : onOpenNotes(),
+                        semantic: semantic,
+                        colorScheme: colorScheme,
+                        textTheme: textTheme,
+                      ),
+                    ],
+                    if (remainingCount > 0) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: DaywellButton(
+                          label:
+                              '+ $remainingCount more ${remainingCount == 1 ? 'note' : 'notes'}',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: onOpenNotes,
                         ),
-                        child: _AdaptiveItemRow(
-                          content: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                note.displayTitle,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: textTheme.bodyMedium?.copyWith(
-                                  fontWeight: FontWeight.w600,
-                                  color: semantic.textPrimary,
-                                ),
-                              ),
-                              if (snippet.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  snippet,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: textTheme.bodySmall?.copyWith(
-                                    color: semantic.textSecondary,
-                                  ),
-                                ),
-                              ],
-                            ],
-                          ),
-                          trailing: DaywellStatusBadge(
-                            label: note.isPinned
-                                ? 'PINNED'
-                                : note.category.toUpperCase(),
-                            tone: note.isPinned
-                                ? DaywellStatusTone.warning
-                                : DaywellStatusTone.info,
-                          ),
-                        ),
-                      );
-                    }),
+                      ),
+                    ],
                   ],
                 ),
               );
@@ -2713,6 +2701,113 @@ class DashboardNotesSection extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _DashboardRecentNoteCard extends StatelessWidget {
+  final NoteEntity note;
+  final VoidCallback onTap;
+  final DaywellSemanticColors semantic;
+  final ColorScheme colorScheme;
+  final TextTheme textTheme;
+
+  const _DashboardRecentNoteCard({
+    required this.note,
+    required this.onTap,
+    required this.semantic,
+    required this.colorScheme,
+    required this.textTheme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final preview = NoteDomainHelpers.buildContentPreview(
+      note.content,
+      maxLength: 120,
+    );
+    final ethDate =
+        CalendarDate.fromUtcInstantInEthiopia(note.updatedAt).toEthiopian();
+    final updatedLabel = SharedDateFormatter.formatEthiopian(
+      ethDate,
+      useAmharic: false,
+      includeEra: false,
+    );
+    final folderLabel = NoteDomainHelpers.formatFolderLabel(note.category);
+
+    return DaywellCard(
+      color: semantic.surfaceSubtle,
+      borderColor: semantic.border,
+      borderRadius: SharedDesignTokens.radiusMd,
+      padding: EdgeInsets.zero,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: SharedDesignTokens.spacingXs,
+                    runSpacing: SharedDesignTokens.spacingXs,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      if (note.isPinned)
+                        Icon(
+                          Icons.push_pin_rounded,
+                          size: DaywellIconSize.xs,
+                          color: semantic.warning,
+                        ),
+                      Text(
+                        note.displayTitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: semantic.textPrimary,
+                        ),
+                      ),
+                      DaywellStatusBadge(
+                        label: folderLabel,
+                        tone: DaywellStatusTone.info,
+                        showIcon: false,
+                      ),
+                    ],
+                  ),
+                  if (preview.isNotEmpty) ...[
+                    const SizedBox(height: SharedDesignTokens.spacingXs),
+                    Text(
+                      preview,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: DaywellTypography.fromToken(
+                        SharedDesignTokens.typeBodyCompact,
+                        color: semantic.textSecondary,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: SharedDesignTokens.spacingXs),
+                  Text(
+                    'Updated $updatedLabel',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: DaywellTypography.caption(color: semantic.textMuted),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: SharedDesignTokens.spacingXs),
+            Icon(
+              Icons.arrow_outward_rounded,
+              size: DaywellIconSize.sm,
+              color: colorScheme.primary,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

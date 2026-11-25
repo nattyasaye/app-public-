@@ -672,6 +672,8 @@ class _CalendarViewState extends State<CalendarView> {
               ),
               builder: (_) => _LinkExistingEventNoteSheet(
                 notesController: notesController,
+                calendarController: widget.calendarController,
+                tasksController: widget.tasksController,
                 event: event,
               ),
             ),
@@ -688,13 +690,39 @@ class _CalendarViewState extends State<CalendarView> {
               action: SnackBarAction(
                 label: 'Undo',
                 onPressed: () {
-                  unawaited(
-                    notesController.linkNoteToEntity(
+                  unawaited(() async {
+                    final targetExists = widget.calendarController.state.events
+                        .any((e) => e.id == event.id);
+                    if (!targetExists) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(this.context).clearSnackBars();
+                        ScaffoldMessenger.of(this.context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Could not undo: event is no longer available.',
+                            ),
+                          ),
+                        );
+                      }
+                      return;
+                    }
+                    final restored = await notesController.linkNoteToEntity(
                       note.id,
                       module: NoteEntity.calendarLinkModule,
                       entityId: event.id,
-                    ),
-                  );
+                      allowReassign: false,
+                    );
+                    if (restored == null && mounted) {
+                      ScaffoldMessenger.of(this.context).clearSnackBars();
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Could not undo: note relationship changed.',
+                          ),
+                        ),
+                      );
+                    }
+                  }());
                 },
               ),
               duration: const Duration(seconds: 4),
@@ -1857,10 +1885,14 @@ class _CalendarCellIndicators extends StatelessWidget {
 
 class _LinkExistingEventNoteSheet extends StatefulWidget {
   final NotesController notesController;
+  final CalendarController? calendarController;
+  final TasksController? tasksController;
   final CalendarEventEntity event;
 
   const _LinkExistingEventNoteSheet({
     required this.notesController,
+    this.calendarController,
+    this.tasksController,
     required this.event,
   });
 
@@ -1880,16 +1912,36 @@ class _LinkExistingEventNoteSheetState
     super.dispose();
   }
 
+  String _describeExistingTarget(CalendarNoteLinkCandidate candidate) {
+    if (candidate.linkedTaskId != null) {
+      final taskTitle = widget.tasksController?.state
+          .findTaskById(candidate.linkedTaskId!)
+          ?.title
+          .trim();
+      if (taskTitle != null && taskTitle.isNotEmpty) {
+        return 'task "$taskTitle"';
+      }
+      return 'an unavailable task';
+    }
+    if (candidate.linkedEventId != null) {
+      final events = widget.calendarController?.state.events ??
+          const <CalendarEventEntity>[];
+      for (final ev in events) {
+        if (ev.id == candidate.linkedEventId && ev.title.trim().isNotEmpty) {
+          return 'Calendar event "${ev.title.trim()}"';
+        }
+      }
+      return 'an unavailable Calendar event';
+    }
+    return candidate.note.linkedModule ?? 'another item';
+  }
+
   Future<void> _handleSelectCandidate(
     BuildContext context,
     CalendarNoteLinkCandidate candidate,
   ) async {
     if (candidate.hasExistingPrimaryLink) {
-      final existingTarget = candidate.linkedTaskId != null
-          ? 'a task'
-          : candidate.linkedEventId != null
-              ? 'another Calendar event'
-              : (candidate.note.linkedModule ?? 'another item');
+      final existingTarget = _describeExistingTarget(candidate);
       final confirmed = await DaywellConfirmationDialog.show(
         context,
         title: 'Replace existing link?',
@@ -1906,6 +1958,7 @@ class _LinkExistingEventNoteSheetState
       candidate.note.id,
       module: NoteEntity.calendarLinkModule,
       entityId: widget.event.id,
+      allowReassign: candidate.hasExistingPrimaryLink,
     );
     if (!context.mounted) return;
     Navigator.pop(context);
@@ -1981,13 +2034,9 @@ class _LinkExistingEventNoteSheetState
                             note.content,
                             maxLength: 90,
                           );
-                          final linkWarning = candidate.linkedTaskId != null
-                              ? 'Currently linked to a task'
-                              : candidate.linkedEventId != null
-                                  ? 'Currently linked to another event'
-                                  : candidate.isLinkedToOtherModule
-                                      ? 'Currently linked to ${note.linkedModule}'
-                                      : null;
+                          final linkWarning = candidate.hasExistingPrimaryLink
+                              ? 'Currently linked to ${_describeExistingTarget(candidate)}'
+                              : null;
 
                           return DaywellCard(
                             padding: EdgeInsets.zero,

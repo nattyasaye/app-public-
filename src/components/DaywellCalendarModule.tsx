@@ -49,6 +49,7 @@ import {
   countNotesLinkedToCalendarEvent,
   createNoteForCalendarEvent,
   linkNoteToCalendarEvent,
+  undoCalendarEventNoteLink,
   unlinkNoteFromCalendarEvent,
   unlinkNotesForDeletedCalendarEvent,
 } from '../domain/calendarNotes';
@@ -264,6 +265,10 @@ export function DaywellCalendarModule({
     }
     return [];
   });
+  const eventsRef = useRef<CalendarEvent[]>(events);
+  eventsRef.current = events;
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -739,7 +744,22 @@ export function DaywellCalendarModule({
     triggerUndo(`Deleted "${target?.title || 'event'}"`, () => {
       commitEvents(previous);
       if (unlinkRes.unlinkedCount > 0) {
-        applyNotesUpdate(previousNotes);
+        applyNotesUpdate((cur) => {
+          let next = cur;
+          for (const nid of unlinkRes.unlinkedNoteIds) {
+            const relinked = linkNoteToCalendarEvent(
+              next,
+              nid,
+              id,
+              undefined,
+              { allowReassign: false }
+            );
+            if (relinked.ok) {
+              next = relinked.notes;
+            }
+          }
+          return next;
+        });
       }
     });
   };
@@ -1670,35 +1690,83 @@ export function DaywellCalendarModule({
                       }
                     }}
                     onLinkExistingNote={(noteId, options) => {
-                      const prevNotes = [...notesRef.current];
+                      const eventId = editingEvent.id;
                       const res = linkNoteToCalendarEvent(
-                        prevNotes,
+                        notesRef.current,
                         noteId,
-                        editingEvent.id,
+                        eventId,
                         undefined,
                         options
                       );
                       if (!res.ok) {
                         return { ok: false, error: res.error };
                       }
-                      applyNotesUpdate(res.notes);
-                      triggerUndo('Linked note to event', () =>
-                        applyNotesUpdate(prevNotes)
-                      );
+                      const prevMod = res.previousLinkedModule;
+                      const prevId = res.previousLinkedId;
+                      applyNotesUpdate((cur) => {
+                        const next = linkNoteToCalendarEvent(
+                          cur,
+                          noteId,
+                          eventId,
+                          undefined,
+                          options
+                        );
+                        return next.ok ? next.notes : cur;
+                      });
+                      triggerUndo('Linked note to event', () => {
+                        applyNotesUpdate((cur) => {
+                          const previousTargetExists =
+                            prevMod === 'tasks' && prevId
+                              ? tasksRef.current.some((t) => t.id === prevId)
+                              : prevMod === 'calendar' && prevId
+                                ? eventsRef.current.some(
+                                    (ev) => ev.id === prevId
+                                  )
+                                : undefined;
+                          const undoRes = undoCalendarEventNoteLink({
+                            notes: cur,
+                            noteId,
+                            appliedEventId: eventId,
+                            previousLinkedModule: prevMod,
+                            previousLinkedId: prevId,
+                            previousTargetExists,
+                          });
+                          return undoRes.ok ? undoRes.notes : cur;
+                        });
+                      });
                       return { ok: true };
                     }}
                     onUnlinkNote={(noteId) => {
-                      const prevNotes = [...notesRef.current];
+                      const eventId = editingEvent.id;
                       const res = unlinkNoteFromCalendarEvent(
-                        prevNotes,
+                        notesRef.current,
                         noteId,
-                        editingEvent.id
+                        eventId
                       );
                       if (!res.ok) return;
-                      applyNotesUpdate(res.notes);
-                      triggerUndo('Unlinked note from event', () =>
-                        applyNotesUpdate(prevNotes)
-                      );
+                      applyNotesUpdate((cur) => {
+                        const next = unlinkNoteFromCalendarEvent(
+                          cur,
+                          noteId,
+                          eventId
+                        );
+                        return next.ok ? next.notes : cur;
+                      });
+                      triggerUndo('Unlinked note from event', () => {
+                        applyNotesUpdate((cur) => {
+                          if (!eventsRef.current.some((ev) => ev.id === eventId)) {
+                            return cur;
+                          }
+                          const restored = linkNoteToCalendarEvent(
+                            cur,
+                            noteId,
+                            eventId,
+                            undefined,
+                            { allowReassign: false }
+                          );
+                          return restored.ok ? restored.notes : cur;
+                        });
+                      });
                     }}
                   />
                 </div>

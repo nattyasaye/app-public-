@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/calendar/calendar_controller.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
+import 'package:personal_management_app/application/tasks/tasks_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
@@ -12,9 +13,11 @@ import 'package:personal_management_app/data/database/database_persistence_coord
 import 'package:personal_management_app/data/repositories/calendar_repository.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
 import 'package:personal_management_app/data/repositories/search_repository.dart';
+import 'package:personal_management_app/data/repositories/tasks_repository.dart';
 import 'package:personal_management_app/domain/calendar/calendar_models.dart';
 import 'package:personal_management_app/domain/notes/calendar_notes_helpers.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
+import 'package:personal_management_app/domain/tasks/task_models.dart';
 import 'package:personal_management_app/ui/screens/calendar_view.dart';
 import 'package:personal_management_app/ui/screens/notes_view.dart';
 
@@ -350,6 +353,336 @@ void main() {
         await tester.tap(find.text('Open').first);
         await tester.pumpAndSettle();
         expect(openedEvent?.id, ev.id);
+      },
+    );
+
+    test(
+      '5. Single-link guard, metadata preservation, archived note retention, colliding task-ID safety on event delete, and NotesState/DriftSearch event-title search',
+      () async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        addTearDown(db.close);
+
+        final calendarRepo = DriftCalendarRepository(db);
+        final notesRepo = DriftNotesRepository(db);
+        final searchRepo = DriftSearchRepository(db);
+        late final NotesController notesCtrl;
+        final calendarCtrl = CalendarController(
+          repository: calendarRepo,
+          onEventDeleted: (eventId) => notesCtrl.clearLinksForTarget(
+            module: NoteEntity.calendarLinkModule,
+            targetId: eventId,
+          ),
+        );
+        notesCtrl = NotesController(repository: notesRepo);
+        addTearDown(() {
+          calendarCtrl.dispose();
+          notesCtrl.dispose();
+        });
+
+        final ev = CalendarEventEntity(
+          id: 'evt-shared-id',
+          title: 'Budget Alignment Call',
+          dateIso: '2026-03-22',
+        );
+        await calendarCtrl.addEvent(ev);
+
+        final taskNote = await notesCtrl.createNote(
+          id: 'note-task-guard',
+          title: 'Tax Checklist',
+          content: 'Verify [[Receipt Archive]]',
+          category: 'work_projects',
+          projectId: 'proj-tax',
+          goalId: 'goal-fin',
+          tags: const ['tax', 'q1'],
+          isPinned: true,
+          isFavorite: true,
+          linkedModule: NoteEntity.taskLinkModule,
+          linkedId: 'evt-shared-id', // intentionally matches event ID string
+        );
+
+        // allowReassign: false blocks silent overwrite of an existing Task link
+        final blocked = await notesCtrl.linkNoteToEntity(
+          taskNote.id,
+          module: NoteEntity.calendarLinkModule,
+          entityId: ev.id,
+          allowReassign: false,
+        );
+        expect(blocked, isNull);
+        expect(notesCtrl.state.findById(taskNote.id)?.linkedModule, 'tasks');
+        expect(
+          notesCtrl.state.findById(taskNote.id)?.linkedId,
+          'evt-shared-id',
+        );
+
+        // Confirmed reassignment preserves projectId, goalId, category, tags, pin, favorite, and content
+        final reassigned = await notesCtrl.linkNoteToEntity(
+          taskNote.id,
+          module: NoteEntity.calendarLinkModule,
+          entityId: ev.id,
+          allowReassign: true,
+        );
+        expect(reassigned?.linkedModule, NoteEntity.calendarLinkModule);
+        expect(reassigned?.linkedId, ev.id);
+        expect(reassigned?.projectId, 'proj-tax');
+        expect(reassigned?.goalId, 'goal-fin');
+        expect(reassigned?.category, 'work_projects');
+        expect(reassigned?.tags, const ['tax', 'q1']);
+        expect(reassigned?.isPinned, isTrue);
+        expect(reassigned?.isFavorite, isTrue);
+        expect(reassigned?.content, 'Verify [[Receipt Archive]]');
+
+        // Archiving then restoring note retains its Calendar link
+        await notesCtrl.toggleArchive(taskNote.id);
+        expect(notesCtrl.state.findById(taskNote.id)?.isArchived, isTrue);
+        expect(
+          notesCtrl.state.findById(taskNote.id)?.linkedModule,
+          NoteEntity.calendarLinkModule,
+        );
+        await notesCtrl.toggleArchive(taskNote.id);
+        expect(notesCtrl.state.findById(taskNote.id)?.isArchived, isFalse);
+        expect(notesCtrl.state.findById(taskNote.id)?.linkedId, ev.id);
+
+        // Trashed note linked to same event is excluded from search & CalendarNotesHelper,
+        // and orphaned event note does not crash search
+        await notesCtrl.createNote(
+          id: 'note-cal-trashed',
+          title: 'Discarded Event Draft',
+          linkedModule: NoteEntity.calendarLinkModule,
+          linkedId: ev.id,
+          isTrashed: true,
+        );
+        await notesCtrl.createNote(
+          id: 'note-cal-orphan',
+          title: 'Historical Missing Event Note',
+          linkedModule: NoteEntity.calendarLinkModule,
+          linkedId: 'evt-deleted-earlier',
+        );
+
+        // Another task note with the colliding ID string
+        await notesCtrl.createNote(
+          id: 'note-colliding-task',
+          title: 'Untouched Task Note',
+          linkedModule: NoteEntity.taskLinkModule,
+          linkedId: 'evt-shared-id',
+        );
+
+        final eventTitles =
+            CalendarNotesHelper.buildEventTitlesById(calendarCtrl.state.events);
+        notesCtrl.setSearchQuery('budget alignment');
+        final activeHits = notesCtrl.state.filterNotes(eventTitlesById: eventTitles);
+        expect(activeHits.map((n) => n.id).toList(), [taskNote.id]);
+        notesCtrl.setSearchQuery('');
+
+        final searchHits = await searchRepo.searchAll(
+          'Budget Alignment',
+          entityFilter: 'note',
+        );
+        expect(searchHits.map((h) => h.id).toList(), [taskNote.id]);
+
+        // Deleting event unlinks active + trashed calendar notes without deleting them
+        // and never touches the task note sharing the same target ID string
+        await calendarCtrl.deleteEvent(ev.id);
+        expect(await notesRepo.getNoteById(taskNote.id), isNotNull);
+        expect((await notesRepo.getNoteById(taskNote.id))?.linkedId, isNull);
+        expect(
+          (await notesRepo.getNoteById('note-cal-trashed'))?.linkedId,
+          isNull,
+        );
+        final colliding = await notesRepo.getNoteById('note-colliding-task');
+        expect(colliding?.linkedModule, NoteEntity.taskLinkModule);
+        expect(colliding?.linkedId, 'evt-shared-id');
+      },
+    );
+
+    test(
+      '6. DatabasePersistenceCoordinator strips half-links, preserves orphaned calendar links + Task/Project links, and keeps Calendar notes intact on Finance-only restore',
+      () async {
+        final sourceDb = AppDatabase(NativeDatabase.memory());
+        await sourceDb.ensureInitialized();
+        addTearDown(sourceDb.close);
+
+        await DriftTasksRepository(sourceDb).createTask(
+          TaskEntity(id: 'task-bk-1', title: 'Keep Task'),
+        );
+        await DriftCalendarRepository(sourceDb).createEvent(
+          CalendarEventEntity(
+            id: 'evt-bk-1',
+            title: 'Board Offsite',
+            dateIso: '2026-04-10',
+          ),
+        );
+        final notesRepo = DriftNotesRepository(sourceDb);
+        await notesRepo.createNote(
+          NoteEntity(
+            id: 'note-bk-cal',
+            title: 'Offsite Brief',
+            projectId: 'proj-missing-or-untracked',
+            tags: const ['board'],
+            linkedModule: NoteEntity.calendarLinkModule,
+            linkedId: 'evt-bk-1',
+          ),
+        );
+        await notesRepo.createNote(
+          NoteEntity(
+            id: 'note-bk-orphan-cal',
+            title: 'Orphan Event Memo',
+            linkedModule: NoteEntity.calendarLinkModule,
+            linkedId: 'evt-historical-missing',
+          ),
+        );
+        await notesRepo.createNote(
+          NoteEntity(
+            id: 'note-bk-task',
+            title: 'Task Memo',
+            linkedModule: NoteEntity.taskLinkModule,
+            linkedId: 'task-bk-1',
+          ),
+        );
+
+        final srcCoordinator = DatabasePersistenceCoordinator(sourceDb);
+        final exported = await srcCoordinator.exportSnapshot();
+        (exported['notes'] as List).add({
+          'id': 'note-half-link',
+          'title': 'Corrupt Half Link',
+          'body': '',
+          'folder': 'general',
+          'tags': const <String>[],
+          'linkedModule': 'calendar',
+          'createdAt': '2026-03-01T08:00:00.000Z',
+          'updatedAt': '2026-03-01T08:00:00.000Z',
+        });
+
+        final targetDb = AppDatabase(NativeDatabase.memory());
+        await targetDb.ensureInitialized();
+        addTearDown(targetDb.close);
+        final targetCoordinator = DatabasePersistenceCoordinator(targetDb);
+
+        final report = await targetCoordinator.importSnapshotDetailed(exported);
+        expect(
+          report.diagnostics
+              .where((d) => d.code == 'ORPHANED_NOTE_TASK_CLEARED')
+              .isEmpty,
+          isTrue,
+        );
+
+        final targetNotes = DriftNotesRepository(targetDb);
+        final restoredCal = await targetNotes.getNoteById('note-bk-cal');
+        expect(restoredCal?.linkedModule, NoteEntity.calendarLinkModule);
+        expect(restoredCal?.linkedId, 'evt-bk-1');
+        final restoredOrphan =
+            await targetNotes.getNoteById('note-bk-orphan-cal');
+        expect(restoredOrphan?.linkedModule, NoteEntity.calendarLinkModule);
+        expect(restoredOrphan?.linkedId, 'evt-historical-missing');
+        final restoredTask = await targetNotes.getNoteById('note-bk-task');
+        expect(restoredTask?.linkedModule, NoteEntity.taskLinkModule);
+        expect(restoredTask?.linkedId, 'task-bk-1');
+        final sanitizedHalf = await targetNotes.getNoteById('note-half-link');
+        expect(sanitizedHalf?.linkedModule, isNull);
+        expect(sanitizedHalf?.linkedId, isNull);
+
+        // Finance-only restore preserves calendarEvents and calendar-linked notes untouched
+        final finSnap = await targetCoordinator.exportFinanceOnlySnapshot();
+        await targetCoordinator.importFinanceOnlySnapshot(finSnap);
+        final calAfterFin = await targetNotes.getNoteById('note-bk-cal');
+        expect(calAfterFin?.linkedModule, NoteEntity.calendarLinkModule);
+        expect(calAfterFin?.linkedId, 'evt-bk-1');
+        expect(
+          await DriftCalendarRepository(targetDb).getEventById('evt-bk-1'),
+          isNotNull,
+        );
+      },
+    );
+
+    testWidgets(
+      '7. CalendarView Link Existing sheet resolves Task title, aborts safely on Cancel, and replaces link only after confirmation',
+      (tester) async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        addTearDown(db.close);
+
+        final calendarCtrl =
+            CalendarController(repository: DriftCalendarRepository(db));
+        final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
+        final notesCtrl = NotesController(repository: DriftNotesRepository(db));
+        addTearDown(() {
+          calendarCtrl.dispose();
+          tasksCtrl.dispose();
+          notesCtrl.dispose();
+        });
+
+        final targetDate = CalendarDate(year: 2026, month: 3, day: 18);
+        calendarCtrl.setSelectedCalendarDate(targetDate);
+        final ev = CalendarEventEntity(
+          id: 'evt-confirm-1',
+          title: 'Quarterly Sync',
+          dateIso: targetDate.toIsoString(),
+        );
+        await calendarCtrl.addEvent(ev);
+        await tasksCtrl.createTask(
+          id: 'task-confirm-1',
+          title: 'Prepare Budget Brief',
+        );
+        await notesCtrl.createNote(
+          id: 'note-task-linked-ui',
+          title: 'Budget Figures',
+          projectId: 'proj-keep',
+          linkedModule: NoteEntity.taskLinkModule,
+          linkedId: 'task-confirm-1',
+        );
+        await calendarCtrl.loadAll();
+        await tasksCtrl.loadAll();
+        await notesCtrl.loadNotes();
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: DaywellTheme.light(),
+            home: CalendarView(
+              calendarController: calendarCtrl,
+              tasksController: tasksCtrl,
+              notesController: notesCtrl,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Quarterly Sync').first);
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text('Link Existing'));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.text('Currently linked to task "Prepare Budget Brief"'),
+          findsOneWidget,
+        );
+
+        // Tap candidate -> shows confirmation dialog; Cancel preserves Task link
+        await tester.tap(find.text('Budget Figures'));
+        await tester.pumpAndSettle();
+        expect(find.text('Replace existing link?'), findsOneWidget);
+
+        await tester.tap(find.text('Cancel').last);
+        await tester.pumpAndSettle();
+        expect(
+          notesCtrl.state.findById('note-task-linked-ui')?.linkedModule,
+          NoteEntity.taskLinkModule,
+        );
+        expect(
+          notesCtrl.state.findById('note-task-linked-ui')?.linkedId,
+          'task-confirm-1',
+        );
+
+        // Tap again and confirm replacement -> switches to Calendar while keeping projectId
+        await tester.tap(find.text('Budget Figures'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Replace link'));
+        await tester.pumpAndSettle();
+
+        final updated = notesCtrl.state.findById('note-task-linked-ui')!;
+        expect(updated.linkedModule, NoteEntity.calendarLinkModule);
+        expect(updated.linkedId, ev.id);
+        expect(updated.projectId, 'proj-keep');
       },
     );
   });

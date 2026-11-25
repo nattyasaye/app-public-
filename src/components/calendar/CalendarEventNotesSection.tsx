@@ -204,15 +204,20 @@ export function CalendarEventNotesSection({
                 const preview = getCalendarEventNotePreview(note.content, 80);
                 const isConfirming = confirmReassignNoteId === note.id;
 
+                const linkedTaskTitle = option.linkedTaskId
+                  ? taskTitleById.get(option.linkedTaskId)
+                  : undefined;
+                const linkedEventTitle = option.linkedEventId
+                  ? eventTitleById.get(option.linkedEventId)
+                  : undefined;
                 const existingLinkSummary = option.linkedTaskId
-                  ? `Linked to task: ${
-                      taskTitleById.get(option.linkedTaskId) || 'Task'
-                    }`
+                  ? linkedTaskTitle
+                    ? `Linked to task: ${linkedTaskTitle}`
+                    : 'Linked task unavailable'
                   : option.linkedEventId
-                    ? `Linked to event: ${
-                        eventTitleById.get(option.linkedEventId) ||
-                        'Another event'
-                      }`
+                    ? linkedEventTitle
+                      ? `Linked to event: ${linkedEventTitle}`
+                      : 'Linked event unavailable'
                     : option.isLinkedToOtherModule
                       ? `Linked to ${note.linkedModule}`
                       : null;

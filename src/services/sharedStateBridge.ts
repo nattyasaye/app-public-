@@ -68,6 +68,7 @@ import {
 import { EthiopiaClock, LocalDateTime, SharedDateFormatter } from '../domain/date';
 import { BackupFailureKind, BackupValidationError } from '../domain/backupTypes';
 import { normalizeDailyRhythmTimeline } from '../domain/dailyRhythm';
+import { normalizeNoteLinkPair } from '../domain/noteHelpers';
 import { interpretSnapshotVersions } from '../domain/snapshotVersionPolicy';
 
 export interface SharedMilestone {
@@ -828,12 +829,10 @@ export class SharedStateBridge {
       typeof n.projectId === 'string' && n.projectId.trim() ? n.projectId.trim() : undefined;
     const goalId =
       typeof n.goalId === 'string' && n.goalId.trim() ? n.goalId.trim() : undefined;
-    const linkedModule =
-      n.linkedModule === 'tasks' || n.linkedModule === 'finance' || n.linkedModule === 'calendar'
-        ? n.linkedModule
-        : undefined;
-    const linkedId =
-      typeof n.linkedId === 'string' && n.linkedId.trim() ? n.linkedId.trim() : undefined;
+    const normalizedLink = normalizeNoteLinkPair(
+      typeof n.linkedModule === 'string' ? n.linkedModule : undefined,
+      typeof n.linkedId === 'string' ? n.linkedId : undefined
+    );
 
     return {
       id,
@@ -847,8 +846,12 @@ export class SharedStateBridge {
       isTrashed: Boolean(n.isTrashed),
       ...(projectId !== undefined ? { projectId } : {}),
       ...(goalId !== undefined ? { goalId } : {}),
-      ...(linkedModule !== undefined ? { linkedModule } : {}),
-      ...(linkedId !== undefined ? { linkedId } : {}),
+      ...(normalizedLink !== null
+        ? {
+            linkedModule: normalizedLink.linkedModule,
+            linkedId: normalizedLink.linkedId,
+          }
+        : {}),
       createdAt,
       updatedAt,
     };
@@ -3586,13 +3589,14 @@ export class SharedStateBridge {
         const rawGoalId = this.optionalString(n, 'goalId', ctx);
         const safeGoalId =
           rawGoalId && targetGoalIds.has(rawGoalId) ? rawGoalId : undefined;
-        const linkedModule = this.optionalEnum(
+        const rawLinkedModule = this.optionalEnum(
           n,
           'linkedModule',
           new Set(['tasks', 'finance', 'calendar'] as const),
           ctx
         );
-        const linkedId = this.optionalString(n, 'linkedId', ctx);
+        const rawLinkedId = this.optionalString(n, 'linkedId', ctx);
+        const normalizedLink = normalizeNoteLinkPair(rawLinkedModule, rawLinkedId);
         const createdAt =
           normalizeOptionalInstant(n.createdAt, `${ctx}.createdAt`) ?? nowIso;
         const updatedAt =
@@ -3610,8 +3614,12 @@ export class SharedStateBridge {
           isTrashed,
           ...(safeProjectId !== undefined ? { projectId: safeProjectId } : {}),
           ...(safeGoalId !== undefined ? { goalId: safeGoalId } : {}),
-          ...(linkedModule !== undefined ? { linkedModule } : {}),
-          ...(linkedId !== undefined ? { linkedId } : {}),
+          ...(normalizedLink !== null
+            ? {
+                linkedModule: normalizedLink.linkedModule,
+                linkedId: normalizedLink.linkedId,
+              }
+            : {}),
           createdAt,
           updatedAt,
         };

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../application/calendar/calendar_controller.dart';
 import '../../application/daily_rhythm/daily_rhythm_controller.dart';
 import '../../application/inbox/inbox_controller.dart';
 import '../../application/notes/notes_controller.dart';
@@ -10,6 +11,7 @@ import '../../application/tasks/tasks_state.dart';
 import '../../core/date/shared_date.dart';
 import '../../core/shared_foundation.dart';
 import '../../core/theme/daywell_theme.dart';
+import '../../domain/calendar/calendar_models.dart';
 import '../../domain/daily_rhythm/daily_rhythm_workflows.dart';
 import '../../domain/inbox/inbox_models.dart';
 import '../../domain/notes/note_models.dart';
@@ -35,6 +37,7 @@ class TasksView extends StatefulWidget {
   final ProjectsController? projectsController;
   final InboxController? inboxController;
   final NotesController? notesController;
+  final CalendarController? calendarController;
   final DailyRhythmController? dailyRhythmController;
   final ({String taskId, int nonce})? requestedTaskFocus;
   final ({int tabIndex, int nonce})? requestedSubTab;
@@ -48,6 +51,7 @@ class TasksView extends StatefulWidget {
     this.projectsController,
     this.inboxController,
     this.notesController,
+    this.calendarController,
     this.dailyRhythmController,
     this.requestedTaskFocus,
     this.requestedSubTab,
@@ -69,6 +73,9 @@ class TasksView extends StatefulWidget {
 
   NotesController? get effectiveNotesController =>
       notesController ?? state?.notesController;
+
+  CalendarController? get effectiveCalendarController =>
+      calendarController ?? state?.calendarController;
 
   DailyRhythmController? get effectiveDailyRhythmController =>
       dailyRhythmController ?? state?.dailyRhythmController;
@@ -1836,6 +1843,7 @@ class _TasksViewState extends State<TasksView>
                           task,
                           controller,
                           notesCtrl,
+                          widget.effectiveCalendarController,
                         ),
                         onUnlinkedWithUndo: (note) {
                           if (!mounted) return;
@@ -1847,13 +1855,55 @@ class _TasksViewState extends State<TasksView>
                               ),
                               action: SnackBarAction(
                                 label: 'Undo',
-                                onPressed: () => unawaited(
-                                  notesCtrl.linkNoteToEntity(
-                                    note.id,
-                                    module: NoteEntity.taskLinkModule,
-                                    entityId: task.id,
-                                  ),
-                                ),
+                                onPressed: () {
+                                  unawaited(() async {
+                                    final targetTask =
+                                        controller.state.findTaskById(task.id);
+                                    final liveNote =
+                                        notesCtrl.state.findById(note.id);
+                                    if (targetTask == null ||
+                                        liveNote == null ||
+                                        liveNote.isTrashed ||
+                                        (liveNote.linkedModule != null &&
+                                            liveNote.linkedId != null &&
+                                            !(liveNote.linkedModule ==
+                                                    NoteEntity.taskLinkModule &&
+                                                liveNote.linkedId ==
+                                                    task.id))) {
+                                      if (!mounted) return;
+                                      ScaffoldMessenger.of(context)
+                                          .clearSnackBars();
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Could not undo: note relationship changed.',
+                                          ),
+                                        ),
+                                      );
+                                      return;
+                                    }
+                                    final restored =
+                                        await notesCtrl.linkNoteToEntity(
+                                      note.id,
+                                      module: NoteEntity.taskLinkModule,
+                                      entityId: task.id,
+                                      allowReassign: false,
+                                    );
+                                    if (restored == null && mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .clearSnackBars();
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        const SnackBar(
+                                          content: Text(
+                                            'Could not undo: note relationship changed.',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  }());
+                                },
                               ),
                               duration: const Duration(seconds: 4),
                             ),
@@ -1950,8 +2000,9 @@ class _TasksViewState extends State<TasksView>
     BuildContext sheetContext,
     TaskEntity task,
     TasksController tasksController,
-    NotesController notesController,
-  ) {
+    NotesController notesController, [
+    CalendarController? calendarController,
+  ]) {
     unawaited(
       showModalBottomSheet<void>(
         context: sheetContext,
@@ -1965,6 +2016,7 @@ class _TasksViewState extends State<TasksView>
           task: task,
           tasksController: tasksController,
           notesController: notesController,
+          calendarController: calendarController,
         ),
       ),
     );
@@ -4142,8 +4194,10 @@ class _TaskDetailsLinkedNotesPanel extends StatelessWidget {
   }
 
   Future<void> _unlinkNote(NoteEntity note) async {
-    await notesController.unlinkNote(note.id);
-    onUnlinkedWithUndo(note);
+    final res = await notesController.unlinkNote(note.id);
+    if (res != null) {
+      onUnlinkedWithUndo(note);
+    }
   }
 
   @override
@@ -4279,11 +4333,13 @@ class _LinkExistingNoteSheet extends StatefulWidget {
   final TaskEntity task;
   final TasksController tasksController;
   final NotesController notesController;
+  final CalendarController? calendarController;
 
   const _LinkExistingNoteSheet({
     required this.task,
     required this.tasksController,
     required this.notesController,
+    this.calendarController,
   });
 
   @override
@@ -4368,15 +4424,66 @@ class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
                               ? widget.tasksController.state
                                   .findTaskById(existingOtherTaskId)
                               : null;
+                          final existingCalendarEventId =
+                              note.linkedCalendarEventId;
+                          CalendarEventEntity? existingCalendarEvent;
+                          if (existingCalendarEventId != null &&
+                              widget.calendarController != null) {
+                            for (final ev
+                                in widget.calendarController!.state.events) {
+                              if (ev.id == existingCalendarEventId) {
+                                existingCalendarEvent = ev;
+                                break;
+                              }
+                            }
+                          }
+                          final hasOtherNonTaskLink = note.linkedModule != null &&
+                              note.linkedId != null &&
+                              note.linkedModule != NoteEntity.taskLinkModule;
+                          final calendarEventTitle =
+                              existingCalendarEvent?.title.trim();
 
                           return DaywellCard(
                             padding: EdgeInsets.zero,
                             child: ListTile(
                               onTap: () async {
+                                if (hasOtherNonTaskLink) {
+                                  final existingTarget =
+                                      existingCalendarEventId != null
+                                          ? ((calendarEventTitle != null &&
+                                                  calendarEventTitle.isNotEmpty)
+                                              ? 'Calendar event "$calendarEventTitle"'
+                                              : 'an unavailable Calendar event')
+                                          : (note.linkedModule ??
+                                              'another item');
+                                  final confirmed =
+                                      await DaywellConfirmationDialog.show(
+                                    context,
+                                    title: 'Replace existing link?',
+                                    message:
+                                        '"${note.displayTitle}" is currently linked to $existingTarget. Replace that link with "${widget.task.title}"?',
+                                    confirmLabel: 'Replace link',
+                                    cancelLabel: 'Cancel',
+                                    icon: Icons.swap_horiz,
+                                  );
+                                  if (!confirmed || !context.mounted) return;
+                                  await widget.notesController.linkNoteToEntity(
+                                    note.id,
+                                    module: NoteEntity.taskLinkModule,
+                                    entityId: widget.task.id,
+                                    allowReassign: true,
+                                  );
+                                  if (context.mounted) {
+                                    Navigator.pop(context);
+                                  }
+                                  return;
+                                }
+
                                 await widget.notesController.linkNoteToEntity(
                                   note.id,
                                   module: NoteEntity.taskLinkModule,
                                   entityId: widget.task.id,
+                                  allowReassign: existingOtherTaskId != null,
                                 );
                                 if (context.mounted) {
                                   Navigator.pop(context);
@@ -4384,7 +4491,9 @@ class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
                               },
                               leading: Icon(
                                 Icons.note_alt_outlined,
-                                color: colorScheme.primary,
+                                color: hasOtherNonTaskLink
+                                    ? semantic.warning
+                                    : colorScheme.primary,
                               ),
                               title: Row(
                                 children: [
@@ -4427,7 +4536,30 @@ class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
                                           color: semantic.textSecondary,
                                         ),
                                   ),
-                                  if (existingOtherTaskId != null)
+                                  if (existingCalendarEventId != null)
+                                    Text(
+                                      calendarEventTitle != null &&
+                                              calendarEventTitle.isNotEmpty
+                                          ? 'Currently linked to Calendar event "$calendarEventTitle"'
+                                          : 'Linked event unavailable',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(color: semantic.warning),
+                                    )
+                                  else if (hasOtherNonTaskLink)
+                                    Text(
+                                      'Currently linked to ${note.linkedModule}',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(color: semantic.warning),
+                                    )
+                                  else if (existingOtherTaskId != null)
                                     Text(
                                       existingOtherTask != null
                                           ? 'Linked to "${existingOtherTask.title}" (tap reassigns)'

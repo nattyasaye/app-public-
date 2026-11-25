@@ -118,11 +118,16 @@ import {
 } from '../domain/taskReminders';
 import { getTaskPrimaryCalendarDate } from '../domain/taskCalendar';
 import {
+  buildCalendarEventTitlesById,
+  CalendarEventNoteTarget,
+} from '../domain/calendarNotes';
+import {
   countNotesLinkedToTask,
   createNoteForTask,
   getAvailableNotesToLink,
   getNotesLinkedToTask,
   linkNoteToTask,
+  undoTaskNoteLink,
   unlinkNoteFromTask,
   unlinkNotesForDeletedTask,
 } from '../domain/taskNotes';
@@ -175,6 +180,7 @@ interface DaywellTasksModuleProps {
   onUpdateNotes?: (
     updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
   ) => void;
+  calendarEvents?: CalendarEventNoteTarget[];
   inboxItems?: SharedInboxItem[];
   onUpdateInboxItems?: (updated: SharedInboxItem[]) => void;
   dailyPlanningEntries?: SharedDailyPlanningEntry[];
@@ -311,6 +317,7 @@ export function DaywellTasksModule({
   onUpdateTasks,
   notes: controlledNotes,
   onUpdateNotes,
+  calendarEvents: controlledCalendarEvents,
   inboxItems: controlledInboxItems,
   onUpdateInboxItems,
   dailyPlanningEntries: controlledDailyPlanningEntries,
@@ -331,6 +338,23 @@ export function DaywellTasksModule({
   const [internalNotes, setInternalNotes] = useState<DaywellNote[]>(() =>
     notesService.loadNotes()
   );
+  const [internalCalendarEvents, setInternalCalendarEvents] = useState<
+    CalendarEventNoteTarget[]
+  >(() => {
+    try {
+      const saved =
+        typeof localStorage !== 'undefined'
+          ? localStorage.getItem('daywell_calendar_events')
+          : null;
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {
+      // ignore
+    }
+    return [];
+  });
   const [internalInboxItems, setInternalInboxItems] = useState<SharedInboxItem[]>(() =>
     inboxService.loadInboxItems()
   );
@@ -355,6 +379,19 @@ export function DaywellTasksModule({
       if (controlledNotes === undefined) {
         setInternalNotes(notesService.loadNotes());
       }
+      if (controlledCalendarEvents === undefined) {
+        try {
+          const saved = localStorage.getItem('daywell_calendar_events');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+              setInternalCalendarEvents(parsed);
+            }
+          }
+        } catch {
+          // ignore
+        }
+      }
       if (controlledInboxItems === undefined) {
         setInternalInboxItems(inboxService.loadInboxItems());
       }
@@ -368,11 +405,23 @@ export function DaywellTasksModule({
     };
     window.addEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
     return () => window.removeEventListener(SharedStateBridge.SYNC_EVENT_NAME, handleSync);
-  }, [controlledNotes, controlledInboxItems, controlledDailyPlanningEntries]);
+  }, [controlledNotes, controlledCalendarEvents, controlledInboxItems, controlledDailyPlanningEntries]);
 
   const effectiveNotes = controlledNotes ?? internalNotes;
   const notesRef = useRef<DaywellNote[]>(effectiveNotes);
   notesRef.current = effectiveNotes;
+  const effectiveCalendarEvents =
+    controlledCalendarEvents ?? internalCalendarEvents;
+  const calendarEventTitlesById = useMemo(
+    () => buildCalendarEventTitlesById(effectiveCalendarEvents),
+    [effectiveCalendarEvents]
+  );
+  const tasksRef = useRef<DaywellTask[]>(tasks);
+  tasksRef.current = tasks;
+  const calendarEventsRef = useRef<CalendarEventNoteTarget[]>(
+    effectiveCalendarEvents
+  );
+  calendarEventsRef.current = effectiveCalendarEvents;
   const applyNotesUpdate = (
     updater: DaywellNote[] | ((prev: DaywellNote[]) => DaywellNote[])
   ) => {
@@ -530,6 +579,12 @@ export function DaywellTasksModule({
   const [isDetailNotePickerOpen, setIsDetailNotePickerOpen] = useState(false);
   const [detailNoteQuery, setDetailNoteQuery] = useState('');
   const [detailNoteError, setDetailNoteError] = useState('');
+  const [pendingNoteLinkReassign, setPendingNoteLinkReassign] = useState<{
+    task: DaywellTask;
+    note: DaywellNote;
+    existingEventTitle?: string;
+    isUnavailableCalendarEvent: boolean;
+  } | null>(null);
 
   // Form Validation & Dirty State
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
@@ -551,6 +606,7 @@ export function DaywellTasksModule({
     setIsDetailNotePickerOpen(false);
     setDetailNoteQuery('');
     setDetailNoteError('');
+    setPendingNoteLinkReassign(null);
   };
 
   const allActiveProjects: SharedProject[] = useMemo(
@@ -2032,54 +2088,156 @@ export function DaywellTasksModule({
 
   // Linked Notes Handlers (keep Notes module as single owner of note records)
   const handleCreateLinkedNoteForTask = (task: DaywellTask) => {
-    const prevNotes = [...notesRef.current];
     const res = createNoteForTask({ notes: notesRef.current, task });
     if (!res.ok || !res.note) {
       setDetailNoteError(res.error || 'Could not create linked note.');
       return;
     }
-    applyNotesUpdate(res.notes);
+    const createdNoteId = res.note.id;
+    applyNotesUpdate((cur) => [res.note!, ...cur]);
     setIsDetailNotePickerOpen(false);
     setDetailNoteQuery('');
     setDetailNoteError('');
     if (onNavigateToNote) {
       setDetailTaskId(null);
-      onNavigateToNote(res.note.id);
+      onNavigateToNote(createdNoteId);
     } else {
       triggerUndo(`Created note "${res.note.title}"`, () =>
-        applyNotesUpdate(prevNotes)
+        applyNotesUpdate((cur) =>
+          cur.filter(
+            (n) =>
+              n.id !== createdNoteId ||
+              n.linkedModule !== 'tasks' ||
+              n.linkedId !== task.id
+          )
+        )
       );
     }
   };
 
-  const handleLinkExistingNoteToTask = (task: DaywellTask, noteId: string) => {
-    const prevNotes = [...notesRef.current];
-    const res = linkNoteToTask(notesRef.current, noteId, task.id);
+  const handleLinkExistingNoteToTask = (
+    task: DaywellTask,
+    noteId: string,
+    options?: { allowReassign?: boolean }
+  ) => {
+    const candidate = notesRef.current.find((n) => n.id === noteId);
+    if (
+      !options?.allowReassign &&
+      candidate &&
+      candidate.linkedModule &&
+      candidate.linkedModule !== 'tasks' &&
+      candidate.linkedId
+    ) {
+      const existingEventTitle =
+        candidate.linkedModule === 'calendar'
+          ? calendarEventTitlesById.get(candidate.linkedId)
+          : undefined;
+      setPendingNoteLinkReassign({
+        task,
+        note: candidate,
+        existingEventTitle,
+        isUnavailableCalendarEvent:
+          candidate.linkedModule === 'calendar' && !existingEventTitle,
+      });
+      return;
+    }
+
+    const res = linkNoteToTask(
+      notesRef.current,
+      noteId,
+      task.id,
+      undefined,
+      options
+    );
     if (!res.ok || !res.updatedNote) {
       setDetailNoteError(res.error || 'Could not link selected note.');
       return;
     }
-    applyNotesUpdate(res.notes);
+    const prevMod = res.previousLinkedModule;
+    const prevId = res.previousLinkedId;
+    applyNotesUpdate((cur) => {
+      const next = linkNoteToTask(cur, noteId, task.id, undefined, options);
+      return next.ok ? next.notes : cur;
+    });
+    setPendingNoteLinkReassign(null);
     setIsDetailNotePickerOpen(false);
     setDetailNoteQuery('');
     setDetailNoteError('');
-    triggerUndo(`Linked "${res.updatedNote.title}"`, () =>
-      applyNotesUpdate(prevNotes)
-    );
+    triggerUndo(`Linked "${res.updatedNote.title}"`, () => {
+      const previousTargetExists =
+        prevMod === 'tasks' && prevId
+          ? tasksRef.current.some((t) => t.id === prevId)
+          : prevMod === 'calendar' && prevId
+            ? calendarEventsRef.current.some((ev) => ev.id === prevId)
+            : undefined;
+      const preCheck = undoTaskNoteLink({
+        notes: notesRef.current,
+        noteId,
+        appliedTaskId: task.id,
+        previousLinkedModule: prevMod,
+        previousLinkedId: prevId,
+        previousTargetExists,
+      });
+      if (!preCheck.ok) {
+        setDetailNoteError(
+          preCheck.error || 'Undo skipped: note relationship changed.'
+        );
+        return;
+      }
+      applyNotesUpdate((cur) => {
+        const undoRes = undoTaskNoteLink({
+          notes: cur,
+          noteId,
+          appliedTaskId: task.id,
+          previousLinkedModule: prevMod,
+          previousLinkedId: prevId,
+          previousTargetExists,
+        });
+        return undoRes.ok ? undoRes.notes : cur;
+      });
+    });
   };
 
   const handleUnlinkNoteFromDetailTask = (task: DaywellTask, noteId: string) => {
-    const prevNotes = [...notesRef.current];
     const res = unlinkNoteFromTask(notesRef.current, noteId, task.id);
     if (!res.ok || !res.updatedNote) {
       setDetailNoteError(res.error || 'Could not unlink note.');
       return;
     }
-    applyNotesUpdate(res.notes);
+    applyNotesUpdate((cur) => {
+      const next = unlinkNoteFromTask(cur, noteId, task.id);
+      return next.ok ? next.notes : cur;
+    });
     setDetailNoteError('');
     triggerUndo(
       `Unlinked "${res.updatedNote.title}" (note preserved in Notes)`,
-      () => applyNotesUpdate(prevNotes)
+      () => {
+        if (!tasksRef.current.some((t) => t.id === task.id)) {
+          setDetailNoteError(
+            'Undo skipped: task is no longer available to re-link.'
+          );
+          return;
+        }
+        const preCheck = linkNoteToTask(
+          notesRef.current,
+          noteId,
+          task.id,
+          undefined,
+          { allowReassign: false }
+        );
+        if (!preCheck.ok) {
+          setDetailNoteError(
+            preCheck.error || 'Undo skipped: note is already linked elsewhere.'
+          );
+          return;
+        }
+        applyNotesUpdate((cur) => {
+          const restored = linkNoteToTask(cur, noteId, task.id, undefined, {
+            allowReassign: false,
+          });
+          return restored.ok ? restored.notes : cur;
+        });
+      }
     );
   };
 
@@ -2102,7 +2260,7 @@ export function DaywellTasksModule({
     setReminders(reconciled.reminders);
     commitTasksAndDailyPlanning(reconciled.tasks, nextEntries);
     if (unlinkRes.unlinkedCount > 0) {
-      applyNotesUpdate(unlinkRes.notes);
+      applyNotesUpdate((cur) => unlinkNotesForDeletedTask(cur, taskId).notes);
     }
     SharedStateBridge.removeDailyPlanningForTask(taskId);
     projectsService.cleanupSectionLinksForTask(taskId);
@@ -2121,7 +2279,18 @@ export function DaywellTasksModule({
         setReminders(prevReminders);
         commitTasksAndDailyPlanning(prev, prevEntries);
         if (unlinkRes.unlinkedCount > 0) {
-          applyNotesUpdate(prevNotes);
+          applyNotesUpdate((cur) => {
+            let next = cur;
+            for (const nid of unlinkRes.unlinkedNoteIds) {
+              const relinked = linkNoteToTask(next, nid, taskId, undefined, {
+                allowReassign: false,
+              });
+              if (relinked.ok) {
+                next = relinked.notes;
+              }
+            }
+            return next;
+          });
         }
       }
     );
@@ -4332,6 +4501,11 @@ export function DaywellTasksModule({
                                   ? tasks.find((t) => t.id === opt.linkedTaskId)
                                       ?.title
                                   : undefined;
+                                const linkedEventTitle = opt.linkedCalendarEventId
+                                  ? calendarEventTitlesById.get(
+                                      opt.linkedCalendarEventId
+                                    )
+                                  : undefined;
                                 return (
                                   <div
                                     key={opt.note.id}
@@ -4361,15 +4535,25 @@ export function DaywellTasksModule({
                                           {otherTaskTitle || 'another task'} (linking reassigns)
                                         </p>
                                       )}
-                                      {opt.isLinkedToOtherModule && (
+                                      {opt.linkedCalendarEventId ? (
+                                        <p className="text-[10px] text-[var(--dw-warning)]">
+                                          {linkedEventTitle
+                                            ? `Linked to event: ${linkedEventTitle}`
+                                            : 'Linked event unavailable'}
+                                        </p>
+                                      ) : opt.isLinkedToOtherModule ? (
                                         <p className="text-[10px] text-[var(--dw-warning)]">
                                           Currently linked to {opt.note.linkedModule}
                                         </p>
-                                      )}
+                                      ) : null}
                                     </div>
                                     <DaywellButton
                                       label="Link"
-                                      variant="tonal"
+                                      variant={
+                                        opt.isLinkedToOtherModule
+                                          ? 'outlined'
+                                          : 'tonal'
+                                      }
                                       size="compact"
                                       onClick={() =>
                                         handleLinkExistingNoteToTask(
@@ -4864,6 +5048,33 @@ export function DaywellTasksModule({
         onConfirm={() => {
           if (pendingDeleteInboxItem) {
             executeDeleteInboxItem(pendingDeleteInboxItem.id);
+          }
+        }}
+      />
+
+      {/* Cross-Module Note Link Replacement Confirmation Dialog */}
+      <DaywellConfirmationDialog
+        isOpen={Boolean(pendingNoteLinkReassign)}
+        title="Replace existing link?"
+        description={
+          pendingNoteLinkReassign
+            ? pendingNoteLinkReassign.note.linkedModule === 'calendar'
+              ? pendingNoteLinkReassign.isUnavailableCalendarEvent
+                ? `"${pendingNoteLinkReassign.note.title}" is linked to an unavailable Calendar event that no longer exists. Replace that link with task "${pendingNoteLinkReassign.task.title}"?`
+                : `"${pendingNoteLinkReassign.note.title}" is currently linked to Calendar event "${pendingNoteLinkReassign.existingEventTitle}". Replace that link with task "${pendingNoteLinkReassign.task.title}"?`
+              : `"${pendingNoteLinkReassign.note.title}" is currently linked to ${pendingNoteLinkReassign.note.linkedModule}. Replace that link with task "${pendingNoteLinkReassign.task.title}"?`
+            : ''
+        }
+        confirmLabel="Replace link"
+        cancelLabel="Cancel"
+        onCancel={() => setPendingNoteLinkReassign(null)}
+        onConfirm={() => {
+          const pending = pendingNoteLinkReassign;
+          setPendingNoteLinkReassign(null);
+          if (pending) {
+            handleLinkExistingNoteToTask(pending.task, pending.note.id, {
+              allowReassign: true,
+            });
           }
         }}
       />

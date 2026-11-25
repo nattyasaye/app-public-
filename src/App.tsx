@@ -79,6 +79,7 @@ import { DaywellFinanceModule } from './components/DaywellFinanceModule';
 import { DaywellCalendarModule, CalendarEvent } from './components/DaywellCalendarModule';
 import { DaywellTasksModule, DaywellTask, DEFAULT_SAMPLE_TASKS } from './components/DaywellTasksModule';
 import { DaywellNotesModule, DaywellNote } from './components/DaywellNotesModule';
+import { DashboardRecentNotesSection } from './components/notes/DashboardRecentNotesSection';
 import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWizard';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
 import { SharedStateBridge } from './services/sharedStateBridge';
@@ -1848,6 +1849,16 @@ export default function App() {
                         )}
                       </div>
 
+                      {/* Shared Recent Notes Section (Live Store) */}
+                      <DashboardRecentNotesSection
+                        notes={notes}
+                        onOpenNote={(noteId) => {
+                          setRequestedNoteFocus({ noteId, nonce: Date.now() });
+                          navigateTo('notes');
+                        }}
+                        onOpenAllNotes={() => navigateTo('notes')}
+                      />
+
                       {/* Shared Quick Capture Inbox Section (Live Store) */}
                       <div className="space-y-2 pt-1">
                         <DaywellSectionHeader
@@ -2054,6 +2065,7 @@ export default function App() {
                   onUpdateTasks={setTasks}
                   notes={notes}
                   onUpdateNotes={handleUpdateNotes}
+                  calendarEvents={calendarEvents}
                   inboxItems={inboxItems}
                   onUpdateInboxItems={handleUpdateInboxItems}
                   dailyPlanningEntries={dailyPlanningEntries}

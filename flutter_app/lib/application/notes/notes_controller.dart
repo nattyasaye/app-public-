@@ -656,6 +656,7 @@ class NotesController extends ChangeNotifier {
     String id, {
     required String module,
     required String entityId,
+    bool? allowReassign,
   }) {
     return _enqueue(() async {
       final existing = _state.findById(id);
@@ -664,6 +665,24 @@ class NotesController extends ChangeNotifier {
       }
       final pair = NoteEntity.normalizeLinkPair(module, entityId);
       if (pair.$1 == null || pair.$2 == null) return existing;
+
+      if (existing.linkedModule == pair.$1 && existing.linkedId == pair.$2) {
+        return existing;
+      }
+
+      final hasConflictingPrimaryLink = existing.linkedModule != null &&
+          existing.linkedId != null &&
+          !(existing.linkedModule == pair.$1 && existing.linkedId == pair.$2);
+      if (hasConflictingPrimaryLink) {
+        if (allowReassign == false) {
+          return null;
+        }
+        if (allowReassign == null &&
+            (existing.linkedModule != pair.$1 ||
+                existing.linkedModule == NoteEntity.calendarLinkModule)) {
+          return null;
+        }
+      }
 
       final updated = existing.copyWith(
         linkedModule: pair.$1,
