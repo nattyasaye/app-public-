@@ -5079,8 +5079,8 @@ class _NoteTaskPickerSheetState extends State<_NoteTaskPickerSheet> {
                             padding: EdgeInsets.zero,
                             child: ListTile(
                               onTap: () {
-                                widget.onSelectTask(task);
                                 Navigator.pop(context);
+                                widget.onSelectTask(task);
                               },
                               leading: Icon(
                                 task.isCompleted
@@ -5423,8 +5423,8 @@ class _NoteCalendarEventPickerSheetState
                             padding: EdgeInsets.zero,
                             child: ListTile(
                               onTap: () {
-                                widget.onSelectEvent(ev);
                                 Navigator.pop(context);
+                                widget.onSelectEvent(ev);
                               },
                               leading: Icon(
                                 Icons.event_note_outlined,
