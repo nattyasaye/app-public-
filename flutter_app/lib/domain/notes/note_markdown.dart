@@ -947,7 +947,8 @@ class NoteMarkdownParser {
     if (match == null) return null;
 
     final nextChecked = match.group(2)!.toLowerCase() != 'x';
-    final nextLine = '${match.group(1)}${nextChecked ? 'x' : ' '}${match.group(3)}';
+    final nextLine =
+        '${match.group(1)}${nextChecked ? 'x' : ' '}${match.group(3)}';
     return NoteChecklistToggleResult(
       text:
           '${source.substring(0, span.start)}$nextLine${source.substring(span.end)}',
@@ -986,4 +987,3 @@ class NoteMarkdownParser {
     );
   }
 }
-

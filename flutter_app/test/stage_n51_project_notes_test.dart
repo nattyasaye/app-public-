@@ -75,7 +75,8 @@ void main() {
         ];
 
         final result = ProjectNotesHelper.getNotesForProject(notes, 'proj-1');
-        expect(result.map((n) => n.id).toList(), ['n-pin', 'n-active', 'n-arch']);
+        expect(
+            result.map((n) => n.id).toList(), ['n-pin', 'n-active', 'n-arch']);
         expect(ProjectNotesHelper.countNotesForProject(notes, 'proj-1'), 3);
         expect(
           ProjectNotesHelper.countNotesForProject(
@@ -85,8 +86,10 @@ void main() {
           ),
           2,
         );
-        expect(ProjectNotesHelper.isNoteLinkedToProject(notes[3], 'proj-1'), false);
-        expect(ProjectNotesHelper.findLinkedProject(notes[1], [p1])?.id, 'proj-1');
+        expect(ProjectNotesHelper.isNoteLinkedToProject(notes[3], 'proj-1'),
+            false);
+        expect(
+            ProjectNotesHelper.findLinkedProject(notes[1], [p1])?.id, 'proj-1');
         expect(ProjectNotesHelper.findLinkedProject(notes[4], [p1]), isNull);
         expect(
           ProjectNotesHelper.buildDefaultProjectNoteTitle(p1),
@@ -156,7 +159,8 @@ void main() {
           entityFilter: 'note',
         );
         expect(searchHits.map((r) => r.id), contains('note-p1'));
-        expect(searchHits.first.snippet, contains('Project: Warehouse Upgrade'));
+        expect(
+            searchHits.first.snippet, contains('Project: Warehouse Upgrade'));
 
         // Clear project association without deleting note
         final clearRes = await notesCtrl.setNoteProject(

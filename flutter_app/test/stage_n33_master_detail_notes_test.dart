@@ -183,7 +183,8 @@ void main() {
         final controller = await _buildController(repo);
         addTearDown(controller.dispose);
 
-        await tester.pumpWidget(_wrapNotesApp(controller: controller, surfaceSize: size));
+        await tester.pumpWidget(
+            _wrapNotesApp(controller: controller, surfaceSize: size));
         await tester.pumpAndSettle();
 
         expect(find.text('Select a note to read or edit'), findsNothing);
@@ -227,7 +228,8 @@ void main() {
         final controller = await _buildController(repo);
         addTearDown(controller.dispose);
 
-        await tester.pumpWidget(_wrapNotesApp(controller: controller, surfaceSize: size));
+        await tester.pumpWidget(
+            _wrapNotesApp(controller: controller, surfaceSize: size));
         await tester.pumpAndSettle();
 
         // Empty detail state visible alongside left master list; no FAB
@@ -289,7 +291,8 @@ void main() {
         final controller = await _buildController(repo);
         addTearDown(controller.dispose);
 
-        await tester.pumpWidget(_wrapNotesApp(controller: controller, surfaceSize: size));
+        await tester.pumpWidget(
+            _wrapNotesApp(controller: controller, surfaceSize: size));
         await tester.pumpAndSettle();
 
         await tester.tap(find.text('Alpha Architecture'));
@@ -336,7 +339,8 @@ void main() {
         final controller = await _buildController(repo);
         addTearDown(controller.dispose);
 
-        await tester.pumpWidget(_wrapNotesApp(controller: controller, surfaceSize: size));
+        await tester.pumpWidget(
+            _wrapNotesApp(controller: controller, surfaceSize: size));
         await tester.pumpAndSettle();
 
         // Apply folder filter ('Reference') -> keeps Alpha & Gamma, hides Beta from list
@@ -407,7 +411,8 @@ void main() {
         final controller = await _buildController(repo);
         addTearDown(controller.dispose);
 
-        await tester.pumpWidget(_wrapNotesApp(controller: controller, surfaceSize: size));
+        await tester.pumpWidget(
+            _wrapNotesApp(controller: controller, surfaceSize: size));
         await tester.pumpAndSettle();
 
         // New Note opens embedded draft

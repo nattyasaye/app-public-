@@ -121,7 +121,9 @@ void main() {
       }
     });
 
-    test('handles rapid sequential toggles and leaves bullets, fenced blocks, and malformed syntax untouched', () {
+    test(
+        'handles rapid sequential toggles and leaves bullets, fenced blocks, and malformed syntax untouched',
+        () {
       const source = [
         '# Plan',
         '',
@@ -161,7 +163,8 @@ void main() {
     });
   });
 
-  group('Stage N2.3 — NotesView Interactive Preview & Write Checklist Widgets', () {
+  group('Stage N2.3 — NotesView Interactive Preview & Write Checklist Widgets',
+      () {
     testWidgets(
       'Preview checkboxes toggle items independently, handle rapid taps, preserve surrounding Markdown, and autosave',
       (WidgetTester tester) async {
@@ -240,7 +243,10 @@ void main() {
         await tester.tap(find.text('Write'));
         await tester.pumpAndSettle();
         expect(
-          tester.widget<TextField>(find.byType(TextField).last).controller?.text,
+          tester
+              .widget<TextField>(find.byType(TextField).last)
+              .controller
+              ?.text,
           expectedAfterPreview,
         );
       },
@@ -295,7 +301,8 @@ void main() {
         await tester.tap(find.text('Check item'));
         await tester.pump();
         expect(bodyController.text, 'Intro edited\n- [x] Draft item');
-        expect(bodyController.selection, const TextSelection.collapsed(offset: 22));
+        expect(bodyController.selection,
+            const TextSelection.collapsed(offset: 22));
         expect(find.text('Checked'), findsOneWidget);
 
         // Immediately switch to Preview before debounce completes — unsaved edit & checked state preserved
@@ -309,7 +316,8 @@ void main() {
         await tester.pump();
         await tester.tap(find.byType(BackButton));
         await tester.pumpAndSettle();
-        expect(repo.store['note-n23-2']?.content, 'Intro edited\n- [ ] Draft item');
+        expect(repo.store['note-n23-2']?.content,
+            'Intro edited\n- [ ] Draft item');
       },
     );
   });

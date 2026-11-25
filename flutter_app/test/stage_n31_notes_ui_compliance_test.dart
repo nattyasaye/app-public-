@@ -142,7 +142,8 @@ List<NoteEntity> _sampleNotes() {
     NoteEntity(
       id: 'n-roadmap',
       title: 'Project Roadmap',
-      content: '1. Milestone one\n2. Milestone two\n\nReference [[Architecture Review & Quarterly Focus Checklist]].',
+      content:
+          '1. Milestone one\n2. Milestone two\n\nReference [[Architecture Review & Quarterly Focus Checklist]].',
       category: 'reference',
       tags: const ['planning'],
       createdAt: DateTime.utc(2026, 1, 2, 8),

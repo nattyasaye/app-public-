@@ -139,7 +139,8 @@ void main() {
         } else {
           expect(result, isNotNull, reason: name);
           expect(result!.text, testCase['expectedText'], reason: name);
-          expect(result.selectionStart, testCase['expectedStart'], reason: name);
+          expect(result.selectionStart, testCase['expectedStart'],
+              reason: name);
           expect(result.selectionEnd, testCase['expectedEnd'], reason: name);
         }
       }
@@ -161,13 +162,15 @@ void main() {
         } else {
           expect(result, isNotNull, reason: name);
           expect(result!.text, testCase['expectedText'], reason: name);
-          expect(result.selectionStart, testCase['expectedStart'], reason: name);
+          expect(result.selectionStart, testCase['expectedStart'],
+              reason: name);
           expect(result.selectionEnd, testCase['expectedEnd'], reason: name);
         }
       }
     });
 
-    test('handles multiline prefixes, prefix replacement, and fenced isolation', () {
+    test('handles multiline prefixes, prefix replacement, and fenced isolation',
+        () {
       final stepped = NoteEditorFormatting.applyToolbarAction(
         '  - One\n\n  - Two',
         0,
@@ -292,7 +295,10 @@ void main() {
         await tester.tap(find.text('Write'));
         await tester.pumpAndSettle();
         expect(
-          tester.widget<TextField>(find.byType(TextField).last).controller?.text,
+          tester
+              .widget<TextField>(find.byType(TextField).last)
+              .controller
+              ?.text,
           'Hello world\n1. First item',
         );
       },
@@ -343,7 +349,8 @@ void main() {
         );
         await tester.pump();
         expect(bodyController.text, '- First\n- ');
-        expect(bodyController.selection, const TextSelection.collapsed(offset: 10));
+        expect(bodyController.selection,
+            const TextSelection.collapsed(offset: 10));
 
         // Simulate Enter on empty "- " -> exits list to "- First\n"
         tester.testTextInput.updateEditingValue(
@@ -354,7 +361,8 @@ void main() {
         );
         await tester.pump();
         expect(bodyController.text, '- First\n');
-        expect(bodyController.selection, const TextSelection.collapsed(offset: 8));
+        expect(
+            bodyController.selection, const TextSelection.collapsed(offset: 8));
 
         // Simulate Backspace on empty checklist line below text
         bodyController.value = const TextEditingValue(
@@ -370,7 +378,8 @@ void main() {
         );
         await tester.pump();
         expect(bodyController.text, 'Keep line\n');
-        expect(bodyController.selection, const TextSelection.collapsed(offset: 10));
+        expect(bodyController.selection,
+            const TextSelection.collapsed(offset: 10));
 
         // Inside fenced code block, Enter does not insert list prefix
         bodyController.value = const TextEditingValue(

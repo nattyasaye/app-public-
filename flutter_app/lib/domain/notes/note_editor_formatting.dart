@@ -378,8 +378,7 @@ class NoteEditorFormatting {
     NoteToolbarFormatAction action,
   ) {
     final blockStart = _getLineBounds(text, start).lineStart;
-    final effectiveEnd =
-        end > start && text[end - 1] == '\n' ? end - 1 : end;
+    final effectiveEnd = end > start && text[end - 1] == '\n' ? end - 1 : end;
     final blockEnd = _getLineBounds(text, effectiveEnd).lineEnd;
 
     final sliceText = text.substring(blockStart, blockEnd);
@@ -399,7 +398,8 @@ class NoteEditorFormatting {
     }
 
     final shouldToggleOff = relevantIndexes.isNotEmpty &&
-        relevantIndexes.every((idx) => parsedLines[idx].prefixKind == targetKind);
+        relevantIndexes
+            .every((idx) => parsedLines[idx].prefixKind == targetKind);
 
     var orderedCounter = 1;
     var oldOffset = blockStart;

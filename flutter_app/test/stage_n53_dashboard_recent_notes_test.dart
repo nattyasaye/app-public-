@@ -91,7 +91,8 @@ void main() {
           ),
         ];
 
-        final summary = NoteDomainHelpers.buildDashboardRecentNotesSummary(notes);
+        final summary =
+            NoteDomainHelpers.buildDashboardRecentNotesSummary(notes);
         expect(summary.totalActiveCount, 5);
         expect(summary.archivedCount, 1);
         expect(summary.recentNotes.length, 4);

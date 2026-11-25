@@ -295,10 +295,12 @@ void main() {
         );
 
         // Move note between folders; reject trashed notes
-        final moveOk = await controller2.moveNoteToFolder(nActive.id, 'reference');
+        final moveOk =
+            await controller2.moveNoteToFolder(nActive.id, 'reference');
         expect(moveOk.saved, isTrue);
         expect(controller2.state.findById(nActive.id)?.category, 'reference');
-        final moveTrashed = await controller2.moveNoteToFolder(nTrashed.id, 'general');
+        final moveTrashed =
+            await controller2.moveNoteToFolder(nTrashed.id, 'general');
         expect(moveTrashed.saved, isFalse);
       },
     );

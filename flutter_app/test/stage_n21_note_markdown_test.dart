@@ -120,8 +120,8 @@ void main() {
 
   group('Stage N2.1 — Shared Markdown Vectors & Pure Dart Parser', () {
     test('matches all shared blockCases identically', () {
-      final blockCases = (vectors['blockCases'] as List<dynamic>)
-          .cast<Map<String, dynamic>>();
+      final blockCases =
+          (vectors['blockCases'] as List<dynamic>).cast<Map<String, dynamic>>();
       for (final testCase in blockCases) {
         final name = testCase['name'] as String;
         final markdown = testCase['markdown'] as String;
@@ -214,7 +214,8 @@ void main() {
     });
   });
 
-  group('Stage N2.1 — Flutter Preview Widget & Editor Write/Preview Toggle', () {
+  group('Stage N2.1 — Flutter Preview Widget & Editor Write/Preview Toggle',
+      () {
     testWidgets(
       'NoteMarkdownPreview renders all syntax safely, stays selectable, and avoids long-line overflow',
       (WidgetTester tester) async {
@@ -270,7 +271,10 @@ void main() {
         expect(find.byType(Divider), findsOneWidget);
         expect(find.text('DART'), findsOneWidget);
         expect(find.textContaining('javascript:'), findsNothing);
-        expect(find.textContaining('<script>alert(1)</script>', findRichText: true), findsOneWidget);
+        expect(
+            find.textContaining('<script>alert(1)</script>',
+                findRichText: true),
+            findsOneWidget);
       },
     );
 
@@ -333,7 +337,10 @@ void main() {
         expect(find.text('Preview'), findsOneWidget);
         expect(find.byType(TextField), findsNWidgets(2));
         expect(
-          tester.widget<TextField>(find.byType(TextField).last).controller?.text,
+          tester
+              .widget<TextField>(find.byType(TextField).last)
+              .controller
+              ?.text,
           rawMarkdown,
         );
 
@@ -350,7 +357,10 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          tester.widget<TextField>(find.byType(TextField).last).controller?.text,
+          tester
+              .widget<TextField>(find.byType(TextField).last)
+              .controller
+              ?.text,
           rawMarkdown,
         );
 

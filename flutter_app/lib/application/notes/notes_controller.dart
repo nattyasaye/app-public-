@@ -256,9 +256,8 @@ class NotesController extends ChangeNotifier {
       }
 
       final safeTitle = NoteEntity.clampTitle(title);
-      final normalizedTags = tags != null
-          ? NoteDomainHelpers.normalizeTags(tags)
-          : existing.tags;
+      final normalizedTags =
+          tags != null ? NoteDomainHelpers.normalizeTags(tags) : existing.tags;
       final trimmedProjectId = projectId?.trim();
       final effectiveProjectId = clearProjectId
           ? null
@@ -338,7 +337,8 @@ class NotesController extends ChangeNotifier {
         return null;
       }
       final now = EthiopiaClock.nowUtc();
-      final safeTitle = NoteEntity.clampTitle('${existing.displayTitle} (Copy)');
+      final safeTitle =
+          NoteEntity.clampTitle('${existing.displayTitle} (Copy)');
       final note = NoteEntity(
         id: 'note-${_uuid.v4()}',
         title: safeTitle,
@@ -549,8 +549,9 @@ class NotesController extends ChangeNotifier {
         _state = _state.copyWith(
           notes: List<NoteEntity>.unmodifiable(nextNotes),
           customFolders: nextCustomFolders,
-          categoryFilter:
-              _state.categoryFilter == oldNorm ? newNorm : _state.categoryFilter,
+          categoryFilter: _state.categoryFilter == oldNorm
+              ? newNorm
+              : _state.categoryFilter,
           clearError: true,
         );
         notifyListeners();
@@ -627,8 +628,9 @@ class NotesController extends ChangeNotifier {
         _state = _state.copyWith(
           notes: List<NoteEntity>.unmodifiable(nextNotes),
           customFolders: nextCustomFolders,
-          categoryFilter:
-              _state.categoryFilter == targetNorm ? 'all' : _state.categoryFilter,
+          categoryFilter: _state.categoryFilter == targetNorm
+              ? 'all'
+              : _state.categoryFilter,
           clearError: true,
         );
         notifyListeners();

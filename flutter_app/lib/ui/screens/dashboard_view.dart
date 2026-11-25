@@ -2629,8 +2629,7 @@ class DashboardNotesSection extends StatelessWidget {
 
         return DaywellSectionContainer(
           title: 'Recent Notes',
-          count:
-              summary.totalActiveCount > 0 ? summary.totalActiveCount : null,
+          count: summary.totalActiveCount > 0 ? summary.totalActiveCount : null,
           actionLabel: 'All Notes',
           onActionPressed: onOpenNotes,
           child: DaywellContentState(

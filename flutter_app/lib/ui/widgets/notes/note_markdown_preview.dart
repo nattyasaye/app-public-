@@ -87,11 +87,11 @@ class NoteMarkdownPreview extends StatelessWidget {
                 for (var i = 0; i < doc.blocks.length; i++) ...[
                   if (i > 0)
                     SizedBox(
-                      height: doc.blocks[i].type ==
-                                  NoteMarkdownBlockType.heading &&
-                              doc.blocks[i].level <= 2
-                          ? SharedDesignTokens.spacingMd
-                          : SharedDesignTokens.spacingCompact,
+                      height:
+                          doc.blocks[i].type == NoteMarkdownBlockType.heading &&
+                                  doc.blocks[i].level <= 2
+                              ? SharedDesignTokens.spacingMd
+                              : SharedDesignTokens.spacingCompact,
                     ),
                   _buildBlock(
                     context: context,
@@ -159,8 +159,7 @@ class NoteMarkdownPreview extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (var idx = 0; idx < block.listItems.length; idx++) ...[
-              if (idx > 0)
-                const SizedBox(height: SharedDesignTokens.spacingXs),
+              if (idx > 0) const SizedBox(height: SharedDesignTokens.spacingXs),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -198,8 +197,7 @@ class NoteMarkdownPreview extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (var idx = 0; idx < block.orderedItems.length; idx++) ...[
-              if (idx > 0)
-                const SizedBox(height: SharedDesignTokens.spacingXs),
+              if (idx > 0) const SizedBox(height: SharedDesignTokens.spacingXs),
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -242,8 +240,7 @@ class NoteMarkdownPreview extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             for (var idx = 0; idx < block.checklistItems.length; idx++) ...[
-              if (idx > 0)
-                const SizedBox(height: SharedDesignTokens.spacingXs),
+              if (idx > 0) const SizedBox(height: SharedDesignTokens.spacingXs),
               _buildChecklistRow(
                 item: block.checklistItems[idx],
                 baseBodyStyle: baseBodyStyle,
@@ -328,7 +325,8 @@ class NoteMarkdownPreview extends StatelessWidget {
                 ),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+                padding:
+                    const EdgeInsets.all(SharedDesignTokens.spacingCompact),
                 child: Text(
                   block.code,
                   style: monoStyle,
@@ -361,7 +359,8 @@ class NoteMarkdownPreview extends StatelessWidget {
           )
         : baseBodyStyle;
     final canToggle = onToggleChecklistItem != null && item.lineIndex >= 0;
-    final plainText = NoteMarkdownParser.inlinesToPlainText(item.inlines).trim();
+    final plainText =
+        NoteMarkdownParser.inlinesToPlainText(item.inlines).trim();
     final actionLabel = item.checked
         ? (plainText.isNotEmpty
             ? 'Mark item incomplete: $plainText'
@@ -379,8 +378,9 @@ class NoteMarkdownPreview extends StatelessWidget {
               label: actionLabel,
               child: IconButton(
                 onPressed: () => onToggleChecklistItem!(item.lineIndex),
-                tooltip:
-                    item.checked ? 'Mark item incomplete' : 'Mark item complete',
+                tooltip: item.checked
+                    ? 'Mark item incomplete'
+                    : 'Mark item complete',
                 visualDensity: VisualDensity.compact,
                 padding: EdgeInsets.zero,
                 tapTargetSize: MaterialTapTargetSize.padded,
@@ -406,8 +406,9 @@ class NoteMarkdownPreview extends StatelessWidget {
                   : Icons.check_box_outline_blank_rounded,
               size: 18,
               color: item.checked ? colorScheme.primary : semantic.textMuted,
-              semanticLabel:
-                  item.checked ? 'Completed checklist item' : 'Open checklist item',
+              semanticLabel: item.checked
+                  ? 'Completed checklist item'
+                  : 'Open checklist item',
             ),
           );
 
@@ -466,7 +467,8 @@ class NoteMarkdownPreview extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 color: colorScheme.primaryContainer,
-                borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
+                borderRadius:
+                    BorderRadius.circular(SharedDesignTokens.radiusSm),
                 border: Border.all(
                   color: colorScheme.primary.withValues(alpha: 0.35),
                 ),
@@ -528,8 +530,8 @@ class NoteMarkdownPreview extends StatelessWidget {
           child: InkWell(
             borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
             onTap: onOpenAmbiguousInternalLink != null
-                ? () =>
-                    onOpenAmbiguousInternalLink!(targetTitle, resolution.matches)
+                ? () => onOpenAmbiguousInternalLink!(
+                    targetTitle, resolution.matches)
                 : null,
             child: Container(
               padding: const EdgeInsets.symmetric(
@@ -538,7 +540,8 @@ class NoteMarkdownPreview extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 color: semantic.warningContainer,
-                borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
+                borderRadius:
+                    BorderRadius.circular(SharedDesignTokens.radiusSm),
                 border: Border.all(
                   color: semantic.warning.withValues(alpha: 0.45),
                 ),
@@ -610,7 +613,8 @@ class NoteMarkdownPreview extends StatelessWidget {
               ),
               decoration: BoxDecoration(
                 color: semantic.surfaceSubtle,
-                borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
+                borderRadius:
+                    BorderRadius.circular(SharedDesignTokens.radiusSm),
                 border: Border.all(color: semantic.border),
               ),
               child: Row(
@@ -706,9 +710,8 @@ class NoteMarkdownPreview extends StatelessWidget {
           final codeStyle = DaywellTypography.mono(
             color: colorScheme.primary,
           ).copyWith(
-            fontSize: baseStyle.fontSize != null
-                ? (baseStyle.fontSize! * 0.9)
-                : null,
+            fontSize:
+                baseStyle.fontSize != null ? (baseStyle.fontSize! * 0.9) : null,
             backgroundColor: semantic.surfaceSubtle,
           );
           spans.add(TextSpan(text: node.text, style: codeStyle));

@@ -163,8 +163,11 @@ class _InMemoryNotesRepository implements INotesRepository {
 void main() {
   final vectors = _loadInternalLinkVectors();
 
-  group('Stage N2.4 — Shared Vectors & Pure Dart Internal Links / Backlinks', () {
-    test('matches all shared inlineCases, normalizeTitleCases, resolutionCases, backlinkCases, and toolbarCases', () {
+  group('Stage N2.4 — Shared Vectors & Pure Dart Internal Links / Backlinks',
+      () {
+    test(
+        'matches all shared inlineCases, normalizeTitleCases, resolutionCases, backlinkCases, and toolbarCases',
+        () {
       final inlineCases = (vectors['inlineCases'] as List<dynamic>)
           .cast<Map<String, dynamic>>();
       for (final testCase in inlineCases) {
@@ -241,7 +244,9 @@ void main() {
       }
     });
 
-    test('handles renames, code exclusions, and dynamic archive/trash restoration', () {
+    test(
+        'handles renames, code exclusions, and dynamic archive/trash restoration',
+        () {
       final initial = _buildFixtureNotes();
       final daily = initial.firstWhere((n) => n.id == 'n-daily');
       expect(NoteLinksDomain.extractInternalLinks(daily.content).length, 2);
@@ -249,9 +254,8 @@ void main() {
       // Restoring an archived note makes links to it resolve dynamically
       final unarchived = initial
           .map(
-            (n) => n.id == 'n-archived-spec'
-                ? n.copyWith(isArchived: false)
-                : n,
+            (n) =>
+                n.id == 'n-archived-spec' ? n.copyWith(isArchived: false) : n,
           )
           .toList();
       expect(
@@ -266,7 +270,9 @@ void main() {
     });
   });
 
-  group('Stage N2.4 — Flutter Preview, Navigation, Ambiguity Chooser & Backlinks', () {
+  group(
+      'Stage N2.4 — Flutter Preview, Navigation, Ambiguity Chooser & Backlinks',
+      () {
     testWidgets(
       'navigates internal links safely while flushing edits, shows ambiguity chooser, ignores missing targets, and renders backlinks',
       (WidgetTester tester) async {
@@ -318,7 +324,8 @@ void main() {
         await tester.pumpAndSettle();
 
         // Tap resolved [[Project Roadmap]] link — flushes pending edit and opens Project Roadmap
-        await tester.tap(find.text('Project Roadmap', findRichText: true).first);
+        await tester
+            .tap(find.text('Project Roadmap', findRichText: true).first);
         await tester.pumpAndSettle();
         expect(
           repo.store['n-daily']?.content,
@@ -335,15 +342,19 @@ void main() {
         // Clicking a backlink opens that referring note cleanly
         await tester.tap(find.text('Sprint Checklist'));
         await tester.pumpAndSettle();
-        expect(find.text('Sprint Checklist', findRichText: true), findsOneWidget);
+        expect(
+            find.text('Sprint Checklist', findRichText: true), findsOneWidget);
 
         // Switch to Write mode and verify Internal note link toolbar button inserts [[]]
         await tester.tap(find.text('Write'));
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Internal note link'));
         await tester.pumpAndSettle();
-        final updatedBody =
-            tester.widget<TextField>(find.byType(TextField).last).controller?.text ?? '';
+        final updatedBody = tester
+                .widget<TextField>(find.byType(TextField).last)
+                .controller
+                ?.text ??
+            '';
         expect(updatedBody.contains('[[]]'), isTrue);
       },
     );

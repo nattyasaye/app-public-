@@ -163,12 +163,14 @@ class NoteDomainHelpers {
     String? rawCandidate,
     Iterable<String> availableTags,
   ) {
-    final cleaned = (rawCandidate ?? '').trim().replaceFirst(RegExp(r'^#+'), '').trim();
+    final cleaned =
+        (rawCandidate ?? '').trim().replaceFirst(RegExp(r'^#+'), '').trim();
     if (cleaned.isEmpty) return null;
     final lower = cleaned.toLowerCase();
     for (final existing in availableTags) {
       final trimmedExisting = existing.trim();
-      if (trimmedExisting.isNotEmpty && trimmedExisting.toLowerCase() == lower) {
+      if (trimmedExisting.isNotEmpty &&
+          trimmedExisting.toLowerCase() == lower) {
         return trimmedExisting;
       }
     }
@@ -234,11 +236,9 @@ class NoteDomainHelpers {
 
   static bool isTrashed(NoteEntity note) => note.isTrashed;
 
-  static bool isArchived(NoteEntity note) =>
-      note.isArchived && !note.isTrashed;
+  static bool isArchived(NoteEntity note) => note.isArchived && !note.isTrashed;
 
-  static bool isActive(NoteEntity note) =>
-      !note.isTrashed && !note.isArchived;
+  static bool isActive(NoteEntity note) => !note.isTrashed && !note.isArchived;
 
   static bool isPinnedActive(NoteEntity note) =>
       isActive(note) && note.isPinned;
@@ -309,17 +309,15 @@ class NoteDomainHelpers {
     final today = CalendarDate.fromUtcInstantInEthiopia(
       (nowUtc ?? EthiopiaClock.nowUtc()).toUtc(),
     );
-    final int windowDays =
-        (filter == NoteDateFilterMode.updated7d ||
-                filter == NoteDateFilterMode.created7d)
-            ? 7
-            : 30;
+    final int windowDays = (filter == NoteDateFilterMode.updated7d ||
+            filter == NoteDateFilterMode.created7d)
+        ? 7
+        : 30;
     final cutoff = today.subtractDays(windowDays - 1);
-    final targetInstant =
-        (filter == NoteDateFilterMode.created7d ||
-                filter == NoteDateFilterMode.created30d)
-            ? note.createdAt
-            : note.updatedAt;
+    final targetInstant = (filter == NoteDateFilterMode.created7d ||
+            filter == NoteDateFilterMode.created30d)
+        ? note.createdAt
+        : note.updatedAt;
     final targetDate =
         CalendarDate.fromUtcInstantInEthiopia(targetInstant.toUtc());
     return targetDate.jdn >= cutoff.jdn;
@@ -441,7 +439,8 @@ class NoteDomainHelpers {
       if (cleanId.isEmpty) continue;
       final existing = deduplicated[cleanId];
       if (existing == null ||
-          compareNotes(note, existing, sortBy: NoteSortMode.recent, pinFirst: false) <
+          compareNotes(note, existing,
+                  sortBy: NoteSortMode.recent, pinFirst: false) <
               0) {
         deduplicated[cleanId] = note;
       }
@@ -474,15 +473,12 @@ class NoteDomainHelpers {
   static String formatFolderLabel(String rawFolder) {
     final trimmed = rawFolder.trim();
     if (trimmed.toLowerCase() == 'all') return 'All Folders';
-    final parts = trimmed
-        .split(RegExp(r'[\s_-]+'))
-        .where((p) => p.isNotEmpty)
-        .toList();
+    final parts =
+        trimmed.split(RegExp(r'[\s_-]+')).where((p) => p.isNotEmpty).toList();
     if (parts.isEmpty) return 'General';
     return parts
         .map(
-          (p) =>
-              '${p[0].toUpperCase()}${p.length > 1 ? p.substring(1) : ''}',
+          (p) => '${p[0].toUpperCase()}${p.length > 1 ? p.substring(1) : ''}',
         )
         .join(' ');
   }

@@ -211,14 +211,12 @@ void main() {
         final byAmharic = await searchRepo.searchAll('ዕቅድ');
         expect(byAmharic.map((r) => r.id), ['note-amharic']);
 
-        final untitledMatch =
-            await searchRepo.searchAll('unique plain phrase');
+        final untitledMatch = await searchRepo.searchAll('unique plain phrase');
         expect(untitledMatch.single.id, 'note-blank-title');
         expect(untitledMatch.single.title, 'Untitled Note');
 
         // Phrase across inline Markdown formatting
-        final byMdPhrase =
-            await searchRepo.searchAll('simplicity vs power');
+        final byMdPhrase = await searchRepo.searchAll('simplicity vs power');
         expect(byMdPhrase.map((r) => r.id), ['note-active-md']);
 
         // Tag (#tag & bare tag) and formatted folder matching
@@ -230,7 +228,8 @@ void main() {
         // Archive preserved with clear status snippet; Trash always excluded
         final byArchived = await searchRepo.searchAll('tax checklist');
         expect(byArchived.map((r) => r.id), ['note-archived']);
-        expect(byArchived.single.snippet, startsWith('Note • Reference (Archived)'));
+        expect(byArchived.single.snippet,
+            startsWith('Note • Reference (Archived)'));
 
         final trashedQuery = await searchRepo.searchAll('Trashed Portfolio');
         expect(trashedQuery, isEmpty);
@@ -312,21 +311,25 @@ void main() {
         // Archive -> stays searchable; Trash -> hidden; Restore -> searchable again
         await controller.toggleArchive(created.id);
         final archivedHit = await searchRepo.searchAll('Strategy Docs');
-        expect(archivedHit.single.snippet, startsWith('Note • Strategy Docs (Archived)'));
+        expect(archivedHit.single.snippet,
+            startsWith('Note • Strategy Docs (Archived)'));
 
         await controller.deleteNote(created.id);
         expect(await searchRepo.searchAll('Renamed Strategy Guide'), isEmpty);
 
         await controller.restoreFromTrash(created.id);
         expect(
-          (await searchRepo.searchAll('Renamed Strategy Guide')).map((r) => r.id),
+          (await searchRepo.searchAll('Renamed Strategy Guide'))
+              .map((r) => r.id),
           [created.id],
         );
       },
     );
   });
 
-  group('Stage N4.1 — Search Result Navigation & Unsaved Edit Safety (NotesView)', () {
+  group(
+      'Stage N4.1 — Search Result Navigation & Unsaved Edit Safety (NotesView)',
+      () {
     testWidgets(
       '3. Wide requestedNoteFocus opens archived/filtered targets, flushes pending edits, blocks on save error, handles deleted & trashed targets, and exposes tab-leave flush handler',
       (tester) async {
@@ -425,7 +428,8 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Restore note from Trash before editing'), findsOneWidget);
+        expect(find.text('Restore note from Trash before editing'),
+            findsOneWidget);
         expect(find.text('Dirty edit before navigation'), findsOneWidget);
 
         // Simulated persistence failure aborts requestedNoteFocus switch preserving draft

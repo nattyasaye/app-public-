@@ -306,7 +306,8 @@ void main() {
 
         // Reading does not rewrite raw SQLite row, yet getNotes(category: 'Work') matches
         final byCustomCategory = await repo.getNotes(category: 'Work');
-        expect(byCustomCategory.map((n) => n.id).toList(), ['note-custom-case']);
+        expect(
+            byCustomCategory.map((n) => n.id).toList(), ['note-custom-case']);
 
         // Literal % search must NOT match '1000 Steps Log' or trashed note
         final percentMatches = await repo.searchNotes('100%');
@@ -460,7 +461,8 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('In Trash'));
         await tester.pumpAndSettle();
-        expect(find.text('Restore note from Trash before editing'), findsOneWidget);
+        expect(find.text('Restore note from Trash before editing'),
+            findsOneWidget);
         expect(find.byType(NotesView), findsOneWidget);
 
         // Switch back to All Notes and test failed save reporting + recovery
@@ -714,7 +716,8 @@ void main() {
           find.text('Could not link task. Kept previous link state.'),
           findsOneWidget,
         );
-        expect(notesController.state.findById('note-task-link')?.linkedId, isNull);
+        expect(
+            notesController.state.findById('note-task-link')?.linkedId, isNull);
 
         // Recover DB and retry -> does NOT resurrect failed link; explicit link works
         notesRepo.shouldThrowOnUpdate = false;
@@ -728,7 +731,8 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.text('Write integration tests'));
         await tester.pumpAndSettle();
-        expect(find.text('Linked Task: Write integration tests'), findsOneWidget);
+        expect(
+            find.text('Linked Task: Write integration tests'), findsOneWidget);
         expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
 
         // Fail task unlink persistence -> must keep Linked Task card and NOT show Unlinked SnackBar
@@ -741,7 +745,8 @@ void main() {
           find.text('Could not unlink task. Kept existing link.'),
           findsOneWidget,
         );
-        expect(find.text('Linked Task: Write integration tests'), findsOneWidget);
+        expect(
+            find.text('Linked Task: Write integration tests'), findsOneWidget);
         expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
 
         // Recover DB and tap Retry -> link remains preserved
@@ -749,7 +754,8 @@ void main() {
         await tester.tap(find.text('Retry'));
         await tester.pumpAndSettle();
         expect(find.text('Saved'), findsOneWidget);
-        expect(find.text('Linked Task: Write integration tests'), findsOneWidget);
+        expect(
+            find.text('Linked Task: Write integration tests'), findsOneWidget);
         expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
       },
     );

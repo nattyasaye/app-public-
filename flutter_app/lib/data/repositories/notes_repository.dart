@@ -166,9 +166,9 @@ class DriftNotesRepository implements INotesRepository {
     final linkPair =
         NoteEntity.normalizeLinkPair(note.linkedModule, note.linkedId);
 
-    final updatedRows =
-        await (_db.update(_db.notes)..where((tbl) => tbl.id.equals(note.id)))
-            .write(
+    final updatedRows = await (_db.update(_db.notes)
+          ..where((tbl) => tbl.id.equals(note.id)))
+        .write(
       NotesCompanion(
         title: Value(safeTitle),
         content: Value(note.content),

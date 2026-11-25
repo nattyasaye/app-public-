@@ -4437,7 +4437,8 @@ class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
                               }
                             }
                           }
-                          final hasOtherNonTaskLink = note.linkedModule != null &&
+                          final hasOtherNonTaskLink = note.linkedModule !=
+                                  null &&
                               note.linkedId != null &&
                               note.linkedModule != NoteEntity.taskLinkModule;
                           final calendarEventTitle =
@@ -4448,14 +4449,13 @@ class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
                             child: ListTile(
                               onTap: () async {
                                 if (hasOtherNonTaskLink) {
-                                  final existingTarget =
-                                      existingCalendarEventId != null
-                                          ? ((calendarEventTitle != null &&
-                                                  calendarEventTitle.isNotEmpty)
-                                              ? 'Calendar event "$calendarEventTitle"'
-                                              : 'an unavailable Calendar event')
-                                          : (note.linkedModule ??
-                                              'another item');
+                                  final existingTarget = existingCalendarEventId !=
+                                          null
+                                      ? ((calendarEventTitle != null &&
+                                              calendarEventTitle.isNotEmpty)
+                                          ? 'Calendar event "$calendarEventTitle"'
+                                          : 'an unavailable Calendar event')
+                                      : (note.linkedModule ?? 'another item');
                                   final confirmed =
                                       await DaywellConfirmationDialog.show(
                                     context,

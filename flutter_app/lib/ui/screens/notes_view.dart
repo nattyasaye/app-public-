@@ -330,9 +330,7 @@ class _NotesViewState extends State<NotesView> {
 
     final narrowRoute = _activeNarrowRoute;
     final narrowSurface = _activeNarrowEditorKey?.currentState;
-    if (narrowRoute != null &&
-        narrowRoute.isActive &&
-        narrowSurface != null) {
+    if (narrowRoute != null && narrowRoute.isActive && narrowSurface != null) {
       if (narrowSurface.noteId == note.id) {
         _alignFiltersForNote(note);
         return;
@@ -455,8 +453,9 @@ class _NotesViewState extends State<NotesView> {
         if (createNew) {
           final activeCategoryFilter =
               widget.effectiveController.state.categoryFilter;
-          final defaultNewCategory =
-              activeCategoryFilter != 'all' ? activeCategoryFilter : 'reflection';
+          final defaultNewCategory = activeCategoryFilter != 'all'
+              ? activeCategoryFilter
+              : 'reflection';
           setState(() {
             _selectedNoteId = null;
             _isNewDraftSelected = true;
@@ -507,7 +506,8 @@ class _NotesViewState extends State<NotesView> {
     NoteEntity? existingNote, {
     bool replaceActiveRoute = false,
   }) {
-    final activeCategoryFilter = widget.effectiveController.state.categoryFilter;
+    final activeCategoryFilter =
+        widget.effectiveController.state.categoryFilter;
     final defaultNewCategory =
         activeCategoryFilter != 'all' ? activeCategoryFilter : 'reflection';
     final surfaceKey = GlobalKey<_NoteEditorSurfaceState>();
@@ -529,11 +529,10 @@ class _NotesViewState extends State<NotesView> {
     _activeNarrowRoute = route;
 
     final navigator = Navigator.of(context);
-    final Future<void> routeFuture = (replaceActiveRoute &&
-            previousRoute != null &&
-            previousRoute.isCurrent)
-        ? navigator.pushReplacement<void, void>(route)
-        : navigator.push<void>(route);
+    final Future<void> routeFuture =
+        (replaceActiveRoute && previousRoute != null && previousRoute.isCurrent)
+            ? navigator.pushReplacement<void, void>(route)
+            : navigator.push<void>(route);
 
     unawaited(
       routeFuture.whenComplete(() {
@@ -728,7 +727,8 @@ class _NotesViewState extends State<NotesView> {
     final folders = <String>[
       ...defaultOrder,
       ...extra,
-      if (!defaultOrder.contains(note.category) && !extra.contains(note.category))
+      if (!defaultOrder.contains(note.category) &&
+          !extra.contains(note.category))
         note.category,
     ];
 
@@ -792,7 +792,8 @@ class _NotesViewState extends State<NotesView> {
                                 content: Text(
                                   res.saved
                                       ? 'Moved to "${_formatFolderLabel(folder)}"'
-                                      : (res.errorMessage ?? 'Could not move note.'),
+                                      : (res.errorMessage ??
+                                          'Could not move note.'),
                                 ),
                               ),
                             );
@@ -814,7 +815,8 @@ class _NotesViewState extends State<NotesView> {
                       onTap: () {
                         Navigator.pop(ctx);
                         unawaited(() async {
-                          final created = await _showFolderNameDialog(controller);
+                          final created =
+                              await _showFolderNameDialog(controller);
                           if (created == null || !mounted) return;
                           final res = await controller.moveNoteToFolder(
                             note.id,
@@ -826,7 +828,8 @@ class _NotesViewState extends State<NotesView> {
                               content: Text(
                                 res.saved
                                     ? 'Moved to "${_formatFolderLabel(created)}"'
-                                    : (res.errorMessage ?? 'Could not move note.'),
+                                    : (res.errorMessage ??
+                                        'Could not move note.'),
                               ),
                             ),
                           );
@@ -1059,8 +1062,8 @@ class _NotesViewState extends State<NotesView> {
                 '${moduleState.dateFilter != 'all' ? ' · ${_dateFilterDisplayLabel(moduleState.dateFilter)}' : ''}'
                 '${moduleState.sortBy != 'recent' ? ' · ${_sortDisplayLabel(moduleState.sortBy)}' : ''}'
             : null;
-        final bool canManageSelectedFolder =
-            moduleState.categoryFilter != 'all' &&
+        final bool canManageSelectedFolder = moduleState.categoryFilter !=
+                'all' &&
             !NoteEntity.defaultCategories.contains(moduleState.categoryFilter);
         final NoteEntity? selectedWideNote = _selectedNoteId != null
             ? moduleState.findById(_selectedNoteId!)
@@ -1232,8 +1235,7 @@ class _NotesViewState extends State<NotesView> {
                           color: colorScheme.primary,
                         ).copyWith(fontWeight: FontWeight.w600),
                       ),
-                      onPressed: () =>
-                          _handleCreateFolderFromList(controller),
+                      onPressed: () => _handleCreateFolderFromList(controller),
                     ),
                   ],
                 ),
@@ -1383,8 +1385,7 @@ class _NotesViewState extends State<NotesView> {
                           ),
                         ),
                         selected: moduleState.dateFilter == opt.$1,
-                        onSelected: (_) =>
-                            controller.setDateFilter(opt.$1),
+                        onSelected: (_) => controller.setDateFilter(opt.$1),
                       ),
                       const SizedBox(width: SharedDesignTokens.spacingSm),
                     ],
@@ -1404,8 +1405,7 @@ class _NotesViewState extends State<NotesView> {
                     title: 'Notes persistence error',
                     message: moduleState.errorMessage!,
                     actionLabel: 'Retry',
-                    onActionPressed: () =>
-                        unawaited(controller.loadNotes()),
+                    onActionPressed: () => unawaited(controller.loadNotes()),
                   ),
                 ),
               if (moduleState.sectionFilter == 'trash' && notes.isNotEmpty)
@@ -1431,21 +1431,19 @@ class _NotesViewState extends State<NotesView> {
                         ? _buildEmptyState(context, controller, moduleState)
                         : LayoutBuilder(
                             builder: (context, listConstraints) {
-                              final bottomPad = isWide
-                                  ? SharedDesignTokens.spacingMd
-                                  : 88.0;
+                              final bottomPad =
+                                  isWide ? SharedDesignTokens.spacingMd : 88.0;
                               if (moduleState.isGridView) {
-                                final int crossAxisCount =
-                                    listConstraints.maxWidth >=
-                                            SharedDesignTokens
-                                                .breakpointExpanded
-                                        ? 3
-                                        : listConstraints.maxWidth < 400
-                                            ? 1
-                                            : 2;
-                                final double cardExtent = (256.0 *
-                                        textScale.clamp(1.0, 2.0))
-                                    .ceilToDouble();
+                                final int crossAxisCount = listConstraints
+                                            .maxWidth >=
+                                        SharedDesignTokens.breakpointExpanded
+                                    ? 3
+                                    : listConstraints.maxWidth < 400
+                                        ? 1
+                                        : 2;
+                                final double cardExtent =
+                                    (256.0 * textScale.clamp(1.0, 2.0))
+                                        .ceilToDouble();
                                 return GridView.builder(
                                   padding: EdgeInsets.fromLTRB(
                                     SharedDesignTokens.spacingMd,
@@ -1489,8 +1487,7 @@ class _NotesViewState extends State<NotesView> {
                                     ),
                                     child: Padding(
                                       padding: const EdgeInsets.only(
-                                        bottom:
-                                            SharedDesignTokens.spacingSm,
+                                        bottom: SharedDesignTokens.spacingSm,
                                       ),
                                       child: _buildNoteCard(
                                         notes[i],
@@ -1529,7 +1526,8 @@ class _NotesViewState extends State<NotesView> {
                       overflow: TextOverflow.ellipsis,
                       style: DaywellTypography.caption(
                         color: semantic.textMuted,
-                      ).copyWith(fontWeight: FontWeight.w700, letterSpacing: 1.2),
+                      ).copyWith(
+                          fontWeight: FontWeight.w700, letterSpacing: 1.2),
                     ),
                     Text(
                       'Notes & Knowledge',
@@ -1586,7 +1584,8 @@ class _NotesViewState extends State<NotesView> {
                                     ? colorScheme.primary
                                     : semantic.textMuted,
                               ),
-                              const SizedBox(width: SharedDesignTokens.spacingSm),
+                              const SizedBox(
+                                  width: SharedDesignTokens.spacingSm),
                               Text(
                                 option.$2,
                                 style: textTheme.bodyMedium?.copyWith(
@@ -1798,7 +1797,8 @@ class _NotesViewState extends State<NotesView> {
         );
         return;
       }
-      final outcome = await NoteMarkdownIoService.exportAndShareNote(latestNote);
+      final outcome =
+          await NoteMarkdownIoService.exportAndShareNote(latestNote);
       if (!mounted) return;
       ScaffoldMessenger.of(context).clearSnackBars();
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1876,7 +1876,8 @@ class _NotesViewState extends State<NotesView> {
     final hasProjectRef =
         ProjectNotesHelper.normalizeProjectId(note.projectId) != null;
     final linkedProject = hasProjectRef && projectsCtrl != null
-        ? ProjectNotesHelper.findLinkedProject(note, projectsCtrl.state.projects)
+        ? ProjectNotesHelper.findLinkedProject(
+            note, projectsCtrl.state.projects)
         : null;
     final theme = Theme.of(context);
     final semantic = context.daywellColors;
@@ -1900,9 +1901,7 @@ class _NotesViewState extends State<NotesView> {
     return DaywellCard(
       padding: EdgeInsets.zero,
       borderRadius: SharedDesignTokens.radiusLg,
-      color: isSelected
-          ? colorScheme.primaryContainer.withOpacity(0.45)
-          : null,
+      color: isSelected ? colorScheme.primaryContainer.withOpacity(0.45) : null,
       borderColor: isSelected
           ? colorScheme.primary
           : isPinnedActive
@@ -1967,8 +1966,8 @@ class _NotesViewState extends State<NotesView> {
                   iconSize: DaywellIconSize.md,
                   iconColor: semantic.textSecondary,
                   tooltip: 'Note actions',
-                  onSelected: (action) =>
-                      unawaited(_handleCardMenuAction(controller, note, action)),
+                  onSelected: (action) => unawaited(
+                      _handleCardMenuAction(controller, note, action)),
                   itemBuilder: (_) => [
                     if (!note.isTrashed && !note.isArchived) ...[
                       PopupMenuItem(
@@ -2028,10 +2027,7 @@ class _NotesViewState extends State<NotesView> {
               ],
             ),
             const SizedBox(height: SharedDesignTokens.spacingXs),
-            if (isGridView)
-              Expanded(child: snippetWidget)
-            else
-              snippetWidget,
+            if (isGridView) Expanded(child: snippetWidget) else snippetWidget,
             const SizedBox(height: SharedDesignTokens.spacingCompact),
             Wrap(
               spacing: SharedDesignTokens.spacingSm,
@@ -2443,8 +2439,9 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
             widget.existingNote!.category,
           )
         : NoteDomainHelpers.normalizeFlutterCategory(widget.initialCategory);
-    _tags = NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
-        .toList();
+    _tags =
+        NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
+            .toList();
     _projectId = ProjectNotesHelper.normalizeProjectId(
       widget.existingNote?.projectId,
     );
@@ -2476,8 +2473,9 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
             widget.existingNote!.category,
           )
         : NoteDomainHelpers.normalizeFlutterCategory(widget.initialCategory);
-    _tags = NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
-        .toList();
+    _tags =
+        NoteDomainHelpers.normalizeTags(widget.existingNote?.tags ?? const [])
+            .toList();
     _projectId = ProjectNotesHelper.normalizeProjectId(
       widget.existingNote?.projectId,
     );
@@ -2661,8 +2659,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     if (!fromDispose && mounted) {
       setState(() {
         _saveErrorMessage = null;
-        _saveStatus =
-            _editRevision == _savedRevision ? 'Saved' : 'Saving...';
+        _saveStatus = _editRevision == _savedRevision ? 'Saved' : 'Saving...';
       });
     }
     return true;
@@ -3181,7 +3178,8 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
           projectsController: projectsCtrl,
           currentProjectId: _projectId,
           onSelectProject: (project) => unawaited(_setProject(project)),
-          onClearProject: _projectId != null ? () => unawaited(_clearProject()) : null,
+          onClearProject:
+              _projectId != null ? () => unawaited(_clearProject()) : null,
         ),
       ),
     );
@@ -3241,8 +3239,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     if (_isApplyingProgrammaticContentEdit) return;
     final prev = _previousContentValue;
     final curr = _contentController.value;
-    final isComposing =
-        curr.composing.isValid && !curr.composing.isCollapsed;
+    final isComposing = curr.composing.isValid && !curr.composing.isCollapsed;
 
     if (!isComposing && prev.selection.isValid && curr.selection.isCollapsed) {
       final prevStart = prev.selection.start <= prev.selection.end
@@ -3258,7 +3255,8 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
           curr.selection.baseOffset == prevStart + 1 &&
           prevStart < curr.text.length &&
           curr.text[prevStart] == '\n' &&
-          curr.text.substring(0, prevStart) == prev.text.substring(0, prevStart) &&
+          curr.text.substring(0, prevStart) ==
+              prev.text.substring(0, prevStart) &&
           curr.text.substring(prevStart + 1) == prev.text.substring(prevEnd);
 
       if (insertedNewline) {
@@ -3559,9 +3557,10 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
                   ),
                   itemBuilder: (_, index) {
                     final match = activeMatches[index];
-                    final snippet = NoteMarkdownParser.toPlainText(match.content)
-                        .replaceAll(RegExp(r'\s+'), ' ')
-                        .trim();
+                    final snippet =
+                        NoteMarkdownParser.toPlainText(match.content)
+                            .replaceAll(RegExp(r'\s+'), ' ')
+                            .trim();
                     final ethDate =
                         EthiopiaClock.toEthiopianDate(match.updatedAt);
                     final dateLabel = SharedDateFormatter.formatEthiopian(
@@ -3636,14 +3635,12 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
             _noteId != null ? widget.controller.state.findById(_noteId!) : null;
         final isPinned = currentNote?.isPinned ?? false;
         final isFavorite = currentNote?.isFavorite ?? false;
-        final effectiveLinkedModule =
-            (_hasPendingChanges || _noteId == null)
-                ? _linkedModule
-                : (currentNote != null ? currentNote.linkedModule : _linkedModule);
-        final effectiveLinkedId =
-            (_hasPendingChanges || _noteId == null)
-                ? _linkedId
-                : (currentNote != null ? currentNote.linkedId : _linkedId);
+        final effectiveLinkedModule = (_hasPendingChanges || _noteId == null)
+            ? _linkedModule
+            : (currentNote != null ? currentNote.linkedModule : _linkedModule);
+        final effectiveLinkedId = (_hasPendingChanges || _noteId == null)
+            ? _linkedId
+            : (currentNote != null ? currentNote.linkedId : _linkedId);
         final isTaskLinked =
             effectiveLinkedModule == NoteEntity.taskLinkModule &&
                 effectiveLinkedId != null;
@@ -3853,784 +3850,778 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
             ),
             child: Column(
               children: [
-                    if (_saveErrorMessage != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
+                if (_saveErrorMessage != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                    ),
+                    child: DaywellStatusBanner(
+                      tone: DaywellStatusTone.error,
+                      title: 'Unable to save note',
+                      message: _saveErrorMessage!,
+                      actionLabel: 'Retry',
+                      onActionPressed: () => unawaited(_flushPendingSaves()),
+                    ),
+                  ),
+                if (!_isPreviewMode)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingSm,
+                      SharedDesignTokens.spacingMd,
+                      0,
+                    ),
+                    child: TextField(
+                      controller: _titleController,
+                      style: DaywellTypography.fromToken(
+                        SharedDesignTokens.typeHeading,
+                        color: semantic.textPrimary,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Note title...',
+                        hintStyle: DaywellTypography.fromToken(
+                          SharedDesignTokens.typeHeading,
+                          color: semantic.textMuted,
                         ),
-                        child: DaywellStatusBanner(
-                          tone: DaywellStatusTone.error,
-                          title: 'Unable to save note',
-                          message: _saveErrorMessage!,
-                          actionLabel: 'Retry',
-                          onActionPressed: () =>
-                              unawaited(_flushPendingSaves()),
+                        border: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        filled: false,
+                        contentPadding: const EdgeInsets.symmetric(
+                          vertical: SharedDesignTokens.spacingSm,
                         ),
                       ),
-                    if (!_isPreviewMode)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingSm,
-                          SharedDesignTokens.spacingMd,
-                          0,
+                      onChanged: (_) => _markDirty(),
+                    ),
+                  )
+                else
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingCompact,
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingSm,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: SelectableText(
+                        NoteDomainHelpers.normalizeTitle(
+                          _titleController.text,
                         ),
-                        child: TextField(
-                          controller: _titleController,
-                          style: DaywellTypography.fromToken(
-                            SharedDesignTokens.typeHeading,
-                            color: semantic.textPrimary,
-                          ),
-                          decoration: InputDecoration(
-                            hintText: 'Note title...',
-                            hintStyle: DaywellTypography.fromToken(
-                              SharedDesignTokens.typeHeading,
-                              color: semantic.textMuted,
-                            ),
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                            filled: false,
-                            contentPadding: const EdgeInsets.symmetric(
-                              vertical: SharedDesignTokens.spacingSm,
-                            ),
-                          ),
-                          onChanged: (_) => _markDirty(),
-                        ),
-                      )
-                    else
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingCompact,
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingSm,
-                        ),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: SelectableText(
-                            NoteDomainHelpers.normalizeTitle(
-                              _titleController.text,
-                            ),
-                            style: DaywellTypography.fromToken(
-                              SharedDesignTokens.typeHeading,
-                              color: semantic.textPrimary,
-                            ),
-                          ),
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: SharedDesignTokens.spacingMd,
-                        vertical: SharedDesignTokens.spacingXs,
-                      ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Wrap(
-                          spacing: SharedDesignTokens.spacingSm,
-                          runSpacing: SharedDesignTokens.spacingXs,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: SharedDesignTokens.spacingSm,
-                              ),
-                              decoration: BoxDecoration(
-                                color: semantic.surfaceSubtle,
-                                borderRadius: BorderRadius.circular(
-                                  SharedDesignTokens.radiusSm,
-                                ),
-                                border: Border.all(color: semantic.border),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.folder_outlined,
-                                    size: DaywellIconSize.xs,
-                                    color: colorScheme.primary,
-                                  ),
-                                  const SizedBox(
-                                    width: SharedDesignTokens.spacingXs,
-                                  ),
-                                  DropdownButtonHideUnderline(
-                                    child: DropdownButton<String>(
-                                      value: _category,
-                                      isDense: true,
-                                      style: DaywellTypography.label(
-                                        color: semantic.textPrimary,
-                                      ),
-                                      items: [
-                                        for (final cat in dropdownCategories)
-                                          DropdownMenuItem(
-                                            value: cat,
-                                            child: Text(_formatFolderLabel(cat)),
-                                          ),
-                                      ],
-                                      onChanged: (val) {
-                                        if (val != null && val != _category) {
-                                          setState(() => _category = val);
-                                          _markDirty();
-                                        }
-                                      },
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            DaywellIconButton(
-                              icon: Icons.create_new_folder_outlined,
-                              iconSize: DaywellIconSize.sm,
-                              tooltip: 'New folder',
-                              onPressed: () =>
-                                  unawaited(_handleCreateFolderFromEditor()),
-                            ),
-                            ActionChip(
-                              avatar: Icon(
-                                Icons.tag,
-                                size: DaywellIconSize.xs,
-                                color: semantic.textSecondary,
-                              ),
-                              label: Text(
-                                'Add Tag',
-                                style: DaywellTypography.label(
-                                  color: semantic.textPrimary,
-                                ),
-                              ),
-                              onPressed: _addTagDialog,
-                            ),
-                            if (tasksCtrl != null &&
-                                !isTaskLinked &&
-                                !isEventLinked &&
-                                effectiveLinkedModule == null)
-                              ActionChip(
-                                avatar: Icon(
-                                  Icons.add_link,
-                                  size: DaywellIconSize.xs,
-                                  color: colorScheme.primary,
-                                ),
-                                label: Text(
-                                  'Link Task',
-                                  style: DaywellTypography.label(
-                                    color: semantic.textPrimary,
-                                  ),
-                                ),
-                                onPressed: _openTaskPicker,
-                              ),
-                            if (calendarCtrl != null &&
-                                !isTaskLinked &&
-                                !isEventLinked &&
-                                effectiveLinkedModule == null)
-                              ActionChip(
-                                avatar: Icon(
-                                  Icons.event_note_outlined,
-                                  size: DaywellIconSize.xs,
-                                  color: semantic.transfer,
-                                ),
-                                label: Text(
-                                  'Link Event',
-                                  style: DaywellTypography.label(
-                                    color: semantic.textPrimary,
-                                  ),
-                                ),
-                                onPressed: _openCalendarEventPicker,
-                              ),
-                            if (projectsCtrl != null && !hasProject)
-                              ActionChip(
-                                avatar: Icon(
-                                  Icons.layers_outlined,
-                                  size: DaywellIconSize.xs,
-                                  color: colorScheme.primary,
-                                ),
-                                label: Text(
-                                  'Add Project',
-                                  style: DaywellTypography.label(
-                                    color: semantic.textPrimary,
-                                  ),
-                                ),
-                                onPressed: _openProjectPicker,
-                              ),
-                          ],
+                        style: DaywellTypography.fromToken(
+                          SharedDesignTokens.typeHeading,
+                          color: semantic.textPrimary,
                         ),
                       ),
                     ),
-                    if (hasProject)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
-                        ),
-                        child: DaywellCard(
-                          color: semantic.surfaceSubtle,
-                          borderColor: semantic.border,
-                          borderRadius: SharedDesignTokens.radiusMd,
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: SharedDesignTokens.spacingMd,
+                    vertical: SharedDesignTokens.spacingXs,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      runSpacing: SharedDesignTokens.spacingXs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: SharedDesignTokens.spacingCompact,
-                            vertical: SharedDesignTokens.spacingXs,
+                            horizontal: SharedDesignTokens.spacingSm,
                           ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.layers_outlined,
-                                size: DaywellIconSize.sm,
-                                color: linkedProject != null
-                                    ? colorScheme.primary
-                                    : semantic.textMuted,
-                              ),
-                              const SizedBox(
-                                width: SharedDesignTokens.spacingSm,
-                              ),
-                              Expanded(
-                                child: Wrap(
-                                  spacing: SharedDesignTokens.spacingXs,
-                                  runSpacing: SharedDesignTokens.spacingXs,
-                                  crossAxisAlignment: WrapCrossAlignment.center,
-                                  children: [
-                                    Text(
-                                      linkedProject != null
-                                          ? 'Project: ${linkedProject.title}'
-                                          : 'Project unavailable',
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: DaywellTypography.fromToken(
-                                        SharedDesignTokens.typeBodyCompact,
-                                        color: linkedProject != null
-                                            ? semantic.textPrimary
-                                            : semantic.textMuted,
-                                      ).copyWith(fontWeight: FontWeight.w600),
-                                    ),
-                                    if (linkedProject?.isArchived == true)
-                                      const DaywellStatusBadge(
-                                        label: 'Archived',
-                                        tone: DaywellStatusTone.warning,
-                                        showIcon: false,
-                                      ),
-                                  ],
-                                ),
-                              ),
-                              if (projectsCtrl != null)
-                                DaywellIconButton(
-                                  icon: Icons.swap_horiz,
-                                  iconSize: DaywellIconSize.md,
-                                  tooltip: 'Change Project',
-                                  onPressed: _openProjectPicker,
-                                ),
-                              DaywellIconButton(
-                                icon: Icons.link_off_outlined,
-                                iconSize: DaywellIconSize.md,
-                                tooltip: 'Remove Project',
-                                onPressed: () => unawaited(_clearProject()),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (isTaskLinked)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
-                        ),
-                        child: DaywellCard(
-                          color: linkedTask != null
-                              ? colorScheme.primaryContainer
-                              : semantic.surfaceSubtle,
-                          borderColor: semantic.border,
-                          borderRadius: SharedDesignTokens.radiusMd,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: SharedDesignTokens.spacingCompact,
-                            vertical: SharedDesignTokens.spacingXs,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.check_circle_outline,
-                                size: DaywellIconSize.sm,
-                                color: linkedTask != null
-                                    ? colorScheme.primary
-                                    : semantic.textMuted,
-                              ),
-                              const SizedBox(
-                                width: SharedDesignTokens.spacingSm,
-                              ),
-                              Expanded(
-                                child: Text(
-                                  linkedTask != null
-                                      ? 'Linked Task: ${linkedTask.title}'
-                                      : 'Linked task unavailable',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: DaywellTypography.fromToken(
-                                    SharedDesignTokens.typeBodyCompact,
-                                    color: linkedTask != null
-                                        ? colorScheme.onPrimaryContainer
-                                        : semantic.textMuted,
-                                  ).copyWith(fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                              if (linkedTask != null &&
-                                  widget.onOpenTask != null)
-                                DaywellButton(
-                                  label: 'Open',
-                                  variant: DaywellButtonVariant.text,
-                                  size: DaywellButtonSize.compact,
-                                  onPressed: () async {
-                                    final ok = await _flushPendingSaves();
-                                    if (!ok || !context.mounted) return;
-                                    if (!widget.isEmbedded) {
-                                      Navigator.pop(context);
-                                    }
-                                    widget.onOpenTask!(linkedTask.id);
-                                  },
-                                ),
-                              if (tasksCtrl != null)
-                                DaywellIconButton(
-                                  icon: Icons.swap_horiz,
-                                  iconSize: DaywellIconSize.md,
-                                  tooltip: 'Change Linked Task',
-                                  onPressed: _openTaskPicker,
-                                ),
-                              DaywellIconButton(
-                                icon: Icons.link_off_outlined,
-                                iconSize: DaywellIconSize.md,
-                                tooltip: 'Unlink Task',
-                                onPressed: () => unawaited(_unlinkTask()),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (isEventLinked)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
-                          SharedDesignTokens.spacingMd,
-                          SharedDesignTokens.spacingXs,
-                        ),
-                        child: DaywellCard(
-                          color: linkedEvent != null
-                              ? semantic.transferContainer
-                              : semantic.surfaceSubtle,
-                          borderColor: semantic.border,
-                          borderRadius: SharedDesignTokens.radiusMd,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: SharedDesignTokens.spacingCompact,
-                            vertical: SharedDesignTokens.spacingXs,
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                Icons.event_note_outlined,
-                                size: DaywellIconSize.sm,
-                                color: linkedEvent != null
-                                    ? semantic.transfer
-                                    : semantic.textMuted,
-                              ),
-                              const SizedBox(
-                                width: SharedDesignTokens.spacingSm,
-                              ),
-                              Expanded(
-                                child: Text(
-                                  linkedEvent != null
-                                      ? 'Linked Event: ${linkedEvent.title}'
-                                      : 'Linked event unavailable',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: DaywellTypography.fromToken(
-                                    SharedDesignTokens.typeBodyCompact,
-                                    color: linkedEvent != null
-                                        ? semantic.onTransferContainer
-                                        : semantic.textMuted,
-                                  ).copyWith(fontWeight: FontWeight.w600),
-                                ),
-                              ),
-                              if (linkedEvent != null &&
-                                  widget.onOpenCalendarEvent != null)
-                                DaywellButton(
-                                  label: 'Open',
-                                  variant: DaywellButtonVariant.text,
-                                  size: DaywellButtonSize.compact,
-                                  onPressed: () async {
-                                    final ok = await _flushPendingSaves();
-                                    if (!ok || !context.mounted) return;
-                                    if (!widget.isEmbedded) {
-                                      Navigator.pop(context);
-                                    }
-                                    widget.onOpenCalendarEvent!(linkedEvent);
-                                  },
-                                ),
-                              if (calendarCtrl != null)
-                                DaywellIconButton(
-                                  icon: Icons.swap_horiz,
-                                  iconSize: DaywellIconSize.md,
-                                  tooltip: 'Change Linked Event',
-                                  onPressed: _openCalendarEventPicker,
-                                ),
-                              DaywellIconButton(
-                                icon: Icons.link_off_outlined,
-                                iconSize: DaywellIconSize.md,
-                                tooltip: 'Unlink Event',
-                                onPressed: () =>
-                                    unawaited(_unlinkCalendarEvent()),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    if (_tags.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: SharedDesignTokens.spacingMd,
-                          vertical: SharedDesignTokens.spacingXs,
-                        ),
-                        child: Align(
-                          alignment: Alignment.centerLeft,
-                          child: Wrap(
-                            spacing: SharedDesignTokens.spacingSm,
-                            runSpacing: SharedDesignTokens.spacingXs,
-                            children: _tags
-                                .map(
-                                  (t) => Chip(
-                                    backgroundColor: semantic.transferContainer,
-                                    side: BorderSide(
-                                      color: semantic.transfer.withOpacity(0.25),
-                                    ),
-                                    deleteIconColor:
-                                        semantic.onTransferContainer,
-                                    label: Text(
-                                      '#$t',
-                                      style: DaywellTypography.caption(
-                                        color: semantic.onTransferContainer,
-                                      ).copyWith(fontWeight: FontWeight.w600),
-                                    ),
-                                    onDeleted: () {
-                                      setState(() => _tags.remove(t));
-                                      _markDirty(scheduleTimer: false);
-                                      if (_noteId != null) {
-                                        unawaited(_flushPendingSaves());
-                                      }
-                                    },
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ),
-                      ),
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(
-                        SharedDesignTokens.spacingMd,
-                        SharedDesignTokens.spacingSm,
-                        SharedDesignTokens.spacingMd,
-                        SharedDesignTokens.spacingSm,
-                      ),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: Container(
                           decoration: BoxDecoration(
                             color: semantic.surfaceSubtle,
                             borderRadius: BorderRadius.circular(
-                              SharedDesignTokens.radiusMd,
+                              SharedDesignTokens.radiusSm,
                             ),
                             border: Border.all(color: semantic.border),
-                          ),
-                          padding: const EdgeInsets.all(
-                            SharedDesignTokens.spacingXs,
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              _buildModeSegment(
-                                label: 'Write',
-                                icon: Icons.edit_outlined,
-                                selected: !_isPreviewMode,
-                                onTap: () {
-                                  if (_isPreviewMode) {
-                                    setState(() => _isPreviewMode = false);
-                                  }
-                                },
-                                semantic: semantic,
-                                colorScheme: colorScheme,
+                              Icon(
+                                Icons.folder_outlined,
+                                size: DaywellIconSize.xs,
+                                color: colorScheme.primary,
                               ),
-                              const SizedBox(width: SharedDesignTokens.spacingXs),
-                              _buildModeSegment(
-                                label: 'Preview',
-                                icon: Icons.visibility_outlined,
-                                selected: _isPreviewMode,
-                                onTap: () {
-                                  if (!_isPreviewMode) {
-                                    FocusScope.of(context).unfocus();
-                                    setState(() => _isPreviewMode = true);
-                                  }
-                                },
-                                semantic: semantic,
-                                colorScheme: colorScheme,
+                              const SizedBox(
+                                width: SharedDesignTokens.spacingXs,
+                              ),
+                              DropdownButtonHideUnderline(
+                                child: DropdownButton<String>(
+                                  value: _category,
+                                  isDense: true,
+                                  style: DaywellTypography.label(
+                                    color: semantic.textPrimary,
+                                  ),
+                                  items: [
+                                    for (final cat in dropdownCategories)
+                                      DropdownMenuItem(
+                                        value: cat,
+                                        child: Text(_formatFolderLabel(cat)),
+                                      ),
+                                  ],
+                                  onChanged: (val) {
+                                    if (val != null && val != _category) {
+                                      setState(() => _category = val);
+                                      _markDirty();
+                                    }
+                                  },
+                                ),
                               ),
                             ],
                           ),
                         ),
+                        DaywellIconButton(
+                          icon: Icons.create_new_folder_outlined,
+                          iconSize: DaywellIconSize.sm,
+                          tooltip: 'New folder',
+                          onPressed: () =>
+                              unawaited(_handleCreateFolderFromEditor()),
+                        ),
+                        ActionChip(
+                          avatar: Icon(
+                            Icons.tag,
+                            size: DaywellIconSize.xs,
+                            color: semantic.textSecondary,
+                          ),
+                          label: Text(
+                            'Add Tag',
+                            style: DaywellTypography.label(
+                              color: semantic.textPrimary,
+                            ),
+                          ),
+                          onPressed: _addTagDialog,
+                        ),
+                        if (tasksCtrl != null &&
+                            !isTaskLinked &&
+                            !isEventLinked &&
+                            effectiveLinkedModule == null)
+                          ActionChip(
+                            avatar: Icon(
+                              Icons.add_link,
+                              size: DaywellIconSize.xs,
+                              color: colorScheme.primary,
+                            ),
+                            label: Text(
+                              'Link Task',
+                              style: DaywellTypography.label(
+                                color: semantic.textPrimary,
+                              ),
+                            ),
+                            onPressed: _openTaskPicker,
+                          ),
+                        if (calendarCtrl != null &&
+                            !isTaskLinked &&
+                            !isEventLinked &&
+                            effectiveLinkedModule == null)
+                          ActionChip(
+                            avatar: Icon(
+                              Icons.event_note_outlined,
+                              size: DaywellIconSize.xs,
+                              color: semantic.transfer,
+                            ),
+                            label: Text(
+                              'Link Event',
+                              style: DaywellTypography.label(
+                                color: semantic.textPrimary,
+                              ),
+                            ),
+                            onPressed: _openCalendarEventPicker,
+                          ),
+                        if (projectsCtrl != null && !hasProject)
+                          ActionChip(
+                            avatar: Icon(
+                              Icons.layers_outlined,
+                              size: DaywellIconSize.xs,
+                              color: colorScheme.primary,
+                            ),
+                            label: Text(
+                              'Add Project',
+                              style: DaywellTypography.label(
+                                color: semantic.textPrimary,
+                              ),
+                            ),
+                            onPressed: _openProjectPicker,
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (hasProject)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                    ),
+                    child: DaywellCard(
+                      color: semantic.surfaceSubtle,
+                      borderColor: semantic.border,
+                      borderRadius: SharedDesignTokens.radiusMd,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: SharedDesignTokens.spacingCompact,
+                        vertical: SharedDesignTokens.spacingXs,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.layers_outlined,
+                            size: DaywellIconSize.sm,
+                            color: linkedProject != null
+                                ? colorScheme.primary
+                                : semantic.textMuted,
+                          ),
+                          const SizedBox(
+                            width: SharedDesignTokens.spacingSm,
+                          ),
+                          Expanded(
+                            child: Wrap(
+                              spacing: SharedDesignTokens.spacingXs,
+                              runSpacing: SharedDesignTokens.spacingXs,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                Text(
+                                  linkedProject != null
+                                      ? 'Project: ${linkedProject.title}'
+                                      : 'Project unavailable',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: DaywellTypography.fromToken(
+                                    SharedDesignTokens.typeBodyCompact,
+                                    color: linkedProject != null
+                                        ? semantic.textPrimary
+                                        : semantic.textMuted,
+                                  ).copyWith(fontWeight: FontWeight.w600),
+                                ),
+                                if (linkedProject?.isArchived == true)
+                                  const DaywellStatusBadge(
+                                    label: 'Archived',
+                                    tone: DaywellStatusTone.warning,
+                                    showIcon: false,
+                                  ),
+                              ],
+                            ),
+                          ),
+                          if (projectsCtrl != null)
+                            DaywellIconButton(
+                              icon: Icons.swap_horiz,
+                              iconSize: DaywellIconSize.md,
+                              tooltip: 'Change Project',
+                              onPressed: _openProjectPicker,
+                            ),
+                          DaywellIconButton(
+                            icon: Icons.link_off_outlined,
+                            iconSize: DaywellIconSize.md,
+                            tooltip: 'Remove Project',
+                            onPressed: () => unawaited(_clearProject()),
+                          ),
+                        ],
                       ),
                     ),
-                    const Divider(height: 1),
-                    if (!_isPreviewMode) ...[
-                      Expanded(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: SharedDesignTokens.spacingMd,
-                          ),
-                          child: TextField(
-                            controller: _contentController,
-                            maxLines: null,
-                            expands: true,
-                            textAlignVertical: TextAlignVertical.top,
-                            style: DaywellTypography.fromToken(
-                              SharedDesignTokens.typeBody,
-                              color: semantic.textPrimary,
-                            ).copyWith(height: 1.55),
-                            decoration: InputDecoration(
-                              hintText:
-                                  'Start writing (English & Amharic / ፊደል)...',
-                              hintStyle: DaywellTypography.fromToken(
-                                SharedDesignTokens.typeBody,
-                                color: semantic.textMuted,
-                              ),
-                              border: InputBorder.none,
-                              enabledBorder: InputBorder.none,
-                              focusedBorder: InputBorder.none,
-                              filled: false,
-                              contentPadding: const EdgeInsets.symmetric(
-                                vertical: SharedDesignTokens.spacingCompact,
-                              ),
-                            ),
-                            onChanged: _handleBodyTextChanged,
-                          ),
-                        ),
+                  ),
+                if (isTaskLinked)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                    ),
+                    child: DaywellCard(
+                      color: linkedTask != null
+                          ? colorScheme.primaryContainer
+                          : semantic.surfaceSubtle,
+                      borderColor: semantic.border,
+                      borderRadius: SharedDesignTokens.radiusMd,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: SharedDesignTokens.spacingCompact,
+                        vertical: SharedDesignTokens.spacingXs,
                       ),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: semantic.surfaceSubtle,
-                          border: Border(
-                            top: BorderSide(color: semantic.border),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.check_circle_outline,
+                            size: DaywellIconSize.sm,
+                            color: linkedTask != null
+                                ? colorScheme.primary
+                                : semantic.textMuted,
+                          ),
+                          const SizedBox(
+                            width: SharedDesignTokens.spacingSm,
+                          ),
+                          Expanded(
+                            child: Text(
+                              linkedTask != null
+                                  ? 'Linked Task: ${linkedTask.title}'
+                                  : 'Linked task unavailable',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: DaywellTypography.fromToken(
+                                SharedDesignTokens.typeBodyCompact,
+                                color: linkedTask != null
+                                    ? colorScheme.onPrimaryContainer
+                                    : semantic.textMuted,
+                              ).copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          if (linkedTask != null && widget.onOpenTask != null)
+                            DaywellButton(
+                              label: 'Open',
+                              variant: DaywellButtonVariant.text,
+                              size: DaywellButtonSize.compact,
+                              onPressed: () async {
+                                final ok = await _flushPendingSaves();
+                                if (!ok || !context.mounted) return;
+                                if (!widget.isEmbedded) {
+                                  Navigator.pop(context);
+                                }
+                                widget.onOpenTask!(linkedTask.id);
+                              },
+                            ),
+                          if (tasksCtrl != null)
+                            DaywellIconButton(
+                              icon: Icons.swap_horiz,
+                              iconSize: DaywellIconSize.md,
+                              tooltip: 'Change Linked Task',
+                              onPressed: _openTaskPicker,
+                            ),
+                          DaywellIconButton(
+                            icon: Icons.link_off_outlined,
+                            iconSize: DaywellIconSize.md,
+                            tooltip: 'Unlink Task',
+                            onPressed: () => unawaited(_unlinkTask()),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (isEventLinked)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                      SharedDesignTokens.spacingMd,
+                      SharedDesignTokens.spacingXs,
+                    ),
+                    child: DaywellCard(
+                      color: linkedEvent != null
+                          ? semantic.transferContainer
+                          : semantic.surfaceSubtle,
+                      borderColor: semantic.border,
+                      borderRadius: SharedDesignTokens.radiusMd,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: SharedDesignTokens.spacingCompact,
+                        vertical: SharedDesignTokens.spacingXs,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            Icons.event_note_outlined,
+                            size: DaywellIconSize.sm,
+                            color: linkedEvent != null
+                                ? semantic.transfer
+                                : semantic.textMuted,
+                          ),
+                          const SizedBox(
+                            width: SharedDesignTokens.spacingSm,
+                          ),
+                          Expanded(
+                            child: Text(
+                              linkedEvent != null
+                                  ? 'Linked Event: ${linkedEvent.title}'
+                                  : 'Linked event unavailable',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: DaywellTypography.fromToken(
+                                SharedDesignTokens.typeBodyCompact,
+                                color: linkedEvent != null
+                                    ? semantic.onTransferContainer
+                                    : semantic.textMuted,
+                              ).copyWith(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                          if (linkedEvent != null &&
+                              widget.onOpenCalendarEvent != null)
+                            DaywellButton(
+                              label: 'Open',
+                              variant: DaywellButtonVariant.text,
+                              size: DaywellButtonSize.compact,
+                              onPressed: () async {
+                                final ok = await _flushPendingSaves();
+                                if (!ok || !context.mounted) return;
+                                if (!widget.isEmbedded) {
+                                  Navigator.pop(context);
+                                }
+                                widget.onOpenCalendarEvent!(linkedEvent);
+                              },
+                            ),
+                          if (calendarCtrl != null)
+                            DaywellIconButton(
+                              icon: Icons.swap_horiz,
+                              iconSize: DaywellIconSize.md,
+                              tooltip: 'Change Linked Event',
+                              onPressed: _openCalendarEventPicker,
+                            ),
+                          DaywellIconButton(
+                            icon: Icons.link_off_outlined,
+                            iconSize: DaywellIconSize.md,
+                            tooltip: 'Unlink Event',
+                            onPressed: () => unawaited(_unlinkCalendarEvent()),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                if (_tags.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: SharedDesignTokens.spacingMd,
+                      vertical: SharedDesignTokens.spacingXs,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: SharedDesignTokens.spacingSm,
+                        runSpacing: SharedDesignTokens.spacingXs,
+                        children: _tags
+                            .map(
+                              (t) => Chip(
+                                backgroundColor: semantic.transferContainer,
+                                side: BorderSide(
+                                  color: semantic.transfer.withOpacity(0.25),
+                                ),
+                                deleteIconColor: semantic.onTransferContainer,
+                                label: Text(
+                                  '#$t',
+                                  style: DaywellTypography.caption(
+                                    color: semantic.onTransferContainer,
+                                  ).copyWith(fontWeight: FontWeight.w600),
+                                ),
+                                onDeleted: () {
+                                  setState(() => _tags.remove(t));
+                                  _markDirty(scheduleTimer: false);
+                                  if (_noteId != null) {
+                                    unawaited(_flushPendingSaves());
+                                  }
+                                },
+                              ),
+                            )
+                            .toList(),
+                      ),
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingSm,
+                    SharedDesignTokens.spacingMd,
+                    SharedDesignTokens.spacingSm,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: semantic.surfaceSubtle,
+                        borderRadius: BorderRadius.circular(
+                          SharedDesignTokens.radiusMd,
+                        ),
+                        border: Border.all(color: semantic.border),
+                      ),
+                      padding: const EdgeInsets.all(
+                        SharedDesignTokens.spacingXs,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildModeSegment(
+                            label: 'Write',
+                            icon: Icons.edit_outlined,
+                            selected: !_isPreviewMode,
+                            onTap: () {
+                              if (_isPreviewMode) {
+                                setState(() => _isPreviewMode = false);
+                              }
+                            },
+                            semantic: semantic,
+                            colorScheme: colorScheme,
+                          ),
+                          const SizedBox(width: SharedDesignTokens.spacingXs),
+                          _buildModeSegment(
+                            label: 'Preview',
+                            icon: Icons.visibility_outlined,
+                            selected: _isPreviewMode,
+                            onTap: () {
+                              if (!_isPreviewMode) {
+                                FocusScope.of(context).unfocus();
+                                setState(() => _isPreviewMode = true);
+                              }
+                            },
+                            semantic: semantic,
+                            colorScheme: colorScheme,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const Divider(height: 1),
+                if (!_isPreviewMode) ...[
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: SharedDesignTokens.spacingMd,
+                      ),
+                      child: TextField(
+                        controller: _contentController,
+                        maxLines: null,
+                        expands: true,
+                        textAlignVertical: TextAlignVertical.top,
+                        style: DaywellTypography.fromToken(
+                          SharedDesignTokens.typeBody,
+                          color: semantic.textPrimary,
+                        ).copyWith(height: 1.55),
+                        decoration: InputDecoration(
+                          hintText:
+                              'Start writing (English & Amharic / ፊደል)...',
+                          hintStyle: DaywellTypography.fromToken(
+                            SharedDesignTokens.typeBody,
+                            color: semantic.textMuted,
+                          ),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          filled: false,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: SharedDesignTokens.spacingCompact,
                           ),
                         ),
-                        child: SafeArea(
-                          top: false,
-                          bottom: isNewBlankDraft,
-                          child: SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: SharedDesignTokens.spacingSm,
-                              vertical: SharedDesignTokens.spacingXs,
+                        onChanged: _handleBodyTextChanged,
+                      ),
+                    ),
+                  ),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: semantic.surfaceSubtle,
+                      border: Border(
+                        top: BorderSide(color: semantic.border),
+                      ),
+                    ),
+                    child: SafeArea(
+                      top: false,
+                      bottom: isNewBlankDraft,
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: SharedDesignTokens.spacingSm,
+                          vertical: SharedDesignTokens.spacingXs,
+                        ),
+                        child: Row(
+                          children: [
+                            _buildToolbarActionButton(
+                              icon: Icons.title,
+                              tooltip: 'Heading 2',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.heading2,
+                              ),
                             ),
-                            child: Row(
-                              children: [
-                                _buildToolbarActionButton(
-                                  icon: Icons.title,
-                                  tooltip: 'Heading 2',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.heading2,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.format_bold,
-                                  tooltip: 'Bold',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.bold,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.format_italic,
-                                  tooltip: 'Italic',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.italic,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.strikethrough_s,
-                                  tooltip: 'Strikethrough',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.strikethrough,
-                                  ),
-                                ),
-                                _buildToolbarDivider(semantic),
-                                _buildToolbarActionButton(
-                                  icon: Icons.format_list_bulleted,
-                                  tooltip: 'Bulleted list',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.bulletList,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.format_list_numbered,
-                                  tooltip: 'Numbered list',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.numberedList,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.check_box_outlined,
-                                  tooltip: 'Checklist',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.checklist,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.format_quote,
-                                  tooltip: 'Blockquote',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.blockquote,
-                                  ),
-                                ),
-                                _buildToolbarDivider(semantic),
-                                _buildToolbarActionButton(
-                                  icon: Icons.code,
-                                  tooltip: 'Inline code',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.inlineCode,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.data_object,
-                                  tooltip: 'Code block',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.codeBlock,
-                                  ),
-                                ),
-                                _buildToolbarActionButton(
-                                  icon: Icons.link,
-                                  tooltip: 'Internal note link',
-                                  semantic: semantic,
-                                  onPressed: () => _applyToolbarFormat(
-                                    NoteToolbarFormatAction.internalLink,
-                                  ),
-                                ),
-                                if (_activeWriteChecklist != null) ...[
-                                  _buildToolbarDivider(semantic),
-                                  Tooltip(
-                                    message: _activeWriteChecklist!.checked
-                                        ? 'Mark item incomplete'
-                                        : 'Mark item complete',
-                                    child: Semantics(
-                                      button: true,
-                                      checked: _activeWriteChecklist!.checked,
-                                      label: _activeWriteChecklist!.checked
-                                          ? 'Mark item incomplete'
-                                          : 'Mark item complete',
-                                      child: InkWell(
+                            _buildToolbarActionButton(
+                              icon: Icons.format_bold,
+                              tooltip: 'Bold',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.bold,
+                              ),
+                            ),
+                            _buildToolbarActionButton(
+                              icon: Icons.format_italic,
+                              tooltip: 'Italic',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.italic,
+                              ),
+                            ),
+                            _buildToolbarActionButton(
+                              icon: Icons.strikethrough_s,
+                              tooltip: 'Strikethrough',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.strikethrough,
+                              ),
+                            ),
+                            _buildToolbarDivider(semantic),
+                            _buildToolbarActionButton(
+                              icon: Icons.format_list_bulleted,
+                              tooltip: 'Bulleted list',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.bulletList,
+                              ),
+                            ),
+                            _buildToolbarActionButton(
+                              icon: Icons.format_list_numbered,
+                              tooltip: 'Numbered list',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.numberedList,
+                              ),
+                            ),
+                            _buildToolbarActionButton(
+                              icon: Icons.check_box_outlined,
+                              tooltip: 'Checklist',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.checklist,
+                              ),
+                            ),
+                            _buildToolbarActionButton(
+                              icon: Icons.format_quote,
+                              tooltip: 'Blockquote',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.blockquote,
+                              ),
+                            ),
+                            _buildToolbarDivider(semantic),
+                            _buildToolbarActionButton(
+                              icon: Icons.code,
+                              tooltip: 'Inline code',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.inlineCode,
+                              ),
+                            ),
+                            _buildToolbarActionButton(
+                              icon: Icons.data_object,
+                              tooltip: 'Code block',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.codeBlock,
+                              ),
+                            ),
+                            _buildToolbarActionButton(
+                              icon: Icons.link,
+                              tooltip: 'Internal note link',
+                              semantic: semantic,
+                              onPressed: () => _applyToolbarFormat(
+                                NoteToolbarFormatAction.internalLink,
+                              ),
+                            ),
+                            if (_activeWriteChecklist != null) ...[
+                              _buildToolbarDivider(semantic),
+                              Tooltip(
+                                message: _activeWriteChecklist!.checked
+                                    ? 'Mark item incomplete'
+                                    : 'Mark item complete',
+                                child: Semantics(
+                                  button: true,
+                                  checked: _activeWriteChecklist!.checked,
+                                  label: _activeWriteChecklist!.checked
+                                      ? 'Mark item incomplete'
+                                      : 'Mark item complete',
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(
+                                      SharedDesignTokens.radiusSm,
+                                    ),
+                                    onTap: () => _handleToggleChecklistLine(
+                                      _activeWriteChecklist!.lineIndex,
+                                    ),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal:
+                                            SharedDesignTokens.spacingCompact,
+                                        vertical: SharedDesignTokens.spacingXs,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: colorScheme.primaryContainer,
                                         borderRadius: BorderRadius.circular(
                                           SharedDesignTokens.radiusSm,
                                         ),
-                                        onTap: () => _handleToggleChecklistLine(
-                                          _activeWriteChecklist!.lineIndex,
-                                        ),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal:
-                                                SharedDesignTokens.spacingCompact,
-                                            vertical:
-                                                SharedDesignTokens.spacingXs,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            _activeWriteChecklist!.checked
+                                                ? Icons.check_box_rounded
+                                                : Icons
+                                                    .check_box_outline_blank_rounded,
+                                            size: DaywellIconSize.sm,
+                                            color:
+                                                colorScheme.onPrimaryContainer,
                                           ),
-                                          decoration: BoxDecoration(
-                                            color: colorScheme.primaryContainer,
-                                            borderRadius: BorderRadius.circular(
-                                              SharedDesignTokens.radiusSm,
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            _activeWriteChecklist!.checked
+                                                ? 'Checked'
+                                                : 'Check item',
+                                            style: DaywellTypography.label(
+                                              color: colorScheme
+                                                  .onPrimaryContainer,
                                             ),
                                           ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                _activeWriteChecklist!.checked
-                                                    ? Icons.check_box_rounded
-                                                    : Icons
-                                                        .check_box_outline_blank_rounded,
-                                                size: DaywellIconSize.sm,
-                                                color: colorScheme
-                                                    .onPrimaryContainer,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Text(
-                                                _activeWriteChecklist!.checked
-                                                    ? 'Checked'
-                                                    : 'Check item',
-                                                style: DaywellTypography.label(
-                                                  color: colorScheme
-                                                      .onPrimaryContainer,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
+                                        ],
                                       ),
                                     ),
                                   ),
-                                ],
-                              ],
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (!isNewBlankDraft)
-                        _buildWriteModeBacklinksBar(
-                          backlinks: backlinks,
-                          semantic: semantic,
-                          colorScheme: colorScheme,
-                        ),
-                    ] else
-                      Expanded(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: SharedDesignTokens.spacingMd,
-                            vertical: SharedDesignTokens.spacingCompact,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              NoteMarkdownPreview(
-                                content: _contentController.text,
-                                notes: liveNotesForInternalLinks,
-                                onToggleChecklistItem:
-                                    _handleToggleChecklistLine,
-                                onOpenInternalNote: (note) =>
-                                    unawaited(_openInternalNote(note)),
-                                onOpenAmbiguousInternalLink:
-                                    _openAmbiguousInternalLinkChooser,
+                                ),
                               ),
-                              if (!isNewBlankDraft) ...[
-                                const SizedBox(
-                                  height: SharedDesignTokens.spacingLg,
-                                ),
-                                _buildBacklinksSection(
-                                  backlinks: backlinks,
-                                  semantic: semantic,
-                                  colorScheme: colorScheme,
-                                ),
-                              ],
                             ],
-                          ),
+                          ],
                         ),
                       ),
-                  ],
-                ),
-              ),
-            );
+                    ),
+                  ),
+                  if (!isNewBlankDraft)
+                    _buildWriteModeBacklinksBar(
+                      backlinks: backlinks,
+                      semantic: semantic,
+                      colorScheme: colorScheme,
+                    ),
+                ] else
+                  Expanded(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: SharedDesignTokens.spacingMd,
+                        vertical: SharedDesignTokens.spacingCompact,
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          NoteMarkdownPreview(
+                            content: _contentController.text,
+                            notes: liveNotesForInternalLinks,
+                            onToggleChecklistItem: _handleToggleChecklistLine,
+                            onOpenInternalNote: (note) =>
+                                unawaited(_openInternalNote(note)),
+                            onOpenAmbiguousInternalLink:
+                                _openAmbiguousInternalLinkChooser,
+                          ),
+                          if (!isNewBlankDraft) ...[
+                            const SizedBox(
+                              height: SharedDesignTokens.spacingLg,
+                            ),
+                            _buildBacklinksSection(
+                              backlinks: backlinks,
+                              semantic: semantic,
+                              colorScheme: colorScheme,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
 
         if (widget.isEmbedded) {
           return Column(
@@ -5435,9 +5426,8 @@ class _NoteCalendarEventPickerSheetState
                             useAmharic: false,
                             includeEra: false,
                           );
-                          final timeLabel = ev.isAllDay
-                              ? 'All Day'
-                              : (ev.startTime ?? '');
+                          final timeLabel =
+                              ev.isAllDay ? 'All Day' : (ev.startTime ?? '');
                           final subtitleParts = <String>[
                             '${ev.dateIso} ($ethLabel)',
                             if (timeLabel.isNotEmpty) timeLabel,
@@ -5484,4 +5474,3 @@ class _NoteCalendarEventPickerSheetState
     );
   }
 }
-

@@ -95,7 +95,8 @@ void main() {
         ];
 
         final linked = CalendarNotesHelper.getNotesForEvent(notes, 'evt-1');
-        expect(linked.map((n) => n.id).toList(), ['n-pin', 'n-active', 'n-arch']);
+        expect(
+            linked.map((n) => n.id).toList(), ['n-pin', 'n-active', 'n-arch']);
         expect(CalendarNotesHelper.countNotesForEvent(notes, 'evt-1'), 3);
         expect(
           CalendarNotesHelper.countNotesForEvent(
@@ -118,7 +119,8 @@ void main() {
         expect(candidates[1].isLinkedToOtherModule, isTrue);
         expect(candidates[1].linkedTaskId, 'task-42');
 
-        expect(CalendarNotesHelper.findLinkedEvent(notes[1], [ev1])?.id, 'evt-1');
+        expect(
+            CalendarNotesHelper.findLinkedEvent(notes[1], [ev1])?.id, 'evt-1');
         expect(CalendarNotesHelper.findLinkedEvent(notes[4], [ev1]), isNull);
         expect(
           CalendarNotesHelper.buildDefaultEventNoteTitle(ev1),
@@ -470,7 +472,8 @@ void main() {
         final eventTitles =
             CalendarNotesHelper.buildEventTitlesById(calendarCtrl.state.events);
         notesCtrl.setSearchQuery('budget alignment');
-        final activeHits = notesCtrl.state.filterNotes(eventTitlesById: eventTitles);
+        final activeHits =
+            notesCtrl.state.filterNotes(eventTitlesById: eventTitles);
         expect(activeHits.map((n) => n.id).toList(), [taskNote.id]);
         notesCtrl.setSearchQuery('');
 

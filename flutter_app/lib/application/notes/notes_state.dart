@@ -129,8 +129,7 @@ class NotesModuleState {
     );
   }
 
-  int get activeNotesCount =>
-      notes.where(NoteDomainHelpers.isActive).length;
+  int get activeNotesCount => notes.where(NoteDomainHelpers.isActive).length;
   int get pinnedNotesCount =>
       notes.where(NoteDomainHelpers.isPinnedActive).length;
   int get favoriteNotesCount =>

@@ -611,7 +611,8 @@ class _CalendarViewState extends State<CalendarView> {
   }
 
   String _formatReadableNoteDate(DateTime utcUpdatedAt) {
-    final eth = CalendarDate.fromUtcInstantInEthiopia(utcUpdatedAt).toEthiopian();
+    final eth =
+        CalendarDate.fromUtcInstantInEthiopia(utcUpdatedAt).toEthiopian();
     return SharedDateFormatter.formatEthiopian(
       eth,
       useAmharic: false,
@@ -838,8 +839,8 @@ class _CalendarViewState extends State<CalendarView> {
                                             note.displayTitle,
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
-                                            style: textTheme.bodyMedium
-                                                ?.copyWith(
+                                            style:
+                                                textTheme.bodyMedium?.copyWith(
                                               color: semantic.textPrimary,
                                               fontWeight: FontWeight.w600,
                                             ),
@@ -1034,7 +1035,8 @@ class _CalendarViewState extends State<CalendarView> {
                                 size: DaywellIconSize.xs,
                                 color: semantic.textMuted,
                               ),
-                              const SizedBox(width: SharedDesignTokens.spacingXs),
+                              const SizedBox(
+                                  width: SharedDesignTokens.spacingXs),
                               Text(
                                 timeLabel,
                                 style: textTheme.labelSmall?.copyWith(
@@ -1052,7 +1054,8 @@ class _CalendarViewState extends State<CalendarView> {
                                 size: DaywellIconSize.xs,
                                 color: Theme.of(context).colorScheme.primary,
                               ),
-                              const SizedBox(width: SharedDesignTokens.spacingXs),
+                              const SizedBox(
+                                  width: SharedDesignTokens.spacingXs),
                               Text(
                                 '$linkedNotesCount ${linkedNotesCount == 1 ? 'note' : 'notes'}',
                                 style: textTheme.labelSmall?.copyWith(
