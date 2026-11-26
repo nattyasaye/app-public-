@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:personal_management_app/core/date/shared_date.dart';
+import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
+import 'package:personal_management_app/data/database/raw_database_recovery_exporter.dart';
 import 'package:personal_management_app/domain/notes/note_helpers.dart';
 import 'package:personal_management_app/domain/notes/note_models.dart';
 import 'package:personal_management_app/main.dart';
@@ -15,6 +19,155 @@ import 'package:personal_management_app/ui/screens/dashboard_view.dart';
 import 'package:personal_management_app/ui/shell/daywell_shell_routes.dart';
 
 import 'support/sqlite_test_helper.dart';
+
+typedef _N53Fixture = ({
+  AppDatabase db,
+  AppStateManager appState,
+  Directory tempDir,
+});
+
+class _NoOpNotificationService implements INotificationService {
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<bool> requestPermissions() async => true;
+
+  @override
+  Future<void> scheduleReminder({
+    required String id,
+    required String title,
+    required String body,
+    required DateTime scheduledDateUtc,
+    String? payload,
+  }) async {}
+
+  @override
+  Future<void> cancelReminder(String id) async {}
+
+  @override
+  Future<void> cancelAllReminders() async {}
+}
+
+Future<void> _settle(WidgetTester tester) {
+  return tester.pumpAndSettle(
+    const Duration(milliseconds: 100),
+    EnginePhase.sendSemanticsUpdate,
+    const Duration(seconds: 5),
+  );
+}
+
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  bool Function() condition, {
+  required String reason,
+}) async {
+  final watch = Stopwatch()..start();
+  while (!condition()) {
+    if (watch.elapsed > const Duration(seconds: 10)) {
+      fail(reason);
+    }
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+  }
+  await _settle(tester);
+}
+
+Future<void> _disposeTestState(
+  WidgetTester tester,
+  AppStateManager state, {
+  Directory? tempDir,
+}) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 20));
+  try {
+    if (!state.isDisposed) {
+      var disposed = false;
+      final disposeFuture = state.disposeAsync().whenComplete(() {
+        disposed = true;
+      });
+      final stopwatch = Stopwatch()..start();
+      while (!disposed && stopwatch.elapsed < const Duration(seconds: 10)) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
+      if (disposed) {
+        await disposeFuture;
+      } else {
+        await tester.runAsync(
+          () => disposeFuture.timeout(const Duration(seconds: 5)),
+        );
+      }
+    }
+  } finally {
+    if (tempDir != null && tempDir.existsSync()) {
+      tempDir.deleteSync(recursive: true);
+    }
+  }
+}
+
+Future<_N53Fixture> _createIsolatedAppState(
+  WidgetTester tester, {
+  Future<void> Function(AppDatabase db, AppStateManager appState)? seed,
+}) async {
+  final result = await tester.runAsync(() async {
+    final tempDir = Directory.systemTemp.createTempSync('daywell_n53_');
+    final docsDir = Directory(p.join(tempDir.path, 'docs'));
+    docsDir.createSync();
+    final supportDir = Directory(p.join(tempDir.path, 'support'));
+    supportDir.createSync();
+    final db = AppDatabase(NativeDatabase.memory());
+    final appState = AppStateManager(
+      db: db,
+      recoveryExporter: RawDatabaseRecoveryExporter(
+        documentsDirProvider: () async => docsDir,
+        supportDirProvider: () async => supportDir,
+      ),
+      notificationService: _NoOpNotificationService(),
+    );
+    try {
+      final ensureFuture = db.ensureInitialized();
+      await ensureFuture.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw TimeoutException(
+          'db.ensureInitialized() timed out after 15s',
+        ),
+      );
+      final initFuture = appState.initialize();
+      await initFuture.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw TimeoutException(
+          'appState.initialize() timed out after 15s',
+        ),
+      );
+      if (seed != null) {
+        final seedFuture = seed(db, appState);
+        await seedFuture.timeout(
+          const Duration(seconds: 15),
+          onTimeout: () => throw TimeoutException(
+            'Stage N5.3 test seed timed out after 15s',
+          ),
+        );
+      }
+      return (db: db, appState: appState, tempDir: tempDir);
+    } catch (_) {
+      try {
+        if (!appState.isDisposed) {
+          await appState.disposeAsync().timeout(const Duration(seconds: 5));
+        }
+      } catch (_) {}
+      if (tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+      rethrow;
+    }
+  });
+  return result!;
+}
 
 void main() {
   setUpAll(configureSqliteForHostTests);
@@ -118,62 +271,68 @@ void main() {
       '2. DashboardNotesSection displays updated notes by recency, formats dates & plain previews, excludes Trash/Archive, and reflects live NotesController changes',
       (WidgetTester tester) async {
         await tester.binding.setSurfaceSize(const Size(960, 1200));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
-
-        final db = AppDatabase(NativeDatabase.memory());
-        final appState = AppStateManager(db: db);
-        await tester.runAsync(() => appState.initialize());
-        addTearDown(() => appState.dispose());
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
         final t1 = DateTime.utc(2026, 3, 10, 9);
         final t2 = DateTime.utc(2026, 3, 15, 9);
         final t3 = DateTime.utc(2026, 3, 20, 9);
         final t4 = DateTime.utc(2026, 3, 22, 9);
 
-        await tester.runAsync(() async {
-          await db.into(db.notes).insert(
-                NotesCompanion.insert(
-                  id: 'n-old-pin',
-                  title: 'Older Pinned Reference',
-                  content: 'Should sit after newer notes',
-                  category: const Value('work'),
-                  isPinned: const Value(true),
-                  createdAt: t1,
-                  updatedAt: t1,
-                ),
-              );
-          await db.into(db.notes).insert(
-                NotesCompanion.insert(
-                  id: 'n-fresh',
-                  title: 'Fresh Strategy Note',
-                  content: '## Summary\nAlign **Milestones** for release.',
-                  category: const Value('study'),
-                  createdAt: t2,
-                  updatedAt: t3,
-                ),
-              );
-          await db.into(db.notes).insert(
-                NotesCompanion.insert(
-                  id: 'n-arch',
-                  title: 'Archived Quarterly Note',
-                  content: 'Archived body',
-                  isArchived: const Value(true),
-                  createdAt: t1,
-                  updatedAt: t4,
-                ),
-              );
-          await db.into(db.notes).insert(
-                NotesCompanion.insert(
-                  id: 'n-trash',
-                  title: 'Trashed Scratch Note',
-                  content: 'Deleted body',
-                  isTrashed: const Value(true),
-                  createdAt: t1,
-                  updatedAt: t4,
-                ),
-              );
-          await appState.notesController.loadNotes();
-        });
+        final fixture = await _createIsolatedAppState(
+          tester,
+          seed: (AppDatabase db, AppStateManager appState) async {
+            await db.into(db.notes).insert(
+                  NotesCompanion.insert(
+                    id: 'n-old-pin',
+                    title: 'Older Pinned Reference',
+                    content: 'Should sit after newer notes',
+                    category: const Value('work'),
+                    isPinned: const Value(true),
+                    createdAt: t1,
+                    updatedAt: t1,
+                  ),
+                );
+            await db.into(db.notes).insert(
+                  NotesCompanion.insert(
+                    id: 'n-fresh',
+                    title: 'Fresh Strategy Note',
+                    content: '## Summary\nAlign **Milestones** for release.',
+                    category: const Value('study'),
+                    createdAt: t2,
+                    updatedAt: t3,
+                  ),
+                );
+            await db.into(db.notes).insert(
+                  NotesCompanion.insert(
+                    id: 'n-arch',
+                    title: 'Archived Quarterly Note',
+                    content: 'Archived body',
+                    isArchived: const Value(true),
+                    createdAt: t1,
+                    updatedAt: t4,
+                  ),
+                );
+            await db.into(db.notes).insert(
+                  NotesCompanion.insert(
+                    id: 'n-trash',
+                    title: 'Trashed Scratch Note',
+                    content: 'Deleted body',
+                    isTrashed: const Value(true),
+                    createdAt: t1,
+                    updatedAt: t4,
+                  ),
+                );
+            await appState.notesController.loadNotes();
+          },
+        );
+        final appState = fixture.appState;
+        addTearDown(
+          () => _disposeTestState(
+            tester,
+            appState,
+            tempDir: fixture.tempDir,
+          ),
+        );
 
         final openedNoteIds = <String>[];
         var openedAllNotesCount = 0;
@@ -192,7 +351,7 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(find.text('Recent Notes'), findsOneWidget);
         expect(find.text('All Notes'), findsOneWidget);
@@ -219,18 +378,23 @@ void main() {
 
         // Tapping a note card triggers direct onOpenNote with that exact ID.
         await tester.tap(find.text('Fresh Strategy Note'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(openedNoteIds, <String>['n-fresh']);
 
         // Updating Older Pinned Reference content/title updates Dashboard live.
         await tester.runAsync(() async {
-          await appState.notesController.updateNote(
+          final updateFuture = appState.notesController.updateNote(
             id: 'n-old-pin',
             title: 'Updated Pinned Reference',
             content: 'Now freshly revised',
           );
+          await updateFuture.timeout(const Duration(seconds: 10));
         });
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () => find.text('Updated Pinned Reference').evaluate().isNotEmpty,
+          reason: 'DashboardNotesSection did not reflect updated note.',
+        );
         expect(find.text('Updated Pinned Reference'), findsOneWidget);
         expect(find.text('Now freshly revised'), findsOneWidget);
         expect(
@@ -240,10 +404,17 @@ void main() {
 
         // Trashing both active notes leaves only Archive-aware empty state.
         await tester.runAsync(() async {
-          await appState.notesController.deleteNote('n-old-pin');
-          await appState.notesController.deleteNote('n-fresh');
+          final deleteOld = appState.notesController.deleteNote('n-old-pin');
+          await deleteOld.timeout(const Duration(seconds: 10));
+          final deleteFresh = appState.notesController.deleteNote('n-fresh');
+          await deleteFresh.timeout(const Duration(seconds: 10));
         });
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () => find.text('No active notes yet').evaluate().isNotEmpty,
+          reason:
+              'DashboardNotesSection did not show archive-aware empty state.',
+        );
 
         expect(find.text('No active notes yet'), findsOneWidget);
         expect(
@@ -253,7 +424,7 @@ void main() {
           findsOneWidget,
         );
         await tester.tap(find.text('Open Notes'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(openedAllNotesCount, 1);
       },
     );
@@ -263,33 +434,48 @@ void main() {
       (WidgetTester tester) async {
         // Part A: Narrow mobile layout (<840dp) pushes dedicated note editor route
         await tester.binding.setSurfaceSize(const Size(412, 892));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
-        final dbNarrow = AppDatabase(NativeDatabase.memory());
-        final narrowState = AppStateManager(db: dbNarrow);
-        await tester.runAsync(() async {
-          await narrowState.initialize();
-          await dbNarrow.into(dbNarrow.notes).insert(
-                NotesCompanion.insert(
-                  id: 'n-target',
-                  title: 'Mobile Focus Note',
-                  content: 'Opened directly from Dashboard on phone width.',
-                  createdAt: DateTime.utc(2026, 3, 18, 9),
-                  updatedAt: DateTime.utc(2026, 3, 19, 9),
-                ),
-              );
-          await narrowState.notesController.loadNotes();
-        });
-        addTearDown(() => narrowState.dispose());
+        final narrowFixture = await _createIsolatedAppState(
+          tester,
+          seed: (AppDatabase db, AppStateManager appState) async {
+            await db.into(db.notes).insert(
+                  NotesCompanion.insert(
+                    id: 'n-target',
+                    title: 'Mobile Focus Note',
+                    content: 'Opened directly from Dashboard on phone width.',
+                    createdAt: DateTime.utc(2026, 3, 18, 9),
+                    updatedAt: DateTime.utc(2026, 3, 19, 9),
+                  ),
+                );
+            await appState.notesController.loadNotes();
+          },
+        );
+        addTearDown(
+          () => _disposeTestState(
+            tester,
+            narrowFixture.appState,
+            tempDir: narrowFixture.tempDir,
+          ),
+        );
 
-        await tester.pumpWidget(DaywellApp(stateManager: narrowState));
-        await tester.pumpAndSettle();
+        await tester.pumpWidget(
+          DaywellApp(stateManager: narrowFixture.appState),
+        );
+        await _settle(tester);
 
         final noteCard = find.text('Mobile Focus Note');
         await tester.ensureVisible(noteCard);
-        await tester.pumpAndSettle();
+        await _settle(tester);
         await tester.tap(noteCard);
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () => find
+              .text('Opened directly from Dashboard on phone width.')
+              .evaluate()
+              .isNotEmpty,
+          reason: 'Mobile note editor did not open from Dashboard.',
+        );
 
         // Now inside Notes tab with the narrow editor pushed for 'Mobile Focus Note'.
         expect(
@@ -298,33 +484,52 @@ void main() {
         );
         expect(tester.takeException(), isNull);
 
+        await _disposeTestState(
+          tester,
+          narrowFixture.appState,
+          tempDir: narrowFixture.tempDir,
+        );
+
         // Part B: Wide master-detail layout (>=840dp) opens target note in right detail pane
         await tester.binding.setSurfaceSize(const Size(1024, 800));
-        final dbWide = AppDatabase(NativeDatabase.memory());
-        final wideState = AppStateManager(db: dbWide);
-        await tester.runAsync(() async {
-          await wideState.initialize();
-          await dbWide.into(dbWide.notes).insert(
-                NotesCompanion.insert(
-                  id: 'n-wide',
-                  title: 'Master Detail Note',
-                  content: 'Detail pane body loaded from Dashboard.',
-                  createdAt: DateTime.utc(2026, 3, 18, 9),
-                  updatedAt: DateTime.utc(2026, 3, 20, 9),
-                ),
-              );
-          await wideState.notesController.loadNotes();
-        });
-        addTearDown(() => wideState.dispose());
+        final wideFixture = await _createIsolatedAppState(
+          tester,
+          seed: (AppDatabase db, AppStateManager appState) async {
+            await db.into(db.notes).insert(
+                  NotesCompanion.insert(
+                    id: 'n-wide',
+                    title: 'Master Detail Note',
+                    content: 'Detail pane body loaded from Dashboard.',
+                    createdAt: DateTime.utc(2026, 3, 18, 9),
+                    updatedAt: DateTime.utc(2026, 3, 20, 9),
+                  ),
+                );
+            await appState.notesController.loadNotes();
+          },
+        );
+        addTearDown(
+          () => _disposeTestState(
+            tester,
+            wideFixture.appState,
+            tempDir: wideFixture.tempDir,
+          ),
+        );
 
-        await tester.pumpWidget(DaywellApp(stateManager: wideState));
-        await tester.pumpAndSettle();
+        await tester.pumpWidget(DaywellApp(stateManager: wideFixture.appState));
+        await _settle(tester);
 
         final wideNoteCard = find.text('Master Detail Note');
         await tester.ensureVisible(wideNoteCard);
-        await tester.pumpAndSettle();
+        await _settle(tester);
         await tester.tap(wideNoteCard);
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () => find
+              .text('Detail pane body loaded from Dashboard.')
+              .evaluate()
+              .isNotEmpty,
+          reason: 'Wide master-detail note pane did not open from Dashboard.',
+        );
 
         expect(
           find.text('Detail pane body loaded from Dashboard.'),
@@ -338,29 +543,35 @@ void main() {
       '4. DashboardNotesSection handles tight 320dp viewport at 2.0x text scale without layout overflow',
       (WidgetTester tester) async {
         await tester.binding.setSurfaceSize(const Size(320, 720));
-        addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
-        final db = AppDatabase(NativeDatabase.memory());
-        final appState = AppStateManager(db: db);
-        await tester.runAsync(() async {
-          await appState.initialize();
-          for (var i = 1; i <= 5; i++) {
-            await db.into(db.notes).insert(
-                  NotesCompanion.insert(
-                    id: 'n-$i',
-                    title: 'Very Long Strategy And Operations Note Title #$i',
-                    content:
-                        'Multi-word Markdown preview that truncates cleanly under 2.0x accessibility scale.',
-                    category: const Value('work_projects'),
-                    isPinned: Value(i == 1),
-                    createdAt: DateTime.utc(2026, 3, i, 9),
-                    updatedAt: DateTime.utc(2026, 3, i, 9),
-                  ),
-                );
-          }
-          await appState.notesController.loadNotes();
-        });
-        addTearDown(() => appState.dispose());
+        final fixture = await _createIsolatedAppState(
+          tester,
+          seed: (AppDatabase db, AppStateManager appState) async {
+            for (var i = 1; i <= 5; i++) {
+              await db.into(db.notes).insert(
+                    NotesCompanion.insert(
+                      id: 'n-$i',
+                      title: 'Very Long Strategy And Operations Note Title #$i',
+                      content:
+                          'Multi-word Markdown preview that truncates cleanly under 2.0x accessibility scale.',
+                      category: const Value('work_projects'),
+                      isPinned: Value(i == 1),
+                      createdAt: DateTime.utc(2026, 3, i, 9),
+                      updatedAt: DateTime.utc(2026, 3, i, 9),
+                    ),
+                  );
+            }
+            await appState.notesController.loadNotes();
+          },
+        );
+        addTearDown(
+          () => _disposeTestState(
+            tester,
+            fixture.appState,
+            tempDir: fixture.tempDir,
+          ),
+        );
 
         await tester.pumpWidget(
           MaterialApp(
@@ -373,7 +584,7 @@ void main() {
               child: Scaffold(
                 body: SingleChildScrollView(
                   child: DashboardView(
-                    state: appState,
+                    state: fixture.appState,
                     onOpenQuickCapture: () {},
                     onSelectTab: (DaywellTabId _) {},
                   ),
@@ -382,7 +593,7 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(tester.takeException(), isNull);
         expect(find.text('+ 1 more note'), findsOneWidget);

@@ -125,6 +125,29 @@ class _ControllableNotesRepository implements INotesRepository {
   }
 }
 
+Future<void> _disposeDbFixture(
+  WidgetTester tester,
+  AppDatabase db,
+  List<ChangeNotifier> controllers,
+) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 20));
+  for (final ctrl in controllers) {
+    ctrl.dispose();
+  }
+  await tester.runAsync(
+    () => db.close().timeout(const Duration(seconds: 10)),
+  );
+}
+
+Future<void> _settle(WidgetTester tester) {
+  return tester.pumpAndSettle(
+    const Duration(milliseconds: 100),
+    EnginePhase.sendSemanticsUpdate,
+    const Duration(seconds: 5),
+  );
+}
+
 void main() {
   setUpAll(configureSqliteForHostTests);
 
@@ -662,32 +685,54 @@ void main() {
     testWidgets(
       '7. Failed task-link and unlink saves keep UI consistent with persisted note and allow Retry without phantom link changes',
       (WidgetTester tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        addTearDown(db.close);
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          final ensureFuture = db.ensureInitialized();
+          await ensureFuture.timeout(
+            const Duration(seconds: 15),
+            onTimeout: () => throw TimeoutException(
+              'db.ensureInitialized() timed out after 15s',
+            ),
+          );
 
-        final tasksRepo = DriftTasksRepository(db);
-        await tasksRepo.createTask(
-          TaskEntity(
-            id: 'task-link-1',
-            title: 'Write integration tests',
+          final tasksRepo = DriftTasksRepository(db);
+          await tasksRepo.createTask(
+            TaskEntity(
+              id: 'task-link-1',
+              title: 'Write integration tests',
+            ),
+          );
+          final tasksController = TasksController(repository: tasksRepo);
+          await tasksController.loadAll();
+
+          final notesRepo = _ControllableNotesRepository();
+          notesRepo.seed(
+            NoteEntity(
+              id: 'note-task-link',
+              title: 'Task Link Consistency',
+              content: 'Body text',
+            ),
+          );
+          final notesController = NotesController(repository: notesRepo);
+          await notesController.loadNotes();
+          return (
+            db: db,
+            tasksController: tasksController,
+            notesRepo: notesRepo,
+            notesController: notesController,
+          );
+        });
+        final db = fixture!.db;
+        final tasksController = fixture.tasksController;
+        final notesRepo = fixture.notesRepo;
+        final notesController = fixture.notesController;
+        addTearDown(
+          () => _disposeDbFixture(
+            tester,
+            db,
+            <ChangeNotifier>[notesController, tasksController],
           ),
         );
-        final tasksController = TasksController(repository: tasksRepo);
-        addTearDown(tasksController.dispose);
-        await tasksController.loadAll();
-
-        final notesRepo = _ControllableNotesRepository();
-        notesRepo.seed(
-          NoteEntity(
-            id: 'note-task-link',
-            title: 'Task Link Consistency',
-            content: 'Body text',
-          ),
-        );
-        final notesController = NotesController(repository: notesRepo);
-        addTearDown(notesController.dispose);
-        await notesController.loadNotes();
 
         await tester.pumpWidget(
           MaterialApp(
@@ -698,17 +743,17 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         await tester.tap(find.text('Task Link Consistency'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         // Fail task link persistence -> UI must NOT show linked task
         notesRepo.shouldThrowOnUpdate = true;
         await tester.tap(find.text('Link Task'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         await tester.tap(find.text('Write integration tests'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(find.text('Linked Task: Write integration tests'), findsNothing);
         expect(find.text('Link Task'), findsOneWidget);
@@ -717,28 +762,32 @@ void main() {
           findsOneWidget,
         );
         expect(
-            notesController.state.findById('note-task-link')?.linkedId, isNull);
+          notesController.state.findById('note-task-link')?.linkedId,
+          isNull,
+        );
 
         // Recover DB and retry -> does NOT resurrect failed link; explicit link works
         notesRepo.shouldThrowOnUpdate = false;
         await tester.tap(find.text('Retry'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(find.text('Saved'), findsOneWidget);
         expect(find.text('Link Task'), findsOneWidget);
         expect(notesRepo.store['note-task-link']?.linkedId, isNull);
 
         await tester.tap(find.text('Link Task'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         await tester.tap(find.text('Write integration tests'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(
-            find.text('Linked Task: Write integration tests'), findsOneWidget);
+          find.text('Linked Task: Write integration tests'),
+          findsOneWidget,
+        );
         expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
 
         // Fail task unlink persistence -> must keep Linked Task card and NOT show Unlinked SnackBar
         notesRepo.shouldThrowOnUpdate = true;
         await tester.tap(find.byIcon(Icons.link_off_outlined));
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(find.text('Unlinked task from note'), findsNothing);
         expect(
@@ -746,16 +795,20 @@ void main() {
           findsOneWidget,
         );
         expect(
-            find.text('Linked Task: Write integration tests'), findsOneWidget);
+          find.text('Linked Task: Write integration tests'),
+          findsOneWidget,
+        );
         expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
 
         // Recover DB and tap Retry -> link remains preserved
         notesRepo.shouldThrowOnUpdate = false;
         await tester.tap(find.text('Retry'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(find.text('Saved'), findsOneWidget);
         expect(
-            find.text('Linked Task: Write integration tests'), findsOneWidget);
+          find.text('Linked Task: Write integration tests'),
+          findsOneWidget,
+        );
         expect(notesRepo.store['note-task-link']?.linkedId, 'task-link-1');
       },
     );
