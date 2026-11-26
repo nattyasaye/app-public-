@@ -140,8 +140,9 @@ Future<void> _disposeDbFixture(
   );
 }
 
-Future<void> _settle(WidgetTester tester) {
-  return tester.pumpAndSettle(
+Future<void> _settle(WidgetTester tester) async {
+  await tester.pump();
+  await tester.pumpAndSettle(
     const Duration(milliseconds: 100),
     EnginePhase.sendSemanticsUpdate,
     const Duration(seconds: 5),
@@ -704,28 +705,23 @@ void main() {
           );
           final tasksController = TasksController(repository: tasksRepo);
           await tasksController.loadAll();
-
-          final notesRepo = _ControllableNotesRepository();
-          notesRepo.seed(
-            NoteEntity(
-              id: 'note-task-link',
-              title: 'Task Link Consistency',
-              content: 'Body text',
-            ),
-          );
-          final notesController = NotesController(repository: notesRepo);
-          await notesController.loadNotes();
           return (
             db: db,
             tasksController: tasksController,
-            notesRepo: notesRepo,
-            notesController: notesController,
           );
         });
         final db = fixture!.db;
         final tasksController = fixture.tasksController;
-        final notesRepo = fixture.notesRepo;
-        final notesController = fixture.notesController;
+        final notesRepo = _ControllableNotesRepository();
+        notesRepo.seed(
+          NoteEntity(
+            id: 'note-task-link',
+            title: 'Task Link Consistency',
+            content: 'Body text',
+          ),
+        );
+        final notesController = NotesController(repository: notesRepo);
+        await notesController.loadNotes();
         addTearDown(
           () => _disposeDbFixture(
             tester,

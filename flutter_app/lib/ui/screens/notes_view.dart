@@ -2594,16 +2594,22 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     super.dispose();
   }
 
-  _NoteDraftSnapshot _captureSnapshot() {
+  _NoteDraftSnapshot _captureSnapshot({
+    bool overrideProject = false,
+    String? projectIdOverride,
+    bool overrideLink = false,
+    String? linkedModuleOverride,
+    String? linkedIdOverride,
+  }) {
     return (
       revision: _editRevision,
       title: _titleController.text,
       content: _contentController.text,
       category: _category,
       tags: List<String>.unmodifiable(_tags),
-      projectId: _projectId,
-      linkedModule: _linkedModule,
-      linkedId: _linkedId,
+      projectId: overrideProject ? projectIdOverride : _projectId,
+      linkedModule: overrideLink ? linkedModuleOverride : _linkedModule,
+      linkedId: overrideLink ? linkedIdOverride : _linkedId,
     );
   }
 
@@ -2633,12 +2639,17 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   Future<bool> _enqueueSaveSnapshot(
     _NoteDraftSnapshot snapshot, {
     required bool fromDispose,
+    bool allowCoalesce = true,
   }) {
     final completer = Completer<bool>();
     _savePipeline = _savePipeline.catchError((Object _) {}).then((_) async {
       var ok = false;
       try {
-        ok = await _persistSnapshot(snapshot, fromDispose: fromDispose);
+        ok = await _persistSnapshot(
+          snapshot,
+          fromDispose: fromDispose,
+          allowCoalesce: allowCoalesce,
+        );
       } catch (_) {
         ok = false;
       }
@@ -2652,8 +2663,12 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   Future<bool> _persistSnapshot(
     _NoteDraftSnapshot snapshot, {
     required bool fromDispose,
+    bool allowCoalesce = true,
   }) async {
-    if (!fromDispose && !_isDisposed && snapshot.revision < _editRevision) {
+    if (allowCoalesce &&
+        !fromDispose &&
+        !_isDisposed &&
+        snapshot.revision < _editRevision) {
       return true;
     }
 
@@ -2844,6 +2859,84 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     return (liveNote.linkedModule, liveNote.linkedId);
   }
 
+  Future<bool> _persistLinkChange({
+    required String? linkedModule,
+    required String? linkedId,
+  }) async {
+    if (_noteId == null) {
+      setState(() {
+        _linkedModule = linkedModule;
+        _linkedId = linkedId;
+      });
+      _markDirty(scheduleTimer: false);
+      return true;
+    }
+
+    _autosaveTimer?.cancel();
+    if (_hasPendingChanges) {
+      final flushed = await _flushPendingSaves();
+      if (!flushed || !mounted || _isDisposed) {
+        return false;
+      }
+    }
+
+    _markDirty(scheduleTimer: false);
+    final snapshot = _captureSnapshot(
+      overrideLink: true,
+      linkedModuleOverride: linkedModule,
+      linkedIdOverride: linkedId,
+    );
+    final ok = await _enqueueSaveSnapshot(
+      snapshot,
+      fromDispose: false,
+      allowCoalesce: false,
+    );
+    if (ok && mounted && !_isDisposed) {
+      setState(() {
+        _linkedModule = linkedModule;
+        _linkedId = linkedId;
+      });
+    }
+    return ok;
+  }
+
+  Future<bool> _persistProjectChange({
+    required String? projectId,
+  }) async {
+    if (_noteId == null) {
+      setState(() {
+        _projectId = projectId;
+      });
+      _markDirty(scheduleTimer: false);
+      return true;
+    }
+
+    _autosaveTimer?.cancel();
+    if (_hasPendingChanges) {
+      final flushed = await _flushPendingSaves();
+      if (!flushed || !mounted || _isDisposed) {
+        return false;
+      }
+    }
+
+    _markDirty(scheduleTimer: false);
+    final snapshot = _captureSnapshot(
+      overrideProject: true,
+      projectIdOverride: projectId,
+    );
+    final ok = await _enqueueSaveSnapshot(
+      snapshot,
+      fromDispose: false,
+      allowCoalesce: false,
+    );
+    if (ok && mounted && !_isDisposed) {
+      setState(() {
+        _projectId = projectId;
+      });
+    }
+    return ok;
+  }
+
   Future<void> _linkTask(TaskEntity task) async {
     final (activeModule, activeId) = _resolveActivePrimaryLink();
     if (activeModule == NoteEntity.taskLinkModule && activeId == task.id) {
@@ -2867,60 +2960,37 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
       if (!confirmed || !mounted) return;
     }
 
-    final prevModule = _linkedModule;
-    final prevId = _linkedId;
-    setState(() {
-      _linkedModule = NoteEntity.taskLinkModule;
-      _linkedId = task.id;
-    });
-    _markDirty(scheduleTimer: false);
-    if (_noteId != null) {
-      final ok = await _flushPendingSaves();
-      if (!ok && mounted) {
-        setState(() {
-          if (_linkedModule == NoteEntity.taskLinkModule &&
-              _linkedId == task.id) {
-            _linkedModule = prevModule;
-            _linkedId = prevId;
-          }
-        });
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not link task. Kept previous link state.'),
-          ),
-        );
-      }
+    final ok = await _persistLinkChange(
+      linkedModule: NoteEntity.taskLinkModule,
+      linkedId: task.id,
+    );
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not link task. Kept previous link state.'),
+        ),
+      );
     }
   }
 
   Future<void> _unlinkTask() async {
     final prevModule = _linkedModule;
     final prevId = _linkedId;
-    setState(() {
-      _linkedModule = null;
-      _linkedId = null;
-    });
-    _markDirty(scheduleTimer: false);
-    if (_noteId != null) {
-      final ok = await _flushPendingSaves();
-      if (!ok) {
-        if (mounted) {
-          setState(() {
-            if (_linkedModule == null && _linkedId == null) {
-              _linkedModule = prevModule;
-              _linkedId = prevId;
-            }
-          });
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not unlink task. Kept existing link.'),
-            ),
-          );
-        }
-        return;
+    final ok = await _persistLinkChange(
+      linkedModule: null,
+      linkedId: null,
+    );
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not unlink task. Kept existing link.'),
+          ),
+        );
       }
+      return;
     }
     if (!mounted || prevModule == null || prevId == null) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -2955,24 +3025,12 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
               );
               return;
             }
-            setState(() {
-              _linkedModule = prevModule;
-              _linkedId = prevId;
-            });
-            _markDirty(scheduleTimer: false);
-            if (_noteId != null) {
-              unawaited(() async {
-                final restored = await _flushPendingSaves();
-                if (!restored && mounted) {
-                  setState(() {
-                    if (_linkedModule == prevModule && _linkedId == prevId) {
-                      _linkedModule = null;
-                      _linkedId = null;
-                    }
-                  });
-                }
-              }());
-            }
+            unawaited(
+              _persistLinkChange(
+                linkedModule: prevModule,
+                linkedId: prevId,
+              ),
+            );
           },
         ),
         duration: const Duration(seconds: 4),
@@ -3023,60 +3081,37 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
       if (!confirmed || !mounted) return;
     }
 
-    final prevModule = _linkedModule;
-    final prevId = _linkedId;
-    setState(() {
-      _linkedModule = NoteEntity.calendarLinkModule;
-      _linkedId = event.id;
-    });
-    _markDirty(scheduleTimer: false);
-    if (_noteId != null) {
-      final ok = await _flushPendingSaves();
-      if (!ok && mounted) {
-        setState(() {
-          if (_linkedModule == NoteEntity.calendarLinkModule &&
-              _linkedId == event.id) {
-            _linkedModule = prevModule;
-            _linkedId = prevId;
-          }
-        });
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not link event. Kept previous link state.'),
-          ),
-        );
-      }
+    final ok = await _persistLinkChange(
+      linkedModule: NoteEntity.calendarLinkModule,
+      linkedId: event.id,
+    );
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not link event. Kept previous link state.'),
+        ),
+      );
     }
   }
 
   Future<void> _unlinkCalendarEvent() async {
     final prevModule = _linkedModule;
     final prevId = _linkedId;
-    setState(() {
-      _linkedModule = null;
-      _linkedId = null;
-    });
-    _markDirty(scheduleTimer: false);
-    if (_noteId != null) {
-      final ok = await _flushPendingSaves();
-      if (!ok) {
-        if (mounted) {
-          setState(() {
-            if (_linkedModule == null && _linkedId == null) {
-              _linkedModule = prevModule;
-              _linkedId = prevId;
-            }
-          });
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not unlink event. Kept existing link.'),
-            ),
-          );
-        }
-        return;
+    final ok = await _persistLinkChange(
+      linkedModule: null,
+      linkedId: null,
+    );
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not unlink event. Kept existing link.'),
+          ),
+        );
       }
+      return;
     }
     if (!mounted || prevModule == null || prevId == null) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -3112,24 +3147,12 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
               );
               return;
             }
-            setState(() {
-              _linkedModule = prevModule;
-              _linkedId = prevId;
-            });
-            _markDirty(scheduleTimer: false);
-            if (_noteId != null) {
-              unawaited(() async {
-                final restored = await _flushPendingSaves();
-                if (!restored && mounted) {
-                  setState(() {
-                    if (_linkedModule == prevModule && _linkedId == prevId) {
-                      _linkedModule = null;
-                      _linkedId = null;
-                    }
-                  });
-                }
-              }());
-            }
+            unawaited(
+              _persistLinkChange(
+                linkedModule: prevModule,
+                linkedId: prevId,
+              ),
+            );
           },
         ),
         duration: const Duration(seconds: 4),
@@ -3160,52 +3183,31 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
   }
 
   Future<void> _setProject(ProjectEntity project) async {
-    final prevProjectId = _projectId;
-    setState(() {
-      _projectId = project.id;
-    });
-    _markDirty(scheduleTimer: false);
-    if (_noteId != null) {
-      final ok = await _flushPendingSaves();
-      if (!ok && mounted) {
-        setState(() {
-          if (_projectId == project.id) {
-            _projectId = prevProjectId;
-          }
-        });
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not associate project. Kept previous state.'),
-          ),
-        );
-      }
+    final ok = await _persistProjectChange(projectId: project.id);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not associate project. Kept previous state.'),
+        ),
+      );
     }
   }
 
   Future<void> _clearProject() async {
     final prevProjectId = _projectId;
-    setState(() {
-      _projectId = null;
-    });
-    _markDirty(scheduleTimer: false);
-    if (_noteId != null) {
-      final ok = await _flushPendingSaves();
-      if (!ok) {
-        if (mounted) {
-          setState(() {
-            _projectId ??= prevProjectId;
-          });
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content:
-                  Text('Could not remove project. Kept existing association.'),
-            ),
-          );
-        }
-        return;
+    final ok = await _persistProjectChange(projectId: null);
+    if (!ok) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Could not remove project. Kept existing association.'),
+          ),
+        );
       }
+      return;
     }
     if (!mounted || prevProjectId == null) return;
     ScaffoldMessenger.of(context).clearSnackBars();
@@ -3216,13 +3218,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
           label: 'Undo',
           onPressed: () {
             if (!mounted) return;
-            setState(() {
-              _projectId = prevProjectId;
-            });
-            _markDirty(scheduleTimer: false);
-            if (_noteId != null) {
-              unawaited(_flushPendingSaves());
-            }
+            unawaited(_persistProjectChange(projectId: prevProjectId));
           },
         ),
         duration: const Duration(seconds: 4),
