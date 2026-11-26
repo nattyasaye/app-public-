@@ -5,7 +5,9 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:personal_management_app/application/calendar/calendar_controller.dart';
+import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/raw_database_recovery_exporter.dart';
 import 'package:personal_management_app/domain/calendar/calendar_contracts.dart';
@@ -31,6 +33,29 @@ import 'support/sqlite_test_helper.dart';
 
 const MethodChannel _kQuickCaptureChannel =
     MethodChannel('com.example.personalmanagement/quick_capture');
+
+class _NoOpNotificationService implements INotificationService {
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<bool> requestPermissions() async => true;
+
+  @override
+  Future<void> scheduleReminder({
+    required String id,
+    required String title,
+    required String body,
+    required DateTime scheduledDateUtc,
+    String? payload,
+  }) async {}
+
+  @override
+  Future<void> cancelReminder(String id) async {}
+
+  @override
+  Future<void> cancelAllReminders() async {}
+}
 
 class _ToggleableFailDatabase extends AppDatabase {
   bool shouldFail;
@@ -127,30 +152,93 @@ void main() {
     }
   }
 
+  Future<void> settleShell(WidgetTester tester) {
+    return tester.pumpAndSettle(
+      const Duration(milliseconds: 100),
+      EnginePhase.sendSemanticsUpdate,
+      const Duration(seconds: 10),
+    );
+  }
+
   Future<void> disposeTestState(
     WidgetTester tester,
-    AppStateManager state,
-  ) async {
+    AppStateManager state, {
+    Directory? tempDir,
+  }) async {
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(milliseconds: 20));
-    var disposed = false;
-    final disposeFuture = state.disposeAsync().whenComplete(() {
-      disposed = true;
+    await tester.pump();
+    try {
+      if (!state.isDisposed) {
+        await tester.runAsync(
+          () => state.disposeAsync().timeout(const Duration(seconds: 10)),
+        );
+      }
+    } finally {
+      if (tempDir != null && tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    }
+  }
+
+  Future<({AppStateManager state, Directory tempDir})> createIsolatedState(
+    WidgetTester tester, {
+    AppDatabase? db,
+    bool initialize = true,
+  }) async {
+    final result = await tester.runAsync(() async {
+      final tempDir = Directory.systemTemp.createTempSync('daywell_shell_');
+      final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
+      final supportDir = Directory(p.join(tempDir.path, 'support'))
+        ..createSync();
+      final targetDb = db ?? AppDatabase(NativeDatabase.memory());
+      final state = AppStateManager(
+        db: targetDb,
+        recoveryExporter: RawDatabaseRecoveryExporter(
+          documentsDirProvider: () async => docsDir,
+          supportDirProvider: () async => supportDir,
+        ),
+        notificationService: _NoOpNotificationService(),
+      );
+      if (!initialize) {
+        return (state: state, tempDir: tempDir);
+      }
+      try {
+        final ensureFuture = targetDb.ensureInitialized();
+        await ensureFuture.timeout(
+          const Duration(seconds: 20),
+          onTimeout: () => throw TimeoutException(
+            'db.ensureInitialized() timed out after 20s',
+          ),
+        );
+        final initFuture = state.initialize();
+        await initFuture.timeout(
+          const Duration(seconds: 20),
+          onTimeout: () => throw TimeoutException(
+            'state.initialize() timed out after 20s',
+          ),
+        );
+        return (state: state, tempDir: tempDir);
+      } catch (_) {
+        try {
+          if (!state.isDisposed) {
+            await state.disposeAsync().timeout(const Duration(seconds: 5));
+          }
+        } catch (_) {}
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+        rethrow;
+      }
     });
-    final stopwatch = Stopwatch()..start();
-    while (!disposed && stopwatch.elapsed < const Duration(seconds: 10)) {
-      await tester.pump(const Duration(milliseconds: 20));
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    final created = result!;
+    addTearDown(() async {
+      await disposeTestState(
+        tester,
+        created.state,
+        tempDir: created.tempDir,
       );
-    }
-    if (disposed) {
-      await disposeFuture;
-    } else {
-      await tester.runAsync(
-        () => disposeFuture.timeout(const Duration(seconds: 5)),
-      );
-    }
+    });
+    return created;
   }
 
   group('DaywellThemeController & DaywellApp Contract Unit Tests', () {
@@ -267,7 +355,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.text('Tab:more'), findsOneWidget);
 
@@ -277,7 +365,7 @@ void main() {
           matching: find.text('Tasks'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(shell.currentTab, DaywellTabId.tasks);
       expect(find.text('Tab:tasks'), findsOneWidget);
@@ -295,11 +383,8 @@ void main() {
       await tester.binding.setSurfaceSize(viewportSize);
       addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-      final db = AppDatabase(NativeDatabase.memory());
-      final state = AppStateManager(db: db);
-      await tester.runAsync(() => state.initialize());
-
-      addTearDown(() => disposeTestState(tester, state));
+      final created = await createIsolatedState(tester);
+      final state = created.state;
 
       await tester.pumpWidget(
         DaywellApp(
@@ -308,7 +393,7 @@ void main() {
           shellController: shellController,
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       return state;
     }
 
@@ -318,25 +403,17 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(412, 840));
       addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-      final tempDir = Directory.systemTemp.createTempSync('daywell_shell_err_');
-      addTearDown(() {
-        if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
-      });
-
       final db = _ToggleableFailDatabase(shouldFail: true);
-      final state = AppStateManager(
+      final created = await createIsolatedState(
+        tester,
         db: db,
-        recoveryExporter: RawDatabaseRecoveryExporter(
-          documentsDirProvider: () async => tempDir,
-          supportDirProvider: () async => tempDir,
-        ),
+        initialize: false,
       );
-
-      addTearDown(() => disposeTestState(tester, state));
+      final state = created.state;
 
       await tester.pumpWidget(DaywellApp(stateManager: state));
       await waitForCondition(tester, () => state.initializationError != null);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(DaywellShellStatusView), findsOneWidget);
       expect(find.byType(DaywellStatusBanner), findsOneWidget);
@@ -346,7 +423,7 @@ void main() {
       db.shouldFail = false;
       await tester.tap(find.text('Retry'));
       await waitForCondition(tester, () => state.isInitialized);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(DaywellShellStatusView), findsNothing);
       expect(find.byType(DaywellAdaptiveScaffold), findsOneWidget);
@@ -372,7 +449,7 @@ void main() {
           matching: find.text('Tasks'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(TasksView), findsOneWidget);
 
       // Visit Notes (also mounts FAB with default Hero tag inside IndexedStack)
@@ -382,25 +459,25 @@ void main() {
           matching: find.text('Notes'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(NotesView), findsOneWidget);
 
       // Push NoteEditor route from NotesView's FloatingActionButton.extended
       await tester.tap(find.text('New Note'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(tester.takeException(), isNull);
       expect(find.text('Note title...'), findsOneWidget);
       expect(find.text('Saved'), findsOneWidget);
 
       await tester.tap(find.byType(BackButton));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(tester.takeException(), isNull);
       expect(find.byType(NotesView), findsOneWidget);
 
       // Opening Backup secondary route disables HeroMode for underlying tabs
       shellController.openSecondaryRoute(DaywellSecondaryRoute.backup);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(BackupView), findsOneWidget);
 
       final heroModes = tester
@@ -437,7 +514,7 @@ void main() {
           matching: find.text('Tasks'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.enterText(
         find
             .descendant(
@@ -447,7 +524,7 @@ void main() {
             .first,
         'focus task',
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       // Switch to Notes and enter search text
       await tester.tap(
@@ -456,7 +533,7 @@ void main() {
           matching: find.text('Notes'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.enterText(
         find
             .descendant(
@@ -466,7 +543,7 @@ void main() {
             .first,
         'persistent search',
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       final State tasksStateBefore =
           tester.state(find.byType(TasksView, skipOffstage: false));
@@ -474,7 +551,7 @@ void main() {
 
       // Resize same running widget surface above 600dp breakpoint
       await tester.binding.setSurfaceSize(const Size(900, 700));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(NavigationRail), findsOneWidget);
       expect(find.byType(NavigationBar), findsNothing);
@@ -500,12 +577,12 @@ void main() {
           matching: find.text('Tasks'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.text('focus task'), findsOneWidget);
 
       // Resize back below 600dp breakpoint and verify state still survives
       await tester.binding.setSurfaceSize(const Size(412, 840));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.byType(NavigationRail), findsNothing);
@@ -537,7 +614,7 @@ void main() {
           matching: find.text('Active Tasks'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(shellController.currentTab, DaywellTabId.tasks);
       expect(find.byType(TasksView), findsOneWidget);
 
@@ -548,14 +625,14 @@ void main() {
           matching: find.text('Today'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.tap(
         find.descendant(
           of: find.byType(DashboardView),
           matching: find.text('Commitments'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(shellController.currentTab, DaywellTabId.finance);
       expect(find.byType(FinanceView), findsOneWidget);
 
@@ -566,14 +643,14 @@ void main() {
           matching: find.text('Today'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.tap(
         find.descendant(
           of: find.byType(DashboardView),
           matching: find.text('Notes'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(shellController.currentTab, DaywellTabId.notes);
       expect(find.byType(NotesView), findsOneWidget);
 
@@ -584,7 +661,7 @@ void main() {
           matching: find.text('Today'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       final Finder dashboardScrollable = find
           .descendant(
             of: find.byType(DashboardView),
@@ -600,9 +677,9 @@ void main() {
         200.0,
         scrollable: dashboardScrollable,
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.tap(viewAllFinder);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(shellController.currentTab, DaywellTabId.tasks);
 
       await tester.tap(
@@ -611,7 +688,7 @@ void main() {
           matching: find.text('Today'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       final Finder manageFinder = find.descendant(
         of: find.byType(DashboardView),
         matching: find.text('Manage'),
@@ -622,12 +699,12 @@ void main() {
           -200.0,
           scrollable: dashboardScrollable,
         );
-        await tester.pumpAndSettle();
+        await settleShell(tester);
       }
       await tester.ensureVisible(manageFinder);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.tap(manageFinder);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(shellController.currentTab, DaywellTabId.finance);
 
       // Return to Today, tap Encrypted Backup AppBar icon -> BackupView, unwind via system back
@@ -637,14 +714,14 @@ void main() {
           matching: find.text('Today'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.tap(find.byTooltip('Encrypted Backup'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(BackupView), findsOneWidget);
       expect(shellController.hasSecondaryRoute, isTrue);
 
       await tester.binding.handlePopRoute();
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(BackupView), findsNothing);
       expect(shellController.hasSecondaryRoute, isFalse);
       expect(shellController.currentTab, DaywellTabId.today);
@@ -656,7 +733,7 @@ void main() {
           matching: find.text('More'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       final Finder moreCalendarCard = find.descendant(
         of: find.byType(MoreView),
         matching: find.text('Calendar'),
@@ -672,7 +749,7 @@ void main() {
             .first,
       );
       await tester.tap(moreCalendarCard);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(shellController.currentTab, DaywellTabId.calendar);
       expect(find.byType(CalendarView), findsOneWidget);
 
@@ -682,7 +759,7 @@ void main() {
           matching: find.text('More'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       final Finder moreSyncBackupTile = find.descendant(
         of: find.byType(MoreView),
         matching: find.text('Sync & backup'),
@@ -698,11 +775,11 @@ void main() {
             .first,
       );
       await tester.tap(moreSyncBackupTile);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(BackupView), findsOneWidget);
 
       await tester.tap(find.byType(BackButton));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(BackupView), findsNothing);
       expect(shellController.currentTab, DaywellTabId.more);
     });
@@ -727,7 +804,7 @@ void main() {
           matching: find.text('More'),
         ),
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(
         find.descendant(
           of: find.byType(MoreView),
@@ -758,15 +835,15 @@ void main() {
         scrollable: moreScrollable,
       );
       await tester.tap(find.text('Appearance'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(DaywellRadioTile<ThemeMode>), findsNWidgets(3));
       await tester.ensureVisible(find.text('Dark'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.tap(find.text('Dark'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       await tester.tap(find.text('Done'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(themeController.themeMode, ThemeMode.dark);
       final materialApp = tester.widget<MaterialApp>(find.byType(MaterialApp));
@@ -784,7 +861,12 @@ void main() {
 
       final initGate = Completer<void>();
       final db = _ToggleableFailDatabase(gate: initGate);
-      final state = AppStateManager(db: db);
+      final created = await createIsolatedState(
+        tester,
+        db: db,
+        initialize: false,
+      );
+      final state = created.state;
 
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         _kQuickCaptureChannel,
@@ -794,10 +876,9 @@ void main() {
           return null;
         },
       );
-      addTearDown(() async {
+      addTearDown(() {
         tester.binding.defaultBinaryMessenger
             .setMockMethodCallHandler(_kQuickCaptureChannel, null);
-        await disposeTestState(tester, state);
       });
 
       await tester.pumpWidget(DaywellApp(stateManager: state));
@@ -823,7 +904,7 @@ void main() {
       // Finish initialization cleanly across FakeAsync and real async loops.
       initGate.complete();
       await waitForCondition(tester, () => state.isInitialized);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       // Exactly 1 QuickCaptureDialog opens and shared text wins over empty trigger.
       expect(find.byType(QuickCaptureDialog), findsOneWidget);
@@ -831,7 +912,7 @@ void main() {
 
       // Canceling does not spawn a second redundant blank dialog.
       await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(QuickCaptureDialog), findsNothing);
     });
 
@@ -842,7 +923,12 @@ void main() {
       addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
       final db = _ToggleableFailDatabase(shouldFail: true);
-      final state = AppStateManager(db: db);
+      final created = await createIsolatedState(
+        tester,
+        db: db,
+        initialize: false,
+      );
+      final state = created.state;
 
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         _kQuickCaptureChannel,
@@ -852,15 +938,14 @@ void main() {
           return null;
         },
       );
-      addTearDown(() async {
+      addTearDown(() {
         tester.binding.defaultBinaryMessenger
             .setMockMethodCallHandler(_kQuickCaptureChannel, null);
-        await disposeTestState(tester, state);
       });
 
       await tester.pumpWidget(DaywellApp(stateManager: state));
       await waitForCondition(tester, () => state.initializationError != null);
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(DaywellShellStatusView), findsOneWidget);
       expect(find.byType(QuickCaptureDialog), findsNothing);
@@ -869,7 +954,7 @@ void main() {
       await tester.tap(find.text('Retry'));
       await waitForCondition(tester, () => state.isInitialized);
       await tester.pump();
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(QuickCaptureDialog), findsOneWidget);
       expect(find.text('Survives retry'), findsOneWidget);
@@ -881,14 +966,11 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(412, 840));
       addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-      final db = AppDatabase(NativeDatabase.memory());
-      final state = AppStateManager(db: db);
-      await tester.runAsync(() => state.initialize());
-
-      addTearDown(() => disposeTestState(tester, state));
+      final created = await createIsolatedState(tester);
+      final state = created.state;
 
       await tester.pumpWidget(DaywellApp(stateManager: state));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       // Send rapid warm-start calls: duplicate trigger, duplicate shared text, distinct shared text.
       await dispatchQuickCapturePlatformCall(
@@ -910,20 +992,20 @@ void main() {
         'onTextShared',
         'Second item',
       );
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(QuickCaptureDialog), findsOneWidget);
       expect(find.text('First item'), findsOneWidget);
 
       // Dismiss first dialog via modal barrier tap; queued 'Second item' opens next.
       await tester.tapAt(const Offset(10, 10));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.byType(QuickCaptureDialog), findsOneWidget);
       expect(find.text('Second item'), findsOneWidget);
 
       await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(find.byType(QuickCaptureDialog), findsNothing);
     });
   });
@@ -958,7 +1040,7 @@ void main() {
       repo.pendingLoad = null;
       repo.shouldThrow = true;
       completer.completeError(StateError('Calendar IO failure'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.text('Unable to load calendar events'), findsOneWidget);
       expect(find.text('Retry'), findsOneWidget);
@@ -974,7 +1056,7 @@ void main() {
         ),
       ];
       await tester.tap(find.text('Retry'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(repo.loadCalls, callsBeforeRetry + 1);
       expect(
@@ -987,13 +1069,13 @@ void main() {
       // 3. Empty state + Open Tasks CTA
       repo.eventsToReturn = const <CalendarEventEntity>[];
       await controller.loadAll();
-      await tester.pumpAndSettle();
+      await settleShell(tester);
 
       expect(find.text('Calendar workspace coming soon'), findsOneWidget);
       expect(find.text('Open Tasks'), findsOneWidget);
 
       await tester.tap(find.text('Open Tasks'));
-      await tester.pumpAndSettle();
+      await settleShell(tester);
       expect(openTasksTapped, 1);
     });
   });
