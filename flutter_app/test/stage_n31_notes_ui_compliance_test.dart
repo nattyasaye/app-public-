@@ -471,7 +471,21 @@ void main() {
         expect(find.byType(NoteMarkdownPreview), findsOneWidget);
         expect(find.text('BACKLINKS (1)'), findsOneWidget);
         expect(
-          find.text('Architecture Review & Quarterly Focus Checklist'),
+          find.descendant(
+            of: find.byType(NoteMarkdownPreview),
+            matching: find.text(
+              'Architecture Review & Quarterly Focus Checklist',
+            ),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(
+            of: find.byType(DaywellCard),
+            matching: find.text(
+              'Architecture Review & Quarterly Focus Checklist',
+            ),
+          ),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);

@@ -170,6 +170,14 @@ void main() {
         await calendarRepo.createEvent(event);
         await calendarCtrl.loadAll();
 
+        await db.into(db.projects).insert(
+              ProjectsCompanion.insert(
+                id: 'proj-payments',
+                title: 'Payments Platform',
+                createdAt: DateTime.utc(2026, 3, 1),
+              ),
+            );
+
         final created = await notesCtrl.createNote(
           id: 'note-summit',
           title: CalendarNotesHelper.buildDefaultEventNoteTitle(event),
@@ -393,6 +401,21 @@ void main() {
         await calendarRepo.createEvent(ev);
         await calendarCtrl.loadAll();
 
+        await db.into(db.goals).insert(
+              GoalsCompanion.insert(
+                id: 'goal-fin',
+                title: 'Finance Governance',
+                createdAt: DateTime.utc(2026, 3, 1),
+              ),
+            );
+        await db.into(db.projects).insert(
+              ProjectsCompanion.insert(
+                id: 'proj-tax',
+                title: 'Tax Compliance',
+                createdAt: DateTime.utc(2026, 3, 1),
+              ),
+            );
+
         final taskNote = await notesCtrl.createNote(
           id: 'note-task-guard',
           title: 'Tax Checklist',
@@ -522,6 +545,13 @@ void main() {
             dateIso: '2026-04-10',
           ),
         );
+        await sourceDb.into(sourceDb.projects).insert(
+              ProjectsCompanion.insert(
+                id: 'proj-missing-or-untracked',
+                title: 'Untracked Project',
+                createdAt: DateTime.utc(2026, 3, 1),
+              ),
+            );
         final notesRepo = DriftNotesRepository(sourceDb);
         await notesRepo.createNote(
           NoteEntity(
@@ -636,6 +666,13 @@ void main() {
           id: 'task-confirm-1',
           title: 'Prepare Budget Brief',
         );
+        await db.into(db.projects).insert(
+              ProjectsCompanion.insert(
+                id: 'proj-keep',
+                title: 'Keep Project',
+                createdAt: DateTime.utc(2026, 3, 1),
+              ),
+            );
         await notesCtrl.createNote(
           id: 'note-task-linked-ui',
           title: 'Budget Figures',
