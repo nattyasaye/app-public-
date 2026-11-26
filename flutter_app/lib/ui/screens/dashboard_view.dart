@@ -2754,20 +2754,29 @@ class _DashboardRecentNoteCard extends StatelessWidget {
                     runSpacing: SharedDesignTokens.spacingXs,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      if (note.isPinned)
-                        Icon(
-                          Icons.push_pin_rounded,
-                          size: DaywellIconSize.xs,
-                          color: semantic.warning,
-                        ),
-                      Text(
-                        note.displayTitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: semantic.textPrimary,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (note.isPinned) ...[
+                            Icon(
+                              Icons.push_pin_rounded,
+                              size: DaywellIconSize.xs,
+                              color: semantic.warning,
+                            ),
+                            const SizedBox(width: SharedDesignTokens.spacingXs),
+                          ],
+                          Flexible(
+                            child: Text(
+                              note.displayTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                                color: semantic.textPrimary,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       DaywellStatusBadge(
                         label: folderLabel,

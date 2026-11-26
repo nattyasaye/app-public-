@@ -465,21 +465,36 @@ void main() {
         await _settle(tester);
 
         final noteCard = find.text('Mobile Focus Note');
-        await tester.ensureVisible(noteCard);
+        await tester.scrollUntilVisible(
+          noteCard,
+          240.0,
+          scrollable: find.byType(Scrollable).first,
+        );
         await _settle(tester);
         await tester.tap(noteCard);
         await _pumpUntil(
           tester,
           () => find
-              .text('Opened directly from Dashboard on phone width.')
+              .widgetWithText(
+                TextField,
+                'Opened directly from Dashboard on phone width.',
+              )
               .evaluate()
               .isNotEmpty,
           reason: 'Mobile note editor did not open from Dashboard.',
         );
 
         // Now inside Notes tab with the narrow editor pushed for 'Mobile Focus Note'.
+        expect(find.byType(BackButton), findsOneWidget);
         expect(
-          find.text('Opened directly from Dashboard on phone width.'),
+          find.widgetWithText(TextField, 'Mobile Focus Note'),
+          findsOneWidget,
+        );
+        expect(
+          find.widgetWithText(
+            TextField,
+            'Opened directly from Dashboard on phone width.',
+          ),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);
@@ -519,20 +534,37 @@ void main() {
         await _settle(tester);
 
         final wideNoteCard = find.text('Master Detail Note');
-        await tester.ensureVisible(wideNoteCard);
+        await tester.scrollUntilVisible(
+          wideNoteCard,
+          240.0,
+          scrollable: find.byType(Scrollable).first,
+        );
         await _settle(tester);
         await tester.tap(wideNoteCard);
         await _pumpUntil(
           tester,
           () => find
-              .text('Detail pane body loaded from Dashboard.')
+              .widgetWithText(
+                TextField,
+                'Detail pane body loaded from Dashboard.',
+              )
               .evaluate()
               .isNotEmpty,
           reason: 'Wide master-detail note pane did not open from Dashboard.',
         );
 
+        expect(find.byType(BackButton), findsNothing);
+        expect(find.text('Select a note to read or edit'), findsNothing);
+        expect(find.byIcon(Icons.arrow_right_rounded), findsOneWidget);
         expect(
-          find.text('Detail pane body loaded from Dashboard.'),
+          find.widgetWithText(TextField, 'Master Detail Note'),
+          findsOneWidget,
+        );
+        expect(
+          find.widgetWithText(
+            TextField,
+            'Detail pane body loaded from Dashboard.',
+          ),
           findsOneWidget,
         );
         expect(tester.takeException(), isNull);
@@ -576,26 +608,41 @@ void main() {
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
-            home: MediaQuery(
-              data: const MediaQueryData(
-                size: Size(320, 720),
-                textScaler: TextScaler.linear(2.0),
-              ),
-              child: Scaffold(
-                body: SingleChildScrollView(
+            home: Builder(
+              builder: (BuildContext context) {
+                return MediaQuery(
+                  data: MediaQuery.of(context).copyWith(
+                    textScaler: const TextScaler.linear(2.0),
+                  ),
                   child: DashboardView(
                     state: fixture.appState,
                     onOpenQuickCapture: () {},
                     onSelectTab: (DaywellTabId _) {},
                   ),
-                ),
-              ),
+                );
+              },
             ),
           ),
         );
         await _settle(tester);
-
         expect(tester.takeException(), isNull);
+
+        await tester.scrollUntilVisible(
+          find.byType(DashboardNotesSection),
+          240.0,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await _settle(tester);
+        expect(tester.takeException(), isNull);
+
+        await tester.scrollUntilVisible(
+          find.text('+ 1 more note'),
+          120.0,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await _settle(tester);
+        expect(tester.takeException(), isNull);
+        expect(find.byType(DashboardNotesSection), findsOneWidget);
         expect(find.text('+ 1 more note'), findsOneWidget);
       },
     );
