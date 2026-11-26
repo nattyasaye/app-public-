@@ -3470,6 +3470,14 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
     if (_isHandlingPop || _hasPopped) return;
     _isHandlingPop = true;
     try {
+      if (_allowDiscardOnNextPop) {
+        final route = ModalRoute.of(context);
+        if (route == null || route.isCurrent) {
+          _hasPopped = true;
+          Navigator.of(context).pop();
+        }
+        return;
+      }
       var ok = true;
       while (mounted && !_isDisposed && _hasPendingChanges) {
         ok = await _flushPendingSaves();
@@ -4694,7 +4702,7 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
         }
 
         return PopScope<Object?>(
-          canPop: !_hasPendingChanges || _allowDiscardOnNextPop,
+          canPop: _allowDiscardOnNextPop || _hasPopped,
           onPopInvokedWithResult: (bool didPop, Object? _) {
             if (!didPop) {
               unawaited(_handlePopAttempt());

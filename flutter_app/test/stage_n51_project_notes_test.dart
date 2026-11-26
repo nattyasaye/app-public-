@@ -19,6 +19,32 @@ import 'package:personal_management_app/ui/screens/projects/project_notes_widget
 
 import 'support/sqlite_test_helper.dart';
 
+Future<void> _settle(WidgetTester tester) {
+  return tester.pumpAndSettle(
+    const Duration(milliseconds: 100),
+    EnginePhase.sendSemanticsUpdate,
+    const Duration(seconds: 5),
+  );
+}
+
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  bool Function() condition, {
+  required String reason,
+}) async {
+  final watch = Stopwatch()..start();
+  while (!condition()) {
+    if (watch.elapsed > const Duration(seconds: 10)) {
+      fail(reason);
+    }
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+  }
+  await _settle(tester);
+}
+
 void main() {
   setUpAll(configureSqliteForHostTests);
 
@@ -305,14 +331,19 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(find.text('NOTES (0)'), findsOneWidget);
         expect(find.text('No notes for this project yet'), findsOneWidget);
 
         // Tap New Note from ProjectNotesWidget
+        await tester.ensureVisible(find.text('New Note').first);
         await tester.tap(find.text('New Note').first);
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () => notesCtrl.state.notes.length == 1 && openedNoteIds.isNotEmpty,
+          reason: 'Creating a project note from ProjectNotesWidget timed out.',
+        );
 
         expect(notesCtrl.state.notes.length, 1);
         final createdNote = notesCtrl.state.notes.first;
@@ -347,7 +378,13 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () =>
+              find.text('Project unavailable').evaluate().isNotEmpty &&
+              find.text('Legacy Field Note').evaluate().isNotEmpty,
+          reason: 'NotesView did not render missing-project fallback.',
+        );
 
         expect(find.text('Project unavailable'), findsWidgets);
         expect(find.text('Legacy Field Note'), findsWidgets);
@@ -364,7 +401,7 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(find.text('NOTES (1)'), findsOneWidget);
         expect(find.text('Field Research — Note'), findsOneWidget);
