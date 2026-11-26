@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -1240,48 +1241,98 @@ void main() {
     testWidgets(
         'BackupView surfaces distinct error SnackBars for authentication failure, unsupported format, unsupported KDF, unsupported future schema, and invalid canonical payload',
         (WidgetTester tester) async {
-      final db = AppDatabase(NativeDatabase.memory());
-      final manager = AppStateManager(
-        db: db,
-        notificationService: _NoOpNotificationService(),
-      );
-      late String validEnvelope;
-      await tester.runAsync(() async {
-        await db.ensureInitialized();
-        await _seedProtectedData(db);
-        await manager.initialize();
-        validEnvelope = await manager.exportEncryptedBackup('BackupPass#1');
+      final setup = await tester.runAsync(() async {
+        final tempDir = Directory.systemTemp.createTempSync(
+          'daywell_s342_ui_',
+        );
+        final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
+        final supportDir = Directory(p.join(tempDir.path, 'support'))
+          ..createSync();
+        final db = AppDatabase(NativeDatabase.memory());
+        final manager = AppStateManager(
+          db: db,
+          recoveryExporter: RawDatabaseRecoveryExporter(
+            documentsDirProvider: () async => docsDir,
+            supportDirProvider: () async => supportDir,
+          ),
+          notificationService: _NoOpNotificationService(),
+        );
+        try {
+          await db.ensureInitialized().timeout(
+                const Duration(seconds: 20),
+                onTimeout: () => throw TimeoutException(
+                  'db.ensureInitialized() timed out after 20s',
+                ),
+              );
+          await _seedProtectedData(db).timeout(
+            const Duration(seconds: 20),
+            onTimeout: () => throw TimeoutException(
+              '_seedProtectedData() timed out after 20s',
+            ),
+          );
+          await manager.initialize().timeout(
+                const Duration(seconds: 20),
+                onTimeout: () => throw TimeoutException(
+                  'manager.initialize() timed out after 20s',
+                ),
+              );
+          final exportFuture = manager.exportEncryptedBackup('BackupPass#1');
+          final envelope = await exportFuture.timeout(
+            const Duration(seconds: 20),
+            onTimeout: () => throw TimeoutException(
+              'exportEncryptedBackup() timed out after 20s',
+            ),
+          );
+          return (
+            manager: manager,
+            tempDir: tempDir,
+            validEnvelope: envelope,
+          );
+        } catch (_) {
+          try {
+            if (!manager.isDisposed) {
+              await manager.disposeAsync().timeout(const Duration(seconds: 5));
+            }
+          } catch (_) {}
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
+          rethrow;
+        }
       });
+      final manager = setup!.manager;
+      final tempDir = setup.tempDir;
+      final validEnvelope = setup.validEnvelope;
 
       addTearDown(() async {
         await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump(const Duration(milliseconds: 20));
-        var disposed = false;
-        final disposeFuture = manager.disposeAsync().whenComplete(() {
-          disposed = true;
-        });
-        final watch = Stopwatch()..start();
-        while (!disposed && watch.elapsed < const Duration(seconds: 10)) {
-          await tester.pump(const Duration(milliseconds: 20));
-          await tester.runAsync(
-            () => Future<void>.delayed(const Duration(milliseconds: 5)),
-          );
-        }
-        if (disposed) {
-          await disposeFuture;
-        } else {
-          await tester.runAsync(
-            () => disposeFuture.timeout(const Duration(seconds: 5)),
-          );
+        await tester.pump();
+        try {
+          if (!manager.isDisposed) {
+            final disposeFuture = manager.disposeAsync();
+            await tester.runAsync(
+              () => disposeFuture.timeout(const Duration(seconds: 10)),
+            );
+          }
+        } finally {
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
         }
       });
+
+      Future<void> settle() => tester.pumpAndSettle(
+            const Duration(milliseconds: 100),
+            EnginePhase.sendSemanticsUpdate,
+            const Duration(seconds: 5),
+          );
 
       await tester.pumpWidget(
         MaterialApp(
           home: BackupView(state: manager),
         ),
       );
-      await tester.pumpAndSettle();
+      await settle();
 
       // Test 1: Canonical future schema rejection SnackBar
       final canonicalInput = find.byWidgetPredicate(
@@ -1295,8 +1346,9 @@ void main() {
         canonicalInput,
         jsonEncode(_minimalValidSnapshot(schemaVersion: 10)),
       );
+      FocusManager.instance.primaryFocus?.unfocus();
       await tester.tap(find.text('Import Pasted JSON'));
-      await tester.pumpAndSettle();
+      await settle();
       expect(
         find.textContaining('Unsupported future snapshot'),
         findsOneWidget,
@@ -1304,12 +1356,13 @@ void main() {
 
       ScaffoldMessenger.of(tester.element(find.byType(BackupView)))
           .clearSnackBars();
-      await tester.pumpAndSettle();
+      await settle();
 
       // Test 1b: Invalid canonical JSON payload rejection SnackBar
       await tester.enterText(canonicalInput, '{{{broken');
+      FocusManager.instance.primaryFocus?.unfocus();
       await tester.tap(find.text('Import Pasted JSON'));
-      await tester.pumpAndSettle();
+      await settle();
       expect(
         find.textContaining('Invalid JSON payload'),
         findsOneWidget,
@@ -1317,7 +1370,7 @@ void main() {
 
       ScaffoldMessenger.of(tester.element(find.byType(BackupView)))
           .clearSnackBars();
-      await tester.pumpAndSettle();
+      await settle();
 
       // Scroll to encrypted restore section and ensure controls are visible
       final listScrollable = find.byType(Scrollable).first;
@@ -1336,57 +1389,60 @@ void main() {
         scrollable: listScrollable,
       );
       await tester.ensureVisible(restoreButton);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.ensureVisible(restorePayloadField);
-      await tester.pumpAndSettle();
+      await settle();
 
       // Test 2: Unsupported format_version rejects BEFORE confirmation dialog
       final badFormat = jsonDecode(validEnvelope) as Map<String, dynamic>;
       (badFormat['header'] as Map<String, dynamic>)['format_version'] = 99;
       await tester.enterText(restorePayloadField, jsonEncode(badFormat));
       await tester.ensureVisible(restorePassField);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.enterText(restorePassField, 'BackupPass#1');
+      FocusManager.instance.primaryFocus?.unfocus();
       await tester.ensureVisible(restoreButton);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.tap(restoreButton);
-      await tester.pumpAndSettle();
+      await settle();
       expect(find.text('Quarantine & Restore Backup?'), findsNothing);
       expect(find.textContaining('format_version 99'), findsOneWidget);
 
       ScaffoldMessenger.of(tester.element(find.byType(BackupView)))
           .clearSnackBars();
-      await tester.pumpAndSettle();
+      await settle();
 
       // Test 3: Unsupported KDF rejects BEFORE confirmation dialog
       final badKdf = jsonDecode(validEnvelope) as Map<String, dynamic>;
       (badKdf['header'] as Map<String, dynamic>)['kdf'] = 'Argon2';
       await tester.ensureVisible(restorePayloadField);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.enterText(restorePayloadField, jsonEncode(badKdf));
+      FocusManager.instance.primaryFocus?.unfocus();
       await tester.ensureVisible(restoreButton);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.tap(restoreButton);
-      await tester.pumpAndSettle();
+      await settle();
       expect(find.text('Quarantine & Restore Backup?'), findsNothing);
       expect(find.textContaining('Unsupported key derivation'), findsOneWidget);
 
       ScaffoldMessenger.of(tester.element(find.byType(BackupView)))
           .clearSnackBars();
-      await tester.pumpAndSettle();
+      await settle();
 
       // Test 4: Authentication failure opens dialog, confirms, and surfaces
       // neutral authenticationFailure SnackBar.
       await tester.ensureVisible(restorePayloadField);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.enterText(restorePayloadField, validEnvelope);
       await tester.ensureVisible(restorePassField);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.enterText(restorePassField, 'WrongPass#99');
+      FocusManager.instance.primaryFocus?.unfocus();
       await tester.ensureVisible(restoreButton);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.tap(restoreButton);
-      await tester.pumpAndSettle();
+      await settle();
       await tester.tap(find.text('Quarantine & Restore'));
 
       final expectedFinder = find.textContaining(
@@ -1399,9 +1455,9 @@ void main() {
           break;
         }
         await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
         );
-        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump(const Duration(milliseconds: 20));
       }
       if (expectedFinder.evaluate().isEmpty) {
         fail(
@@ -1412,16 +1468,12 @@ void main() {
           '${manager.lastBackupResult?.message}).',
         );
       }
-      await tester.pumpAndSettle(
-        const Duration(milliseconds: 100),
-        EnginePhase.sendSemanticsUpdate,
-        const Duration(seconds: 10),
-      );
+      await settle();
       expect(expectedFinder, findsOneWidget);
 
       ScaffoldMessenger.of(tester.element(find.byType(BackupView)))
           .clearSnackBars();
-      await tester.pumpAndSettle();
+      await settle();
     });
   });
 }

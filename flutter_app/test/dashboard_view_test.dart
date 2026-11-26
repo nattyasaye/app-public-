@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:personal_management_app/application/calendar/calendar_controller.dart';
 import 'package:personal_management_app/application/daily_rhythm/daily_rhythm_controller.dart';
 import 'package:personal_management_app/application/finance/finance_controller.dart';
@@ -11,8 +13,10 @@ import 'package:personal_management_app/application/notes/notes_controller.dart'
 import 'package:personal_management_app/application/projects/projects_controller.dart';
 import 'package:personal_management_app/application/tasks/tasks_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
+import 'package:personal_management_app/core/interfaces/platform_service_interfaces.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
+import 'package:personal_management_app/data/database/raw_database_recovery_exporter.dart';
 import 'package:personal_management_app/domain/calendar/calendar_contracts.dart';
 import 'package:personal_management_app/domain/calendar/calendar_models.dart';
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_contracts.dart';
@@ -36,6 +40,29 @@ import 'package:personal_management_app/ui/widgets/quick_capture_dialog.dart';
 import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
 
 import 'support/sqlite_test_helper.dart';
+
+class _NoOpNotificationService implements INotificationService {
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<bool> requestPermissions() async => true;
+
+  @override
+  Future<void> scheduleReminder({
+    required String id,
+    required String title,
+    required String body,
+    required DateTime scheduledDateUtc,
+    String? payload,
+  }) async {}
+
+  @override
+  Future<void> cancelReminder(String id) async {}
+
+  @override
+  Future<void> cancelAllReminders() async {}
+}
 
 class _FakeFinanceRepository implements IFinanceRepository {
   int loadCalls = 0;
@@ -1249,28 +1276,78 @@ void main() {
 
   Future<void> disposeTestState(
     WidgetTester tester,
-    AppStateManager state,
-  ) async {
+    AppStateManager state, {
+    Directory? tempDir,
+  }) async {
     await tester.pumpWidget(const SizedBox.shrink());
-    await tester.pump(const Duration(milliseconds: 20));
-    var disposed = false;
-    final disposeFuture = state.disposeAsync().whenComplete(() {
-      disposed = true;
+    await tester.pump();
+    try {
+      if (!state.isDisposed) {
+        await tester.runAsync(
+          () => state.disposeAsync().timeout(const Duration(seconds: 10)),
+        );
+      }
+    } finally {
+      if (tempDir != null && tempDir.existsSync()) {
+        tempDir.deleteSync(recursive: true);
+      }
+    }
+  }
+
+  Future<({AppStateManager state, Directory tempDir})> createIsolatedAppState(
+    WidgetTester tester, {
+    Future<void> Function(AppStateManager state)? seed,
+  }) async {
+    final result = await tester.runAsync(() async {
+      final tempDir = Directory.systemTemp.createTempSync('daywell_dash_');
+      final docsDir = Directory(p.join(tempDir.path, 'docs'))..createSync();
+      final supportDir = Directory(p.join(tempDir.path, 'support'))
+        ..createSync();
+      final db = AppDatabase(NativeDatabase.memory());
+      final state = AppStateManager(
+        db: db,
+        recoveryExporter: RawDatabaseRecoveryExporter(
+          documentsDirProvider: () async => docsDir,
+          supportDirProvider: () async => supportDir,
+        ),
+        notificationService: _NoOpNotificationService(),
+      );
+      try {
+        await db.ensureInitialized().timeout(
+              const Duration(seconds: 20),
+              onTimeout: () => throw TimeoutException(
+                'db.ensureInitialized() timed out after 20s',
+              ),
+            );
+        await state.initialize().timeout(
+              const Duration(seconds: 20),
+              onTimeout: () => throw TimeoutException(
+                'state.initialize() timed out after 20s',
+              ),
+            );
+        if (seed != null) {
+          await seed(state).timeout(
+            const Duration(seconds: 20),
+            onTimeout: () => throw TimeoutException(
+              'Dashboard test seed timed out after 20s',
+            ),
+          );
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+        return (state: state, tempDir: tempDir);
+      } catch (_) {
+        try {
+          if (!state.isDisposed) {
+            await state.disposeAsync().timeout(const Duration(seconds: 5));
+          }
+        } catch (_) {}
+        if (tempDir.existsSync()) {
+          tempDir.deleteSync(recursive: true);
+        }
+        rethrow;
+      }
     });
-    final stopwatch = Stopwatch()..start();
-    while (!disposed && stopwatch.elapsed < const Duration(seconds: 10)) {
-      await tester.pump(const Duration(milliseconds: 20));
-      await tester.runAsync(
-        () => Future<void>.delayed(const Duration(milliseconds: 5)),
-      );
-    }
-    if (disposed) {
-      await disposeFuture;
-    } else {
-      await tester.runAsync(
-        () => disposeFuture.timeout(const Duration(seconds: 5)),
-      );
-    }
+    return result!;
   }
 
   group('DashboardView Stage 3.8 Integration & SQLite Tests', () {
@@ -1280,74 +1357,79 @@ void main() {
         await tester.binding.setSurfaceSize(const Size(900, 900));
         addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-        final db = AppDatabase(NativeDatabase.memory());
-        final state = AppStateManager(db: db);
-        await tester.runAsync(() => state.initialize());
-
-        addTearDown(() => disposeTestState(tester, state));
-
         final today = CalendarDate.today();
+        final setup = await createIsolatedAppState(
+          tester,
+          seed: (AppStateManager state) async {
+            await state.financeController.completeSetup(<AccountModel>[
+              AccountModel(
+                id: 'acc-cash',
+                name: 'Wallet Cash',
+                type: AccountType.asset,
+                openingBalanceCents: 150000, // 1,500.00 ETB
+              ),
+            ]);
+            await state.financeController.addCommitment(
+              CommitmentModel(
+                id: 'com-rent',
+                title: 'Internet Bill',
+                amountCents: 45000,
+                dueDate: today.addDays(2),
+              ),
+            );
+            // ignore: deprecated_member_use_from_same_package
+            await state.financeController.recordTransaction(
+              TransactionModel(
+                id: 'tx-coffee',
+                categoryId: 'cat-groceries',
+                categoryName: 'Groceries',
+                amountCents: 12050,
+                type: 'expense',
+                transactionDate: today,
+                payee: 'Merkato Market',
+              ),
+            );
+            await state.tasksController.createTask(
+              id: 'task-urgent',
+              title: 'Submit tax filing',
+              priority: 'urgent',
+              dueDate: today,
+            );
+            await state.tasksController.createTask(
+              id: 'task-done',
+              title: 'Clean inbox',
+              priority: 'low',
+              dueDate: today,
+            );
+            await state.tasksController.toggleTaskStatus('task-done');
+            await state.calendarController.createEvent(
+              title: 'Clinic Checkup',
+              dateIso: today.toIsoString(),
+              startTime: '14:30',
+              category: 'health',
+            );
+            await state.notesController.createNote(
+              title: 'Budget Plan Note',
+              content: 'Keep groceries below weekly target.',
+              category: 'reference',
+              isPinned: true,
+            );
+            await state.inboxController.captureQuickThought(
+              'Buy printer paper',
+              category: 'idea',
+              autoTriage: false,
+            );
+          },
+        );
+        final state = setup.state;
+        final tempDir = setup.tempDir;
+        addTearDown(() => disposeTestState(tester, state, tempDir: tempDir));
 
-        await tester.runAsync(() async {
-          await state.financeController.completeSetup(<AccountModel>[
-            AccountModel(
-              id: 'acc-cash',
-              name: 'Wallet Cash',
-              type: AccountType.asset,
-              openingBalanceCents: 150000, // 1,500.00 ETB
-            ),
-          ]);
-          await state.financeController.addCommitment(
-            CommitmentModel(
-              id: 'com-rent',
-              title: 'Internet Bill',
-              amountCents: 45000,
-              dueDate: today.addDays(2),
-            ),
-          );
-          // ignore: deprecated_member_use_from_same_package
-          await state.financeController.recordTransaction(
-            TransactionModel(
-              id: 'tx-coffee',
-              categoryId: 'cat-groceries',
-              categoryName: 'Groceries',
-              amountCents: 12050,
-              type: 'expense',
-              transactionDate: today,
-              payee: 'Merkato Market',
-            ),
-          );
-          await state.tasksController.createTask(
-            id: 'task-urgent',
-            title: 'Submit tax filing',
-            priority: 'urgent',
-            dueDate: today,
-          );
-          await state.tasksController.createTask(
-            id: 'task-done',
-            title: 'Clean inbox',
-            priority: 'low',
-            dueDate: today,
-          );
-          await state.tasksController.toggleTaskStatus('task-done');
-          await state.calendarController.createEvent(
-            title: 'Clinic Checkup',
-            dateIso: today.toIsoString(),
-            startTime: '14:30',
-            category: 'health',
-          );
-          await state.notesController.createNote(
-            title: 'Budget Plan Note',
-            content: 'Keep groceries below weekly target.',
-            category: 'reference',
-            isPinned: true,
-          );
-          await state.inboxController.captureQuickThought(
-            'Buy printer paper',
-            category: 'idea',
-            autoTriage: false,
-          );
-        });
+        Future<void> settle() => tester.pumpAndSettle(
+              const Duration(milliseconds: 100),
+              EnginePhase.sendSemanticsUpdate,
+              const Duration(seconds: 5),
+            );
 
         // Apply narrow search filters in module controllers to verify Dashboard
         // does not leak module-internal filter state onto overview cards.
@@ -1356,7 +1438,7 @@ void main() {
         state.inboxController.setCategoryFilter('problem');
 
         await tester.pumpWidget(_wrapDashboard(state: state));
-        await tester.pumpAndSettle();
+        await settle();
 
         expect(find.text('Dashboard'), findsOneWidget);
         await tester.scrollUntilVisible(
@@ -1364,7 +1446,7 @@ void main() {
           240.0,
           scrollable: find.byType(Scrollable).first,
         );
-        await tester.pumpAndSettle();
+        await settle();
         expect(find.text('AVAILABLE TO SPEND'), findsOneWidget);
         expect(
           find.text(
@@ -1386,13 +1468,13 @@ void main() {
         // Toggle urgent task inline from Dashboard checkbox & verify persistence.
         final Finder checkbox = find.byType(Checkbox).first;
         await tester.ensureVisible(checkbox);
-        await tester.pumpAndSettle();
+        await settle();
         await tester.tap(checkbox);
         await waitForCondition(
           tester,
           () => state.tasksController.state.completedCount >= 2,
         );
-        await tester.pumpAndSettle();
+        await settle();
 
         expect(find.text('2 / 2 done'), findsOneWidget);
         expect(find.text('All active tasks are completed.'), findsOneWidget);
@@ -2071,10 +2153,12 @@ void main() {
         ]);
 
         // Full DaywellApp shell integration smoke check for Quick Capture + Backup.
-        final db = AppDatabase(NativeDatabase.memory());
-        final appState = AppStateManager(db: db);
-        await tester.runAsync(() => appState.initialize());
-        addTearDown(() => disposeTestState(tester, appState));
+        final shellSetup = await createIsolatedAppState(tester);
+        final appState = shellSetup.state;
+        final shellTempDir = shellSetup.tempDir;
+        addTearDown(
+          () => disposeTestState(tester, appState, tempDir: shellTempDir),
+        );
 
         await tester.pumpWidget(DaywellApp(stateManager: appState));
         await tester.pumpAndSettle();
