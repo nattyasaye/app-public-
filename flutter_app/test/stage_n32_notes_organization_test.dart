@@ -439,7 +439,10 @@ void main() {
         expect(find.text('Updated 7d'), findsOneWidget);
 
         // Tag + Date filtering updates list & offers Clear filters when empty
-        await tester.tap(find.text('#reading'));
+        final readingTagChip = find.widgetWithText(FilterChip, '#reading');
+        await tester.ensureVisible(readingTagChip);
+        await tester.pumpAndSettle();
+        await tester.tap(readingTagChip);
         await tester.pumpAndSettle();
         expect(find.text('Reading Highlights'), findsOneWidget);
         expect(find.text('Roadmap Planning'), findsNothing);
@@ -452,7 +455,10 @@ void main() {
         expect(find.text('Roadmap Planning'), findsOneWidget);
 
         // Create a custom folder from the list -> empty-folder state shown
-        await tester.tap(find.text('New Folder'));
+        final newFolderChip = find.text('New Folder');
+        await tester.ensureVisible(newFolderChip);
+        await tester.pumpAndSettle();
+        await tester.tap(newFolderChip);
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(DaywellTextField), 'Research');
         await tester.tap(find.text('Create'));
@@ -471,7 +477,10 @@ void main() {
         expect(find.text('Folder: Field Lab'), findsOneWidget);
 
         // Move a note to Field Lab via card menu
-        await tester.tap(find.text('All Folders'));
+        final allFoldersChip = find.text('All Folders');
+        await tester.ensureVisible(allFoldersChip);
+        await tester.pumpAndSettle();
+        await tester.tap(allFoldersChip);
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Note actions').first);
         await tester.pumpAndSettle();
@@ -482,7 +491,10 @@ void main() {
         expect(controller.state.findById('n1')?.category, 'field lab');
 
         // Delete Field Lab -> confirmation dialog warns no notes will be deleted & moves note to General
-        await tester.tap(find.text('Field Lab').first);
+        final fieldLabChip = find.widgetWithText(FilterChip, 'Field Lab');
+        await tester.ensureVisible(fieldLabChip);
+        await tester.pumpAndSettle();
+        await tester.tap(fieldLabChip);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Delete Folder'));
         await tester.pumpAndSettle();
@@ -492,7 +504,10 @@ void main() {
         expect(controller.state.findById('n1')?.category, 'general');
 
         // Open editor for Reading Highlights -> Add Tag shows Existing tags chips and reuses casing
-        await tester.tap(find.text('Reading Highlights'));
+        final readingCard = find.text('Reading Highlights');
+        await tester.ensureVisible(readingCard);
+        await tester.pumpAndSettle();
+        await tester.tap(readingCard);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Add Tag'));
         await tester.pumpAndSettle();

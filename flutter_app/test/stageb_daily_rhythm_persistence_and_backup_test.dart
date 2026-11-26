@@ -13,6 +13,8 @@ import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_engine.
 import 'package:personal_management_app/domain/daily_rhythm/daily_rhythm_models.dart';
 import 'package:personal_management_app/services/backup/encryption_backup_service.dart';
 
+import 'support/sqlite_test_helper.dart';
+
 DailyRhythmDayEntity _qualifyingDay(
   String dateIso, {
   String financeStatus = DailyRhythmFinanceCloseStatuses.closedWithTransactions,
@@ -38,6 +40,8 @@ DailyRhythmDayEntity _qualifyingDay(
 }
 
 void main() {
+  setUpAll(configureSqliteForHostTests);
+
   group('Stage B — Flutter Daily Rhythm Persistence & Backup/Restore', () {
     test(
       '1. DriftDailyRhythmRepository enforces 1 record per dateIso, validates fields, lists chronologically, and deletes cleanly',
