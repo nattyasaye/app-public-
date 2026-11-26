@@ -20,6 +20,47 @@ import 'package:personal_management_app/ui/screens/notes_view.dart';
 
 import 'support/sqlite_test_helper.dart';
 
+Future<void> _disposeDbFixture(
+  WidgetTester tester,
+  AppDatabase db,
+  List<ChangeNotifier> controllers,
+) async {
+  await tester.pumpWidget(const SizedBox.shrink());
+  await tester.pump(const Duration(milliseconds: 20));
+  for (final ctrl in controllers) {
+    ctrl.dispose();
+  }
+  await tester.runAsync(
+    () => db.close().timeout(const Duration(seconds: 10)),
+  );
+}
+
+Future<void> _settle(WidgetTester tester) {
+  return tester.pumpAndSettle(
+    const Duration(milliseconds: 100),
+    EnginePhase.sendSemanticsUpdate,
+    const Duration(seconds: 5),
+  );
+}
+
+Future<void> _pumpUntil(
+  WidgetTester tester,
+  bool Function() condition, {
+  required String reason,
+}) async {
+  final watch = Stopwatch()..start();
+  while (!condition()) {
+    if (watch.elapsed > const Duration(seconds: 10)) {
+      fail(reason);
+    }
+    await tester.pump(const Duration(milliseconds: 20));
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 5)),
+    );
+  }
+  await _settle(tester);
+}
+
 void main() {
   setUpAll(configureSqliteForHostTests);
 
@@ -271,30 +312,46 @@ void main() {
     testWidgets(
       '4. CalendarView edit modal shows linked notes & creates new event note; NotesView shows Linked Event bar and missing event fallback',
       (tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        addTearDown(db.close);
-
-        final calendarRepo = DriftCalendarRepository(db);
-        final notesRepo = DriftNotesRepository(db);
-        final calendarCtrl = CalendarController(repository: calendarRepo);
-        final notesCtrl = NotesController(repository: notesRepo);
-        addTearDown(() {
-          calendarCtrl.dispose();
-          notesCtrl.dispose();
-        });
+        await tester.binding.setSurfaceSize(const Size(1000, 1200));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
         final targetDate = CalendarDate(year: 2026, month: 3, day: 18);
-        calendarCtrl.setSelectedCalendarDate(targetDate);
         final ev = CalendarEventEntity(
           id: 'evt-ui-1',
           title: 'Product Design Critique',
           dateIso: targetDate.toIsoString(),
           startTime: '11:00',
         );
-        await calendarRepo.createEvent(ev);
-        await calendarCtrl.loadAll();
-        await notesCtrl.loadNotes();
+
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized().timeout(const Duration(seconds: 15));
+
+          final calendarRepo = DriftCalendarRepository(db);
+          final notesRepo = DriftNotesRepository(db);
+          final calendarCtrl = CalendarController(repository: calendarRepo);
+          final notesCtrl = NotesController(repository: notesRepo);
+
+          calendarCtrl.setSelectedCalendarDate(targetDate);
+          await calendarRepo.createEvent(ev);
+          await calendarCtrl.loadAll();
+          await notesCtrl.loadNotes();
+          return (
+            db: db,
+            calendarCtrl: calendarCtrl,
+            notesCtrl: notesCtrl,
+          );
+        });
+        final db = fixture!.db;
+        final calendarCtrl = fixture.calendarCtrl;
+        final notesCtrl = fixture.notesCtrl;
+        addTearDown(
+          () => _disposeDbFixture(
+            tester,
+            db,
+            [calendarCtrl, notesCtrl],
+          ),
+        );
 
         final openedNoteIds = <String>[];
 
@@ -308,18 +365,27 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         // Tap event card on selected day to open Edit Event modal
+        await tester.ensureVisible(find.text('Product Design Critique').first);
         await tester.tap(find.text('Product Design Critique').first);
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(find.text('LINKED NOTES (0)'), findsOneWidget);
-        expect(find.text('No notes linked to this event yet'), findsOneWidget);
+        expect(
+          find.textContaining('No notes linked to this event yet'),
+          findsOneWidget,
+        );
 
         // Tap New Note from Edit Event modal
+        await tester.ensureVisible(find.text('New Note').first);
         await tester.tap(find.text('New Note').first);
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () => notesCtrl.state.notes.length == 1 && openedNoteIds.isNotEmpty,
+          reason: 'Creating a linked note from CalendarView did not finish.',
+        );
 
         expect(notesCtrl.state.notes.length, 1);
         final created = notesCtrl.state.notes.first;
@@ -329,12 +395,14 @@ void main() {
         expect(openedNoteIds, [created.id]);
 
         // Also add an orphaned calendar-linked note and inspect NotesView
-        await notesCtrl.createNote(
-          id: 'note-orphan-cal',
-          title: 'Legacy Calendar Memo',
-          content: 'Still intact',
-          linkedModule: NoteEntity.calendarLinkModule,
-          linkedId: 'evt-deleted-999',
+        await tester.runAsync(
+          () => notesCtrl.createNote(
+            id: 'note-orphan-cal',
+            title: 'Legacy Calendar Memo',
+            content: 'Still intact',
+            linkedModule: NoteEntity.calendarLinkModule,
+            linkedId: 'evt-deleted-999',
+          ),
         );
 
         CalendarEventEntity? openedEvent;
@@ -342,7 +410,7 @@ void main() {
           MaterialApp(
             theme: DaywellTheme.light,
             home: MediaQuery(
-              data: const MediaQueryData(size: Size(1000, 800)),
+              data: const MediaQueryData(size: Size(1000, 1200)),
               child: NotesView(
                 controller: notesCtrl,
                 calendarController: calendarCtrl,
@@ -352,7 +420,12 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        final focusedBar = find.text('Linked Event: Product Design Critique');
+        await _pumpUntil(
+          tester,
+          () => focusedBar.evaluate().isNotEmpty,
+          reason: 'NotesView did not focus the linked calendar note.',
+        );
 
         expect(
           find.text('Linked Event: Product Design Critique'),
@@ -363,8 +436,9 @@ void main() {
         expect(find.text('Link Task'), findsNothing);
         expect(find.text('Link Event'), findsNothing);
 
+        await tester.ensureVisible(find.text('Open').first);
         await tester.tap(find.text('Open').first);
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(openedEvent?.id, ev.id);
       },
     );
@@ -640,50 +714,71 @@ void main() {
     testWidgets(
       '7. CalendarView Link Existing sheet resolves Task title, aborts safely on Cancel, and replaces link only after confirmation',
       (tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        addTearDown(db.close);
-
-        final calendarRepo = DriftCalendarRepository(db);
-        final calendarCtrl = CalendarController(repository: calendarRepo);
-        final tasksCtrl = TasksController(repository: DriftTasksRepository(db));
-        final notesCtrl = NotesController(repository: DriftNotesRepository(db));
-        addTearDown(() {
-          calendarCtrl.dispose();
-          tasksCtrl.dispose();
-          notesCtrl.dispose();
-        });
+        await tester.binding.setSurfaceSize(const Size(1000, 1200));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
         final targetDate = CalendarDate(year: 2026, month: 3, day: 18);
-        calendarCtrl.setSelectedCalendarDate(targetDate);
         final ev = CalendarEventEntity(
           id: 'evt-confirm-1',
           title: 'Quarterly Sync',
           dateIso: targetDate.toIsoString(),
         );
-        await calendarRepo.createEvent(ev);
-        await tasksCtrl.createTask(
-          id: 'task-confirm-1',
-          title: 'Prepare Budget Brief',
+
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized().timeout(const Duration(seconds: 15));
+
+          final calendarRepo = DriftCalendarRepository(db);
+          final calendarCtrl = CalendarController(repository: calendarRepo);
+          final tasksCtrl = TasksController(
+            repository: DriftTasksRepository(db),
+          );
+          final notesCtrl = NotesController(
+            repository: DriftNotesRepository(db),
+          );
+
+          calendarCtrl.setSelectedCalendarDate(targetDate);
+          await calendarRepo.createEvent(ev);
+          await tasksCtrl.createTask(
+            id: 'task-confirm-1',
+            title: 'Prepare Budget Brief',
+          );
+          await db.into(db.projects).insert(
+                ProjectsCompanion.insert(
+                  id: 'proj-keep',
+                  title: 'Keep Project',
+                  createdAt: DateTime.utc(2026, 3, 1),
+                ),
+              );
+          await notesCtrl.createNote(
+            id: 'note-task-linked-ui',
+            title: 'Budget Figures',
+            content: '',
+            projectId: 'proj-keep',
+            linkedModule: NoteEntity.taskLinkModule,
+            linkedId: 'task-confirm-1',
+          );
+          await calendarCtrl.loadAll();
+          await tasksCtrl.loadAll();
+          await notesCtrl.loadNotes();
+          return (
+            db: db,
+            calendarCtrl: calendarCtrl,
+            tasksCtrl: tasksCtrl,
+            notesCtrl: notesCtrl,
+          );
+        });
+        final db = fixture!.db;
+        final calendarCtrl = fixture.calendarCtrl;
+        final tasksCtrl = fixture.tasksCtrl;
+        final notesCtrl = fixture.notesCtrl;
+        addTearDown(
+          () => _disposeDbFixture(
+            tester,
+            db,
+            [calendarCtrl, tasksCtrl, notesCtrl],
+          ),
         );
-        await db.into(db.projects).insert(
-              ProjectsCompanion.insert(
-                id: 'proj-keep',
-                title: 'Keep Project',
-                createdAt: DateTime.utc(2026, 3, 1),
-              ),
-            );
-        await notesCtrl.createNote(
-          id: 'note-task-linked-ui',
-          title: 'Budget Figures',
-          content: '',
-          projectId: 'proj-keep',
-          linkedModule: NoteEntity.taskLinkModule,
-          linkedId: 'task-confirm-1',
-        );
-        await calendarCtrl.loadAll();
-        await tasksCtrl.loadAll();
-        await notesCtrl.loadNotes();
 
         await tester.pumpWidget(
           MaterialApp(
@@ -695,13 +790,15 @@ void main() {
             ),
           ),
         );
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
+        await tester.ensureVisible(find.text('Quarterly Sync').first);
         await tester.tap(find.text('Quarterly Sync').first);
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
+        await tester.ensureVisible(find.text('Link Existing'));
         await tester.tap(find.text('Link Existing'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
 
         expect(
           find.text('Currently linked to task "Prepare Budget Brief"'),
@@ -709,12 +806,13 @@ void main() {
         );
 
         // Tap candidate -> shows confirmation dialog; Cancel preserves Task link
+        await tester.ensureVisible(find.text('Budget Figures'));
         await tester.tap(find.text('Budget Figures'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(find.text('Replace existing link?'), findsOneWidget);
 
         await tester.tap(find.text('Cancel').last);
-        await tester.pumpAndSettle();
+        await _settle(tester);
         expect(
           notesCtrl.state.findById('note-task-linked-ui')?.linkedModule,
           NoteEntity.taskLinkModule,
@@ -725,10 +823,18 @@ void main() {
         );
 
         // Tap again and confirm replacement -> switches to Calendar while keeping projectId
+        await tester.ensureVisible(find.text('Budget Figures'));
         await tester.tap(find.text('Budget Figures'));
-        await tester.pumpAndSettle();
+        await _settle(tester);
         await tester.tap(find.text('Replace link'));
-        await tester.pumpAndSettle();
+        await _pumpUntil(
+          tester,
+          () {
+            final note = notesCtrl.state.findById('note-task-linked-ui');
+            return note?.linkedModule == NoteEntity.calendarLinkModule;
+          },
+          reason: 'Replacing Task link with Calendar event link timed out.',
+        );
 
         final updated = notesCtrl.state.findById('note-task-linked-ui')!;
         expect(updated.linkedModule, NoteEntity.calendarLinkModule);

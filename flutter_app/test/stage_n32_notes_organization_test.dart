@@ -422,9 +422,11 @@ void main() {
         );
 
         final controller = NotesController(repository: repo);
+        addTearDown(controller.dispose);
         await controller.loadNotes();
 
         await tester.binding.setSurfaceSize(const Size(360, 760));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
@@ -471,7 +473,12 @@ void main() {
         await tester.tap(find.text('Rename'));
         await tester.pumpAndSettle();
         await tester.enterText(find.byType(DaywellTextField), 'Field Lab');
-        await tester.tap(find.widgetWithText(DaywellButton, 'Rename'));
+        await tester.tap(
+          find.descendant(
+            of: find.byType(AlertDialog),
+            matching: find.widgetWithText(DaywellButton, 'Rename'),
+          ),
+        );
         await tester.pumpAndSettle();
         expect(controller.state.categoryFilter, 'field lab');
         expect(find.text('Folder: Field Lab'), findsOneWidget);
@@ -499,7 +506,12 @@ void main() {
         await tester.tap(find.text('Delete Folder'));
         await tester.pumpAndSettle();
         expect(find.byType(DaywellConfirmationDialog), findsOneWidget);
-        await tester.tap(find.widgetWithText(DaywellButton, 'Delete Folder'));
+        await tester.tap(
+          find.descendant(
+            of: find.byType(DaywellConfirmationDialog),
+            matching: find.widgetWithText(DaywellButton, 'Delete Folder'),
+          ),
+        );
         await tester.pumpAndSettle();
         expect(controller.state.findById('n1')?.category, 'general');
 

@@ -1123,7 +1123,8 @@ class _NotesViewState extends State<NotesView> {
         }
 
         Widget buildMasterColumn({required bool isWide}) {
-          return Column(
+          final Widget masterHeader = Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (isWide)
@@ -1460,86 +1461,111 @@ class _NotesViewState extends State<NotesView> {
                   ),
                 ),
               const Divider(height: 1),
-              Expanded(
-                child: moduleState.isLoading && notes.isEmpty
-                    ? const DaywellLoadingIndicator(label: 'Loading notes...')
-                    : notes.isEmpty
-                        ? _buildEmptyState(context, controller, moduleState)
-                        : LayoutBuilder(
-                            builder: (context, listConstraints) {
-                              final bottomPad =
-                                  isWide ? SharedDesignTokens.spacingMd : 88.0;
-                              if (moduleState.isGridView) {
-                                final int crossAxisCount = listConstraints
-                                            .maxWidth >=
-                                        SharedDesignTokens.breakpointExpanded
-                                    ? 3
-                                    : listConstraints.maxWidth < 400
-                                        ? 1
-                                        : 2;
-                                final double cardExtent =
-                                    (256.0 * textScale.clamp(1.0, 2.0))
-                                        .ceilToDouble();
-                                return GridView.builder(
-                                  padding: EdgeInsets.fromLTRB(
-                                    SharedDesignTokens.spacingMd,
-                                    SharedDesignTokens.spacingCompact,
-                                    SharedDesignTokens.spacingMd,
-                                    bottomPad,
-                                  ),
-                                  gridDelegate:
-                                      SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: crossAxisCount,
-                                    crossAxisSpacing:
-                                        SharedDesignTokens.spacingCompact,
-                                    mainAxisSpacing:
-                                        SharedDesignTokens.spacingCompact,
-                                    mainAxisExtent: cardExtent,
-                                  ),
-                                  itemCount: notes.length,
-                                  itemBuilder: (_, i) => _buildNoteCard(
-                                    notes[i],
-                                    true,
-                                    isSelected: isWide &&
-                                        !_isNewDraftSelected &&
-                                        _selectedNoteId == notes[i].id,
-                                  ),
-                                );
-                              }
+            ],
+          );
 
-                              return ListView.builder(
-                                padding: EdgeInsets.fromLTRB(
-                                  SharedDesignTokens.spacingMd,
-                                  SharedDesignTokens.spacingCompact,
-                                  SharedDesignTokens.spacingMd,
-                                  bottomPad,
-                                ),
-                                itemCount: notes.length,
-                                itemBuilder: (_, i) => Center(
-                                  child: ConstrainedBox(
-                                    constraints: const BoxConstraints(
-                                      maxWidth: SharedDesignTokens
-                                          .breakpointMaxContentWidth,
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.only(
-                                        bottom: SharedDesignTokens.spacingSm,
+          return LayoutBuilder(
+            builder: (context, masterConstraints) {
+              final double maxHeaderHeight =
+                  masterConstraints.maxHeight.isFinite
+                      ? (masterConstraints.maxHeight > 120.0
+                          ? masterConstraints.maxHeight - 80.0
+                          : masterConstraints.maxHeight * 0.5)
+                      : double.infinity;
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: maxHeaderHeight),
+                    child: SingleChildScrollView(child: masterHeader),
+                  ),
+                  Expanded(
+                    child: moduleState.isLoading && notes.isEmpty
+                        ? const DaywellLoadingIndicator(
+                            label: 'Loading notes...',
+                          )
+                        : notes.isEmpty
+                            ? _buildEmptyState(context, controller, moduleState)
+                            : LayoutBuilder(
+                                builder: (context, listConstraints) {
+                                  final bottomPad = isWide
+                                      ? SharedDesignTokens.spacingMd
+                                      : 88.0;
+                                  if (moduleState.isGridView) {
+                                    final int crossAxisCount =
+                                        listConstraints.maxWidth >=
+                                                SharedDesignTokens
+                                                    .breakpointExpanded
+                                            ? 3
+                                            : listConstraints.maxWidth < 400
+                                                ? 1
+                                                : 2;
+                                    final double cardExtent = (256.0 *
+                                            textScale.clamp(1.0, 2.0))
+                                        .ceilToDouble();
+                                    return GridView.builder(
+                                      padding: EdgeInsets.fromLTRB(
+                                        SharedDesignTokens.spacingMd,
+                                        SharedDesignTokens.spacingCompact,
+                                        SharedDesignTokens.spacingMd,
+                                        bottomPad,
                                       ),
-                                      child: _buildNoteCard(
+                                      gridDelegate:
+                                          SliverGridDelegateWithFixedCrossAxisCount(
+                                        crossAxisCount: crossAxisCount,
+                                        crossAxisSpacing:
+                                            SharedDesignTokens.spacingCompact,
+                                        mainAxisSpacing:
+                                            SharedDesignTokens.spacingCompact,
+                                        mainAxisExtent: cardExtent,
+                                      ),
+                                      itemCount: notes.length,
+                                      itemBuilder: (_, i) => _buildNoteCard(
                                         notes[i],
-                                        false,
+                                        true,
                                         isSelected: isWide &&
                                             !_isNewDraftSelected &&
                                             _selectedNoteId == notes[i].id,
                                       ),
+                                    );
+                                  }
+
+                                  return ListView.builder(
+                                    padding: EdgeInsets.fromLTRB(
+                                      SharedDesignTokens.spacingMd,
+                                      SharedDesignTokens.spacingCompact,
+                                      SharedDesignTokens.spacingMd,
+                                      bottomPad,
                                     ),
-                                  ),
-                                ),
-                              );
-                            },
-                          ),
-              ),
-            ],
+                                    itemCount: notes.length,
+                                    itemBuilder: (_, i) => Center(
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: SharedDesignTokens
+                                              .breakpointMaxContentWidth,
+                                        ),
+                                        child: Padding(
+                                          padding: const EdgeInsets.only(
+                                            bottom: SharedDesignTokens.spacingSm,
+                                          ),
+                                          child: _buildNoteCard(
+                                            notes[i],
+                                            false,
+                                            isSelected: isWide &&
+                                                !_isNewDraftSelected &&
+                                                _selectedNoteId == notes[i].id,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                  ),
+                ],
+              );
+            },
           );
         }
 

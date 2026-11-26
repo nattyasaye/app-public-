@@ -251,24 +251,43 @@ void main() {
     testWidgets(
       '4. ProjectNotesWidget renders empty state, creates a note with projectId, opens existing project notes, and NotesView handles missing project references safely',
       (tester) async {
-        final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        addTearDown(db.close);
+        await tester.binding.setSurfaceSize(const Size(1000, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
 
-        final projectsRepo = DriftProjectsRepository(db);
-        final notesRepo = DriftNotesRepository(db);
-        final projectsCtrl = ProjectsController(repository: projectsRepo);
-        final notesCtrl = NotesController(repository: notesRepo);
-        addTearDown(() {
+        final fixture = await tester.runAsync(() async {
+          final db = AppDatabase(NativeDatabase.memory());
+          await db.ensureInitialized().timeout(const Duration(seconds: 15));
+
+          final projectsRepo = DriftProjectsRepository(db);
+          final notesRepo = DriftNotesRepository(db);
+          final projectsCtrl = ProjectsController(repository: projectsRepo);
+          final notesCtrl = NotesController(repository: notesRepo);
+
+          final project = await projectsRepo.createProject(
+            ProjectEntity(id: 'proj-ui-1', title: 'Field Research'),
+          );
+          await projectsCtrl.loadAll();
+          await notesCtrl.loadNotes();
+          return (
+            db: db,
+            projectsCtrl: projectsCtrl,
+            notesCtrl: notesCtrl,
+            project: project,
+          );
+        });
+        final db = fixture!.db;
+        final projectsCtrl = fixture.projectsCtrl;
+        final notesCtrl = fixture.notesCtrl;
+        final project = fixture.project;
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
           projectsCtrl.dispose();
           notesCtrl.dispose();
+          await tester.runAsync(
+            () => db.close().timeout(const Duration(seconds: 10)),
+          );
         });
-
-        final project = await projectsRepo.createProject(
-          ProjectEntity(id: 'proj-ui-1', title: 'Field Research'),
-        );
-        await projectsCtrl.loadAll();
-        await notesCtrl.loadNotes();
 
         final openedNoteIds = <String>[];
 
@@ -302,13 +321,18 @@ void main() {
         expect(openedNoteIds, [createdNote.id]);
         expect(find.text('NOTES (1)'), findsOneWidget);
 
-        // Add a note pointing to a missing project and verify ProjectDetailScreen + NotesView render cleanly
-        await notesCtrl.createNote(
-          id: 'note-missing-proj',
-          title: 'Legacy Field Note',
-          content: 'Still readable',
-          projectId: 'proj-gone-999',
-        );
+        // Simulate an in-memory note pointing to a missing project and verify ProjectDetailScreen + NotesView render cleanly
+        notesCtrl.replaceNotes(<NoteEntity>[
+          ...notesCtrl.state.notes,
+          NoteEntity(
+            id: 'note-missing-proj',
+            title: 'Legacy Field Note',
+            content: 'Still readable',
+            projectId: 'proj-gone-999',
+            createdAt: DateTime.utc(2026, 3, 4, 9),
+            updatedAt: DateTime.utc(2026, 3, 4, 9),
+          ),
+        ]);
 
         await tester.pumpWidget(
           MaterialApp(
@@ -326,6 +350,8 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Project unavailable'), findsWidgets);
+        expect(find.text('Legacy Field Note'), findsWidgets);
+        expect(tester.takeException(), isNull);
 
         await tester.pumpWidget(
           MaterialApp(
@@ -342,6 +368,7 @@ void main() {
 
         expect(find.text('NOTES (1)'), findsOneWidget);
         expect(find.text('Field Research — Note'), findsOneWidget);
+        expect(tester.takeException(), isNull);
       },
     );
   });
