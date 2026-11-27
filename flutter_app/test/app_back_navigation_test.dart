@@ -176,10 +176,9 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       if (!created.state.isDisposed) {
+        final state = created.state;
         await tester.runAsync(
-          () => created.state
-              .disposeAsync()
-              .timeout(const Duration(seconds: 10)),
+          () => state.disposeAsync().timeout(const Duration(seconds: 10)),
         );
       }
       if (created.tempDir.existsSync()) {
@@ -563,8 +562,9 @@ void main() {
       await settle(tester);
       expect(find.byType(QuickCaptureDialog), findsNothing);
       expect(
-        state.inboxController.state.items
-            .any((i) => i.rawText == 'Unsaved thought'),
+        state.inboxController.state.items.any(
+          (i) => i.rawText == 'Unsaved thought',
+        ),
         isTrue,
       );
 
@@ -605,8 +605,9 @@ void main() {
       );
       await settle(tester);
       expect(
-        state.tasksController.state.tasks
-            .any((t) => t.title == 'Draft Task Name'),
+        state.tasksController.state.tasks.any(
+          (t) => t.title == 'Draft Task Name',
+        ),
         isFalse,
       );
 
@@ -637,8 +638,9 @@ void main() {
       );
       await settle(tester);
       expect(
-        state.calendarController.state.events
-            .any((e) => e.title == 'Doctor Visit'),
+        state.calendarController.state.events.any(
+          (e) => e.title == 'Doctor Visit',
+        ),
         isFalse,
       );
 
@@ -686,15 +688,15 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(1024, 760));
       addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
 
-      final notesRepo = _ControllableNotesRepo()
-        ..seed(
-          NoteEntity(
-            id: 'note-split-1',
-            title: 'Split View Architecture',
-            content: 'Original note content',
-            category: 'reference',
-          ),
-        );
+      final notesRepo = _ControllableNotesRepo();
+      notesRepo.seed(
+        NoteEntity(
+          id: 'note-split-1',
+          title: 'Split View Architecture',
+          content: 'Original note content',
+          category: 'reference',
+        ),
+      );
       final notesController = NotesController(repository: notesRepo);
       addTearDown(notesController.dispose);
       await notesController.loadNotes();

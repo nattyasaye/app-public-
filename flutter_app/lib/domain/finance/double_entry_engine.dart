@@ -3968,11 +3968,13 @@ class DoubleEntryEngine {
     }
 
     return TransferDisplayEndpoints(
-      sourceAccountId: creditAccountIds.length == 1 ? creditAccountIds.first : null,
+      sourceAccountId:
+          creditAccountIds.length == 1 ? creditAccountIds.first : null,
       destinationAccountId:
           debitAccountIds.length == 1 ? debitAccountIds.first : null,
       sourceName: creditAccountIds.length == 1
-          ? (accountById[creditAccountIds.first]?.name ?? creditAccountIds.first)
+          ? (accountById[creditAccountIds.first]?.name ??
+              creditAccountIds.first)
           : null,
       destinationName: debitAccountIds.length == 1
           ? (accountById[debitAccountIds.first]?.name ?? debitAccountIds.first)
@@ -4047,8 +4049,9 @@ class DoubleEntryEngine {
       }
     }
 
-    final principalDebits =
-        expenseDebits.where((p) => !isExpenseFeePosting(p)).toList(growable: false);
+    final principalDebits = expenseDebits
+        .where((p) => !isExpenseFeePosting(p))
+        .toList(growable: false);
     if (principalDebits.isEmpty ||
         expenseCredits.isNotEmpty ||
         paidCreditPosting == null) {

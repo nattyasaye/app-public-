@@ -104,7 +104,8 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
   }
 
   List<String> _splitBatchMessages(String raw) {
-    final normalized = raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
+    final normalized =
+        raw.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
     if (normalized.isEmpty) return const [];
     return normalized
         .split(RegExp(r'\n\s*---+\s*\n|\n\s*\n+'))
@@ -167,7 +168,8 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
       destinationAccountId: destSuggestion,
       categoryId: suggestedCat,
       feeCategoryId: SystemControlAccounts.feeCategoryId,
-      occurrenceDate: FinanceSmsParsers.resolveDefaultDraftOccurrenceDate(draft),
+      occurrenceDate:
+          FinanceSmsParsers.resolveDefaultDraftOccurrenceDate(draft),
       description: FinanceSmsParsers.buildDefaultDraftDescription(draft),
       payee: draft.counterpartyName ?? '',
     );
@@ -342,7 +344,8 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                           DaywellStatusBanner(
                             tone: DaywellStatusTone.error,
                             message: _globalError!,
-                            onDismiss: () => setState(() => _globalError = null),
+                            onDismiss: () =>
+                                setState(() => _globalError = null),
                           ),
                         ],
                         const SizedBox(height: SharedDesignTokens.spacingSm),
@@ -362,7 +365,9 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                                 items: const [
                                   DropdownMenuItem<SmsProvider?>(
                                     value: null,
-                                    child: Text('Auto-detect (CBE / Telebirr / BOA)'),
+                                    child: Text(
+                                      'Auto-detect (CBE / Telebirr / BOA)',
+                                    ),
                                   ),
                                   DropdownMenuItem<SmsProvider?>(
                                     value: SmsProvider.cbe,
@@ -402,8 +407,9 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                                 onPressed: _isBusy
                                     ? null
                                     : () async {
-                                        final msgs =
-                                            _splitBatchMessages(_pasteCtrl.text);
+                                        final msgs = _splitBatchMessages(
+                                          _pasteCtrl.text,
+                                        );
                                         if (msgs.isEmpty) {
                                           setState(() {
                                             _globalError =
@@ -682,22 +688,22 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
             if (draft.accountHint != null)
               Text(
                 'Account hint: ${draft.accountHint}',
-                style:
-                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+                style: textTheme.bodySmall
+                    ?.copyWith(color: semantic.textSecondary),
               ),
             if (draft.transactionReference != null)
               Text(
                 'Reference: ${draft.transactionReference}',
-                style:
-                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+                style: textTheme.bodySmall
+                    ?.copyWith(color: semantic.textSecondary),
               ),
             if (draft.receiptUrl != null)
               Text(
                 'Receipt URL (offline ref): ${draft.receiptUrl}',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style:
-                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+                style: textTheme.bodySmall
+                    ?.copyWith(color: semantic.textSecondary),
               ),
           ],
           if (draft.hasAmountMismatch) ...[
@@ -788,9 +794,10 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
               ],
               onChanged: (nextType) {
                 if (nextType == null) return;
-                final nextPool = nextType == SmsSuggestedTransactionType.transfer
-                    ? transferableAccounts
-                    : spendableAccounts;
+                final nextPool =
+                    nextType == SmsSuggestedTransactionType.transfer
+                        ? transferableAccounts
+                        : spendableAccounts;
                 final nextAccountId =
                     nextPool.any((a) => a.id == edit.accountId)
                         ? edit.accountId
@@ -878,7 +885,8 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
             if (feesCents > 0) ...[
               DaywellDropdownField<String>(
                 label: 'Fee Category',
-                value: feeCategoryItems.any((i) => i.value == edit.feeCategoryId)
+                value: feeCategoryItems
+                        .any((i) => i.value == edit.feeCategoryId)
                     ? edit.feeCategoryId
                     : null,
                 items: feeCategoryItems,
@@ -990,20 +998,21 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                               draftId: draft.id,
                               finalType: selectedType,
                               accountId: edit.accountId!,
-                              destinationAccountId:
-                                  selectedType == SmsSuggestedTransactionType.transfer
-                                      ? edit.destinationAccountId
-                                      : null,
-                              categoryId:
-                                  selectedType == SmsSuggestedTransactionType.transfer
-                                      ? null
-                                      : edit.categoryId,
+                              destinationAccountId: selectedType ==
+                                      SmsSuggestedTransactionType.transfer
+                                  ? edit.destinationAccountId
+                                  : null,
+                              categoryId: selectedType ==
+                                      SmsSuggestedTransactionType.transfer
+                                  ? null
+                                  : edit.categoryId,
                               feeCategoryId:
                                   feesCents > 0 ? edit.feeCategoryId : null,
                               occurrenceDate: edit.occurrenceDate,
                               description: edit.description,
                               payee: selectedType !=
-                                          SmsSuggestedTransactionType.transfer &&
+                                          SmsSuggestedTransactionType
+                                              .transfer &&
                                       edit.payee.trim().isNotEmpty
                                   ? edit.payee.trim()
                                   : null,
@@ -1063,7 +1072,9 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
     );
     final hh = addis.hour.toString().padLeft(2, '0');
     final mm = addis.minute.toString().padLeft(2, '0');
-    return '${SharedDateFormatter.formatDual(date, useAmharic: false)} · $hh:$mm EAT';
+    final formattedDate =
+        SharedDateFormatter.formatDual(date, useAmharic: false);
+    return '$formattedDate · $hh:$mm EAT';
   }
 
   (String, DaywellStatusTone) _permissionBadgeFor(
@@ -1251,19 +1262,19 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
               ),
               Text(
                 'Last completed scan: ${_formatUtcAddisLabel(checkpoint.lastSuccessUtc)}',
-                style:
-                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+                style: textTheme.bodySmall
+                    ?.copyWith(color: semantic.textSecondary),
               ),
               Text(
                 'Last SMS checkpoint: ${_formatUtcAddisLabel(checkpoint.lastProcessedReceivedAtUtc)}',
-                style:
-                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+                style: textTheme.bodySmall
+                    ?.copyWith(color: semantic.textSecondary),
               ),
             ] else ...[
               Text(
                 'Inbox reading is unavailable on this device.',
-                style:
-                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+                style: textTheme.bodySmall
+                    ?.copyWith(color: semantic.textSecondary),
               ),
             ],
             const SizedBox(height: SharedDesignTokens.spacingCompact),
@@ -1335,8 +1346,8 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
             ] else ...[
               Text(
                 'Immediate incoming SMS broadcast detection is unavailable on this device.',
-                style:
-                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+                style: textTheme.bodySmall
+                    ?.copyWith(color: semantic.textSecondary),
               ),
             ],
           ],
@@ -1420,7 +1431,8 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                   onPressed: busy
                       ? null
                       : () async {
-                          final rawKey = FinanceSmsInboxScanner.normalizeSenderKey(
+                          final rawKey =
+                              FinanceSmsInboxScanner.normalizeSenderKey(
                             _aliasSenderCtrl.text,
                           );
                           if (rawKey.isEmpty) {

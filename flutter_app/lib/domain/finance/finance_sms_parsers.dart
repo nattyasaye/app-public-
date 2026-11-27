@@ -179,7 +179,12 @@ class FinanceSmsParsers {
     final second = int.parse(match.group(6)!);
 
     if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-    if (hour < 0 || hour > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) {
+    if (hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59 ||
+        second < 0 ||
+        second > 59) {
       return null;
     }
 
@@ -225,8 +230,9 @@ class FinanceSmsParsers {
     String fingerprint,
     String? ref,
   ) {
-    final seed =
-        ref != null && ref.isNotEmpty ? '${provider.dbValue}:$ref:$fingerprint' : fingerprint;
+    final seed = ref != null && ref.isNotEmpty
+        ? '${provider.dbValue}:$ref:$fingerprint'
+        : fingerprint;
     final hash = sha256HexSync(seed);
     return 'sms-draft-${provider.dbValue}-${hash.substring(0, 16)}';
   }
@@ -301,7 +307,8 @@ class FinanceSmsParsers {
   ) {
     final transferable = accounts.where((a) {
       if (!DoubleEntryEngine.isActiveVerifiedEtbAccount(a)) return false;
-      if (draft.suggestedAccountId != null && a.id == draft.suggestedAccountId) {
+      if (draft.suggestedAccountId != null &&
+          a.id == draft.suggestedAccountId) {
         return false;
       }
       return (a.type == AccountType.asset &&
@@ -1503,7 +1510,8 @@ class FinanceSmsParsers {
       return const SmsParseOutcome.ignored(ignoreReason: 'Empty SMS message.');
     }
 
-    final effectiveReceivedAt = (receivedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
+    final effectiveReceivedAt =
+        (receivedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
     final detected = detectSmsProvider(trimmed, providerHint: providerHint);
 
     if (detected == null || detected == SmsProvider.unknown) {

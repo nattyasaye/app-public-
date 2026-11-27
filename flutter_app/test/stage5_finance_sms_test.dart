@@ -51,7 +51,10 @@ void main() {
         expect(boaDebit.isIgnoredNonTransactional, isFalse);
         expect(boaDebit.draft?.provider, SmsProvider.boa);
         expect(boaDebit.draft?.status, SmsDraftStatus.needsReview);
-        expect(boaDebit.draft?.suggestedType, SmsSuggestedTransactionType.expense);
+        expect(
+          boaDebit.draft?.suggestedType,
+          SmsSuggestedTransactionType.expense,
+        );
         expect(boaDebit.draft?.principalCents, 45050);
         expect(boaDebit.draft?.reportedBalanceCents, 1454950);
         expect(boaDebit.draft?.transactionReference, 'FT26326BOA01');
@@ -66,7 +69,10 @@ void main() {
         expect(boaPosLock.isIgnoredNonTransactional, isFalse);
         expect(boaPosLock.draft?.status, SmsDraftStatus.unrecognized);
         expect(boaPosLock.draft?.isNonLedgerNotice, isTrue);
-        expect(boaPosLock.draft?.suggestedType, SmsSuggestedTransactionType.unknown);
+        expect(
+          boaPosLock.draft?.suggestedType,
+          SmsSuggestedTransactionType.unknown,
+        );
         expect(boaPosLock.draft?.canApprove, isFalse);
 
         // BOA security/promo ignored
@@ -243,7 +249,10 @@ void main() {
         expect(feePosting.amountCents, 120);
         expect(feePosting.note, contains('Service fee: ETB 0.87'));
         expect(feePosting.note, contains('VAT: ETB 0.13'));
-        expect(feePosting.note, contains('Disaster Recovery / Other: ETB 0.20'));
+        expect(
+          feePosting.note,
+          contains('Disaster Recovery / Other: ETB 0.20'),
+        );
         expect(
           approvedEntry!.description.contains('Service charge of ETB'),
           isFalse,

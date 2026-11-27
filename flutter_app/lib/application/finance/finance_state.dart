@@ -514,9 +514,7 @@ class FinanceModuleState {
 
   int get legacyNonEtbEntryCount {
     final map = classificationsByEntryId;
-    return journalEntries
-        .where((e) => map[e.id]?.isEligibleEtb != true)
-        .length;
+    return journalEntries.where((e) => map[e.id]?.isEligibleEtb != true).length;
   }
 
   bool get hasLegacyNonEtbRecords =>

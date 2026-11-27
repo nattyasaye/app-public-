@@ -278,8 +278,9 @@ abstract class IDebtRepositoryContract {
   });
 
   /// Savings Goals
-  Future<List<SavingsGoalModel>> getSavingsGoals(
-      {bool includeArchived = false});
+  Future<List<SavingsGoalModel>> getSavingsGoals({
+    bool includeArchived = false,
+  });
   Future<SavingsGoalModel> createSavingsGoal(SavingsGoalModel goal);
   Future<SavingsGoalModel> updateSavingsGoal(SavingsGoalModel goal);
   Future<void> deleteSavingsGoal(String goalId);

@@ -302,7 +302,8 @@ class FinanceSmsInboxScanner {
     }
 
     final trimmedSender = senderAddress.trim();
-    if (trimmedSender.isNotEmpty && RegExp(r'[A-Za-z]').hasMatch(trimmedSender)) {
+    if (trimmedSender.isNotEmpty &&
+        RegExp(r'[A-Za-z]').hasMatch(trimmedSender)) {
       if (explicitBodyBrand != null) {
         return SmsSenderIdentification.accepted(
           provider: explicitBodyBrand,
@@ -328,7 +329,10 @@ class FinanceSmsInboxScanner {
 
   static final List<RegExp> _failedOrDeclinedPatterns = <RegExp>[
     RegExp(r'\btransaction\s+(?:has\s+)?failed\b', caseSensitive: false),
-    RegExp(r'\b(?:payment|transfer)\s+(?:has\s+)?failed\b', caseSensitive: false),
+    RegExp(
+      r'\b(?:payment|transfer)\s+(?:has\s+)?failed\b',
+      caseSensitive: false,
+    ),
     RegExp(r'\btransaction\s+(?:was\s+)?declined\b', caseSensitive: false),
     RegExp(r'\bdeclined\s+due\s+to\b', caseSensitive: false),
     RegExp(r'\binsufficient\s+(?:balance|funds)\b', caseSensitive: false),
@@ -359,7 +363,8 @@ class FinanceSmsInboxScanner {
     SmsInboxMessage message, {
     Map<String, SmsProvider> userAliases = const <String, SmsProvider>{},
     List<AccountModel> accounts = const <AccountModel>[],
-    List<TransactionCategoryModel> categories = const <TransactionCategoryModel>[],
+    List<TransactionCategoryModel> categories =
+        const <TransactionCategoryModel>[],
   }) {
     final trimmedBody = message.body.trim();
     if (trimmedBody.isEmpty) {
@@ -382,7 +387,8 @@ class FinanceSmsInboxScanner {
     if (isFailedOrDeclinedSms(trimmedBody)) {
       return SmsParseOutcome.ignored(
         provider: identification.provider,
-        ignoreReason: 'Ignored failed, declined, or insufficient-balance notice.',
+        ignoreReason:
+            'Ignored failed, declined, or insufficient-balance notice.',
       );
     }
 

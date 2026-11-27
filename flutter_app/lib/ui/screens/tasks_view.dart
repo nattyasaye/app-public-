@@ -2238,6 +2238,22 @@ class _TasksViewState extends State<TasksView>
     String? editingTag;
     String? editError;
 
+    VoidCallback undoTags(
+      List<TaskEntity> prevTasks,
+      List<String> prevCustom,
+      Set<String> prevFilters,
+    ) {
+      return () {
+        unawaited(
+          controller.restoreTasksLabelsSnapshot(
+            prevTasks,
+            previousCustomTags: prevCustom,
+            previousTagFilters: prevFilters,
+          ),
+        );
+      };
+    }
+
     unawaited(
       showDialog<void>(
         context: context,
@@ -2424,16 +2440,10 @@ class _TasksViewState extends State<TasksView>
                                                       ),
                                                       action: SnackBarAction(
                                                         label: 'Undo',
-                                                        onPressed: () =>
-                                                            unawaited(
-                                                          controller
-                                                              .restoreTasksLabelsSnapshot(
-                                                            prevTasks,
-                                                            previousCustomTags:
-                                                                prevCustom,
-                                                            previousTagFilters:
-                                                                prevFilters,
-                                                          ),
+                                                        onPressed: undoTags(
+                                                          prevTasks,
+                                                          prevCustom,
+                                                          prevFilters,
                                                         ),
                                                       ),
                                                     ),
@@ -2517,15 +2527,10 @@ class _TasksViewState extends State<TasksView>
                                                 ),
                                                 action: SnackBarAction(
                                                   label: 'Undo',
-                                                  onPressed: () => unawaited(
-                                                    controller
-                                                        .restoreTasksLabelsSnapshot(
-                                                      prevTasks,
-                                                      previousCustomTags:
-                                                          prevCustom,
-                                                      previousTagFilters:
-                                                          prevFilters,
-                                                    ),
+                                                  onPressed: undoTags(
+                                                    prevTasks,
+                                                    prevCustom,
+                                                    prevFilters,
                                                   ),
                                                 ),
                                               ),
@@ -2792,9 +2797,10 @@ class _TasksViewState extends State<TasksView>
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     DaywellDropdownField<String>(
                       label: 'Category',
-                      value: categoryChoices.any((c) => c.$1 == selectedCategory)
-                          ? selectedCategory
-                          : 'general',
+                      value:
+                          categoryChoices.any((c) => c.$1 == selectedCategory)
+                              ? selectedCategory
+                              : 'general',
                       items: [
                         for (final c in categoryChoices)
                           DropdownMenuItem(value: c.$1, child: Text(c.$2)),
@@ -4678,13 +4684,18 @@ class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
                             child: ListTile(
                               onTap: () async {
                                 if (hasOtherNonTaskLink) {
-                                  final existingTarget = existingCalendarEventId !=
-                                          null
-                                      ? ((calendarEventTitle != null &&
-                                              calendarEventTitle.isNotEmpty)
-                                          ? 'Calendar event "$calendarEventTitle"'
-                                          : 'an unavailable Calendar event')
-                                      : (note.linkedModule ?? 'another item');
+                                  final String existingTarget;
+                                  if (existingCalendarEventId != null) {
+                                    final hasEventTitle =
+                                        calendarEventTitle != null &&
+                                            calendarEventTitle.isNotEmpty;
+                                    existingTarget = hasEventTitle
+                                        ? 'Calendar event "$calendarEventTitle"'
+                                        : 'an unavailable Calendar event';
+                                  } else {
+                                    existingTarget =
+                                        note.linkedModule ?? 'another item';
+                                  }
                                   final confirmed =
                                       await DaywellConfirmationDialog.show(
                                     context,

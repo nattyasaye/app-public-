@@ -1028,10 +1028,9 @@ class AppStateManager extends ChangeNotifier {
 
       RawDeviceSmsMessage? effectiveMessage = incomingMessage;
       var effectiveFallbackToInbox = fallbackToInbox;
-      var effectiveEventUtc = (fallbackEventReceivedAtUtc ??
-              incomingMessage?.receivedAtUtc ??
-              nowUtc)
-          .toUtc();
+      var effectiveEventUtc = fallbackEventReceivedAtUtc?.toUtc() ??
+          incomingMessage?.receivedAtUtc.toUtc() ??
+          nowUtc;
 
       if (effectiveMessage == null &&
           !effectiveFallbackToInbox &&

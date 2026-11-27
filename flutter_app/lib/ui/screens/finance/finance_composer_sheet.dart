@@ -118,11 +118,10 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         _payeeCtrl.text.trim() != _initialPayee ||
         _correctionReasonCtrl.text.trim() != _initialCorrectionReason ||
         _newPartyCtrl.text.trim() != _initialNewParty;
-    final hasDateChanges =
-        _selectedDate != _initialSelectedDate ||
-            _movementDate != _initialMovementDate ||
-            _isMovementDateSynced != _initialIsMovementDateSynced ||
-            _dueDate != _initialDueDate;
+    final hasDateChanges = _selectedDate != _initialSelectedDate ||
+        _movementDate != _initialMovementDate ||
+        _isMovementDateSynced != _initialIsMovementDateSynced ||
+        _dueDate != _initialDueDate;
     if (_isEditing) {
       final hasSelectionChanges = _mode != _initialMode ||
           _accountId != _initialAccountId ||
@@ -1015,423 +1014,432 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                   ),
                 ],
               ),
-            if (!_isEditing) ...[
-              const SizedBox(height: SharedDesignTokens.spacingSm),
-              Wrap(
-                spacing: SharedDesignTokens.spacingSm,
-                runSpacing: SharedDesignTokens.spacingSm,
-                children: [
-                  ChoiceChip(
-                    label: const Text('Expense'),
-                    selected: _mode == FinanceComposerMode.expense,
-                    onSelected: (_) => _switchMode(FinanceComposerMode.expense),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Income'),
-                    selected: _mode == FinanceComposerMode.income,
-                    onSelected: (_) => _switchMode(FinanceComposerMode.income),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Transfer'),
-                    selected: _mode == FinanceComposerMode.transfer,
-                    onSelected: (_) =>
-                        _switchMode(FinanceComposerMode.transfer),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Split Expense'),
-                    selected: _mode == FinanceComposerMode.split,
-                    onSelected: (_) => _switchMode(FinanceComposerMode.split),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Lend'),
-                    selected: _mode == FinanceComposerMode.lend,
-                    onSelected: (_) => _switchMode(FinanceComposerMode.lend),
-                  ),
-                  ChoiceChip(
-                    label: const Text('Borrow'),
-                    selected: _mode == FinanceComposerMode.borrow,
-                    onSelected: (_) => _switchMode(FinanceComposerMode.borrow),
-                  ),
-                ],
-              ),
-            ],
-            if (_validationError != null) ...[
+              if (!_isEditing) ...[
+                const SizedBox(height: SharedDesignTokens.spacingSm),
+                Wrap(
+                  spacing: SharedDesignTokens.spacingSm,
+                  runSpacing: SharedDesignTokens.spacingSm,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Expense'),
+                      selected: _mode == FinanceComposerMode.expense,
+                      onSelected: (_) =>
+                          _switchMode(FinanceComposerMode.expense),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Income'),
+                      selected: _mode == FinanceComposerMode.income,
+                      onSelected: (_) =>
+                          _switchMode(FinanceComposerMode.income),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Transfer'),
+                      selected: _mode == FinanceComposerMode.transfer,
+                      onSelected: (_) =>
+                          _switchMode(FinanceComposerMode.transfer),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Split Expense'),
+                      selected: _mode == FinanceComposerMode.split,
+                      onSelected: (_) => _switchMode(FinanceComposerMode.split),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Lend'),
+                      selected: _mode == FinanceComposerMode.lend,
+                      onSelected: (_) => _switchMode(FinanceComposerMode.lend),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Borrow'),
+                      selected: _mode == FinanceComposerMode.borrow,
+                      onSelected: (_) =>
+                          _switchMode(FinanceComposerMode.borrow),
+                    ),
+                  ],
+                ),
+              ],
+              if (_validationError != null) ...[
+                const SizedBox(height: SharedDesignTokens.spacingCompact),
+                DaywellStatusBanner(
+                  message: _validationError!,
+                  tone: DaywellStatusTone.error,
+                  onDismiss: () => setState(() => _validationError = null),
+                ),
+              ],
               const SizedBox(height: SharedDesignTokens.spacingCompact),
-              DaywellStatusBanner(
-                message: _validationError!,
-                tone: DaywellStatusTone.error,
-                onDismiss: () => setState(() => _validationError = null),
-              ),
-            ],
-            const SizedBox(height: SharedDesignTokens.spacingCompact),
-            if (accounts.isEmpty)
-              DaywellStatusBanner(
-                title: 'No Eligible Active ETB Accounts Available',
-                message: _mode == FinanceComposerMode.transfer
-                    ? 'Create or restore an active ETB account before recording transfers.'
-                    : 'Create or restore an active spendable ETB account (savings vaults can only participate in transfers).',
-                tone: DaywellStatusTone.warning,
-              )
-            else ...[
-              DaywellDropdownField<String>(
-                label: _primaryAccountLabel(),
-                value: accounts.any((a) => a.id == _accountId)
-                    ? _accountId
-                    : accounts.first.id,
-                items: [
-                  for (final a in accounts)
-                    DropdownMenuItem(
-                      value: a.id,
-                      child: Text(
-                        '${a.name}${a.subType.isSavingsVault ? ' [Vault]' : ''} (${FinanceUiFormatters.formatCurrencyCents(state.getAccountBalanceCents(a), currencyCode: a.currencyCode)})',
-                        overflow: TextOverflow.ellipsis,
+              if (accounts.isEmpty)
+                DaywellStatusBanner(
+                  title: 'No Eligible Active ETB Accounts Available',
+                  message: _mode == FinanceComposerMode.transfer
+                      ? 'Create or restore an active ETB account before recording transfers.'
+                      : 'Create or restore an active spendable ETB account (savings vaults can only participate in transfers).',
+                  tone: DaywellStatusTone.warning,
+                )
+              else ...[
+                DaywellDropdownField<String>(
+                  label: _primaryAccountLabel(),
+                  value: accounts.any((a) => a.id == _accountId)
+                      ? _accountId
+                      : accounts.first.id,
+                  items: [
+                    for (final a in accounts)
+                      DropdownMenuItem(
+                        value: a.id,
+                        child: Text(
+                          '${a.name}${a.subType.isSavingsVault ? ' [Vault]' : ''} (${FinanceUiFormatters.formatCurrencyCents(state.getAccountBalanceCents(a), currencyCode: a.currencyCode)})',
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
+                  ],
+                  onChanged: (val) => setState(() {
+                    _accountId = val;
+                    if (_mode == FinanceComposerMode.transfer &&
+                        _destinationAccountId == val &&
+                        accounts.length > 1) {
+                      _destinationAccountId =
+                          accounts.firstWhere((a) => a.id != val).id;
+                    }
+                  }),
+                ),
+                if (_mode == FinanceComposerMode.transfer) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  if (accounts.length < 2)
+                    const DaywellStatusBanner(
+                      message:
+                          'Add at least 2 active ETB accounts (including liquid or savings vault accounts) to transfer between accounts.',
+                      tone: DaywellStatusTone.warning,
+                    )
+                  else
+                    DaywellDropdownField<String>(
+                      label: 'Destination Account',
+                      value: accounts.any((a) => a.id == _destinationAccountId)
+                          ? _destinationAccountId
+                          : accounts
+                              .firstWhere(
+                                (a) => a.id != _accountId,
+                                orElse: () => accounts.first,
+                              )
+                              .id,
+                      items: [
+                        for (final a in accounts)
+                          DropdownMenuItem(
+                            value: a.id,
+                            child: Text(
+                              '${a.name}${a.subType.isSavingsVault ? ' [Vault]' : ''} (${FinanceUiFormatters.formatCurrencyCents(state.getAccountBalanceCents(a), currencyCode: a.currencyCode)})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (val) =>
+                          setState(() => _destinationAccountId = val),
                     ),
                 ],
-                onChanged: (val) => setState(() {
-                  _accountId = val;
-                  if (_mode == FinanceComposerMode.transfer &&
-                      _destinationAccountId == val &&
-                      accounts.length > 1) {
-                    _destinationAccountId =
-                        accounts.firstWhere((a) => a.id != val).id;
-                  }
-                }),
-              ),
-              if (_mode == FinanceComposerMode.transfer) ...[
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                if (accounts.length < 2)
-                  const DaywellStatusBanner(
-                    message:
-                        'Add at least 2 active ETB accounts (including liquid or savings vault accounts) to transfer between accounts.',
-                    tone: DaywellStatusTone.warning,
-                  )
-                else
-                  DaywellDropdownField<String>(
-                    label: 'Destination Account',
-                    value: accounts.any((a) => a.id == _destinationAccountId)
-                        ? _destinationAccountId
-                        : accounts
-                            .firstWhere(
-                              (a) => a.id != _accountId,
-                              orElse: () => accounts.first,
-                            )
-                            .id,
-                    items: [
-                      for (final a in accounts)
-                        DropdownMenuItem(
-                          value: a.id,
-                          child: Text(
-                            '${a.name}${a.subType.isSavingsVault ? ' [Vault]' : ''} (${FinanceUiFormatters.formatCurrencyCents(state.getAccountBalanceCents(a), currencyCode: a.currencyCode)})',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: (val) =>
-                        setState(() => _destinationAccountId = val),
-                  ),
-              ],
-              if (_modeUsesCategory) ...[
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellDropdownField<String>(
-                  label: _mode == FinanceComposerMode.split
-                      ? 'My Share Category'
-                      : 'Category',
-                  value: categoryItems.any((i) => i.value == _categoryId)
-                      ? _categoryId
-                      : (categoryItems.isNotEmpty
-                          ? categoryItems.first.value
-                          : null),
-                  items: categoryItems,
-                  onChanged: (val) => setState(() => _categoryId = val),
-                ),
-              ],
-              const SizedBox(height: SharedDesignTokens.spacingCompact),
-              DaywellTextField(
-                controller: _amountCtrl,
-                label: _mode == FinanceComposerMode.split
-                    ? 'My Share Amount (ETB)'
-                    : 'Amount (ETB)',
-                hintText: '0.00',
-                isRequired: true,
-                keyboardType:
-                    const TextInputType.numberWithOptions(decimal: true),
-              ),
-              if (_modeUsesFee) ...[
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: _feeCtrl,
-                  label: 'Bank / Service Fee (ETB, optional)',
-                  hintText: '0.00',
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
-                ),
-                if (_showFeeCategory) ...[
+                if (_modeUsesCategory) ...[
                   const SizedBox(height: SharedDesignTokens.spacingCompact),
                   DaywellDropdownField<String>(
-                    label: 'Fee Category',
-                    value: feeCategoryItems.any((i) => i.value == _feeCategoryId)
-                        ? _feeCategoryId
-                        : (feeCategoryItems.isNotEmpty
-                            ? feeCategoryItems.first.value
+                    label: _mode == FinanceComposerMode.split
+                        ? 'My Share Category'
+                        : 'Category',
+                    value: categoryItems.any((i) => i.value == _categoryId)
+                        ? _categoryId
+                        : (categoryItems.isNotEmpty
+                            ? categoryItems.first.value
                             : null),
-                    items: feeCategoryItems,
-                    onChanged: (val) => setState(() => _feeCategoryId = val),
+                    items: categoryItems,
+                    onChanged: (val) => setState(() => _categoryId = val),
                   ),
                 ],
-                if (_mode == FinanceComposerMode.expense &&
-                    _parsedFeeCents > 0 &&
-                    mySharePreviewCents > 0) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingXs),
-                  Text(
-                    'Total deduction: ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents + _parsedFeeCents)} '
-                    '(Principal ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents)} + '
-                    'Fee ${FinanceUiFormatters.formatEtbCents(_parsedFeeCents)})',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: semantic.textSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ],
-              if (_mode == FinanceComposerMode.split) ...[
                 const SizedBox(height: SharedDesignTokens.spacingCompact),
                 DaywellTextField(
-                  controller: _theirShareCtrl,
-                  label: 'Their Share / Receivable (ETB)',
+                  controller: _amountCtrl,
+                  label: _mode == FinanceComposerMode.split
+                      ? 'My Share Amount (ETB)'
+                      : 'Amount (ETB)',
                   hintText: '0.00',
                   isRequired: true,
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                 ),
-                if (mySharePreviewCents > 0 || theirSharePreviewCents > 0) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingXs),
-                  Text(
-                    'Total Paid: ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents + theirSharePreviewCents)}',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: semantic.textSecondary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
-              ],
-              if (_modeUsesParty) ...[
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                if (activeParties.isNotEmpty && !_showNewPartyField) ...[
-                  DaywellDropdownField<String>(
-                    label: _mode == FinanceComposerMode.split
-                        ? 'Split With (Person / Party)'
-                        : 'Person / Counterparty',
-                    value: activeParties.any((p) => p.id == _partyId)
-                        ? _partyId
-                        : activeParties.first.id,
-                    items: [
-                      for (final p in activeParties)
-                        DropdownMenuItem(
-                          value: p.id,
-                          child: Text(p.name, overflow: TextOverflow.ellipsis),
-                        ),
-                    ],
-                    onChanged: (val) => setState(() => _partyId = val),
-                  ),
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: DaywellButton(
-                      label: '+ New Person',
-                      variant: DaywellButtonVariant.text,
-                      size: DaywellButtonSize.compact,
-                      onPressed: () =>
-                          setState(() => _showNewPartyField = true),
-                    ),
-                  ),
-                ] else ...[
+                if (_modeUsesFee) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
                   DaywellTextField(
-                    controller: _newPartyCtrl,
-                    label: 'New Person / Party Name',
-                    hintText: 'e.g. Abebe',
-                    isRequired: true,
+                    controller: _feeCtrl,
+                    label: 'Bank / Service Fee (ETB, optional)',
+                    hintText: '0.00',
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
                   ),
-                  if (activeParties.isNotEmpty)
+                  if (_showFeeCategory) ...[
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellDropdownField<String>(
+                      label: 'Fee Category',
+                      value:
+                          feeCategoryItems.any((i) => i.value == _feeCategoryId)
+                              ? _feeCategoryId
+                              : (feeCategoryItems.isNotEmpty
+                                  ? feeCategoryItems.first.value
+                                  : null),
+                      items: feeCategoryItems,
+                      onChanged: (val) => setState(() => _feeCategoryId = val),
+                    ),
+                  ],
+                  if (_mode == FinanceComposerMode.expense &&
+                      _parsedFeeCents > 0 &&
+                      mySharePreviewCents > 0) ...[
+                    const SizedBox(height: SharedDesignTokens.spacingXs),
+                    Text(
+                      'Total deduction: ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents + _parsedFeeCents)} '
+                      '(Principal ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents)} + '
+                      'Fee ${FinanceUiFormatters.formatEtbCents(_parsedFeeCents)})',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: semantic.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+                if (_mode == FinanceComposerMode.split) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  DaywellTextField(
+                    controller: _theirShareCtrl,
+                    label: 'Their Share / Receivable (ETB)',
+                    hintText: '0.00',
+                    isRequired: true,
+                    keyboardType:
+                        const TextInputType.numberWithOptions(decimal: true),
+                  ),
+                  if (mySharePreviewCents > 0 ||
+                      theirSharePreviewCents > 0) ...[
+                    const SizedBox(height: SharedDesignTokens.spacingXs),
+                    Text(
+                      'Total Paid: ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents + theirSharePreviewCents)}',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: semantic.textSecondary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ],
+                if (_modeUsesParty) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  if (activeParties.isNotEmpty && !_showNewPartyField) ...[
+                    DaywellDropdownField<String>(
+                      label: _mode == FinanceComposerMode.split
+                          ? 'Split With (Person / Party)'
+                          : 'Person / Counterparty',
+                      value: activeParties.any((p) => p.id == _partyId)
+                          ? _partyId
+                          : activeParties.first.id,
+                      items: [
+                        for (final p in activeParties)
+                          DropdownMenuItem(
+                            value: p.id,
+                            child: Text(
+                              p.name,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (val) => setState(() => _partyId = val),
+                    ),
                     Align(
                       alignment: AlignmentDirectional.centerStart,
                       child: DaywellButton(
-                        label: 'Choose Existing Party',
+                        label: '+ New Person',
                         variant: DaywellButtonVariant.text,
                         size: DaywellButtonSize.compact,
                         onPressed: () =>
-                            setState(() => _showNewPartyField = false),
+                            setState(() => _showNewPartyField = true),
                       ),
                     ),
+                  ] else ...[
+                    DaywellTextField(
+                      controller: _newPartyCtrl,
+                      label: 'New Person / Party Name',
+                      hintText: 'e.g. Abebe',
+                      isRequired: true,
+                    ),
+                    if (activeParties.isNotEmpty)
+                      Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: DaywellButton(
+                          label: 'Choose Existing Party',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: () =>
+                              setState(() => _showNewPartyField = false),
+                        ),
+                      ),
+                  ],
                 ],
-              ],
-              if (_modeUsesDueDate) ...[
+                if (_modeUsesDueDate) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingXs),
+                  Wrap(
+                    spacing: SharedDesignTokens.spacingSm,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      Text(
+                        _dueDate == null
+                            ? 'Repayment Due Date: Optional'
+                            : 'Due: ${SharedDateFormatter.formatDual(_dueDate!, useAmharic: false)}',
+                        style: textTheme.bodySmall?.copyWith(
+                          color: semantic.textSecondary,
+                        ),
+                      ),
+                      DaywellButton(
+                        label: _dueDate == null ? 'Set Due Date' : 'Change',
+                        variant: DaywellButtonVariant.text,
+                        size: DaywellButtonSize.compact,
+                        onPressed: () async {
+                          final picked =
+                              await FinanceUiFormatters.pickCalendarDate(
+                            context,
+                            initialDate: _dueDate ?? _selectedDate.addDays(7),
+                          );
+                          if (picked != null && mounted) {
+                            setState(() => _dueDate = picked);
+                          }
+                        },
+                      ),
+                      if (_dueDate != null)
+                        DaywellButton(
+                          label: 'Clear',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: () => setState(() => _dueDate = null),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: SharedDesignTokens.spacingCompact),
+                DaywellTextField(
+                  controller: _descriptionCtrl,
+                  label: 'Description',
+                  hintText: _mode == FinanceComposerMode.lend
+                      ? 'e.g. Short-term loan to Abebe'
+                      : _mode == FinanceComposerMode.borrow
+                          ? 'e.g. Emergency advance from Dawit'
+                          : 'e.g. Weekly groceries at Shoa',
+                ),
+                if (_modeUsesPayee) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  DaywellTextField(
+                    controller: _payeeCtrl,
+                    label: _mode == FinanceComposerMode.income
+                        ? 'Source / Payer (optional)'
+                        : 'Merchant / Payee (optional)',
+                    hintText: 'Optional',
+                  ),
+                ],
+                if (_isEditing) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingCompact),
+                  DaywellTextField(
+                    controller: _correctionReasonCtrl,
+                    label: 'Correction Reason',
+                    hintText: 'e.g. Receipt showed 540 ETB instead of 450 ETB',
+                    isRequired: true,
+                  ),
+                ],
+                const SizedBox(height: SharedDesignTokens.spacingCompact),
+                Wrap(
+                  spacing: SharedDesignTokens.spacingSm,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      'Occurrence Date: ${SharedDateFormatter.formatDual(_selectedDate, useAmharic: false)}',
+                      style: textTheme.bodySmall?.copyWith(
+                        color: semantic.textSecondary,
+                      ),
+                    ),
+                    DaywellButton(
+                      label: 'Pick Date',
+                      variant: DaywellButtonVariant.text,
+                      size: DaywellButtonSize.compact,
+                      onPressed: () async {
+                        final picked =
+                            await FinanceUiFormatters.pickCalendarDate(
+                          context,
+                          initialDate: _selectedDate,
+                        );
+                        if (picked != null && mounted) {
+                          setState(() {
+                            _selectedDate = picked;
+                            if (_isMovementDateSynced) {
+                              _movementDate = picked;
+                            }
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
                 const SizedBox(height: SharedDesignTokens.spacingXs),
                 Wrap(
                   spacing: SharedDesignTokens.spacingSm,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     Text(
-                      _dueDate == null
-                          ? 'Repayment Due Date: Optional'
-                          : 'Due: ${SharedDateFormatter.formatDual(_dueDate!, useAmharic: false)}',
+                      _isMovementDateSynced
+                          ? 'Cash Movement Date: Same as occurrence date'
+                          : 'Cash Movement Date: ${SharedDateFormatter.formatDual(_movementDate, useAmharic: false)}',
                       style: textTheme.bodySmall?.copyWith(
                         color: semantic.textSecondary,
                       ),
                     ),
-                    DaywellButton(
-                      label: _dueDate == null ? 'Set Due Date' : 'Change',
-                      variant: DaywellButtonVariant.text,
-                      size: DaywellButtonSize.compact,
-                      onPressed: () async {
-                        final picked =
-                            await FinanceUiFormatters.pickCalendarDate(
-                          context,
-                          initialDate: _dueDate ?? _selectedDate.addDays(7),
-                        );
-                        if (picked != null && mounted) {
-                          setState(() => _dueDate = picked);
-                        }
-                      },
-                    ),
-                    if (_dueDate != null)
+                    if (_isMovementDateSynced)
                       DaywellButton(
-                        label: 'Clear',
+                        label: 'Separate Movement Date',
                         variant: DaywellButtonVariant.text,
                         size: DaywellButtonSize.compact,
-                        onPressed: () => setState(() => _dueDate = null),
-                      ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: SharedDesignTokens.spacingCompact),
-              DaywellTextField(
-                controller: _descriptionCtrl,
-                label: 'Description',
-                hintText: _mode == FinanceComposerMode.lend
-                    ? 'e.g. Short-term loan to Abebe'
-                    : _mode == FinanceComposerMode.borrow
-                        ? 'e.g. Emergency advance from Dawit'
-                        : 'e.g. Weekly groceries at Shoa',
-              ),
-              if (_modeUsesPayee) ...[
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: _payeeCtrl,
-                  label: _mode == FinanceComposerMode.income
-                      ? 'Source / Payer (optional)'
-                      : 'Merchant / Payee (optional)',
-                  hintText: 'Optional',
-                ),
-              ],
-              if (_isEditing) ...[
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: _correctionReasonCtrl,
-                  label: 'Correction Reason',
-                  hintText: 'e.g. Receipt showed 540 ETB instead of 450 ETB',
-                  isRequired: true,
-                ),
-              ],
-              const SizedBox(height: SharedDesignTokens.spacingCompact),
-              Wrap(
-                spacing: SharedDesignTokens.spacingSm,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text(
-                    'Occurrence Date: ${SharedDateFormatter.formatDual(_selectedDate, useAmharic: false)}',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: semantic.textSecondary,
-                    ),
-                  ),
-                  DaywellButton(
-                    label: 'Pick Date',
-                    variant: DaywellButtonVariant.text,
-                    size: DaywellButtonSize.compact,
-                    onPressed: () async {
-                      final picked = await FinanceUiFormatters.pickCalendarDate(
-                        context,
-                        initialDate: _selectedDate,
-                      );
-                      if (picked != null && mounted) {
-                        setState(() {
-                          _selectedDate = picked;
-                          if (_isMovementDateSynced) {
-                            _movementDate = picked;
+                        onPressed: () {
+                          setState(() {
+                            _isMovementDateSynced = false;
+                            _movementDate = _selectedDate;
+                          });
+                        },
+                      )
+                    else ...[
+                      DaywellButton(
+                        label: 'Pick Movement Date',
+                        variant: DaywellButtonVariant.text,
+                        size: DaywellButtonSize.compact,
+                        onPressed: () async {
+                          final picked =
+                              await FinanceUiFormatters.pickCalendarDate(
+                            context,
+                            initialDate: _movementDate,
+                          );
+                          if (picked != null && mounted) {
+                            setState(() => _movementDate = picked);
                           }
-                        });
-                      }
-                    },
-                  ),
-                ],
-              ),
-              const SizedBox(height: SharedDesignTokens.spacingXs),
-              Wrap(
-                spacing: SharedDesignTokens.spacingSm,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  Text(
-                    _isMovementDateSynced
-                        ? 'Cash Movement Date: Same as occurrence date'
-                        : 'Cash Movement Date: ${SharedDateFormatter.formatDual(_movementDate, useAmharic: false)}',
-                    style: textTheme.bodySmall?.copyWith(
-                      color: semantic.textSecondary,
-                    ),
-                  ),
-                  if (_isMovementDateSynced)
-                    DaywellButton(
-                      label: 'Separate Movement Date',
-                      variant: DaywellButtonVariant.text,
-                      size: DaywellButtonSize.compact,
-                      onPressed: () {
-                        setState(() {
-                          _isMovementDateSynced = false;
-                          _movementDate = _selectedDate;
-                        });
-                      },
-                    )
-                  else ...[
-                    DaywellButton(
-                      label: 'Pick Movement Date',
-                      variant: DaywellButtonVariant.text,
-                      size: DaywellButtonSize.compact,
-                      onPressed: () async {
-                        final picked =
-                            await FinanceUiFormatters.pickCalendarDate(
-                          context,
-                          initialDate: _movementDate,
-                        );
-                        if (picked != null && mounted) {
-                          setState(() => _movementDate = picked);
-                        }
-                      },
-                    ),
-                    DaywellButton(
-                      label: 'Sync to Occurrence',
-                      variant: DaywellButtonVariant.text,
-                      size: DaywellButtonSize.compact,
-                      onPressed: () {
-                        setState(() {
-                          _isMovementDateSynced = true;
-                          _movementDate = _selectedDate;
-                        });
-                      },
-                    ),
+                        },
+                      ),
+                      DaywellButton(
+                        label: 'Sync to Occurrence',
+                        variant: DaywellButtonVariant.text,
+                        size: DaywellButtonSize.compact,
+                        onPressed: () {
+                          setState(() {
+                            _isMovementDateSynced = true;
+                            _movementDate = _selectedDate;
+                          });
+                        },
+                      ),
+                    ],
                   ],
-                ],
-              ),
-              const SizedBox(height: SharedDesignTokens.spacingMd),
-              DaywellButton(
-                label: _submitButtonLabel(),
-                leadingIcon: Icons.check,
-                isLoading: _isSaving,
-                fullWidth: true,
-                onPressed: (_isSaving || _didSubmit) ? null : _submit,
-              ),
+                ),
+                const SizedBox(height: SharedDesignTokens.spacingMd),
+                DaywellButton(
+                  label: _submitButtonLabel(),
+                  leadingIcon: Icons.check,
+                  isLoading: _isSaving,
+                  fullWidth: true,
+                  onPressed: (_isSaving || _didSubmit) ? null : _submit,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
-    ),
     );
   }
 }

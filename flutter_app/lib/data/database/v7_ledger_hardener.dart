@@ -1151,13 +1151,11 @@ class V7LedgerHardener {
       );
       final txNote = legacyTx?.note?.trim();
       final String? unambiguousNote;
-      if (postingNote != null &&
-          txNote != null &&
-          txNote.isNotEmpty) {
+      if (postingNote != null && txNote != null && txNote.isNotEmpty) {
         unambiguousNote = postingNote == txNote ? postingNote : null;
       } else {
-        unambiguousNote =
-            postingNote ?? ((txNote != null && txNote.isNotEmpty) ? txNote : null);
+        unambiguousNote = postingNote ??
+            ((txNote != null && txNote.isNotEmpty) ? txNote : null);
       }
 
       final resolved = DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(

@@ -163,8 +163,7 @@ class DaywellShellController extends ChangeNotifier {
     DaywellSecondaryRoute route, [
     DaywellBackNavigationHandler? handler,
   ]) {
-    if (handler == null ||
-        identical(_secondaryBackHandlers[route], handler)) {
+    if (handler == null || identical(_secondaryBackHandlers[route], handler)) {
       _secondaryBackHandlers.remove(route);
     }
   }

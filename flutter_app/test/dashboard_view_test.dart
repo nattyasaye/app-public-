@@ -270,8 +270,9 @@ class _FakeFinanceRepository implements IFinanceRepository {
   Future<void> deleteRecurringRule(String ruleId) async {}
 
   @override
-  Future<int> processDueRecurringRules(
-          {required CalendarDate asOfDate}) async =>
+  Future<int> processDueRecurringRules({
+    required CalendarDate asOfDate,
+  }) async =>
       0;
 
   @override
@@ -875,7 +876,10 @@ class _FakeFinanceRepository implements IFinanceRepository {
         }
       } else {
         final candidate = outcome.draft!;
-        final dedup = FinanceSmsParsers.findDuplicateDraft(candidate, smsDrafts);
+        final dedup = FinanceSmsParsers.findDuplicateDraft(
+          candidate,
+          smsDrafts,
+        );
         if (dedup.isDuplicate) {
           duplicateCount++;
         } else {

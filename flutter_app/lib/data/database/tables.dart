@@ -560,10 +560,11 @@ class SmsDraftsTable extends Table {
   TextColumn get fingerprint => text()(); // SHA-256 hex of normalized SMS body
   TextColumn get transactionReference => text().nullable()();
   TextColumn get receiptUrl => text().nullable()();
+  // expense | income | transfer | unknown
   TextColumn get suggestedType =>
-      text().withDefault(const Constant('unknown'))(); // expense | income | transfer | unknown
-  TextColumn get direction =>
-      text().withDefault(const Constant('uncertain'))(); // incoming | outgoing | uncertain
+      text().withDefault(const Constant('unknown'))();
+  // incoming | outgoing | uncertain
+  TextColumn get direction => text().withDefault(const Constant('uncertain'))();
   IntColumn get principalCents => integer().withDefault(const Constant(0))();
   IntColumn get serviceFeeCents => integer().withDefault(const Constant(0))();
   IntColumn get vatCents => integer().withDefault(const Constant(0))();
@@ -581,8 +582,9 @@ class SmsDraftsTable extends Table {
   DateTimeColumn get receivedAtUtc => dateTime()();
   TextColumn get confidence =>
       text().withDefault(const Constant('unrecognized'))();
+  // needs_review | approved | dismissed | unrecognized
   TextColumn get status =>
-      text().withDefault(const Constant('needs_review'))(); // needs_review | approved | dismissed | unrecognized
+      text().withDefault(const Constant('needs_review'))();
   BoolColumn get isNonLedgerNotice =>
       boolean().withDefault(const Constant(false))();
   TextColumn get parseNotes => text().nullable()();

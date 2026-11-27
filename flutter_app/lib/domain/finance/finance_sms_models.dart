@@ -191,8 +191,7 @@ class FinanceSmsDraftModel {
         createdAt = (createdAt ?? EthiopiaClock.nowUtc()).toUtc(),
         updatedAt = (updatedAt ?? EthiopiaClock.nowUtc()).toUtc();
 
-  int get totalFeesCents =>
-      serviceFeeCents + vatCents + otherChargesCents;
+  int get totalFeesCents => serviceFeeCents + vatCents + otherChargesCents;
 
   bool get canApprove =>
       status == SmsDraftStatus.needsReview &&
@@ -326,7 +325,8 @@ class SmsInboxMessage {
 class SmsSenderIdentification {
   final bool isTargetFinancialMessage;
   final SmsProvider? provider;
-  final String? matchedBy; // 'sender_alias' | 'canonical_sender' | 'message_body'
+  // 'sender_alias' | 'canonical_sender' | 'message_body'
+  final String? matchedBy;
   final String? rejectReason;
 
   const SmsSenderIdentification.accepted({

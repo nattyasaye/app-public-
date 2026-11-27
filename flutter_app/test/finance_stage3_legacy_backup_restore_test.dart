@@ -384,7 +384,10 @@ void main() {
         await _seedMixedCurrencyDatabase(srcDb, srcRepo, srcCtrl);
         expect(srcCtrl.state.availableToSpendCents, 300000);
         expect(srcCtrl.state.availableToSpendBreakdown.liquidCashCents, 300000);
-        expect(srcCtrl.state.availableToSpendBreakdown.vaultSavingsCents, 100000);
+        expect(
+          srcCtrl.state.availableToSpendBreakdown.vaultSavingsCents,
+          100000,
+        );
 
         // Point 1 & 2: Export canonical full snapshot, encrypted .daywell envelope, and Finance-only snapshot
         final srcCoordinator = DatabasePersistenceCoordinator(srcDb);
@@ -501,7 +504,9 @@ void main() {
         expect(restoredComRule.isActive, isTrue);
         expect(restoredComRule.nextOccurrenceDate.toIsoString(), '2026-11-01');
         expect(
-          state.commitments.any((c) => c.recurringRuleId == 'rule-usd-auto-due'),
+          state.commitments.any(
+            (c) => c.recurringRuleId == 'rule-usd-auto-due',
+          ),
           isFalse,
         );
         expect(

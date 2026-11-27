@@ -1719,7 +1719,8 @@ class DriftFinanceRepository implements IFinanceRepository {
         FinancialTransactionsCompanion(
           isSuperseded: const Value(true),
           note: Value(
-              '[Superseded by ${newId.substring(0, newPrefixLen)}] ${original.note ?? ''}'),
+            '[Superseded by ${newId.substring(0, newPrefixLen)}] ${original.note ?? ''}',
+          ),
         ),
       );
 
@@ -4727,7 +4728,8 @@ class DriftFinanceRepository implements IFinanceRepository {
     SmsProvider? providerHint,
     DateTime? receivedAtUtc,
   }) async {
-    final effectiveReceivedAt = (receivedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
+    final effectiveReceivedAt =
+        (receivedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
     return _db.transaction(() async {
       final accounts =
           await getAccounts(includeArchived: true, includeSystem: true);
@@ -4760,7 +4762,8 @@ class DriftFinanceRepository implements IFinanceRepository {
         }
 
         final candidate = outcome.draft!;
-        final dup = FinanceSmsParsers.findDuplicateDraft(candidate, knownDrafts);
+        final dup =
+            FinanceSmsParsers.findDuplicateDraft(candidate, knownDrafts);
         if (dup.isDuplicate) {
           duplicateCount++;
           continue;
@@ -5162,8 +5165,7 @@ class DriftFinanceRepository implements IFinanceRepository {
       'device_sms_last_checkpoint_utc';
   static const String deviceSmsLastAttemptKey =
       'device_sms_last_scan_attempt_utc';
-  static const String deviceSmsLastSuccessKey =
-      'device_sms_last_success_utc';
+  static const String deviceSmsLastSuccessKey = 'device_sms_last_success_utc';
   static const String deviceSmsPermissionAskedKey =
       'device_sms_permission_asked';
   static const String deviceSmsDailyScanEnabledKey =

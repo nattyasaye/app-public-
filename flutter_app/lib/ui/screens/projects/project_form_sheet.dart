@@ -528,278 +528,288 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
         ),
         child: SingleChildScrollView(
           child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _isEditing ? 'Edit Project' : 'New Project',
-                    style: textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-                DaywellIconButton(
-                  icon: Icons.close,
-                  tooltip: 'Close',
-                  onPressed:
-                      _isSaving ? null : () => Navigator.of(context).maybePop(),
-                ),
-              ],
-            ),
-            const SizedBox(height: SharedDesignTokens.spacingSm),
-            if (_formError != null) ...[
-              DaywellStatusBanner(
-                message: _formError!,
-                tone: DaywellStatusTone.error,
-                onDismiss: () => setState(() => _formError = null),
-              ),
-              const SizedBox(height: SharedDesignTokens.spacingCompact),
-            ],
-            DaywellTextField(
-              controller: _titleCtrl,
-              label: 'Project Title',
-              hintText: 'e.g. Portfolio Refresh or Thesis Chapter 3',
-              isRequired: true,
-              errorText: _titleError,
-              autofocus: !_isEditing,
-              onChanged: (_) {
-                if (_titleError != null) {
-                  setState(() => _titleError = null);
-                }
-              },
-            ),
-            const SizedBox(height: SharedDesignTokens.spacingCompact),
-            DaywellTextField(
-              controller: _descCtrl,
-              label: 'Description',
-              hintText: 'Optional goal summary or scope notes',
-              maxLines: 3,
-            ),
-            const SizedBox(height: SharedDesignTokens.spacingCompact),
-            DaywellDropdownField<String>(
-              value: _status,
-              label: 'Status',
-              items: const [
-                DropdownMenuItem(value: 'active', child: Text('Active')),
-                DropdownMenuItem(value: 'on_hold', child: Text('On Hold')),
-                DropdownMenuItem(value: 'completed', child: Text('Completed')),
-              ],
-              onChanged: (v) {
-                if (v != null) setState(() => _status = v);
-              },
-            ),
-            const SizedBox(height: SharedDesignTokens.spacingCompact),
-            Row(
-              children: [
-                Expanded(
-                  child: _DatePickerTile(
-                    label: 'Start Date',
-                    date: _startDate,
-                    onPick: () async {
-                      final picked = await pickProjectCalendarDate(
-                        context,
-                        initialDate: _startDate,
-                        helpText: 'Select start date',
-                      );
-                      if (picked != null && mounted) {
-                        setState(() => _startDate = picked);
-                      }
-                    },
-                    onClear: _startDate != null
-                        ? () => setState(() => _startDate = null)
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: SharedDesignTokens.spacingSm),
-                Expanded(
-                  child: _DatePickerTile(
-                    label: 'Target Date',
-                    date: _targetDate,
-                    onPick: () async {
-                      final picked = await pickProjectCalendarDate(
-                        context,
-                        initialDate: _targetDate ?? _startDate,
-                        helpText: 'Select target date',
-                      );
-                      if (picked != null && mounted) {
-                        setState(() => _targetDate = picked);
-                      }
-                    },
-                    onClear: _targetDate != null
-                        ? () => setState(() => _targetDate = null)
-                        : null,
-                  ),
-                ),
-              ],
-            ),
-            if (widget.existingProject?.goalId != null &&
-                widget.existingProject!.goalId!.isNotEmpty) ...[
-              const SizedBox(height: SharedDesignTokens.spacingSm),
-              Text(
-                'Linked Goal ID: ${widget.existingProject!.goalId}',
-                style: textTheme.bodySmall?.copyWith(color: semantic.textMuted),
-              ),
-            ],
-            const SizedBox(height: SharedDesignTokens.spacingMd),
-            DaywellSectionHeader(
-              title: 'Tracking Blocks',
-              count: _blocks.length,
-              actionLabel: 'Add Block',
-              onActionPressed: () => _openInlineBlockEditor(),
-            ),
-            const SizedBox(height: SharedDesignTokens.spacingSm),
-            if (_blocks.isEmpty)
-              DaywellCard(
-                padding:
-                    const EdgeInsets.all(SharedDesignTokens.spacingCompact),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.widgets_outlined,
-                      color: semantic.textMuted,
-                      size: DaywellIconSize.md,
-                    ),
-                    const SizedBox(width: SharedDesignTokens.spacingSm),
-                    Expanded(
-                      child: Text(
-                        'Optional: add counters, grouped lists, checklists, or schedules now or later inside Project Details.',
-                        style: textTheme.bodySmall?.copyWith(
-                          color: semantic.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              )
-            else
-              Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  for (var i = 0; i < _blocks.length; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(
-                        bottom: SharedDesignTokens.spacingSm,
-                      ),
-                      child: DaywellCard(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: SharedDesignTokens.spacingCompact,
-                          vertical: SharedDesignTokens.spacingSm,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              blockTypeIcon(_blocks[i].blockType),
-                              size: DaywellIconSize.md,
-                              color: colorScheme.primary,
-                            ),
-                            const SizedBox(width: SharedDesignTokens.spacingSm),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    _blocks[i].title,
-                                    style: textTheme.bodyMedium?.copyWith(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                  Text(
-                                    [
-                                      blockTypeLabel(_blocks[i].blockType),
-                                      if (_blocks[i].isRollup) 'Rollup',
-                                      if (_blocks[i].targetValue != null)
-                                        'Target ${formatProjectNumber(_blocks[i].targetValue!)}',
-                                      if (_blocks[i]
-                                          .unitLabel
-                                          .trim()
-                                          .isNotEmpty)
-                                        _blocks[i].unitLabel.trim(),
-                                    ].join(' · '),
-                                    style: textTheme.bodySmall?.copyWith(
-                                      color: semantic.textMuted,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            DaywellIconButton(
-                              icon: Icons.edit_outlined,
-                              tooltip: 'Edit block',
-                              onPressed: () => _openInlineBlockEditor(
-                                editingDraft: _blocks[i],
-                              ),
-                            ),
-                            if (!_blocks[i].isExisting)
-                              DaywellIconButton(
-                                icon: Icons.delete_outline,
-                                tooltip: 'Remove staged block',
-                                isDestructive: true,
-                                onPressed: () {
-                                  setState(() {
-                                    final removedId = _blocks[i].tempId;
-                                    _blocks.removeAt(i);
-                                    if (_primaryDraftId == removedId) {
-                                      _primaryDraftId = null;
-                                    }
-                                    for (final b in _blocks) {
-                                      if (b.rollupSourceTempId == removedId) {
-                                        b.rollupSourceTempId = null;
-                                      }
-                                    }
-                                  });
-                                },
-                              ),
-                          ],
-                        ),
+                  Expanded(
+                    child: Text(
+                      _isEditing ? 'Edit Project' : 'New Project',
+                      style: textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                  const SizedBox(height: SharedDesignTokens.spacingSm),
-                  DaywellDropdownField<String?>(
-                    value: validPrimaryValue,
-                    label: 'Primary Progress Block (Optional)',
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('None (track each block independently)'),
-                      ),
-                      for (final b in _blocks)
-                        DropdownMenuItem<String?>(
-                          value: b.tempId,
-                          child: Text(
-                              '${b.title} (${blockTypeLabel(b.blockType)})'),
-                        ),
-                    ],
-                    onChanged: (v) => setState(() => _primaryDraftId = v),
                   ),
-                ],
-              ),
-            const SizedBox(height: SharedDesignTokens.spacingMd),
-            Row(
-              children: [
-                Expanded(
-                  child: DaywellButton(
-                    label: 'Cancel',
-                    variant: DaywellButtonVariant.outlined,
-                    fullWidth: true,
+                  DaywellIconButton(
+                    icon: Icons.close,
+                    tooltip: 'Close',
                     onPressed: _isSaving
                         ? null
                         : () => Navigator.of(context).maybePop(),
                   ),
+                ],
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              if (_formError != null) ...[
+                DaywellStatusBanner(
+                  message: _formError!,
+                  tone: DaywellStatusTone.error,
+                  onDismiss: () => setState(() => _formError = null),
                 ),
-                const SizedBox(width: SharedDesignTokens.spacingSm),
-                Expanded(
-                  child: DaywellButton(
-                    label: _isEditing ? 'Save Changes' : 'Create Project',
-                    variant: DaywellButtonVariant.primary,
-                    isLoading: _isSaving,
-                    fullWidth: true,
-                    onPressed: _isSaving ? null : _handleSave,
+                const SizedBox(height: SharedDesignTokens.spacingCompact),
+              ],
+              DaywellTextField(
+                controller: _titleCtrl,
+                label: 'Project Title',
+                hintText: 'e.g. Portfolio Refresh or Thesis Chapter 3',
+                isRequired: true,
+                errorText: _titleError,
+                autofocus: !_isEditing,
+                onChanged: (_) {
+                  if (_titleError != null) {
+                    setState(() => _titleError = null);
+                  }
+                },
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingCompact),
+              DaywellTextField(
+                controller: _descCtrl,
+                label: 'Description',
+                hintText: 'Optional goal summary or scope notes',
+                maxLines: 3,
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingCompact),
+              DaywellDropdownField<String>(
+                value: _status,
+                label: 'Status',
+                items: const [
+                  DropdownMenuItem(value: 'active', child: Text('Active')),
+                  DropdownMenuItem(value: 'on_hold', child: Text('On Hold')),
+                  DropdownMenuItem(
+                    value: 'completed',
+                    child: Text('Completed'),
+                  ),
+                ],
+                onChanged: (v) {
+                  if (v != null) setState(() => _status = v);
+                },
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingCompact),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DatePickerTile(
+                      label: 'Start Date',
+                      date: _startDate,
+                      onPick: () async {
+                        final picked = await pickProjectCalendarDate(
+                          context,
+                          initialDate: _startDate,
+                          helpText: 'Select start date',
+                        );
+                        if (picked != null && mounted) {
+                          setState(() => _startDate = picked);
+                        }
+                      },
+                      onClear: _startDate != null
+                          ? () => setState(() => _startDate = null)
+                          : null,
+                    ),
+                  ),
+                  const SizedBox(width: SharedDesignTokens.spacingSm),
+                  Expanded(
+                    child: _DatePickerTile(
+                      label: 'Target Date',
+                      date: _targetDate,
+                      onPick: () async {
+                        final picked = await pickProjectCalendarDate(
+                          context,
+                          initialDate: _targetDate ?? _startDate,
+                          helpText: 'Select target date',
+                        );
+                        if (picked != null && mounted) {
+                          setState(() => _targetDate = picked);
+                        }
+                      },
+                      onClear: _targetDate != null
+                          ? () => setState(() => _targetDate = null)
+                          : null,
+                    ),
+                  ),
+                ],
+              ),
+              if (widget.existingProject?.goalId != null &&
+                  widget.existingProject!.goalId!.isNotEmpty) ...[
+                const SizedBox(height: SharedDesignTokens.spacingSm),
+                Text(
+                  'Linked Goal ID: ${widget.existingProject!.goalId}',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: semantic.textMuted,
                   ),
                 ),
               ],
-            ),
+              const SizedBox(height: SharedDesignTokens.spacingMd),
+              DaywellSectionHeader(
+                title: 'Tracking Blocks',
+                count: _blocks.length,
+                actionLabel: 'Add Block',
+                onActionPressed: () => _openInlineBlockEditor(),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              if (_blocks.isEmpty)
+                DaywellCard(
+                  padding: const EdgeInsets.all(
+                    SharedDesignTokens.spacingCompact,
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.widgets_outlined,
+                        color: semantic.textMuted,
+                        size: DaywellIconSize.md,
+                      ),
+                      const SizedBox(width: SharedDesignTokens.spacingSm),
+                      Expanded(
+                        child: Text(
+                          'Optional: add counters, grouped lists, checklists, or schedules now or later inside Project Details.',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                Column(
+                  children: [
+                    for (var i = 0; i < _blocks.length; i++)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: SharedDesignTokens.spacingSm,
+                        ),
+                        child: DaywellCard(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: SharedDesignTokens.spacingCompact,
+                            vertical: SharedDesignTokens.spacingSm,
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                blockTypeIcon(_blocks[i].blockType),
+                                size: DaywellIconSize.md,
+                                color: colorScheme.primary,
+                              ),
+                              const SizedBox(
+                                width: SharedDesignTokens.spacingSm,
+                              ),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      _blocks[i].title,
+                                      style: textTheme.bodyMedium?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    Text(
+                                      [
+                                        blockTypeLabel(_blocks[i].blockType),
+                                        if (_blocks[i].isRollup) 'Rollup',
+                                        if (_blocks[i].targetValue != null)
+                                          'Target ${formatProjectNumber(_blocks[i].targetValue!)}',
+                                        if (_blocks[i]
+                                            .unitLabel
+                                            .trim()
+                                            .isNotEmpty)
+                                          _blocks[i].unitLabel.trim(),
+                                      ].join(' · '),
+                                      style: textTheme.bodySmall?.copyWith(
+                                        color: semantic.textMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              DaywellIconButton(
+                                icon: Icons.edit_outlined,
+                                tooltip: 'Edit block',
+                                onPressed: () => _openInlineBlockEditor(
+                                  editingDraft: _blocks[i],
+                                ),
+                              ),
+                              if (!_blocks[i].isExisting)
+                                DaywellIconButton(
+                                  icon: Icons.delete_outline,
+                                  tooltip: 'Remove staged block',
+                                  isDestructive: true,
+                                  onPressed: () {
+                                    setState(() {
+                                      final removedId = _blocks[i].tempId;
+                                      _blocks.removeAt(i);
+                                      if (_primaryDraftId == removedId) {
+                                        _primaryDraftId = null;
+                                      }
+                                      for (final b in _blocks) {
+                                        if (b.rollupSourceTempId == removedId) {
+                                          b.rollupSourceTempId = null;
+                                        }
+                                      }
+                                    });
+                                  },
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: SharedDesignTokens.spacingSm),
+                    DaywellDropdownField<String?>(
+                      value: validPrimaryValue,
+                      label: 'Primary Progress Block (Optional)',
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('None (track each block independently)'),
+                        ),
+                        for (final b in _blocks)
+                          DropdownMenuItem<String?>(
+                            value: b.tempId,
+                            child: Text(
+                              '${b.title} (${blockTypeLabel(b.blockType)})',
+                            ),
+                          ),
+                      ],
+                      onChanged: (v) => setState(() => _primaryDraftId = v),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: SharedDesignTokens.spacingMd),
+              Row(
+                children: [
+                  Expanded(
+                    child: DaywellButton(
+                      label: 'Cancel',
+                      variant: DaywellButtonVariant.outlined,
+                      fullWidth: true,
+                      onPressed: _isSaving
+                          ? null
+                          : () => Navigator.of(context).maybePop(),
+                    ),
+                  ),
+                  const SizedBox(width: SharedDesignTokens.spacingSm),
+                  Expanded(
+                    child: DaywellButton(
+                      label: _isEditing ? 'Save Changes' : 'Create Project',
+                      variant: DaywellButtonVariant.primary,
+                      isLoading: _isSaving,
+                      fullWidth: true,
+                      onPressed: _isSaving ? null : _handleSave,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -852,8 +862,10 @@ class _DatePickerTile extends StatelessWidget {
                 child: Text(
                   date == null
                       ? 'Not set'
-                      : SharedDateFormatter.formatDual(date!,
-                          useAmharic: false),
+                      : SharedDateFormatter.formatDual(
+                          date!,
+                          useAmharic: false,
+                        ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: textTheme.bodySmall?.copyWith(
@@ -1009,7 +1021,8 @@ class _InlineBlockEditorDialogState extends State<_InlineBlockEditorDialog> {
         (_rollupSourceTempId == null ||
             !eligibleSources.any((s) => s.tempId == _rollupSourceTempId))) {
       setState(
-          () => _error = 'Select a source tracking block for this rollup.');
+        () => _error = 'Select a source tracking block for this rollup.',
+      );
       return;
     }
 

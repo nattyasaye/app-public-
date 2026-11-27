@@ -584,9 +584,10 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                       ),
                     ),
                     DaywellStatusBadge(
-                      label: currencyTier == CurrencyValidationTier.verifiedNonEtb
-                          ? 'Legacy ($normalizedCode) · Read-only'
-                          : 'Legacy · Read-only',
+                      label:
+                          currencyTier == CurrencyValidationTier.verifiedNonEtb
+                              ? 'Legacy ($normalizedCode) · Read-only'
+                              : 'Legacy · Read-only',
                       tone: DaywellStatusTone.warning,
                       showIcon: false,
                     ),
@@ -1169,111 +1170,113 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                   children: [
                     Text(
                       existing == null ? 'New Account' : 'Edit Account',
-                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    if (error != null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      DaywellStatusBanner(
+                        message: error!,
+                        tone: DaywellStatusTone.error,
                       ),
-                ),
-                if (error != null) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingSm),
-                  DaywellStatusBanner(
-                    message: error!,
-                    tone: DaywellStatusTone.error,
-                  ),
-                ],
-                if (isLegacyLockedCurrency) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingSm),
-                  DaywellStatusBanner(
-                    tone: DaywellStatusTone.warning,
-                    title: 'Legacy Account ($currencyBadgeLabel)',
-                    message:
-                        'Historical non-ETB balances are preserved read-only and excluded from ETB totals.',
-                  ),
-                ],
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: nameCtrl,
-                  label: 'Account Name',
-                  isRequired: true,
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellDropdownField<AccountSubType>(
-                  label: 'Account Kind',
-                  value: subType,
-                  items: const [
-                    DropdownMenuItem(
-                      value: AccountSubType.bank,
-                      child: Text('Bank Account (Liquid)'),
+                    ],
+                    if (isLegacyLockedCurrency) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      DaywellStatusBanner(
+                        tone: DaywellStatusTone.warning,
+                        title: 'Legacy Account ($currencyBadgeLabel)',
+                        message:
+                            'Historical non-ETB balances are preserved read-only and excluded from ETB totals.',
+                      ),
+                    ],
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: nameCtrl,
+                      label: 'Account Name',
+                      isRequired: true,
                     ),
-                    DropdownMenuItem(
-                      value: AccountSubType.cash,
-                      child: Text('Cash Wallet (Liquid)'),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellDropdownField<AccountSubType>(
+                      label: 'Account Kind',
+                      value: subType,
+                      items: const [
+                        DropdownMenuItem(
+                          value: AccountSubType.bank,
+                          child: Text('Bank Account (Liquid)'),
+                        ),
+                        DropdownMenuItem(
+                          value: AccountSubType.cash,
+                          child: Text('Cash Wallet (Liquid)'),
+                        ),
+                        DropdownMenuItem(
+                          value: AccountSubType.mobileMoney,
+                          child: Text('Mobile Money (Liquid)'),
+                        ),
+                        DropdownMenuItem(
+                          value: AccountSubType.savingsVault,
+                          child: Text('Savings Vault (Protected)'),
+                        ),
+                        DropdownMenuItem(
+                          value: AccountSubType.creditCard,
+                          child: Text('Credit Card (Short-Term Liability)'),
+                        ),
+                      ],
+                      onChanged: (val) {
+                        if (val != null) setModalState(() => subType = val);
+                      },
                     ),
-                    DropdownMenuItem(
-                      value: AccountSubType.mobileMoney,
-                      child: Text('Mobile Money (Liquid)'),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: balCtrl,
+                      enabled: !isLegacyLockedCurrency,
+                      readOnly: isLegacyLockedCurrency,
+                      label: subType == AccountSubType.creditCard
+                          ? 'Opening Amount Owed (${isLegacyLockedCurrency ? currencyBadgeLabel : 'ETB'})'
+                          : 'Opening Balance (${isLegacyLockedCurrency ? currencyBadgeLabel : 'ETB'})',
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                     ),
-                    DropdownMenuItem(
-                      value: AccountSubType.savingsVault,
-                      child: Text('Savings Vault (Protected)'),
+                    const SizedBox(height: SharedDesignTokens.spacingSm),
+                    Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'Opening Date: ${SharedDateFormatter.formatDual(openingDate, useAmharic: false)}',
+                          style: Theme.of(ctx).textTheme.bodySmall,
+                        ),
+                        if (!isLegacyLockedCurrency)
+                          DaywellButton(
+                            label: 'Pick Date',
+                            variant: DaywellButtonVariant.text,
+                            size: DaywellButtonSize.compact,
+                            onPressed: () async {
+                              final picked =
+                                  await FinanceUiFormatters.pickCalendarDate(
+                                ctx,
+                                initialDate: openingDate,
+                              );
+                              if (picked != null) {
+                                setModalState(() => openingDate = picked);
+                              }
+                            },
+                          ),
+                      ],
                     ),
-                    DropdownMenuItem(
-                      value: AccountSubType.creditCard,
-                      child: Text('Credit Card (Short-Term Liability)'),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    DaywellButton(
+                      label: existing == null
+                          ? 'Create Account'
+                          : 'Save Account',
+                      fullWidth: true,
+                      onPressed: submitAccount,
                     ),
                   ],
-                  onChanged: (val) {
-                    if (val != null) setModalState(() => subType = val);
-                  },
                 ),
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: balCtrl,
-                  enabled: !isLegacyLockedCurrency,
-                  readOnly: isLegacyLockedCurrency,
-                  label: subType == AccountSubType.creditCard
-                      ? 'Opening Amount Owed (${isLegacyLockedCurrency ? currencyBadgeLabel : 'ETB'})'
-                      : 'Opening Balance (${isLegacyLockedCurrency ? currencyBadgeLabel : 'ETB'})',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingSm),
-                Wrap(
-                  spacing: SharedDesignTokens.spacingSm,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    Text(
-                      'Opening Date: ${SharedDateFormatter.formatDual(openingDate, useAmharic: false)}',
-                      style: Theme.of(ctx).textTheme.bodySmall,
-                    ),
-                    if (!isLegacyLockedCurrency)
-                      DaywellButton(
-                        label: 'Pick Date',
-                        variant: DaywellButtonVariant.text,
-                        size: DaywellButtonSize.compact,
-                        onPressed: () async {
-                          final picked =
-                              await FinanceUiFormatters.pickCalendarDate(
-                            ctx,
-                            initialDate: openingDate,
-                          );
-                          if (picked != null) {
-                            setModalState(() => openingDate = picked);
-                          }
-                        },
-                      ),
-                  ],
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingMd),
-                  DaywellButton(
-                    label: existing == null ? 'Create Account' : 'Save Account',
-                    fullWidth: true,
-                    onPressed: submitAccount,
-                  ),
-                ],
               ),
             ),
-          ),
           );
         },
       ),
@@ -1421,110 +1424,110 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                  Text(
-                    existing == null ? 'New Category' : 'Edit Category',
-                    style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  if (error != null) ...[
-                    const SizedBox(height: SharedDesignTokens.spacingSm),
-                    DaywellStatusBanner(
-                      message: error!,
-                      tone: DaywellStatusTone.error,
+                    Text(
+                      existing == null ? 'New Category' : 'Edit Category',
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
-                  ],
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  if (existing == null) ...[
-                    Wrap(
-                      spacing: SharedDesignTokens.spacingSm,
-                      children: [
-                        ChoiceChip(
-                          label: const Text('Expense'),
-                          selected: catType == 'expense',
-                          onSelected: (_) => setModalState(() {
-                            catType = 'expense';
-                            parentId = null;
-                          }),
-                        ),
-                        ChoiceChip(
-                          label: const Text('Income'),
-                          selected: catType == 'income',
-                          onSelected: (_) => setModalState(() {
-                            catType = 'income';
-                            parentId = null;
-                          }),
-                        ),
-                      ],
+                    if (error != null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      DaywellStatusBanner(
+                        message: error!,
+                        tone: DaywellStatusTone.error,
+                      ),
+                    ],
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    if (existing == null) ...[
+                      Wrap(
+                        spacing: SharedDesignTokens.spacingSm,
+                        children: [
+                          ChoiceChip(
+                            label: const Text('Expense'),
+                            selected: catType == 'expense',
+                            onSelected: (_) => setModalState(() {
+                              catType = 'expense';
+                              parentId = null;
+                            }),
+                          ),
+                          ChoiceChip(
+                            label: const Text('Income'),
+                            selected: catType == 'income',
+                            onSelected: (_) => setModalState(() {
+                              catType = 'income';
+                              parentId = null;
+                            }),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    ],
+                    DaywellTextField(
+                      controller: nameCtrl,
+                      label: 'Category Name',
+                      isRequired: true,
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  ],
-                  DaywellTextField(
-                    controller: nameCtrl,
-                    label: 'Category Name',
-                    isRequired: true,
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  DaywellDropdownField<String?>(
-                    label: 'Parent Group (Optional)',
-                    value: parentCandidates.any((c) => c.id == parentId)
-                        ? parentId
-                        : null,
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('Top-Level Category'),
-                      ),
-                      for (final p in parentCandidates)
-                        DropdownMenuItem<String?>(
-                          value: p.id,
-                          child: Text(p.name),
+                    DaywellDropdownField<String?>(
+                      label: 'Parent Group (Optional)',
+                      value: parentCandidates.any((c) => c.id == parentId)
+                          ? parentId
+                          : null,
+                      items: [
+                        const DropdownMenuItem<String?>(
+                          value: null,
+                          child: Text('Top-Level Category'),
                         ),
-                    ],
-                    onChanged: (val) => setModalState(() => parentId = val),
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  Wrap(
-                    spacing: SharedDesignTokens.spacingSm,
-                    runSpacing: SharedDesignTokens.spacingSm,
-                    children: [
-                      for (final hex in palette)
-                        ChoiceChip(
-                          label: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                width: 12,
-                                height: 12,
-                                decoration: BoxDecoration(
-                                  color: FinanceUiFormatters.parseColorHex(
-                                    hex,
-                                    Colors.teal,
-                                  ),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(hex),
-                            ],
+                        for (final p in parentCandidates)
+                          DropdownMenuItem<String?>(
+                            value: p.id,
+                            child: Text(p.name),
                           ),
-                          selected: colorHex == hex,
-                          onSelected: (_) =>
-                              setModalState(() => colorHex = hex),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingMd),
-                  DaywellButton(
-                    label:
-                        existing == null ? 'Create Category' : 'Save Changes',
-                    fullWidth: true,
-                    onPressed: submitCategory,
-                  ),
-                ],
+                      ],
+                      onChanged: (val) => setModalState(() => parentId = val),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      runSpacing: SharedDesignTokens.spacingSm,
+                      children: [
+                        for (final hex in palette)
+                          ChoiceChip(
+                            label: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 12,
+                                  height: 12,
+                                  decoration: BoxDecoration(
+                                    color: FinanceUiFormatters.parseColorHex(
+                                      hex,
+                                      Colors.teal,
+                                    ),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Text(hex),
+                              ],
+                            ),
+                            selected: colorHex == hex,
+                            onSelected: (_) =>
+                                setModalState(() => colorHex = hex),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    DaywellButton(
+                      label:
+                          existing == null ? 'Create Category' : 'Save Changes',
+                      fullWidth: true,
+                      onPressed: submitCategory,
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
           );
         },
       ),

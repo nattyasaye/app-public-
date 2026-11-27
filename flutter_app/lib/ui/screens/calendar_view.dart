@@ -526,228 +526,231 @@ class _CalendarViewState extends State<CalendarView> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                  Text(
-                    isEditing ? 'Edit Event' : 'Add Event',
-                    style: Theme.of(modalContext).textTheme.titleLarge,
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  DaywellTextField(
-                    controller: titleCtrl,
-                    autofocus: !isEditing,
-                    isRequired: true,
-                    label: 'Event Title',
-                    hintText: 'e.g. Clinic Appointment',
-                    errorText: titleError,
-                    onChanged: (_) {
-                      final nowDirty = hasUnsavedChanges();
-                      if (titleError != null || nowDirty != lastDirty) {
-                        lastDirty = nowDirty;
-                        setModalState(() => titleError = null);
-                      }
-                    },
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  DaywellTextField(
-                    controller: notesCtrl,
-                    label: 'Notes (optional)',
-                    hintText: 'Location or details...',
-                    maxLines: 2,
-                    onChanged: (_) {
-                      final nowDirty = hasUnsavedChanges();
-                      if (nowDirty != lastDirty) {
-                        lastDirty = nowDirty;
-                        setModalState(() {});
-                      }
-                    },
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  DaywellDropdownField<String>(
-                    label: 'Category',
-                    value: category,
-                    items: [
-                      for (final opt in _categoryOptions)
-                        DropdownMenuItem(value: opt.$1, child: Text(opt.$2)),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setModalState(() => category = v);
-                    },
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  Wrap(
-                    spacing: SharedDesignTokens.spacingSm,
-                    runSpacing: SharedDesignTokens.spacingSm,
-                    children: [
-                      DaywellButton(
-                        label: 'Date: ${eventDate.toIsoString()}',
-                        variant: DaywellButtonVariant.outlined,
-                        size: DaywellButtonSize.compact,
-                        leadingIcon: Icons.calendar_today_outlined,
-                        onPressed: () async {
-                          final picked = await _pickDate(eventDate);
-                          if (picked != null) {
-                            setModalState(() {
-                              eventDate = picked;
-                              if (endDate != null &&
-                                  endDate!.isBefore(eventDate)) {
-                                endDate = null;
-                              }
-                            });
-                          }
-                        },
-                      ),
-                      DaywellButton(
-                        label: endDate != null
-                            ? 'End: ${endDate!.toIsoString()}'
-                            : 'Multi-day End',
-                        variant: DaywellButtonVariant.outlined,
-                        size: DaywellButtonSize.compact,
-                        leadingIcon: Icons.event_outlined,
-                        onPressed: () async {
-                          final picked = await _pickDate(endDate ?? eventDate);
-                          if (picked != null && !picked.isBefore(eventDate)) {
-                            setModalState(() => endDate = picked);
-                          }
-                        },
-                      ),
-                      if (endDate != null)
-                        DaywellIconButton(
-                          icon: Icons.clear,
-                          tooltip: 'Clear end date',
-                          onPressed: () => setModalState(() => endDate = null),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingSm),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('All Day'),
-                    value: isAllDay,
-                    onChanged: (val) => setModalState(() {
-                      isAllDay = val;
-                      timeError = null;
-                    }),
-                  ),
-                  if (!isAllDay) ...[
-                    Row(
+                    Text(
+                      isEditing ? 'Edit Event' : 'Add Event',
+                      style: Theme.of(modalContext).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: titleCtrl,
+                      autofocus: !isEditing,
+                      isRequired: true,
+                      label: 'Event Title',
+                      hintText: 'e.g. Clinic Appointment',
+                      errorText: titleError,
+                      onChanged: (_) {
+                        final nowDirty = hasUnsavedChanges();
+                        if (titleError != null || nowDirty != lastDirty) {
+                          lastDirty = nowDirty;
+                          setModalState(() => titleError = null);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: notesCtrl,
+                      label: 'Notes (optional)',
+                      hintText: 'Location or details...',
+                      maxLines: 2,
+                      onChanged: (_) {
+                        final nowDirty = hasUnsavedChanges();
+                        if (nowDirty != lastDirty) {
+                          lastDirty = nowDirty;
+                          setModalState(() {});
+                        }
+                      },
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellDropdownField<String>(
+                      label: 'Category',
+                      value: category,
+                      items: [
+                        for (final opt in _categoryOptions)
+                          DropdownMenuItem(value: opt.$1, child: Text(opt.$2)),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) setModalState(() => category = v);
+                      },
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      runSpacing: SharedDesignTokens.spacingSm,
                       children: [
-                        Expanded(
-                          child: DaywellButton(
-                            label: 'Start: $startTime',
-                            variant: DaywellButtonVariant.outlined,
-                            size: DaywellButtonSize.compact,
-                            leadingIcon: Icons.schedule_outlined,
-                            onPressed: () async {
-                              final picked = await _pickTime(startTime);
-                              if (picked != null) {
-                                setModalState(() {
-                                  startTime = picked;
-                                  timeError = null;
-                                });
-                              }
-                            },
-                          ),
+                        DaywellButton(
+                          label: 'Date: ${eventDate.toIsoString()}',
+                          variant: DaywellButtonVariant.outlined,
+                          size: DaywellButtonSize.compact,
+                          leadingIcon: Icons.calendar_today_outlined,
+                          onPressed: () async {
+                            final picked = await _pickDate(eventDate);
+                            if (picked != null) {
+                              setModalState(() {
+                                eventDate = picked;
+                                if (endDate != null &&
+                                    endDate!.isBefore(eventDate)) {
+                                  endDate = null;
+                                }
+                              });
+                            }
+                          },
                         ),
-                        const SizedBox(width: SharedDesignTokens.spacingSm),
-                        Expanded(
-                          child: DaywellButton(
-                            label: 'End: $endTime',
-                            variant: DaywellButtonVariant.outlined,
-                            size: DaywellButtonSize.compact,
-                            leadingIcon: Icons.schedule,
-                            onPressed: () async {
-                              final picked = await _pickTime(endTime);
-                              if (picked != null) {
-                                setModalState(() {
-                                  endTime = picked;
-                                  timeError = null;
-                                });
-                              }
-                            },
-                          ),
+                        DaywellButton(
+                          label: endDate != null
+                              ? 'End: ${endDate!.toIsoString()}'
+                              : 'Multi-day End',
+                          variant: DaywellButtonVariant.outlined,
+                          size: DaywellButtonSize.compact,
+                          leadingIcon: Icons.event_outlined,
+                          onPressed: () async {
+                            final picked =
+                                await _pickDate(endDate ?? eventDate);
+                            if (picked != null && !picked.isBefore(eventDate)) {
+                              setModalState(() => endDate = picked);
+                            }
+                          },
                         ),
+                        if (endDate != null)
+                          DaywellIconButton(
+                            icon: Icons.clear,
+                            tooltip: 'Clear end date',
+                            onPressed: () =>
+                                setModalState(() => endDate = null),
+                          ),
                       ],
                     ),
-                    if (timeError != null) ...[
-                      const SizedBox(height: SharedDesignTokens.spacingXs),
-                      Text(
-                        timeError!,
-                        style: Theme.of(modalContext)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(color: semantic.error),
-                      ),
-                    ],
-                  ],
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Reminder'),
-                    value: hasReminder,
-                    onChanged: (val) => setModalState(() => hasReminder = val),
-                  ),
-                  if (isEditing && widget.notesController != null) ...[
                     const SizedBox(height: SharedDesignTokens.spacingSm),
-                    _buildModalLinkedNotesSection(
-                      modalContext: modalContext,
-                      sheetNavigatorContext: ctx,
-                      event: existing,
-                      notesController: widget.notesController!,
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('All Day'),
+                      value: isAllDay,
+                      onChanged: (val) => setModalState(() {
+                        isAllDay = val;
+                        timeError = null;
+                      }),
                     ),
-                  ],
-                  const SizedBox(height: SharedDesignTokens.spacingMd),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      if (isEditing)
-                        DaywellButton(
-                          label: 'Delete',
-                          variant: DaywellButtonVariant.destructive,
-                          size: DaywellButtonSize.compact,
-                          leadingIcon: Icons.delete_outline,
-                          onPressed: () async {
-                            final confirmed =
-                                await DaywellConfirmationDialog.show(
-                              modalContext,
-                              title: 'Delete event?',
-                              message:
-                                  'Delete "${existing.title}" from Calendar?',
-                              confirmLabel: 'Delete',
-                              isDestructive: true,
-                              icon: Icons.delete_outline,
-                            );
-                            if (!confirmed) return;
-                            await widget.calendarController
-                                .deleteEvent(existing.id);
-                            didCommitOrDelete = true;
-                            if (ctx.mounted) Navigator.pop(ctx);
-                          },
-                        )
-                      else
-                        const SizedBox.shrink(),
+                    if (!isAllDay) ...[
                       Row(
                         children: [
-                          DaywellButton(
-                            label: 'Cancel',
-                            variant: DaywellButtonVariant.text,
-                            size: DaywellButtonSize.compact,
-                            onPressed: () =>
-                                unawaited(Navigator.of(ctx).maybePop()),
+                          Expanded(
+                            child: DaywellButton(
+                              label: 'Start: $startTime',
+                              variant: DaywellButtonVariant.outlined,
+                              size: DaywellButtonSize.compact,
+                              leadingIcon: Icons.schedule_outlined,
+                              onPressed: () async {
+                                final picked = await _pickTime(startTime);
+                                if (picked != null) {
+                                  setModalState(() {
+                                    startTime = picked;
+                                    timeError = null;
+                                  });
+                                }
+                              },
+                            ),
                           ),
                           const SizedBox(width: SharedDesignTokens.spacingSm),
-                          DaywellButton(
-                            label: isEditing ? 'Save' : 'Add Event',
-                            variant: DaywellButtonVariant.primary,
-                            size: DaywellButtonSize.compact,
-                            onPressed: () => unawaited(commitEvent()),
+                          Expanded(
+                            child: DaywellButton(
+                              label: 'End: $endTime',
+                              variant: DaywellButtonVariant.outlined,
+                              size: DaywellButtonSize.compact,
+                              leadingIcon: Icons.schedule,
+                              onPressed: () async {
+                                final picked = await _pickTime(endTime);
+                                if (picked != null) {
+                                  setModalState(() {
+                                    endTime = picked;
+                                    timeError = null;
+                                  });
+                                }
+                              },
+                            ),
                           ),
                         ],
                       ),
+                      if (timeError != null) ...[
+                        const SizedBox(height: SharedDesignTokens.spacingXs),
+                        Text(
+                          timeError!,
+                          style: Theme.of(modalContext)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: semantic.error),
+                        ),
+                      ],
                     ],
-                  ),
-                ],
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Reminder'),
+                      value: hasReminder,
+                      onChanged: (val) =>
+                          setModalState(() => hasReminder = val),
+                    ),
+                    if (isEditing && widget.notesController != null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      _buildModalLinkedNotesSection(
+                        modalContext: modalContext,
+                        sheetNavigatorContext: ctx,
+                        event: existing,
+                        notesController: widget.notesController!,
+                      ),
+                    ],
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        if (isEditing)
+                          DaywellButton(
+                            label: 'Delete',
+                            variant: DaywellButtonVariant.destructive,
+                            size: DaywellButtonSize.compact,
+                            leadingIcon: Icons.delete_outline,
+                            onPressed: () async {
+                              final confirmed =
+                                  await DaywellConfirmationDialog.show(
+                                modalContext,
+                                title: 'Delete event?',
+                                message:
+                                    'Delete "${existing.title}" from Calendar?',
+                                confirmLabel: 'Delete',
+                                isDestructive: true,
+                                icon: Icons.delete_outline,
+                              );
+                              if (!confirmed) return;
+                              await widget.calendarController
+                                  .deleteEvent(existing.id);
+                              didCommitOrDelete = true;
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                          )
+                        else
+                          const SizedBox.shrink(),
+                        Row(
+                          children: [
+                            DaywellButton(
+                              label: 'Cancel',
+                              variant: DaywellButtonVariant.text,
+                              size: DaywellButtonSize.compact,
+                              onPressed: () =>
+                                  unawaited(Navigator.of(ctx).maybePop()),
+                            ),
+                            const SizedBox(width: SharedDesignTokens.spacingSm),
+                            DaywellButton(
+                              label: isEditing ? 'Save' : 'Add Event',
+                              variant: DaywellButtonVariant.primary,
+                              size: DaywellButtonSize.compact,
+                              onPressed: () => unawaited(commitEvent()),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        );
+          );
         },
       ),
     );

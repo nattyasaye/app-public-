@@ -114,7 +114,13 @@ void main() {
           findsNothing,
         );
 
-        for (final modeLabel in ['Income', 'Transfer', 'Split Expense', 'Lend', 'Borrow']) {
+        for (final modeLabel in [
+          'Income',
+          'Transfer',
+          'Split Expense',
+          'Lend',
+          'Borrow',
+        ]) {
           await tester.tap(find.widgetWithText(ChoiceChip, modeLabel));
           await tester.pumpAndSettle();
           expect(
@@ -130,10 +136,12 @@ void main() {
         }
 
         // Verify FinanceTransactionsTab and FinancePlanTab omit transaction Note UI while retaining Party Notes & voidReason
-        final txTabSource = File('lib/ui/screens/finance/finance_transactions_tab.dart')
-            .readAsStringSync();
-        final planTabSource = File('lib/ui/screens/finance/finance_plan_tab.dart')
-            .readAsStringSync();
+        final txTabSource = File(
+          'lib/ui/screens/finance/finance_transactions_tab.dart',
+        ).readAsStringSync();
+        final planTabSource = File(
+          'lib/ui/screens/finance/finance_plan_tab.dart',
+        ).readAsStringSync();
         expect(txTabSource.contains('Note (optional)'), isFalse);
         expect(txTabSource.contains('entry.voidReason'), isTrue);
         expect(planTabSource.contains('Payment Note (optional)'), isFalse);
@@ -161,9 +169,9 @@ void main() {
             .toList();
         // Principal & cash legs do not write transaction-level notes
         expect(
-          createdPostings.where((p) => !DoubleEntryEngine.isExpenseFeePosting(p)).every(
-                (p) => p.note == null,
-              ),
+          createdPostings
+              .where((p) => !DoubleEntryEngine.isExpenseFeePosting(p))
+              .every((p) => p.note == null),
           isTrue,
         );
 
@@ -227,8 +235,9 @@ void main() {
                 ))
             .toList();
 
-        final postingsCsv = FinanceExportService.exportPostingsCsv(postingsWithNote)
-            .replaceFirst('\uFEFF', '');
+        final postingsCsv = FinanceExportService.exportPostingsCsv(
+          postingsWithNote,
+        ).replaceFirst('\uFEFF', '');
         final header = postingsCsv.split(RegExp(r'\r?\n')).first;
         expect(
           header,
@@ -358,8 +367,8 @@ void main() {
               ),
             );
 
-        final updatedCount =
-            await V7LedgerHardener.backfillBlankDescriptionsFromHistoricalNotesInTx(
+        final updatedCount = await V7LedgerHardener
+            .backfillBlankDescriptionsFromHistoricalNotesInTx(
           db,
         );
         expect(updatedCount, 1);
@@ -367,8 +376,7 @@ void main() {
         final entries = await db.select(db.journalEntriesTable).get();
         final backfilled =
             entries.firstWhere((e) => e.id == 'je-blank-posting-note');
-        final preserved =
-            entries.firstWhere((e) => e.id == 'je-keep-existing');
+        final preserved = entries.firstWhere((e) => e.id == 'je-keep-existing');
         expect(backfilled.description, 'Copied legacy food note');
         expect(preserved.description, 'Official receipt');
 

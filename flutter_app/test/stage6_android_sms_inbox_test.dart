@@ -547,10 +547,14 @@ void main() {
         expect(deniedRes.skippedBecausePermission, isTrue);
         expect(fakeService.cancelDailyScanCalls, greaterThanOrEqualTo(1));
         expect(controller.state.smsScanCheckpoint.permissionAsked, isTrue);
-        expect(controller.state.smsPermissionStatus, DeviceSmsPermissionStatus.denied);
+        expect(
+          controller.state.smsPermissionStatus,
+          DeviceSmsPermissionStatus.denied,
+        );
 
         // Foreground catch-up after denial NEVER prompts again
-        final catchUpAfterDeny = await controller.runForegroundCatchUpSmsScanIfNeeded();
+        final catchUpAfterDeny =
+            await controller.runForegroundCatchUpSmsScanIfNeeded();
         expect(catchUpAfterDeny.skippedBecausePermission, isTrue);
         expect(fakeService.requestPermissionCalls, 1);
 
@@ -561,18 +565,23 @@ void main() {
         expect(grantRes.importedCount, 1);
         expect(fakeService.dailyScanScheduled, isTrue);
         expect(controller.state.smsDrafts.length, 1);
-        expect(controller.state.smsDrafts.single.transactionReference, 'FT26331SCAN1');
+        expect(
+          controller.state.smsDrafts.single.transactionReference,
+          'FT26331SCAN1',
+        );
 
         // Zero ledger/balance mutation before explicit user approval
         expect(controller.state.liquidCashCents, 2000000);
         expect(
-          controller.state.journalEntries.where((e) => e.entryType == EntryType.standard),
+          controller.state.journalEntries
+              .where((e) => e.entryType == EntryType.standard),
           isEmpty,
         );
 
         // 3c. Fresh scan skips foreground catch-up; stale (>= 25h) triggers catch-up with 20m overlap
         currentNow = currentNow.add(const Duration(hours: 2));
-        final freshCatchUp = await controller.runForegroundCatchUpSmsScanIfNeeded();
+        final freshCatchUp =
+            await controller.runForegroundCatchUpSmsScanIfNeeded();
         expect(freshCatchUp.skippedBecauseFresh, isTrue);
 
         currentNow = currentNow.add(const Duration(hours: 24)); // total +26h
@@ -585,10 +594,12 @@ void main() {
             receivedAtUtc: DateTime.utc(2026, 11, 28, 7, 0, 0),
           ),
         );
-        final staleCatchUp = await controller.runForegroundCatchUpSmsScanIfNeeded();
+        final staleCatchUp =
+            await controller.runForegroundCatchUpSmsScanIfNeeded();
         expect(staleCatchUp.executed, isTrue);
         expect(staleCatchUp.importedCount, 1);
-        expect(staleCatchUp.duplicateCount, 1); // m1 falls within 20m overlap window and is deduplicated cleanly
+        // m1 falls within 20m overlap window and is deduplicated cleanly
+        expect(staleCatchUp.duplicateCount, 1);
         expect(controller.state.smsDrafts.length, 2);
 
         // 3d. Concurrent native/in-flight lock guard prevents overlapping scans
@@ -640,7 +651,8 @@ void main() {
 
         fakeService.status = DeviceSmsPermissionStatus.denied;
         currentNow = currentNow.add(const Duration(hours: 30));
-        final revokedRes = await controller.runForegroundCatchUpSmsScanIfNeeded();
+        final revokedRes =
+            await controller.runForegroundCatchUpSmsScanIfNeeded();
         expect(revokedRes.skippedBecausePermission, isTrue);
         expect(fakeService.dailyScanScheduled, isFalse);
 

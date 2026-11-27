@@ -67,16 +67,23 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     );
     final classifications = state.classificationsByEntryId;
     final etbFiltered = filtered
-        .where((e) => (classifications[e.id] ?? state.classifyEntry(e)).isEligibleEtb)
+        .where(
+          (e) =>
+              (classifications[e.id] ?? state.classifyEntry(e)).isEligibleEtb,
+        )
         .toList(growable: false);
     final legacyFiltered = filtered
-        .where((e) => !(classifications[e.id] ?? state.classifyEntry(e)).isEligibleEtb)
+        .where(
+          (e) =>
+              !(classifications[e.id] ?? state.classifyEntry(e)).isEligibleEtb,
+        )
         .toList(growable: false);
 
     final visibleCount = state.txDisplayLimit < etbFiltered.length
         ? state.txDisplayLimit
         : etbFiltered.length;
-    final visibleEntries = etbFiltered.take(visibleCount).toList(growable: false);
+    final visibleEntries =
+        etbFiltered.take(visibleCount).toList(growable: false);
 
     return Column(
       children: [
@@ -319,7 +326,8 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
           if (hasMoreButton)
             Center(
               child: DaywellButton(
-                label: 'Load More (${filtered.length - visibleCount} remaining)',
+                label:
+                    'Load More (${filtered.length - visibleCount} remaining)',
                 variant: DaywellButtonVariant.outlined,
                 onPressed: () => widget.controller
                     .setTxDisplayLimit(state.txDisplayLimit + 25),
@@ -944,6 +952,14 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     final canRefund =
         refundSummary.eligible && refundSummary.remainingRefundableCents > 0;
 
+    final resolvedTitle =
+        DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
+      description: entry.description,
+      legacyNote: DoubleEntryEngine.resolveUnambiguousHistoricalPostingNote(
+        postings,
+      ),
+    );
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -964,13 +980,7 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   children: [
                     Expanded(
                       child: Text(
-                        DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
-                          description: entry.description,
-                          legacyNote: DoubleEntryEngine
-                              .resolveUnambiguousHistoricalPostingNote(
-                            postings,
-                          ),
-                        ),
+                        resolvedTitle,
                         style: textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -1068,10 +1078,9 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   Builder(
                     builder: (_) {
                       final acc = accountById[p.accountId];
-                      final isSystemAcc =
-                          SystemControlAccounts.isSystemControlId(
-                                  p.accountId) ||
-                              (acc?.isSystem ?? false);
+                      final isSystemAcc = SystemControlAccounts
+                              .isSystemControlId(p.accountId) ||
+                          (acc?.isSystem ?? false);
                       final postingCurrency = isSystemAcc
                           ? (classification.nativeCurrencyCode ??
                               (classification.touchedCurrencies.length == 1 &&

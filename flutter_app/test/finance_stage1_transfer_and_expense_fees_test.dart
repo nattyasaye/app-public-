@@ -123,7 +123,8 @@ void main() {
           description: 'Return to bank',
         );
         final oppositeRes = DoubleEntryEngine.resolveTransferDisplayEndpoints(
-          postings: (opposite['postings'] as List<PostingModel>).reversed.toList(),
+          postings:
+              (opposite['postings'] as List<PostingModel>).reversed.toList(),
           accounts: accounts,
         );
         expect(oppositeRes.isUnambiguous, true);
@@ -218,17 +219,21 @@ void main() {
         // No duplicate cat-fees rows created
         final categories = await repo.getCategories();
         expect(
-          categories.where((c) => c.id == SystemControlAccounts.feeCategoryId).length,
+          categories
+              .where((c) => c.id == SystemControlAccounts.feeCategoryId)
+              .length,
           1,
         );
 
         // CBE balance = 5,000 - 500 - 1,015 = 3,485 ETB
-        final cbe = controller.state.accounts.firstWhere((a) => a.id == 'acc-cbe');
+        final cbe =
+            controller.state.accounts.firstWhere((a) => a.id == 'acc-cbe');
         expect(controller.state.getAccountBalanceCents(cbe), 348500);
 
         // Legacy mirror row stores principal (1,000 ETB) and merchant category (cat-food)
         final mirrorTxs = await repo.getTransactions();
-        final feeMirror = mirrorTxs.firstWhere((t) => t.id == feeEntry.legacySourceTxId);
+        final feeMirror =
+            mirrorTxs.firstWhere((t) => t.id == feeEntry.legacySourceTxId);
         expect(feeMirror.amountCents, 100000);
         expect(feeMirror.categoryId, 'cat-food');
       },
@@ -328,8 +333,10 @@ void main() {
         );
         expect(repl, isNotNull);
 
-        final cbe = controller.state.accounts.firstWhere((a) => a.id == 'acc-cbe');
-        expect(controller.state.getAccountBalanceCents(cbe), 378000); // 5000 - 1220
+        final cbe =
+            controller.state.accounts.firstWhere((a) => a.id == 'acc-cbe');
+        // 5000 - 1220
+        expect(controller.state.getAccountBalanceCents(cbe), 378000);
 
         // Mirror row for replacement stores principal (1,200 ETB) and merchant category (cat-food)
         final replMirror = (await repo.getTransactions())
@@ -455,7 +462,10 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(
-          find.widgetWithText(DaywellTextField, 'Bank / Service Fee (ETB, optional)'),
+          find.widgetWithText(
+            DaywellTextField,
+            'Bank / Service Fee (ETB, optional)',
+          ),
           findsOneWidget,
         );
         final feeTextField = tester.widget<TextFormField>(
@@ -467,7 +477,10 @@ void main() {
         await tester.tap(find.widgetWithText(ChoiceChip, 'Income'));
         await tester.pumpAndSettle();
         expect(
-          find.widgetWithText(DaywellTextField, 'Bank / Service Fee (ETB, optional)'),
+          find.widgetWithText(
+            DaywellTextField,
+            'Bank / Service Fee (ETB, optional)',
+          ),
           findsNothing,
         );
 
@@ -497,7 +510,10 @@ void main() {
             ?.text;
         expect(amountCtrlText, '1000.00');
         expect(editFeeText, '15.00');
-        expect(find.textContaining('Total deduction: 1,015.00 ETB'), findsOneWidget);
+        expect(
+          find.textContaining('Total deduction: 1,015.00 ETB'),
+          findsOneWidget,
+        );
       },
     );
   });

@@ -764,7 +764,10 @@ class DashboardFinanceSection extends StatelessWidget {
         }
 
         final pendingCommitments = financeState.pendingCommitments
-            .where((c) => !financeState.resolveCommitmentCurrency(c).isExcludedNonEtb)
+            .where(
+              (c) =>
+                  !financeState.resolveCommitmentCurrency(c).isExcludedNonEtb,
+            )
             .toList(growable: false);
         final recentActivity = _buildRecentFinanceActivity(financeState);
 
