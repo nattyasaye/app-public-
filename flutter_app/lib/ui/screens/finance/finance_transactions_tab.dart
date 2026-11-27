@@ -282,8 +282,7 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
         if (state.pendingSmsDraftCount > 0) ...[
           DaywellStatusBanner(
             tone: DaywellStatusTone.info,
-            title:
-                '${state.pendingSmsDraftCount} SMS draft(s) awaiting review',
+            title: '${state.pendingSmsDraftCount} SMS draft(s) awaiting review',
             message:
                 'SMS drafts stay separate from your ledger until you explicitly approve them.',
             actionLabel: 'Review Drafts',
@@ -537,7 +536,8 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                 return ep.isUnambiguous
                     ? '${ep.sourceName} → ${ep.destinationName}'
                     : ep.fallbackAccountNames.join(' · ');
-              })().toLowerCase()
+              })()
+                .toLowerCase()
             : '';
         final resolvedDesc =
             DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
@@ -675,9 +675,8 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
           : transferEndpoints.fallbackAccountNames.join(' · ');
     } else if (expenseSummary.isDirectExpense &&
         expenseSummary.paidAccountId != null) {
-      userAccountsInvolved =
-          accountById[expenseSummary.paidAccountId!]?.name ??
-              expenseSummary.paidAccountId!;
+      userAccountsInvolved = accountById[expenseSummary.paidAccountId!]?.name ??
+          expenseSummary.paidAccountId!;
     } else {
       userAccountsInvolved = postings
           .where((p) =>
@@ -1078,9 +1077,10 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   Builder(
                     builder: (_) {
                       final acc = accountById[p.accountId];
-                      final isSystemAcc = SystemControlAccounts
-                              .isSystemControlId(p.accountId) ||
-                          (acc?.isSystem ?? false);
+                      final isSystemAcc =
+                          SystemControlAccounts.isSystemControlId(
+                                  p.accountId) ||
+                              (acc?.isSystem ?? false);
                       final postingCurrency = isSystemAcc
                           ? (classification.nativeCurrencyCode ??
                               (classification.touchedCurrencies.length == 1 &&

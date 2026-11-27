@@ -347,11 +347,10 @@ class FinanceSmsInboxScanner {
   static bool isFailedOrDeclinedSms(String rawBody) {
     final trimmed = rawBody.trim();
     if (trimmed.isEmpty) return false;
-    final isBoaPosLock =
-        RegExp(r'is\s+locked\s+from\s+your\s+account', caseSensitive: false)
-                .hasMatch(trimmed) &&
-            RegExp(r'pos\s+transaction', caseSensitive: false)
-                .hasMatch(trimmed);
+    final isBoaPosLock = RegExp(r'is\s+locked\s+from\s+your\s+account',
+                caseSensitive: false)
+            .hasMatch(trimmed) &&
+        RegExp(r'pos\s+transaction', caseSensitive: false).hasMatch(trimmed);
     if (isBoaPosLock) return false;
     return _failedOrDeclinedPatterns.any((re) => re.hasMatch(trimmed));
   }

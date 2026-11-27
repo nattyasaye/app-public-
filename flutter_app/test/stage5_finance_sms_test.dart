@@ -206,8 +206,8 @@ void main() {
         expect(reimport.duplicateCount, 1);
 
         // Attempting to approve POS lock must fail without mutating ledger
-        final posDraft = controller.state.smsDrafts
-            .firstWhere((d) => d.isNonLedgerNotice);
+        final posDraft =
+            controller.state.smsDrafts.firstWhere((d) => d.isNonLedgerNotice);
         final posRejected = await controller.approveSmsDraft(
           draftId: posDraft.id,
           finalType: SmsSuggestedTransactionType.expense,

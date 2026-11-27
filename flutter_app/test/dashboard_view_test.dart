@@ -840,11 +840,12 @@ class _FakeFinanceRepository implements IFinanceRepository {
   }
 
   @override
-  Future<({
-    SmsImportBatchResult batch,
-    DateTime? updatedCheckpointUtc,
-    DateTime completedAtUtc,
-  })> importInboxSmsBatchWithCheckpoint({
+  Future<
+      ({
+        SmsImportBatchResult batch,
+        DateTime? updatedCheckpointUtc,
+        DateTime completedAtUtc,
+      })> importInboxSmsBatchWithCheckpoint({
     required List<SmsInboxMessage> messages,
     DateTime? completedAtUtc,
     bool advanceCheckpoint = true,

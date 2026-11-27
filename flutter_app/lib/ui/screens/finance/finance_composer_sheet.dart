@@ -400,18 +400,17 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
             !SystemControlAccounts.isSystemControlId(p.accountId),
         orElse: () => entryPostings.first,
       );
-      _accountId = expenseSummary.isDirectExpense &&
-              expenseSummary.paidAccountId != null
-          ? expenseSummary.paidAccountId
-          : crAcc.accountId;
+      _accountId =
+          expenseSummary.isDirectExpense && expenseSummary.paidAccountId != null
+              ? expenseSummary.paidAccountId
+              : crAcc.accountId;
       _categoryId = expenseSummary.isDirectExpense
           ? expenseSummary.primaryCategoryId
           : drExp.categoryId;
       final feeCents =
           expenseSummary.isDirectExpense ? expenseSummary.feeCents : 0;
-      _feeCtrl.text = feeCents > 0
-          ? FinanceUiFormatters.formatCentsAsInput(feeCents)
-          : '0';
+      _feeCtrl.text =
+          feeCents > 0 ? FinanceUiFormatters.formatCentsAsInput(feeCents) : '0';
       final rawFeeCat =
           expenseSummary.isDirectExpense ? expenseSummary.feeCategoryId : null;
       _feeCategoryId = rawFeeCat != null

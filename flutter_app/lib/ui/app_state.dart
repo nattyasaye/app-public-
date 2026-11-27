@@ -959,8 +959,7 @@ class AppStateManager extends ChangeNotifier {
       }
 
       await repo.recordSmsScanAttempt(nowUtc);
-      final windowStart =
-          FinanceSmsInboxScanner.computeInboxReadWindowStartUtc(
+      final windowStart = FinanceSmsInboxScanner.computeInboxReadWindowStartUtc(
         checkpointUtc: checkpoint.lastProcessedReceivedAtUtc,
         nowUtc: nowUtc,
       );

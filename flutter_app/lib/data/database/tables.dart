@@ -583,8 +583,7 @@ class SmsDraftsTable extends Table {
   TextColumn get confidence =>
       text().withDefault(const Constant('unrecognized'))();
   // needs_review | approved | dismissed | unrecognized
-  TextColumn get status =>
-      text().withDefault(const Constant('needs_review'))();
+  TextColumn get status => text().withDefault(const Constant('needs_review'))();
   BoolColumn get isNonLedgerNotice =>
       boolean().withDefault(const Constant(false))();
   TextColumn get parseNotes => text().nullable()();

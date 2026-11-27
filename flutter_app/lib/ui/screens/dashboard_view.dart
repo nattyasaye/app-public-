@@ -1308,12 +1308,10 @@ List<_FinanceActivityPreviewItem> _buildRecentFinanceActivity(
     }).toList(growable: false);
   }
 
-  final recentTransactions = financeState.activeTransactions
-      .where((tx) {
-        final txAcc = tx.accountId != null ? accountById[tx.accountId] : null;
-        return txAcc != null && DoubleEntryEngine.isEtb(txAcc.currencyCode);
-      })
-      .toList()
+  final recentTransactions = financeState.activeTransactions.where((tx) {
+    final txAcc = tx.accountId != null ? accountById[tx.accountId] : null;
+    return txAcc != null && DoubleEntryEngine.isEtb(txAcc.currencyCode);
+  }).toList()
     ..sort(
       (TransactionModel a, TransactionModel b) =>
           b.transactionDate.compareTo(a.transactionDate),

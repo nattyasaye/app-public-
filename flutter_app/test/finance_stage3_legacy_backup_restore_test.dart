@@ -401,8 +401,8 @@ void main() {
               fullSnapshot['schemaVersion'] as int? ?? srcDb.schemaVersion,
         );
 
-        final accountsExported = (fullSnapshot['accounts'] as List)
-            .cast<Map<String, dynamic>>();
+        final accountsExported =
+            (fullSnapshot['accounts'] as List).cast<Map<String, dynamic>>();
         expect(
           accountsExported
               .firstWhere((a) => a['id'] == 'acc-usd-bank')['currencyCode'],
@@ -459,15 +459,11 @@ void main() {
           {'acc-usd-bank', 'acc-eur-cash', 'acc-unclassified'},
         );
         expect(
-          state.accounts
-              .firstWhere((a) => a.id == 'acc-usd-bank')
-              .currencyCode,
+          state.accounts.firstWhere((a) => a.id == 'acc-usd-bank').currencyCode,
           'USD',
         );
         expect(
-          state.accounts
-              .firstWhere((a) => a.id == 'acc-eur-cash')
-              .currencyCode,
+          state.accounts.firstWhere((a) => a.id == 'acc-eur-cash').currencyCode,
           'EUR',
         );
         expect(
@@ -477,9 +473,7 @@ void main() {
           '',
         );
         expect(
-          state.postings
-              .firstWhere((p) => p.id == 'post-usd-exp-dr')
-              .note,
+          state.postings.firstWhere((p) => p.id == 'post-usd-exp-dr').note,
           'Historical USD lodging note',
         );
         final restoredDebt =
@@ -494,8 +488,8 @@ void main() {
         );
 
         // Recurring rule regression assertions
-        final restoredAutoRule = state.recurringRules
-            .firstWhere((r) => r.id == 'rule-usd-auto-due');
+        final restoredAutoRule =
+            state.recurringRules.firstWhere((r) => r.id == 'rule-usd-auto-due');
         expect(restoredAutoRule.autoPost, isFalse);
         expect(restoredAutoRule.isActive, isTrue);
         expect(restoredAutoRule.nextOccurrenceDate.toIsoString(), '2026-11-01');
@@ -528,8 +522,7 @@ void main() {
         expect(state.availableToSpendBreakdown.vaultSavingsCents, 100000);
         expect(
           DoubleEntryEngine.calculateAccountBalance(
-            account:
-                state.accounts.firstWhere((a) => a.id == 'acc-usd-bank'),
+            account: state.accounts.firstWhere((a) => a.id == 'acc-usd-bank'),
             postings: state.postings,
             entries: state.journalEntries,
           ),
@@ -538,8 +531,8 @@ void main() {
         );
         expect(
           DoubleEntryEngine.calculateAccountBalance(
-            account: state.accounts
-                .firstWhere((a) => a.id == 'acc-unclassified'),
+            account:
+                state.accounts.firstWhere((a) => a.id == 'acc-unclassified'),
             postings: state.postings,
             entries: state.journalEntries,
           ),

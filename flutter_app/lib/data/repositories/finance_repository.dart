@@ -4383,8 +4383,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     final cls = classifications[entryId];
     if (cls == null || !cls.isEligibleEtb) {
       throw DoubleEntryValidationError(
-        cls?.reason ??
-            'Legacy non-ETB journal entries cannot be restored.',
+        cls?.reason ?? 'Legacy non-ETB journal entries cannot be restored.',
       );
     }
 
@@ -4866,9 +4865,8 @@ class DriftFinanceRepository implements IFinanceRepository {
               : (suggestedCategoryId != null
                   ? Value(suggestedCategoryId)
                   : const Value.absent()),
-          parseNotes: parseNotes != null
-              ? Value(parseNotes)
-              : const Value.absent(),
+          parseNotes:
+              parseNotes != null ? Value(parseNotes) : const Value.absent(),
           updatedAt: Value(nowUtc),
         ),
       );
@@ -5250,11 +5248,12 @@ class DriftFinanceRepository implements IFinanceRepository {
   }
 
   @override
-  Future<({
-    SmsImportBatchResult batch,
-    DateTime? updatedCheckpointUtc,
-    DateTime completedAtUtc,
-  })> importInboxSmsBatchWithCheckpoint({
+  Future<
+      ({
+        SmsImportBatchResult batch,
+        DateTime? updatedCheckpointUtc,
+        DateTime completedAtUtc,
+      })> importInboxSmsBatchWithCheckpoint({
     required List<SmsInboxMessage> messages,
     DateTime? completedAtUtc,
     bool advanceCheckpoint = true,

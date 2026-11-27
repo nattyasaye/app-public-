@@ -144,14 +144,10 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
           draft.copyWith(suggestedAccountId: suggestedAcc),
           allAccounts,
         ) ??
-        transferableAccounts
-            .where((a) => a.id != suggestedAcc)
-            .firstOrNull
-            ?.id;
+        transferableAccounts.where((a) => a.id != suggestedAcc).firstOrNull?.id;
 
-    final catType = finalType == SmsSuggestedTransactionType.income
-        ? 'income'
-        : 'expense';
+    final catType =
+        finalType == SmsSuggestedTransactionType.income ? 'income' : 'expense';
     final catPool = categories
         .where((c) => !c.isArchived && c.type == catType)
         .toList(growable: false);
@@ -592,8 +588,7 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
             padding: const EdgeInsets.all(SharedDesignTokens.spacingSm),
             decoration: BoxDecoration(
               color: semantic.surfaceSubtle,
-              borderRadius:
-                  BorderRadius.circular(SharedDesignTokens.radiusSm),
+              borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
               border: Border.all(color: semantic.border),
             ),
             child: Column(
@@ -885,10 +880,10 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
             if (feesCents > 0) ...[
               DaywellDropdownField<String>(
                 label: 'Fee Category',
-                value: feeCategoryItems
-                        .any((i) => i.value == edit.feeCategoryId)
-                    ? edit.feeCategoryId
-                    : null,
+                value:
+                    feeCategoryItems.any((i) => i.value == edit.feeCategoryId)
+                        ? edit.feeCategoryId
+                        : null,
                 items: feeCategoryItems,
                 onChanged: (val) {
                   if (val != null) setState(() => edit.feeCategoryId = val);

@@ -1267,9 +1267,8 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingMd),
                     DaywellButton(
-                      label: existing == null
-                          ? 'Create Account'
-                          : 'Save Account',
+                      label:
+                          existing == null ? 'Create Account' : 'Save Account',
                       fullWidth: true,
                       onPressed: submitAccount,
                     ),
