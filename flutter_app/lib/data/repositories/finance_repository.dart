@@ -4694,6 +4694,459 @@ class DriftFinanceRepository implements IFinanceRepository {
     await _insertEntryAndPostingsInTx(entry, postings);
   }
 
+  // ==========================================================================
+  // Stage 5 — Financial SMS Drafts (Local-Only Staging; Never Auto-Posts)
+  // ==========================================================================
+
+  @override
+  Future<List<FinanceSmsDraftModel>> getSmsDrafts({
+    SmsDraftStatus? status,
+  }) async {
+    final query = _db.select(_db.smsDraftsTable)
+      ..orderBy([
+        (tbl) => OrderingTerm.desc(tbl.receivedAtUtc),
+        (tbl) => OrderingTerm.desc(tbl.createdAt),
+      ]);
+    if (status != null) {
+      query.where((tbl) => tbl.status.equals(status.dbValue));
+    }
+    final rows = await query.get();
+    return rows.map(_mapSmsDraftRow).toList(growable: false);
+  }
+
+  @override
+  Future<SmsImportBatchResult> importSmsDrafts({
+    required List<String> rawMessages,
+    SmsProvider? providerHint,
+    DateTime? receivedAtUtc,
+  }) async {
+    final effectiveReceivedAt = (receivedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
+    return _db.transaction(() async {
+      final accounts =
+          await getAccounts(includeArchived: true, includeSystem: true);
+      final categories = await getCategories(includeArchived: true);
+      final existingRows = await _db.select(_db.smsDraftsTable).get();
+      final knownDrafts = existingRows.map(_mapSmsDraftRow).toList();
+
+      var importedCount = 0;
+      var unrecognizedCount = 0;
+      var duplicateCount = 0;
+      var ignoredCount = 0;
+      final importedDrafts = <FinanceSmsDraftModel>[];
+      final ignoredReasons = <String>[];
+
+      for (final rawMsg in rawMessages) {
+        final outcome = FinanceSmsParsers.parseFinancialSmsMessage(
+          rawMsg,
+          providerHint: providerHint,
+          receivedAtUtc: effectiveReceivedAt,
+          accounts: accounts,
+          categories: categories,
+        );
+        if (outcome.isIgnoredNonTransactional || outcome.draft == null) {
+          ignoredCount++;
+          if (outcome.ignoreReason != null &&
+              outcome.ignoreReason!.trim().isNotEmpty) {
+            ignoredReasons.add(outcome.ignoreReason!.trim());
+          }
+          continue;
+        }
+
+        final candidate = outcome.draft!;
+        final dup = FinanceSmsParsers.findDuplicateDraft(candidate, knownDrafts);
+        if (dup.isDuplicate) {
+          duplicateCount++;
+          continue;
+        }
+
+        await _db.into(_db.smsDraftsTable).insert(
+              SmsDraftsTableCompanion.insert(
+                id: candidate.id,
+                provider: candidate.provider.dbValue,
+                fingerprint: candidate.fingerprint,
+                transactionReference: Value(candidate.transactionReference),
+                receiptUrl: Value(candidate.receiptUrl),
+                suggestedType: Value(candidate.suggestedType.dbValue),
+                direction: Value(candidate.direction.dbValue),
+                principalCents: Value(candidate.principalCents),
+                serviceFeeCents: Value(candidate.serviceFeeCents),
+                vatCents: Value(candidate.vatCents),
+                otherChargesCents: Value(candidate.otherChargesCents),
+                totalAmountCents: Value(candidate.totalAmountCents),
+                hasAmountMismatch: Value(candidate.hasAmountMismatch),
+                currencyCode: Value(candidate.currencyCode),
+                accountHint: Value(candidate.accountHint),
+                counterpartyName: Value(candidate.counterpartyName),
+                counterpartyHint: Value(candidate.counterpartyHint),
+                reportedBalanceCents: Value(candidate.reportedBalanceCents),
+                transactionTimestampUtc:
+                    Value(candidate.transactionTimestampUtc),
+                transactionDateIso: Value(candidate.transactionDateIso),
+                receivedAtUtc: candidate.receivedAtUtc,
+                confidence: Value(candidate.confidence.dbValue),
+                status: Value(candidate.status.dbValue),
+                isNonLedgerNotice: Value(candidate.isNonLedgerNotice),
+                parseNotes: Value(candidate.parseNotes),
+                suggestedAccountId: Value(candidate.suggestedAccountId),
+                suggestedCategoryId: Value(candidate.suggestedCategoryId),
+                approvedEntryId: Value(candidate.approvedEntryId),
+                rawSmsText: candidate.rawSmsText,
+                createdAt: candidate.createdAt,
+                updatedAt: candidate.updatedAt,
+              ),
+            );
+        knownDrafts.add(candidate);
+        importedDrafts.add(candidate);
+        if (candidate.status == SmsDraftStatus.unrecognized) {
+          unrecognizedCount++;
+        } else {
+          importedCount++;
+        }
+      }
+
+      return SmsImportBatchResult(
+        importedCount: importedCount,
+        unrecognizedCount: unrecognizedCount,
+        duplicateCount: duplicateCount,
+        ignoredCount: ignoredCount,
+        importedDrafts: List<FinanceSmsDraftModel>.unmodifiable(importedDrafts),
+        ignoredReasons: List<String>.unmodifiable(ignoredReasons),
+      );
+    });
+  }
+
+  @override
+  Future<FinanceSmsDraftModel> updateSmsDraftReview({
+    required String draftId,
+    SmsSuggestedTransactionType? suggestedType,
+    String? suggestedAccountId,
+    bool clearSuggestedAccountId = false,
+    String? suggestedCategoryId,
+    bool clearSuggestedCategoryId = false,
+    String? parseNotes,
+  }) async {
+    final nowUtc = EthiopiaClock.nowUtc();
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .getSingleOrNull();
+      if (existing == null) {
+        throw DoubleEntryValidationError('SMS draft "$draftId" not found.');
+      }
+      if (existing.status == SmsDraftStatus.approved.dbValue) {
+        throw DoubleEntryValidationError(
+          'Approved SMS drafts cannot be modified.',
+        );
+      }
+
+      await (_db.update(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .write(
+        SmsDraftsTableCompanion(
+          suggestedType: suggestedType != null
+              ? Value(suggestedType.dbValue)
+              : const Value.absent(),
+          suggestedAccountId: clearSuggestedAccountId
+              ? const Value(null)
+              : (suggestedAccountId != null
+                  ? Value(suggestedAccountId)
+                  : const Value.absent()),
+          suggestedCategoryId: clearSuggestedCategoryId
+              ? const Value(null)
+              : (suggestedCategoryId != null
+                  ? Value(suggestedCategoryId)
+                  : const Value.absent()),
+          parseNotes: parseNotes != null
+              ? Value(parseNotes)
+              : const Value.absent(),
+          updatedAt: Value(nowUtc),
+        ),
+      );
+
+      final updated = await (_db.select(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .getSingle();
+      return _mapSmsDraftRow(updated);
+    });
+  }
+
+  @override
+  Future<FinanceSmsDraftModel> dismissSmsDraft(String draftId) async {
+    final nowUtc = EthiopiaClock.nowUtc();
+    return _db.transaction(() async {
+      final existing = await (_db.select(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .getSingleOrNull();
+      if (existing == null) {
+        throw DoubleEntryValidationError('SMS draft "$draftId" not found.');
+      }
+      if (existing.status == SmsDraftStatus.approved.dbValue) {
+        throw DoubleEntryValidationError(
+          'Approved SMS drafts cannot be dismissed.',
+        );
+      }
+
+      await (_db.update(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .write(
+        SmsDraftsTableCompanion(
+          status: Value(SmsDraftStatus.dismissed.dbValue),
+          updatedAt: Value(nowUtc),
+        ),
+      );
+
+      final updated = await (_db.select(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .getSingle();
+      return _mapSmsDraftRow(updated);
+    });
+  }
+
+  @override
+  Future<({FinanceSmsDraftModel draft, JournalEntryModel entry})>
+      approveSmsDraft({
+    required String draftId,
+    required SmsSuggestedTransactionType finalType,
+    required String accountId,
+    String? destinationAccountId,
+    String? categoryId,
+    String? feeCategoryId,
+    required CalendarDate occurrenceDate,
+    CalendarDate? movementDate,
+    required String description,
+    String? payee,
+  }) async {
+    final nowUtc = EthiopiaClock.nowUtc();
+    return _db.transaction(() async {
+      final existingRow = await (_db.select(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .getSingleOrNull();
+      if (existingRow == null) {
+        throw DoubleEntryValidationError('SMS draft "$draftId" not found.');
+      }
+      final draft = _mapSmsDraftRow(existingRow);
+
+      final validationError = FinanceSmsParsers.validateDraftApproval(
+        draft: draft,
+        finalType: finalType,
+        accountId: accountId,
+        destinationAccountId: destinationAccountId,
+      );
+      if (validationError != null) {
+        throw DoubleEntryValidationError(validationError);
+      }
+
+      await V6LedgerMigrator.ensureSystemControlAccounts(_db);
+
+      final entryId = 'entry-sms-${_uuid.v4()}';
+      final txId = 'tx-$entryId';
+      final feesCents = draft.totalFeesCents;
+      final effectiveFeeCategoryId = feesCents > 0
+          ? ((feeCategoryId != null && feeCategoryId.trim().isNotEmpty)
+              ? feeCategoryId.trim()
+              : SystemControlAccounts.feeCategoryId)
+          : null;
+
+      final cleanDesc = description.trim().isEmpty
+          ? FinanceSmsParsers.buildDefaultDraftDescription(draft)
+          : description.trim();
+      final rawPayee = (payee != null && payee.trim().isNotEmpty)
+          ? payee.trim()
+          : (finalType != SmsSuggestedTransactionType.transfer
+              ? draft.counterpartyName?.trim()
+              : null);
+      final cleanPayee =
+          (rawPayee != null && rawPayee.isNotEmpty) ? rawPayee : null;
+      final formattedDesc = _formatDescription(cleanDesc, payee: cleanPayee);
+
+      late final JournalEntryModel entry;
+      late final List<PostingModel> postings;
+      String? persistedCategoryId;
+
+      if (finalType == SmsSuggestedTransactionType.transfer) {
+        final destId = destinationAccountId!.trim();
+        await _assertTransferEtbAccountsInTx([accountId, destId]);
+        final mirrorCategoryId = await _resolveTransferMirrorCategoryIdInTx(
+          feeCategoryId: effectiveFeeCategoryId,
+        );
+        final built = DoubleEntryEngine.buildTransfer(
+          entryId: entryId,
+          fromAssetAccountId: accountId,
+          toAssetAccountId: destId,
+          amountCents: draft.principalCents,
+          date: occurrenceDate.toIsoString(),
+          movementDate: movementDate?.toIsoString(),
+          description: cleanDesc,
+          transferFeeCents: feesCents,
+          feeExpenseAccountId:
+              feesCents > 0 ? SystemControlAccounts.expense : null,
+          feeCategoryId: effectiveFeeCategoryId,
+        );
+        entry = (built['entry'] as JournalEntryModel)
+            .copyWith(legacySourceTxId: txId);
+        final rawPostings = built['postings'] as List<PostingModel>;
+        postings = feesCents > 0
+            ? rawPostings
+                .map(
+                  (p) => DoubleEntryEngine.isExpenseFeePosting(p)
+                      ? p.copyWith(
+                          note: FinanceSmsParsers.formatFeeBreakdownNote(
+                            draft,
+                            p.note ?? 'Transfer service fee',
+                          ),
+                        )
+                      : p,
+                )
+                .toList(growable: false)
+            : rawPostings;
+        DoubleEntryEngine.validateBalancedEntry(postings);
+        await _insertEntryAndPostingsInTx(entry, postings);
+        await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+              FinancialTransactionsCompanion.insert(
+                id: txId,
+                categoryId: mirrorCategoryId,
+                amountCents: draft.principalCents,
+                type: 'transfer',
+                transactionDate: occurrenceDate.toIsoString(),
+                accountId: Value(accountId),
+                destinationAccountId: Value(destId),
+                isSuperseded: const Value(false),
+                createdAt: entry.createdAt,
+              ),
+            );
+      } else if (finalType == SmsSuggestedTransactionType.income) {
+        await _assertSpendableEtbAccountsInTx(
+          [accountId],
+          roleLabel: 'Deposit account',
+        );
+        final resolvedCatId =
+            (categoryId != null && categoryId.trim().isNotEmpty)
+                ? categoryId.trim()
+                : 'cat-other-inc';
+        persistedCategoryId = resolvedCatId;
+        await _ensureCategoryExists(
+          resolvedCatId,
+          DoubleEntryEngine.canonicalCategoryNameForSeed(resolvedCatId),
+          'income',
+        );
+        final built = DoubleEntryEngine.buildDirectIncome(
+          entryId: entryId,
+          destAccountId: accountId,
+          categoryId: resolvedCatId,
+          amountCents: draft.principalCents,
+          date: occurrenceDate.toIsoString(),
+          movementDate: movementDate?.toIsoString(),
+          description: formattedDesc,
+        );
+        entry = (built['entry'] as JournalEntryModel)
+            .copyWith(legacySourceTxId: txId);
+        postings = built['postings'] as List<PostingModel>;
+        DoubleEntryEngine.validateBalancedEntry(postings);
+        await _insertEntryAndPostingsInTx(entry, postings);
+        await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+              FinancialTransactionsCompanion.insert(
+                id: txId,
+                categoryId: resolvedCatId,
+                amountCents: draft.principalCents,
+                type: 'income',
+                transactionDate: occurrenceDate.toIsoString(),
+                payee: Value(cleanPayee),
+                accountId: Value(accountId),
+                isSuperseded: const Value(false),
+                createdAt: entry.createdAt,
+              ),
+            );
+      } else {
+        await _assertSpendableEtbAccountsInTx(
+          [accountId],
+          roleLabel: 'Paid account',
+        );
+        final resolvedCatId =
+            (categoryId != null && categoryId.trim().isNotEmpty)
+                ? categoryId.trim()
+                : SystemControlAccounts.canonicalDefaultExpenseCategoryId;
+        persistedCategoryId = resolvedCatId;
+        await _ensureCategoryExists(
+          resolvedCatId,
+          DoubleEntryEngine.canonicalCategoryNameForSeed(resolvedCatId),
+          'expense',
+        );
+        if (effectiveFeeCategoryId != null) {
+          await _ensureCategoryExists(
+            effectiveFeeCategoryId,
+            DoubleEntryEngine.canonicalCategoryNameForSeed(
+              effectiveFeeCategoryId,
+            ),
+            'expense',
+          );
+        }
+        final built = DoubleEntryEngine.buildDirectExpense(
+          entryId: entryId,
+          paidAccountId: accountId,
+          categoryId: resolvedCatId,
+          amountCents: draft.principalCents,
+          feeCents: feesCents,
+          feeCategoryId: effectiveFeeCategoryId,
+          date: occurrenceDate.toIsoString(),
+          movementDate: movementDate?.toIsoString(),
+          description: formattedDesc,
+        );
+        entry = (built['entry'] as JournalEntryModel)
+            .copyWith(legacySourceTxId: txId);
+        final rawPostings = built['postings'] as List<PostingModel>;
+        postings = feesCents > 0
+            ? rawPostings
+                .map(
+                  (p) => DoubleEntryEngine.isExpenseFeePosting(p)
+                      ? p.copyWith(
+                          note: FinanceSmsParsers.formatFeeBreakdownNote(
+                            draft,
+                            p.note ?? 'Bank / transaction fee',
+                          ),
+                        )
+                      : p,
+                )
+                .toList(growable: false)
+            : rawPostings;
+        DoubleEntryEngine.validateBalancedEntry(postings);
+        await _insertEntryAndPostingsInTx(entry, postings);
+        await _db.into(_db.financialTransactions).insertOnConflictUpdate(
+              FinancialTransactionsCompanion.insert(
+                id: txId,
+                categoryId: resolvedCatId,
+                amountCents: draft.principalCents,
+                type: 'expense',
+                transactionDate: occurrenceDate.toIsoString(),
+                payee: Value(cleanPayee),
+                accountId: Value(accountId),
+                isSuperseded: const Value(false),
+                createdAt: entry.createdAt,
+              ),
+            );
+      }
+
+      await (_db.update(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .write(
+        SmsDraftsTableCompanion(
+          suggestedType: Value(finalType.dbValue),
+          suggestedAccountId: Value(accountId),
+          suggestedCategoryId: Value(persistedCategoryId),
+          status: Value(SmsDraftStatus.approved.dbValue),
+          approvedEntryId: Value(entry.id),
+          updatedAt: Value(nowUtc),
+        ),
+      );
+
+      await _syncVaultGoalsInTx();
+
+      final updatedRow = await (_db.select(_db.smsDraftsTable)
+            ..where((tbl) => tbl.id.equals(draftId)))
+          .getSingle();
+      return (draft: _mapSmsDraftRow(updatedRow), entry: entry);
+    });
+  }
+
   String _formatDescription(String description, {String? payee}) {
     final cleanDesc = description.trim();
     final cleanPayee = payee?.trim();
@@ -4861,6 +5314,42 @@ class DriftFinanceRepository implements IFinanceRepository {
       isActive: row.isActive,
       autoPost: row.autoPost,
       createdAt: row.createdAt,
+    );
+  }
+
+  FinanceSmsDraftModel _mapSmsDraftRow(SmsDraftsTableData row) {
+    return FinanceSmsDraftModel(
+      id: row.id,
+      provider: SmsProvider.fromDbValue(row.provider),
+      fingerprint: row.fingerprint,
+      transactionReference: row.transactionReference,
+      receiptUrl: row.receiptUrl,
+      suggestedType: SmsSuggestedTransactionType.fromDbValue(row.suggestedType),
+      direction: SmsDirection.fromDbValue(row.direction),
+      principalCents: row.principalCents,
+      serviceFeeCents: row.serviceFeeCents,
+      vatCents: row.vatCents,
+      otherChargesCents: row.otherChargesCents,
+      totalAmountCents: row.totalAmountCents,
+      hasAmountMismatch: row.hasAmountMismatch,
+      currencyCode: row.currencyCode,
+      accountHint: row.accountHint,
+      counterpartyName: row.counterpartyName,
+      counterpartyHint: row.counterpartyHint,
+      reportedBalanceCents: row.reportedBalanceCents,
+      transactionTimestampUtc: row.transactionTimestampUtc,
+      transactionDateIso: row.transactionDateIso,
+      receivedAtUtc: row.receivedAtUtc,
+      confidence: SmsParseConfidence.fromDbValue(row.confidence),
+      status: SmsDraftStatus.fromDbValue(row.status),
+      isNonLedgerNotice: row.isNonLedgerNotice,
+      parseNotes: row.parseNotes,
+      suggestedAccountId: row.suggestedAccountId,
+      suggestedCategoryId: row.suggestedCategoryId,
+      approvedEntryId: row.approvedEntryId,
+      rawSmsText: row.rawSmsText,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
     );
   }
 }

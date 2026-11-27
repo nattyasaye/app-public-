@@ -9,6 +9,7 @@ import {
   CornerDownLeft,
   ChevronDown,
   ChevronRight,
+  MessageSquareText,
 } from 'lucide-react';
 import {
   Account,
@@ -92,6 +93,8 @@ interface FinanceTransactionsTabProps {
   ) => void;
   dailyRhythmRecord?: DailyRhythmDayRecord;
   onConfirmFinanceClose?: () => void;
+  pendingSmsDraftCount?: number;
+  onOpenSmsDrafts?: () => void;
 }
 
 export function FinanceTransactionsTab({
@@ -110,6 +113,8 @@ export function FinanceTransactionsTab({
   onRequestConfirm,
   dailyRhythmRecord,
   onConfirmFinanceClose,
+  pendingSmsDraftCount = 0,
+  onOpenSmsDrafts,
 }: FinanceTransactionsTabProps) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
@@ -597,13 +602,28 @@ export function FinanceTransactionsTab({
             ariaLabel="Search ledger entries"
             className="flex-1 min-w-[200px]"
           />
-          <DaywellButton
-            label="Log Entry"
-            variant="primary"
-            size="compact"
-            leadingIcon={<Plus className="w-3.5 h-3.5" />}
-            onClick={() => onOpenComposer('expense')}
-          />
+          <div className="flex flex-wrap items-center gap-2">
+            {onOpenSmsDrafts && (
+              <DaywellButton
+                label={
+                  pendingSmsDraftCount > 0
+                    ? `SMS Drafts (${pendingSmsDraftCount})`
+                    : 'SMS Drafts'
+                }
+                variant={pendingSmsDraftCount > 0 ? 'secondary' : 'outlined'}
+                size="compact"
+                leadingIcon={<MessageSquareText className="w-3.5 h-3.5" />}
+                onClick={onOpenSmsDrafts}
+              />
+            )}
+            <DaywellButton
+              label="Log Entry"
+              variant="primary"
+              size="compact"
+              leadingIcon={<Plus className="w-3.5 h-3.5" />}
+              onClick={() => onOpenComposer('expense')}
+            />
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs">

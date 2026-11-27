@@ -55,6 +55,7 @@ class FinanceController extends ChangeNotifier {
         await _repository.getSavingsGoals(includeArchived: true);
     final budgets = await _repository.getBudgets();
     final recurringRules = await _repository.getRecurringRules();
+    final smsDrafts = await _repository.getSmsDrafts();
     final migrationReport = await _repository.getLatestMigrationReport();
     final debtControlAudit = await _repository.auditDebtControlBalances();
     final legacyNoticeDismissed =
@@ -76,6 +77,7 @@ class FinanceController extends ChangeNotifier {
       savingsGoals: List<SavingsGoalModel>.unmodifiable(savingsGoals),
       budgets: List<BudgetModel>.unmodifiable(budgets),
       recurringRules: List<RecurringRuleModel>.unmodifiable(recurringRules),
+      smsDrafts: List<FinanceSmsDraftModel>.unmodifiable(smsDrafts),
       openingBalanceCents: settings.openingBalanceCents,
       isSetupCompleted: settings.isSetupCompleted,
       legacyNonEtbNoticeDismissed: legacyNoticeDismissed,
@@ -1674,6 +1676,127 @@ class FinanceController extends ChangeNotifier {
       _state = _state.copyWith(errorMessage: e.toString());
       notifyListeners();
       return false;
+    }
+  }
+
+  // --- Stage 5: Financial SMS Draft Workflows (Never Auto-Post) ---
+
+  Future<SmsImportBatchResult?> importSmsMessages({
+    required List<String> rawMessages,
+    SmsProvider? providerHint,
+    DateTime? receivedAtUtc,
+  }) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      final result = await _repository.importSmsDrafts(
+        rawMessages: rawMessages,
+        providerHint: providerHint,
+        receivedAtUtc: receivedAtUtc,
+      );
+      await _refreshAccountsAndLedger();
+      return result;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<FinanceSmsDraftModel?> updateSmsDraftReview({
+    required String draftId,
+    SmsSuggestedTransactionType? suggestedType,
+    String? suggestedAccountId,
+    bool clearSuggestedAccountId = false,
+    String? suggestedCategoryId,
+    bool clearSuggestedCategoryId = false,
+    String? parseNotes,
+  }) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      final updated = await _repository.updateSmsDraftReview(
+        draftId: draftId,
+        suggestedType: suggestedType,
+        suggestedAccountId: suggestedAccountId,
+        clearSuggestedAccountId: clearSuggestedAccountId,
+        suggestedCategoryId: suggestedCategoryId,
+        clearSuggestedCategoryId: clearSuggestedCategoryId,
+        parseNotes: parseNotes,
+      );
+      await _refreshAccountsAndLedger();
+      return updated;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<FinanceSmsDraftModel?> dismissSmsDraft(String draftId) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      final updated = await _repository.dismissSmsDraft(draftId);
+      await _refreshAccountsAndLedger();
+      return updated;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<JournalEntryModel?> approveSmsDraft({
+    required String draftId,
+    required SmsSuggestedTransactionType finalType,
+    required String accountId,
+    String? destinationAccountId,
+    String? categoryId,
+    String? feeCategoryId,
+    required CalendarDate occurrenceDate,
+    CalendarDate? movementDate,
+    required String description,
+    String? payee,
+  }) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      if (finalType == SmsSuggestedTransactionType.transfer) {
+        _preflightAssertTransferEtbAccountIfLoaded(
+          accountId,
+          roleLabel: 'Source account',
+        );
+        if (destinationAccountId != null &&
+            destinationAccountId.trim().isNotEmpty) {
+          _preflightAssertTransferEtbAccountIfLoaded(
+            destinationAccountId,
+            roleLabel: 'Destination account',
+          );
+        }
+      } else {
+        _preflightAssertSpendableEtbAccountIfLoaded(
+          accountId,
+          roleLabel: finalType == SmsSuggestedTransactionType.income
+              ? 'Deposit account'
+              : 'Paid account',
+        );
+      }
+
+      final res = await _repository.approveSmsDraft(
+        draftId: draftId,
+        finalType: finalType,
+        accountId: accountId,
+        destinationAccountId: destinationAccountId,
+        categoryId: categoryId,
+        feeCategoryId: feeCategoryId,
+        occurrenceDate: occurrenceDate,
+        movementDate: movementDate,
+        description: description,
+        payee: payee,
+      );
+      await _refreshAccountsAndLedger();
+      return res.entry;
+    } catch (e) {
+      _state = _state.copyWith(errorMessage: e.toString());
+      notifyListeners();
+      return null;
     }
   }
 

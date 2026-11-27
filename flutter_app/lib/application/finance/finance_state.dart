@@ -1,6 +1,7 @@
 import '../../core/date/shared_date.dart';
 import '../../domain/finance/double_entry_engine.dart';
 import '../../domain/finance/finance_models.dart';
+import '../../domain/finance/finance_sms_models.dart';
 import '../../domain/finance/financial_engine.dart';
 
 /// Immutable state container for the Daywell Finance module.
@@ -18,6 +19,7 @@ class FinanceModuleState {
   final List<SavingsGoalModel> savingsGoals;
   final List<BudgetModel> budgets;
   final List<RecurringRuleModel> recurringRules;
+  final List<FinanceSmsDraftModel> smsDrafts;
   final CalendarDate? planningPeriodEnd;
   final int openingBalanceCents;
   final MigrationDiagnosticReport? migrationReport;
@@ -51,6 +53,7 @@ class FinanceModuleState {
     this.savingsGoals = const [],
     this.budgets = const [],
     this.recurringRules = const [],
+    this.smsDrafts = const [],
     this.planningPeriodEnd,
     this.openingBalanceCents = 0,
     this.migrationReport,
@@ -82,6 +85,7 @@ class FinanceModuleState {
     List<SavingsGoalModel>? savingsGoals,
     List<BudgetModel>? budgets,
     List<RecurringRuleModel>? recurringRules,
+    List<FinanceSmsDraftModel>? smsDrafts,
     CalendarDate? planningPeriodEnd,
     bool clearPlanningPeriodEnd = false,
     int? openingBalanceCents,
@@ -120,6 +124,7 @@ class FinanceModuleState {
       savingsGoals: savingsGoals ?? this.savingsGoals,
       budgets: budgets ?? this.budgets,
       recurringRules: recurringRules ?? this.recurringRules,
+      smsDrafts: smsDrafts ?? this.smsDrafts,
       planningPeriodEnd: clearPlanningPeriodEnd
           ? null
           : (planningPeriodEnd ?? this.planningPeriodEnd),
@@ -521,6 +526,13 @@ class FinanceModuleState {
 
   List<RecurringRuleModel> get activeRecurringRules =>
       recurringRules.where((r) => r.isActive).toList(growable: false);
+
+  List<FinanceSmsDraftModel> get pendingSmsDrafts => smsDrafts
+      .where((d) => d.status == SmsDraftStatus.needsReview)
+      .toList(growable: false);
+
+  int get pendingSmsDraftCount =>
+      smsDrafts.where((d) => d.status == SmsDraftStatus.needsReview).length;
 
   bool get isAnyFilterActive =>
       typeFilter != 'all' ||

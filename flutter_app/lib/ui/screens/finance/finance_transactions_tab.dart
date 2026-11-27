@@ -13,6 +13,7 @@ import '../../widgets/daily_rhythm_workflow_widgets.dart';
 import '../../widgets/shared_ui_widgets.dart';
 import 'finance_composer_sheet.dart';
 import 'finance_formatters.dart';
+import 'finance_sms_drafts_sheet.dart';
 
 /// Stage 4.9 Transactions & Ledger Tab: powered directly by authoritative
 /// [JournalEntryModel] and [PostingModel] records with search, filters,
@@ -87,13 +88,30 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
             _searchCtrl.clear();
             widget.controller.setSearchQuery('');
           },
-          trailingAction: DaywellButton(
-            label: '+ Record',
-            size: DaywellButtonSize.compact,
-            onPressed: () => FinanceComposerSheet.show(
-              context,
-              controller: widget.controller,
-            ),
+          trailingAction: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DaywellIconButton(
+                icon: Icons.sms_outlined,
+                tooltip: state.pendingSmsDraftCount > 0
+                    ? 'SMS Drafts (${state.pendingSmsDraftCount})'
+                    : 'SMS Drafts',
+                isSelected: state.pendingSmsDraftCount > 0,
+                onPressed: () => FinanceSmsDraftsSheet.show(
+                  context,
+                  controller: widget.controller,
+                ),
+              ),
+              const SizedBox(width: SharedDesignTokens.spacingXs),
+              DaywellButton(
+                label: '+ Record',
+                size: DaywellButtonSize.compact,
+                onPressed: () => FinanceComposerSheet.show(
+                  context,
+                  controller: widget.controller,
+                ),
+              ),
+            ],
           ),
           hasActiveFilters: state.isAnyFilterActive || _showVoided,
           activeSummary: '${etbFiltered.length} ETB entries',
@@ -219,14 +237,31 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   controller: widget.controller,
                 ),
       );
-      if (!hasCloseCard) return emptyState;
+      if (!hasCloseCard && state.pendingSmsDraftCount == 0) return emptyState;
       return SingleChildScrollView(
         padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _buildFinanceCloseCard(context),
-            const SizedBox(height: SharedDesignTokens.spacingMd),
+            if (state.pendingSmsDraftCount > 0) ...[
+              DaywellStatusBanner(
+                tone: DaywellStatusTone.info,
+                title:
+                    '${state.pendingSmsDraftCount} SMS draft(s) awaiting review',
+                message:
+                    'SMS drafts stay separate from your ledger until you explicitly approve them.',
+                actionLabel: 'Review Drafts',
+                onActionPressed: () => FinanceSmsDraftsSheet.show(
+                  context,
+                  controller: widget.controller,
+                ),
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+            ],
+            if (hasCloseCard) ...[
+              _buildFinanceCloseCard(context),
+              const SizedBox(height: SharedDesignTokens.spacingMd),
+            ],
             emptyState,
           ],
         ),
@@ -237,6 +272,21 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     return ListView(
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
       children: [
+        if (state.pendingSmsDraftCount > 0) ...[
+          DaywellStatusBanner(
+            tone: DaywellStatusTone.info,
+            title:
+                '${state.pendingSmsDraftCount} SMS draft(s) awaiting review',
+            message:
+                'SMS drafts stay separate from your ledger until you explicitly approve them.',
+            actionLabel: 'Review Drafts',
+            onActionPressed: () => FinanceSmsDraftsSheet.show(
+              context,
+              controller: widget.controller,
+            ),
+          ),
+          const SizedBox(height: SharedDesignTokens.spacingSm),
+        ],
         if (hasCloseCard) ...[
           _buildFinanceCloseCard(context),
           const SizedBox(height: SharedDesignTokens.spacingSm),

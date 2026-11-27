@@ -665,6 +665,148 @@ class _FakeFinanceRepository implements IFinanceRepository {
 
   @override
   Future<void> importFinanceOnlyJson(String rawJson) async {}
+
+  List<FinanceSmsDraftModel> smsDrafts = <FinanceSmsDraftModel>[];
+
+  @override
+  Future<List<FinanceSmsDraftModel>> getSmsDrafts({
+    SmsDraftStatus? status,
+  }) async {
+    if (status == null) return List<FinanceSmsDraftModel>.from(smsDrafts);
+    return smsDrafts.where((d) => d.status == status).toList(growable: false);
+  }
+
+  @override
+  Future<SmsImportBatchResult> importSmsDrafts({
+    required List<String> rawMessages,
+    SmsProvider? providerHint,
+    DateTime? receivedAtUtc,
+  }) async {
+    var importedCount = 0;
+    var unrecognizedCount = 0;
+    var duplicateCount = 0;
+    var ignoredCount = 0;
+    final imported = <FinanceSmsDraftModel>[];
+    final ignoredReasons = <String>[];
+
+    for (final raw in rawMessages) {
+      final outcome = FinanceSmsParsers.parseFinancialSmsMessage(
+        raw,
+        providerHint: providerHint,
+        receivedAtUtc: receivedAtUtc,
+        accounts: accounts,
+        categories: categories,
+      );
+      if (outcome.isIgnoredNonTransactional || outcome.draft == null) {
+        ignoredCount++;
+        if (outcome.ignoreReason != null) {
+          ignoredReasons.add(outcome.ignoreReason!);
+        }
+        continue;
+      }
+      final candidate = outcome.draft!;
+      final dedup = FinanceSmsParsers.findDuplicateDraft(candidate, smsDrafts);
+      if (dedup.isDuplicate) {
+        duplicateCount++;
+        continue;
+      }
+      smsDrafts = <FinanceSmsDraftModel>[candidate, ...smsDrafts];
+      imported.add(candidate);
+      if (candidate.status == SmsDraftStatus.unrecognized) {
+        unrecognizedCount++;
+      } else {
+        importedCount++;
+      }
+    }
+
+    return SmsImportBatchResult(
+      importedCount: importedCount,
+      unrecognizedCount: unrecognizedCount,
+      duplicateCount: duplicateCount,
+      ignoredCount: ignoredCount,
+      importedDrafts: imported,
+      ignoredReasons: ignoredReasons,
+    );
+  }
+
+  @override
+  Future<FinanceSmsDraftModel> updateSmsDraftReview({
+    required String draftId,
+    SmsSuggestedTransactionType? suggestedType,
+    String? suggestedAccountId,
+    bool clearSuggestedAccountId = false,
+    String? suggestedCategoryId,
+    bool clearSuggestedCategoryId = false,
+    String? parseNotes,
+  }) async {
+    final idx = smsDrafts.indexWhere((d) => d.id == draftId);
+    if (idx == -1) throw StateError('SMS draft not found: $draftId');
+    final updated = smsDrafts[idx].copyWith(
+      suggestedType: suggestedType,
+      suggestedAccountId: suggestedAccountId,
+      clearSuggestedAccountId: clearSuggestedAccountId,
+      suggestedCategoryId: suggestedCategoryId,
+      clearSuggestedCategoryId: clearSuggestedCategoryId,
+      parseNotes: parseNotes,
+    );
+    smsDrafts = List<FinanceSmsDraftModel>.from(smsDrafts)..[idx] = updated;
+    return updated;
+  }
+
+  @override
+  Future<FinanceSmsDraftModel> dismissSmsDraft(String draftId) async {
+    final idx = smsDrafts.indexWhere((d) => d.id == draftId);
+    if (idx == -1) throw StateError('SMS draft not found: $draftId');
+    final updated = smsDrafts[idx].copyWith(status: SmsDraftStatus.dismissed);
+    smsDrafts = List<FinanceSmsDraftModel>.from(smsDrafts)..[idx] = updated;
+    return updated;
+  }
+
+  @override
+  Future<({FinanceSmsDraftModel draft, JournalEntryModel entry})>
+      approveSmsDraft({
+    required String draftId,
+    required SmsSuggestedTransactionType finalType,
+    required String accountId,
+    String? destinationAccountId,
+    String? categoryId,
+    String? feeCategoryId,
+    required CalendarDate occurrenceDate,
+    CalendarDate? movementDate,
+    required String description,
+    String? payee,
+  }) async {
+    final idx = smsDrafts.indexWhere((d) => d.id == draftId);
+    if (idx == -1) throw StateError('SMS draft not found: $draftId');
+    final draft = smsDrafts[idx];
+    final err = FinanceSmsParsers.validateDraftApproval(
+      draft: draft,
+      finalType: finalType,
+      accountId: accountId,
+      destinationAccountId: destinationAccountId,
+    );
+    if (err != null) {
+      throw DoubleEntryValidationError(err);
+    }
+    final entry = JournalEntryModel(
+      id: 'entry-sms-${journalEntries.length + 1}',
+      entryType: finalType == SmsSuggestedTransactionType.transfer
+          ? EntryType.transfer
+          : EntryType.standard,
+      description: description,
+      occurrenceDate: occurrenceDate.toIsoString(),
+    );
+    final updated = draft.copyWith(
+      status: SmsDraftStatus.approved,
+      suggestedType: finalType,
+      suggestedAccountId: accountId,
+      suggestedCategoryId: categoryId,
+      approvedEntryId: entry.id,
+    );
+    smsDrafts = List<FinanceSmsDraftModel>.from(smsDrafts)..[idx] = updated;
+    journalEntries = <JournalEntryModel>[entry, ...journalEntries];
+    return (draft: updated, entry: entry);
+  }
 }
 
 class _FakeTasksRepository implements ITasksRepository {

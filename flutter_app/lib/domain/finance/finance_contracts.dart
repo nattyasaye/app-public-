@@ -2,10 +2,14 @@ import '../../core/date/shared_date.dart';
 import 'double_entry_engine.dart';
 import 'financial_engine.dart';
 import 'finance_models.dart';
+import 'finance_sms_models.dart';
+import 'finance_sms_parsers.dart';
 
 export 'double_entry_engine.dart';
 export 'financial_engine.dart';
 export 'finance_models.dart';
+export 'finance_sms_models.dart';
+export 'finance_sms_parsers.dart';
 
 /// Domain contract for Account persistence and lifecycle management.
 abstract class IAccountRepositoryContract {
@@ -311,6 +315,47 @@ abstract class IRecurringRuleRepositoryContract {
   Future<int> processDueRecurringRules({required CalendarDate asOfDate});
 }
 
+/// Domain contract for Stage 5 local-only Financial SMS Draft review lifecycle.
+///
+/// Invariant: SMS imports NEVER create ledger postings automatically. Only
+/// explicit user approval through [approveSmsDraft] converts a reviewable draft
+/// into balanced journal postings.
+abstract class ISmsDraftRepositoryContract {
+  Future<List<FinanceSmsDraftModel>> getSmsDrafts({SmsDraftStatus? status});
+
+  Future<SmsImportBatchResult> importSmsDrafts({
+    required List<String> rawMessages,
+    SmsProvider? providerHint,
+    DateTime? receivedAtUtc,
+  });
+
+  Future<FinanceSmsDraftModel> updateSmsDraftReview({
+    required String draftId,
+    SmsSuggestedTransactionType? suggestedType,
+    String? suggestedAccountId,
+    bool clearSuggestedAccountId = false,
+    String? suggestedCategoryId,
+    bool clearSuggestedCategoryId = false,
+    String? parseNotes,
+  });
+
+  Future<FinanceSmsDraftModel> dismissSmsDraft(String draftId);
+
+  Future<({FinanceSmsDraftModel draft, JournalEntryModel entry})>
+      approveSmsDraft({
+    required String draftId,
+    required SmsSuggestedTransactionType finalType,
+    required String accountId,
+    String? destinationAccountId,
+    String? categoryId,
+    String? feeCategoryId,
+    required CalendarDate occurrenceDate,
+    CalendarDate? movementDate,
+    required String description,
+    String? payee,
+  });
+}
+
 /// Cohesive Finance Repository unifying all domain sub-contracts.
 ///
 /// Ensures single-unit atomic database transaction boundaries while maintaining
@@ -322,7 +367,8 @@ abstract class IFinanceRepository
         ITransactionRepositoryContract,
         IDebtRepositoryContract,
         IBudgetRepositoryContract,
-        IRecurringRuleRepositoryContract {
+        IRecurringRuleRepositoryContract,
+        ISmsDraftRepositoryContract {
   /// Reads persisted finance setup status and opening balance from SQLite settings.
   Future<({bool isSetupCompleted, int openingBalanceCents})>
       getFinanceSettings();

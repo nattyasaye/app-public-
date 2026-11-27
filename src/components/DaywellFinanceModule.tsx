@@ -72,12 +72,15 @@ import { CalendarDate, EthiopiaClock } from '../domain/date';
 import { DailyRhythmDayRecord } from '../domain/dailyRhythm';
 import { formatBirr, parseDecimalToCentsStrict } from '../domain/financialEngine';
 import { dailyRhythmWorkflowService } from '../services/dailyRhythmWorkflowService';
+import { FinanceSmsService } from '../services/financeSmsService';
 import { SharedStateBridge } from '../services/sharedStateBridge';
+import { FinanceSmsDraft, SmsImportBatchSummary, SmsProvider } from '../domain/financeSms';
 import { FinanceOverviewTab } from './finance/FinanceOverviewTab';
 import { FinanceTransactionsTab } from './finance/FinanceTransactionsTab';
 import { FinancePlanTab } from './finance/FinancePlanTab';
 import { FinanceReportsTab } from './finance/FinanceReportsTab';
 import { FinanceComposerModal } from './finance/FinanceComposerModal';
+import { FinanceSmsDraftsModal } from './finance/FinanceSmsDraftsModal';
 import {
   ComposerKind,
   ConfirmActionState,
@@ -228,6 +231,12 @@ export function DaywellFinanceModule({
     useState<DailyRhythmDayRecord>(() =>
       dailyRhythmWorkflowService.getDayOrEmpty(todayStr, { todayIso: todayStr })
     );
+
+  // Local-only Stage 5 SMS Drafts (excluded from canonical backups & ledger until approved)
+  const [smsDrafts, setSmsDrafts] = useState<FinanceSmsDraft[]>(() =>
+    FinanceSmsService.loadDrafts()
+  );
+  const [smsDraftsOpen, setSmsDraftsOpen] = useState(false);
 
   // UI Overlays: Composer, Confirm Modal, Status Toast
   const [composerOpen, setComposerOpen] = useState(false);
@@ -1226,6 +1235,134 @@ export function DaywellFinanceModule({
         return { ok: false, error: err.message };
       }
       return { ok: false, error: 'Failed to save transaction.' };
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Stage 5 — Financial SMS Drafts (Never Auto-Post)
+  // -------------------------------------------------------------
+  const pendingSmsDraftCount = useMemo(
+    () => smsDrafts.filter((d) => d.status === 'needs_review').length,
+    [smsDrafts]
+  );
+
+  const handleImportSmsMessages = (payload: {
+    rawMessages: string[];
+    providerHint?: SmsProvider;
+  }): SmsImportBatchSummary => {
+    const res = FinanceSmsService.importSmsMessages({
+      rawMessages: payload.rawMessages,
+      providerHint: payload.providerHint,
+      accounts,
+      categories,
+    });
+    setSmsDrafts(res.drafts);
+    if (res.summary.importedCount > 0) {
+      showToast(
+        `Imported ${res.summary.importedCount} SMS draft(s) for review. No ledger entries posted.`
+      );
+    }
+    return res.summary;
+  };
+
+  const handleUpdateSmsDraftReview = (payload: {
+    draftId: string;
+    suggestedType?: 'expense' | 'income' | 'transfer' | 'unknown';
+    suggestedAccountId?: string;
+    suggestedCategoryId?: string;
+  }): { ok: boolean; error?: string } => {
+    try {
+      const res = FinanceSmsService.updateDraftReview({
+        draftId: payload.draftId,
+        suggestedType: payload.suggestedType,
+        suggestedAccountId: payload.suggestedAccountId,
+        suggestedCategoryId: payload.suggestedCategoryId,
+      });
+      setSmsDrafts(res.drafts);
+      return { ok: true };
+    } catch (err: unknown) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to update SMS draft.',
+      };
+    }
+  };
+
+  const handleDismissSmsDraft = (draftId: string): { ok: boolean; error?: string } => {
+    try {
+      const res = FinanceSmsService.dismissDraft({ draftId });
+      setSmsDrafts(res.drafts);
+      showToast('SMS draft dismissed. It will not reappear on duplicate import.');
+      return { ok: true };
+    } catch (err: unknown) {
+      return {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Failed to dismiss SMS draft.',
+      };
+    }
+  };
+
+  const handleApproveSmsDraft = (payload: {
+    draftId: string;
+    finalType: 'expense' | 'income' | 'transfer';
+    accountId: string;
+    destinationAccountId?: string;
+    categoryId?: string;
+    feeCategoryId?: string;
+    occurrenceDate: string;
+    description: string;
+    payee?: string;
+  }): { ok: boolean; error?: string } => {
+    try {
+      const committed = FinanceSmsService.approveDraftAtomically({
+        draftId: payload.draftId,
+        finalType: payload.finalType,
+        accountId: payload.accountId,
+        destinationAccountId: payload.destinationAccountId,
+        categoryId: payload.categoryId,
+        feeCategoryId: payload.feeCategoryId,
+        occurrenceDate: payload.occurrenceDate,
+        description: payload.description,
+        payee: payload.payee,
+        accounts,
+        categories,
+        entries,
+        postings,
+        simpleTransactions,
+        savingsGoals,
+      });
+
+      setCategories(committed.categories);
+      setEntries(committed.entries);
+      setPostings(committed.postings);
+      setSimpleTransactions(committed.simpleTransactions);
+      setSavingsGoals(committed.savingsGoals);
+      setSmsDrafts(committed.drafts);
+
+      try {
+        dailyRhythmWorkflowService.notifyFinanceLedgerMutation({
+          prevEntries: entries,
+          prevPostings: postings,
+          nextEntries: committed.entries,
+          nextPostings: committed.postings,
+          todayIso: todayStr,
+        });
+      } catch {
+        // Non-critical rhythm cache refresh must never invalidate committed ledger state
+      }
+      showToast(
+        `Approved & posted SMS transaction: ${committed.result.entry.description}`
+      );
+      setTimeout(notifyCanonicalSynced, 0);
+      return { ok: true };
+    } catch (err: unknown) {
+      return {
+        ok: false,
+        error:
+          err instanceof DoubleEntryValidationError || err instanceof Error
+            ? err.message
+            : 'Failed to approve SMS draft.',
+      };
     }
   };
 
@@ -2379,6 +2516,8 @@ export function DaywellFinanceModule({
           onRefundExpense={handleExpenseRefund}
           onRequestConfirm={requestConfirm}
           dailyRhythmRecord={dailyRhythmTodayRecord}
+          pendingSmsDraftCount={pendingSmsDraftCount}
+          onOpenSmsDrafts={() => setSmsDraftsOpen(true)}
           onConfirmFinanceClose={() => {
             const res = dailyRhythmWorkflowService.confirmFinanceClose({
               entries,
@@ -2471,6 +2610,19 @@ export function DaywellFinanceModule({
         }}
         onCreateParty={handleCreateParty}
         onSubmit={handleComposerSubmit}
+      />
+
+      {/* Stage 5 Local-Only Financial SMS Drafts Modal */}
+      <FinanceSmsDraftsModal
+        isOpen={smsDraftsOpen}
+        drafts={smsDrafts}
+        accounts={accounts}
+        categories={categories}
+        onClose={() => setSmsDraftsOpen(false)}
+        onImportMessages={handleImportSmsMessages}
+        onUpdateDraftReview={handleUpdateSmsDraftReview}
+        onDismissDraft={handleDismissSmsDraft}
+        onApproveDraft={handleApproveSmsDraft}
       />
 
       {/* Custom Confirm Dialog (Zero window.confirm) */}

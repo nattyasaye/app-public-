@@ -6,9 +6,22 @@
  * Workflow: SMS text -> parsed result -> reviewable draft -> explicit user approval -> ledger posting.
  */
 
-import { Account, TransactionCategory } from './doubleEntryFinance';
+import { CalendarDate, EthiopiaClock } from './date';
+import {
+  Account,
+  assertEtbPostingAccounts,
+  buildDirectExpense,
+  buildDirectIncome,
+  buildTransfer,
+  DEFAULT_EXPENSE_CATEGORIES,
+  DoubleEntryValidationError,
+  JournalEntry,
+  Posting,
+  SimpleTransaction,
+  TransactionCategory,
+} from './doubleEntryFinance';
 import { getAccountSubType, isActiveVerifiedEtbAccount } from './financeV7Engine';
-import { SYSTEM_CONTROL_ACCOUNT_IDS } from './sharedFoundation';
+import { SHARED_DESIGN_TOKENS, SYSTEM_CONTROL_ACCOUNT_IDS } from './sharedFoundation';
 
 export type SmsProvider = 'cbe' | 'telebirr' | 'boa' | 'unknown';
 export type SmsDirection = 'incoming' | 'outgoing' | 'uncertain';
@@ -327,9 +340,18 @@ function cleanCounterpartyName(raw: string | undefined): string | undefined {
 // Account & Category Auto-Suggestion Helpers
 // ============================================================================
 
+function extractTrailingDigitsHint(rawHint: string | undefined): string | undefined {
+  if (!rawHint) return undefined;
+  const digits = rawHint.replace(/\D/g, '');
+  if (digits.length >= 4) return digits.slice(-4);
+  if (digits.length >= 2) return digits;
+  return undefined;
+}
+
 export function suggestEtbAccountForProvider(
   provider: SmsProvider,
-  accounts: Account[]
+  accounts: Account[],
+  accountHint?: string
 ): string | undefined {
   const spendable = accounts.filter((a) => {
     if (!isActiveVerifiedEtbAccount(a)) return false;
@@ -354,11 +376,51 @@ export function suggestEtbAccountForProvider(
   });
   if (matches.length === 1) return matches[0].id;
 
+  const trailingDigits = extractTrailingDigitsHint(accountHint);
+  if (trailingDigits) {
+    const pool = matches.length > 0 ? matches : spendable;
+    const digitMatches = pool.filter((acc) => acc.name.includes(trailingDigits));
+    if (digitMatches.length === 1) return digitMatches[0].id;
+  }
+
   if (provider === 'telebirr') {
     const mobileMoneyAccounts = spendable.filter(
       (a) => getAccountSubType(a) === 'mobile_money'
     );
     if (mobileMoneyAccounts.length === 1) return mobileMoneyAccounts[0].id;
+  }
+
+  return undefined;
+}
+
+export function suggestTransferDestinationAccount(
+  draft: FinanceSmsDraft,
+  accounts: Account[]
+): string | undefined {
+  const transferable = accounts.filter((a) => {
+    if (!isActiveVerifiedEtbAccount(a)) return false;
+    if (draft.suggestedAccountId && a.id === draft.suggestedAccountId) return false;
+    const sub = getAccountSubType(a);
+    return (
+      (a.type === 'asset' && sub !== 'receivable') ||
+      (a.type === 'liability' && sub === 'credit_card')
+    );
+  });
+  if (transferable.length === 0) return undefined;
+
+  const trailingDigits = extractTrailingDigitsHint(draft.counterpartyHint);
+  if (trailingDigits) {
+    const digitMatches = transferable.filter((acc) => acc.name.includes(trailingDigits));
+    if (digitMatches.length === 1) return digitMatches[0].id;
+  }
+
+  const cpLower = draft.counterpartyName?.trim().toLowerCase();
+  if (cpLower) {
+    const nameMatches = transferable.filter((acc) => {
+      const accLower = acc.name.trim().toLowerCase();
+      return accLower === cpLower || cpLower.includes(accLower) || accLower.includes(cpLower);
+    });
+    if (nameMatches.length === 1) return nameMatches[0].id;
   }
 
   return undefined;
@@ -424,40 +486,51 @@ export function detectSmsProvider(
   return providerHint ?? null;
 }
 
-function isNonTransactionalNoise(provider: SmsProvider, rawSmsText: string): string | null {
-  const lower = rawSmsText.toLowerCase();
-  const hasCompletedTxMarker =
+const NON_TRANSACTIONAL_NOISE_MARKERS: readonly string[] = [
+  'pin or password is incorrect',
+  'pin is incorrect',
+  'invalid pin',
+  'incorrect pin',
+  'wrong pin',
+  'wrong password',
+  'pin locked',
+  'pin blocked',
+  'failed login',
+  'password will expire',
+  'never share your pin',
+  'never share your password',
+  'do not share your otp',
+  'verification code',
+  'one time password',
+  'otp is',
+  'security alert',
+  'security tip',
+  'download our',
+  'special offer',
+  'win a',
+  'happy holiday',
+  'promotion',
+];
+
+function hasCompletedTransactionMarker(rawSmsText: string): boolean {
+  return (
     /was (?:debited|credited) with etb/i.test(rawSmsText) ||
     /you have successfully transferred etb/i.test(rawSmsText) ||
     /you have (?:transferred|paid|received) etb/i.test(rawSmsText) ||
-    (/is locked from your account/i.test(rawSmsText) && /pos transaction/i.test(rawSmsText));
+    (/is locked from your account/i.test(rawSmsText) && /pos transaction/i.test(rawSmsText))
+  );
+}
 
-  if (hasCompletedTxMarker) return null;
+function hasNonTransactionalNoiseMarker(rawSmsText: string): boolean {
+  if (hasCompletedTransactionMarker(rawSmsText)) return false;
+  const lower = rawSmsText.toLowerCase();
+  return NON_TRANSACTIONAL_NOISE_MARKERS.some((marker) => lower.includes(marker));
+}
 
-  if (
-    lower.includes('pin or password is incorrect') ||
-    lower.includes('invalid pin') ||
-    lower.includes('incorrect pin') ||
-    lower.includes('wrong password') ||
-    lower.includes('failed login') ||
-    lower.includes('password will expire') ||
-    lower.includes('never share your pin') ||
-    lower.includes('never share your password') ||
-    lower.includes('do not share your otp') ||
-    lower.includes('verification code') ||
-    lower.includes('one time password') ||
-    lower.includes('otp is') ||
-    lower.includes('security alert') ||
-    lower.includes('security tip') ||
-    lower.includes('download our') ||
-    lower.includes('special offer') ||
-    lower.includes('win a') ||
-    lower.includes('happy holiday') ||
-    lower.includes('promotion')
-  ) {
+function isNonTransactionalNoise(provider: SmsProvider, rawSmsText: string): string | null {
+  if (hasNonTransactionalNoiseMarker(rawSmsText)) {
     return `Ignored non-transactional ${SMS_PROVIDER_LABELS[provider]} security/promotional notice.`;
   }
-
   return null;
 }
 
@@ -482,14 +555,14 @@ export function parseBoaSms(
   const fingerprint = computeSmsFingerprint(trimmed);
   const { receiptUrl, queryRef } = extractReceiptUrlAndRef(trimmed);
   const nowIso = options.receivedAtUtc;
-  const matchedAccountId = options.accounts
+  const fallbackAccountId = options.accounts
     ? suggestEtbAccountForProvider('boa', options.accounts)
     : undefined;
 
   // 1a. BOA POS Locked / Authorization hold — MUST NOT create a normal expense draft!
   if (/is\s+locked\s+from\s+your\s+account/i.test(trimmed) || /pos\s+transaction/i.test(trimmed)) {
     const posMatch =
-      /ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+is\s+locked\s+from\s+your\s+account\s+([0-9*xX]+).*?due\s+to\s+pos\s+transaction(?:\s+at\s+([^.\n]+?))?(?:\.\s*your\s+available\s+balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?))?/is.exec(
+      /ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+is\s+locked\s+from\s+your\s+account\s+([0-9*xX]+).*?due\s+to\s+pos\s+transaction(?:\s+at\s+([^.\n]+))?(?:\.\s*your\s+available\s+balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?))?/is.exec(
         trimmed
       );
     const lockedAmount = posMatch?.[1] ? (parseSmsAmountToCents(posMatch[1]) ?? 0) : 0;
@@ -502,6 +575,9 @@ export function parseBoaSms(
       : undefined;
     const merchant = cleanCounterpartyName(posMatch?.[3]);
     const accountHint = maskAccountOrPhoneHint(posMatch?.[2]);
+    const matchedAccountId = options.accounts
+      ? suggestEtbAccountForProvider('boa', options.accounts, accountHint)
+      : fallbackAccountId;
 
     return {
       kind: 'draft',
@@ -539,11 +615,14 @@ export function parseBoaSms(
 
   // 1b. BOA Debit
   const debitMatch =
-    /your\s+account\s+([0-9*xX]+)\s+was\s+debited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+(?:for|to|at|by)\s+([^.\n]+?))?(?=\.\s|,\s|https?:|$)/is.exec(
+    /your\s+account\s+([0-9*xX]+)\s+was\s+debited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+(?:for|to|at|by)\s+([^.\n]+?))?(?=\.(?:\s|$)|,\s|https?:|$)/is.exec(
       trimmed
     );
   if (debitMatch) {
     const accountHint = maskAccountOrPhoneHint(debitMatch[1]);
+    const matchedAccountId = options.accounts
+      ? suggestEtbAccountForProvider('boa', options.accounts, accountHint)
+      : fallbackAccountId;
     const principalCents = parseSmsAmountToCents(debitMatch[2]);
     const counterpartyName = cleanCounterpartyName(debitMatch[3]);
     const balanceMatch = /available\s+balance(?:\s+is|:)\s*ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
@@ -624,11 +703,14 @@ export function parseBoaSms(
 
   // 1c. BOA Credit
   const creditMatch =
-    /your\s+account\s+([0-9*xX]+)\s+was\s+credited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+by\s+([^.\n]+?))?(?=\.\s|,\s|https?:|$)/is.exec(
+    /your\s+account\s+([0-9*xX]+)\s+was\s+credited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+by\s+([^.\n]+?))?(?=\.(?:\s|$)|,\s|https?:|$)/is.exec(
       trimmed
     );
   if (creditMatch) {
     const accountHint = maskAccountOrPhoneHint(creditMatch[1]);
+    const matchedAccountId = options.accounts
+      ? suggestEtbAccountForProvider('boa', options.accounts, accountHint)
+      : fallbackAccountId;
     const principalCents = parseSmsAmountToCents(creditMatch[2]);
     const counterpartyName = cleanCounterpartyName(creditMatch[3]);
     const balanceMatch = /available\s+balance(?:\s+is|:)\s*ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
@@ -761,7 +843,7 @@ export function parseCbeSms(
   );
   const transactionReference = queryRef ?? refTokenMatch?.[1];
   const nowIso = options.receivedAtUtc;
-  const matchedAccountId = options.accounts
+  const fallbackAccountId = options.accounts
     ? suggestEtbAccountForProvider('cbe', options.accounts)
     : undefined;
 
@@ -773,17 +855,20 @@ export function parseCbeSms(
   if (outgoingMatch) {
     const principalCents = parseSmsAmountToCents(outgoingMatch[1]);
     const accountHint = maskAccountOrPhoneHint(outgoingMatch[2]);
+    const matchedAccountId = options.accounts
+      ? suggestEtbAccountForProvider('cbe', options.accounts, accountHint)
+      : fallbackAccountId;
     const counterpartyHint = maskAccountOrPhoneHint(outgoingMatch[3]);
     const counterpartyName = cleanCounterpartyName(outgoingMatch[4]);
 
     const serviceChargeMatch = /service\s+charge\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
       trimmed
     );
-    const vatMatch = /VAT(?:\s*\(\s*\d+%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
+    const vatMatch = /VAT(?:\s*\(\s*\d+(?:\.\d+)?%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
       trimmed
     );
     const disasterMatch =
-      /Disaster\s+Recovery(?:\s*\(\s*\d+%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
+      /Disaster\s+Recovery(?:\s+Fund)?(?:\s*\(\s*\d+(?:\.\d+)?%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
         trimmed
       );
     const totalMatch = /with\s+total\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(trimmed);
@@ -898,6 +983,9 @@ export function parseCbeSms(
     const counterpartyHint = maskAccountOrPhoneHint(incomingMatch[2]);
     const counterpartyName = cleanCounterpartyName(incomingMatch[3]);
     const accountHint = maskAccountOrPhoneHint(incomingMatch[4]);
+    const matchedAccountId = options.accounts
+      ? suggestEtbAccountForProvider('cbe', options.accounts, accountHint)
+      : fallbackAccountId;
     const balanceMatch = /your\s+current\s+balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
       trimmed
     );
@@ -1033,19 +1121,23 @@ export function parseTelebirrSms(
 
   // 3a. Telebirr Outgoing (transferred / paid)
   const outgoingMatch =
-    /you\s+have\s+(?:transferred|paid)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+to\s+(.+?)\s*\(([^)]+)\)\s+on\s+(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2})/is.exec(
+    /you\s+have\s+(?:transferred|paid)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+to\s+(?:(.+?)\s*\(([^)]+)\)|(.+?))\s+on\s+(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2})/is.exec(
       trimmed
     );
   if (outgoingMatch) {
     const principalCents = parseSmsAmountToCents(outgoingMatch[1]);
-    const counterpartyName = cleanCounterpartyName(outgoingMatch[2]);
+    const counterpartyName = cleanCounterpartyName(outgoingMatch[2] ?? outgoingMatch[4]);
     const counterpartyHint = maskAccountOrPhoneHint(outgoingMatch[3]);
-    const parsedDt = parseAddisAbabaDateTime(outgoingMatch[4]);
+    const parsedDt = parseAddisAbabaDateTime(outgoingMatch[5]);
 
     const serviceFeeMatch =
       /(?:the\s+)?service\s+fee\s+(?:is|of)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(trimmed);
     const vatMatch =
-      /(?:\d+%\s+)?VAT(?:\s+on\s+the\s+service\s+fee)?\s+(?:is|of)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
+      /(?:\d+(?:\.\d+)?%\s+)?VAT(?:\s+on\s+(?:the\s+)?service\s+fee)?\s+(?:is|of)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
+        trimmed
+      );
+    const totalPaidMatch =
+      /(?:with\s+)?(?:the\s+)?total(?:\s+(?:paid|deducted|amount))?(?:\s+is|\s+of)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
         trimmed
       );
     const balanceMatch =
@@ -1088,7 +1180,13 @@ export function parseTelebirrSms(
       ? (parseSmsAmountToCents(serviceFeeMatch[1]) ?? 0)
       : 0;
     const vatCents = vatMatch?.[1] ? (parseSmsAmountToCents(vatMatch[1]) ?? 0) : 0;
-    const totalAmountCents = principalCents + serviceFeeCents + vatCents;
+    const computedTotalCents = principalCents + serviceFeeCents + vatCents;
+    const reportedTotalCents = totalPaidMatch?.[1]
+      ? (parseSmsAmountToCents(totalPaidMatch[1]) ?? undefined)
+      : undefined;
+    const hasAmountMismatch =
+      reportedTotalCents !== undefined && reportedTotalCents !== computedTotalCents;
+    const totalAmountCents = reportedTotalCents ?? computedTotalCents;
     const reportedBalanceCents = balanceMatch?.[1]
       ? (parseSmsAmountToCents(balanceMatch[1]) ?? undefined)
       : undefined;
@@ -1113,7 +1211,7 @@ export function parseTelebirrSms(
         vatCents,
         otherChargesCents: 0,
         totalAmountCents,
-        hasAmountMismatch: false,
+        hasAmountMismatch,
         currencyCode: 'ETB',
         accountHint: 'Telebirr',
         ...(counterpartyName ? { counterpartyName } : {}),
@@ -1122,9 +1220,18 @@ export function parseTelebirrSms(
         ...(parsedDt ? { transactionTimestampIso: parsedDt.timestampUtcIso } : {}),
         ...(parsedDt ? { transactionDateIso: parsedDt.dateIso } : {}),
         receivedAtUtc: nowIso,
-        confidence: transactionReference && parsedDt ? 'high' : 'medium',
+        confidence: hasAmountMismatch
+          ? 'medium'
+          : transactionReference && parsedDt
+            ? 'high'
+            : 'medium',
         status: 'needs_review',
         isNonLedgerNotice: false,
+        ...(hasAmountMismatch
+          ? {
+              parseNotes: `Amount mismatch: principal + fees (${(computedTotalCents / 100).toFixed(2)} ETB) differs from reported total (${(reportedTotalCents! / 100).toFixed(2)} ETB). Verify before approving.`,
+            }
+          : {}),
         ...(matchedAccountId ? { suggestedAccountId: matchedAccountId } : {}),
         ...(suggestedCategoryId ? { suggestedCategoryId } : {}),
         rawSmsText: trimmed,
@@ -1136,14 +1243,14 @@ export function parseTelebirrSms(
 
   // 3b. Telebirr Incoming
   const incomingMatch =
-    /you\s+have\s+received\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+from\s+(.+?)\s*\(([^)]+)\)\s+on\s+(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2})/is.exec(
+    /you\s+have\s+received\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+from\s+(?:(.+?)\s*\(([^)]+)\)|(.+?))\s+on\s+(\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2})/is.exec(
       trimmed
     );
   if (incomingMatch) {
     const principalCents = parseSmsAmountToCents(incomingMatch[1]);
-    const counterpartyName = cleanCounterpartyName(incomingMatch[2]);
+    const counterpartyName = cleanCounterpartyName(incomingMatch[2] ?? incomingMatch[4]);
     const counterpartyHint = maskAccountOrPhoneHint(incomingMatch[3]);
-    const parsedDt = parseAddisAbabaDateTime(incomingMatch[4]);
+    const parsedDt = parseAddisAbabaDateTime(incomingMatch[5]);
     const balanceMatch =
       /your\s+current\s+(?:E-Money\s+Account\s+)?balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)/i.exec(
         trimmed
@@ -1279,12 +1386,8 @@ export function parseFinancialSmsMessage(
   if (!detected) {
     const fingerprint = computeSmsFingerprint(trimmed);
     const { receiptUrl, queryRef } = extractReceiptUrlAndRef(trimmed);
-    // Still check generic security/promo noise
-    if (
-      /pin or password is incorrect|wrong password|one time password|otp is|security alert/i.test(
-        trimmed
-      )
-    ) {
+    // Still check generic security/PIN/OTP/promo noise
+    if (hasNonTransactionalNoiseMarker(trimmed)) {
       return {
         kind: 'ignored_non_transactional',
         reason: 'Ignored non-transactional security/PIN/OTP message.',
@@ -1396,6 +1499,30 @@ export function totalDraftFeesCents(draft: FinanceSmsDraft): number {
   return draft.serviceFeeCents + draft.vatCents + draft.otherChargesCents;
 }
 
+function formatCentsFixed(cents: number): string {
+  const whole = Math.floor(cents / 100);
+  const frac = String(cents % 100).padStart(2, '0');
+  return `${whole}.${frac}`;
+}
+
+export function formatSmsFeeBreakdownNote(
+  draft: FinanceSmsDraft,
+  defaultLabel: string
+): string {
+  const parts: string[] = [];
+  if (draft.serviceFeeCents > 0) {
+    parts.push(`Service fee: ETB ${formatCentsFixed(draft.serviceFeeCents)}`);
+  }
+  if (draft.vatCents > 0) {
+    parts.push(`VAT: ETB ${formatCentsFixed(draft.vatCents)}`);
+  }
+  if (draft.otherChargesCents > 0) {
+    parts.push(`Disaster Recovery / Other: ETB ${formatCentsFixed(draft.otherChargesCents)}`);
+  }
+  if (parts.length === 0) return defaultLabel;
+  return `${defaultLabel} (${parts.join(', ')})`;
+}
+
 export function canApproveSmsDraft(draft: FinanceSmsDraft): { ok: boolean; error?: string } {
   if (draft.status === 'approved') {
     return { ok: false, error: 'This SMS draft has already been approved and posted to the ledger.' };
@@ -1435,4 +1562,315 @@ export function buildDefaultDraftDescription(draft: FinanceSmsDraft): string {
   return `${providerLabel} SMS${refPart}`;
 }
 
-export const SMS_FEE_DEFAULT_CATEGORY_ID = SYSTEM_CONTROL_ACCOUNT_IDS ? 'cat-fees' : 'cat-fees';
+export const SMS_FEE_DEFAULT_CATEGORY_ID = 'cat-fees';
+
+export function resolveDefaultDraftOccurrenceDate(draft: FinanceSmsDraft): string {
+  const explicit = draft.transactionDateIso ? CalendarDate.tryParse(draft.transactionDateIso) : null;
+  if (explicit) return explicit.toIsoString();
+
+  const receivedMs = Date.parse(draft.receivedAtUtc);
+  if (Number.isFinite(receivedMs)) {
+    const addis = new Date(receivedMs + 3 * 60 * 60 * 1000);
+    const y = String(addis.getUTCFullYear()).padStart(4, '0');
+    const m = String(addis.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(addis.getUTCDate()).padStart(2, '0');
+    const parsed = CalendarDate.tryParse(`${y}-${m}-${d}`);
+    if (parsed) return parsed.toIsoString();
+  }
+  return CalendarDate.today().toIsoString();
+}
+
+export interface SmsDraftApprovalInput {
+  draft: FinanceSmsDraft;
+  finalType: 'expense' | 'income' | 'transfer';
+  accountId: string;
+  destinationAccountId?: string;
+  categoryId?: string;
+  feeCategoryId?: string;
+  occurrenceDate: string;
+  movementDate?: string;
+  description: string;
+  payee?: string;
+  entryId: string;
+  accounts: Account[];
+  categories: TransactionCategory[];
+  nowIso?: string;
+}
+
+export interface SmsDraftApprovalBuildResult {
+  updatedDraft: FinanceSmsDraft;
+  entry: JournalEntry;
+  postings: Posting[];
+  simpleTx: SimpleTransaction;
+  feeCategoryToAdd?: TransactionCategory;
+}
+
+function assertSpendableEtbAccount(account: Account | undefined, roleLabel: string): void {
+  if (!account || !isActiveVerifiedEtbAccount(account)) {
+    throw new DoubleEntryValidationError(
+      `${roleLabel} must be an active, verified ETB account.`
+    );
+  }
+  const sub = getAccountSubType(account);
+  const isSpendable =
+    (account.type === 'asset' && sub !== 'savings_vault' && sub !== 'receivable') ||
+    (account.type === 'liability' && sub === 'credit_card');
+  if (!isSpendable) {
+    throw new DoubleEntryValidationError(
+      `${roleLabel} "${account.name}" cannot be used for direct income/expense; select an active ETB liquid asset or credit card account (Savings Vaults are allowed in Transfers only).`
+    );
+  }
+}
+
+function assertTransferableEtbAccount(account: Account | undefined, roleLabel: string): void {
+  if (!account || !isActiveVerifiedEtbAccount(account)) {
+    throw new DoubleEntryValidationError(
+      `${roleLabel} must be an active, verified ETB account.`
+    );
+  }
+  const sub = getAccountSubType(account);
+  const isTransferable =
+    (account.type === 'asset' && sub !== 'receivable') ||
+    (account.type === 'liability' && sub === 'credit_card');
+  if (!isTransferable) {
+    throw new DoubleEntryValidationError(
+      `${roleLabel} "${account.name}" cannot participate in an ETB transfer.`
+    );
+  }
+}
+
+/**
+ * Pure atomic builder converting an explicitly approved SMS draft into a balanced
+ * double-entry ledger transaction. NEVER copies rawSmsText into ledger entries/notes.
+ */
+export function buildApprovedSmsLedgerEntry(
+  input: SmsDraftApprovalInput
+): SmsDraftApprovalBuildResult {
+  const { draft } = input;
+  const check = canApproveSmsDraft({
+    ...draft,
+    suggestedType: input.finalType,
+  });
+  if (!check.ok) {
+    throw new DoubleEntryValidationError(check.error || 'SMS draft cannot be approved.');
+  }
+  if (draft.status !== 'needs_review' || draft.isNonLedgerNotice) {
+    throw new DoubleEntryValidationError(
+      'Only pending financial drafts can be approved and posted.'
+    );
+  }
+  const occCal = CalendarDate.tryParse(input.occurrenceDate);
+  if (!occCal) {
+    throw new DoubleEntryValidationError('Occurrence date must be a valid YYYY-MM-DD date.');
+  }
+  const movCal = input.movementDate ? CalendarDate.tryParse(input.movementDate) : occCal;
+  if (!movCal) {
+    throw new DoubleEntryValidationError('Movement date must be a valid YYYY-MM-DD date.');
+  }
+  const occurrenceIso = occCal.toIsoString();
+  const movementIso = movCal.toIsoString();
+  const nowIso = input.nowIso ?? EthiopiaClock.nowUtc().toISOString();
+  const feesCents = totalDraftFeesCents(draft);
+
+  const accountById = new Map(input.accounts.map((a) => [a.id, a]));
+  const primaryAcc = accountById.get(input.accountId);
+  const cleanDesc = input.description.trim() || buildDefaultDraftDescription(draft);
+  const cleanPayee =
+    input.payee?.trim() ||
+    (input.finalType !== 'transfer' ? draft.counterpartyName?.trim() : undefined) ||
+    undefined;
+  const formattedDesc =
+    cleanPayee && cleanDesc !== cleanPayee && !cleanDesc.startsWith(`${cleanPayee} — `)
+      ? `${cleanPayee} — ${cleanDesc}`
+      : cleanDesc;
+
+  let feeCategoryToAdd: TransactionCategory | undefined;
+  const effectiveFeeCategoryId =
+    feesCents > 0
+      ? (input.feeCategoryId?.trim() || SMS_FEE_DEFAULT_CATEGORY_ID)
+      : undefined;
+
+  if (
+    effectiveFeeCategoryId === SMS_FEE_DEFAULT_CATEGORY_ID &&
+    !input.categories.some((c) => c.id === SMS_FEE_DEFAULT_CATEGORY_ID)
+  ) {
+    feeCategoryToAdd = {
+      id: SMS_FEE_DEFAULT_CATEGORY_ID,
+      name: 'Financial Fees',
+      type: 'expense',
+      colorHex:
+        DEFAULT_EXPENSE_CATEGORIES.find((c) => c.id === SMS_FEE_DEFAULT_CATEGORY_ID)?.colorHex ??
+        SHARED_DESIGN_TOKENS.colors.text.mutedLight,
+      isArchived: false,
+    };
+  }
+
+  let entry: JournalEntry;
+  let postings: Posting[];
+  let simpleTx: SimpleTransaction;
+  let updatedCategoryId: string | undefined = input.categoryId;
+
+  if (input.finalType === 'transfer') {
+    if (!input.destinationAccountId) {
+      throw new DoubleEntryValidationError('Destination account is required for a transfer.');
+    }
+    if (input.accountId === input.destinationAccountId) {
+      throw new DoubleEntryValidationError(
+        'Source and destination accounts must be distinct.'
+      );
+    }
+    assertEtbPostingAccounts({
+      accounts: input.accounts,
+      accountIds: [input.accountId, input.destinationAccountId],
+      roleLabels: ['Source account', 'Destination account'],
+    });
+    assertTransferableEtbAccount(primaryAcc, 'Source account');
+    assertTransferableEtbAccount(
+      accountById.get(input.destinationAccountId),
+      'Destination account'
+    );
+
+    const built = buildTransfer({
+      id: input.entryId,
+      fromAssetAccountId: input.accountId,
+      toAssetAccountId: input.destinationAccountId,
+      amountCents: draft.principalCents,
+      date: occurrenceIso,
+      movementDate: movementIso,
+      description: cleanDesc,
+      transferFeeCents: feesCents,
+      feeExpenseAccountId: feesCents > 0 ? SYSTEM_CONTROL_ACCOUNT_IDS.expense : undefined,
+      feeCategoryId: effectiveFeeCategoryId,
+    });
+    entry = {
+      ...built.entry,
+      legacySourceTxId: `tx-${input.entryId}`,
+    };
+    postings =
+      feesCents > 0
+        ? built.postings.map((p) =>
+            p.id.endsWith('-dr-fee') || p.id.endsWith('-post-dr-fee')
+              ? { ...p, note: formatSmsFeeBreakdownNote(draft, p.note || 'Transfer service fee') }
+              : p
+          )
+        : built.postings;
+    simpleTx = {
+      id: `tx-${input.entryId}`,
+      type: 'transfer',
+      amountCents: draft.principalCents,
+      accountId: input.accountId,
+      destinationAccountId: input.destinationAccountId,
+      categoryId: effectiveFeeCategoryId,
+      description: cleanDesc,
+      transactionDate: occurrenceIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      journalEntryId: input.entryId,
+    };
+    updatedCategoryId = undefined;
+  } else if (input.finalType === 'income') {
+    assertEtbPostingAccounts({
+      accounts: input.accounts,
+      accountIds: [input.accountId],
+      roleLabels: ['Deposit account'],
+    });
+    assertSpendableEtbAccount(primaryAcc, 'Deposit account');
+    const resolvedCatId = input.categoryId?.trim() || 'cat-other-inc';
+    updatedCategoryId = resolvedCatId;
+
+    const built = buildDirectIncome({
+      id: input.entryId,
+      assetAccountId: input.accountId,
+      incomeAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.income,
+      categoryId: resolvedCatId,
+      amountCents: draft.principalCents,
+      occurrenceDate: occurrenceIso,
+      movementDate: movementIso,
+      description: formattedDesc,
+    });
+    entry = {
+      ...built.entry,
+      legacySourceTxId: `tx-${input.entryId}`,
+    };
+    postings = built.postings;
+    simpleTx = {
+      id: `tx-${input.entryId}`,
+      type: 'income',
+      amountCents: draft.principalCents,
+      accountId: input.accountId,
+      categoryId: resolvedCatId,
+      description: formattedDesc,
+      payee: cleanPayee,
+      transactionDate: occurrenceIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      journalEntryId: input.entryId,
+    };
+  } else {
+    assertEtbPostingAccounts({
+      accounts: input.accounts,
+      accountIds: [input.accountId],
+      roleLabels: ['Paid account'],
+    });
+    assertSpendableEtbAccount(primaryAcc, 'Paid account');
+    const resolvedCatId = input.categoryId?.trim() || 'cat-other-exp';
+    updatedCategoryId = resolvedCatId;
+
+    const built = buildDirectExpense({
+      id: input.entryId,
+      assetAccountId: input.accountId,
+      expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+      categoryId: resolvedCatId,
+      amountCents: draft.principalCents,
+      feeCents: feesCents,
+      feeExpenseAccountId: feesCents > 0 ? SYSTEM_CONTROL_ACCOUNT_IDS.expense : undefined,
+      feeCategoryId: effectiveFeeCategoryId,
+      occurrenceDate: occurrenceIso,
+      movementDate: movementIso,
+      description: formattedDesc,
+    });
+    entry = {
+      ...built.entry,
+      legacySourceTxId: `tx-${input.entryId}`,
+    };
+    postings =
+      feesCents > 0
+        ? built.postings.map((p) =>
+            p.id.endsWith('-dr-fee') || p.id.endsWith('-post-dr-fee')
+              ? { ...p, note: formatSmsFeeBreakdownNote(draft, p.note || 'Bank / transaction fee') }
+              : p
+          )
+        : built.postings;
+    simpleTx = {
+      id: `tx-${input.entryId}`,
+      type: 'expense',
+      amountCents: draft.principalCents,
+      accountId: input.accountId,
+      categoryId: resolvedCatId,
+      description: formattedDesc,
+      payee: cleanPayee,
+      transactionDate: occurrenceIso,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      journalEntryId: input.entryId,
+    };
+  }
+
+  const updatedDraft: FinanceSmsDraft = {
+    ...draft,
+    suggestedType: input.finalType,
+    suggestedAccountId: input.accountId,
+    ...(updatedCategoryId ? { suggestedCategoryId: updatedCategoryId } : {}),
+    status: 'approved',
+    approvedEntryId: entry.id,
+    updatedAt: nowIso,
+  };
+
+  return {
+    updatedDraft,
+    entry,
+    postings,
+    simpleTx,
+    ...(feeCategoryToAdd ? { feeCategoryToAdd } : {}),
+  };
+}

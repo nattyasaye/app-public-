@@ -240,10 +240,19 @@ class FinanceSmsParsers {
     return cleaned.isEmpty ? null : cleaned;
   }
 
+  static String? _extractTrailingDigitsHint(String? rawHint) {
+    if (rawHint == null || rawHint.isEmpty) return null;
+    final digits = rawHint.replaceAll(RegExp(r'\D'), '');
+    if (digits.length >= 4) return digits.substring(digits.length - 4);
+    if (digits.length >= 2) return digits;
+    return null;
+  }
+
   static String? suggestEtbAccountForProvider(
     SmsProvider provider,
-    List<AccountModel> accounts,
-  ) {
+    List<AccountModel> accounts, {
+    String? accountHint,
+  }) {
     final spendable = accounts.where((a) {
       if (!DoubleEntryEngine.isActiveVerifiedEtbAccount(a)) return false;
       return (a.type == AccountType.asset &&
@@ -267,11 +276,58 @@ class FinanceSmsParsers {
     }).toList(growable: false);
     if (matches.length == 1) return matches.first.id;
 
+    final trailingDigits = _extractTrailingDigitsHint(accountHint);
+    if (trailingDigits != null) {
+      final pool = matches.isNotEmpty ? matches : spendable;
+      final digitMatches = pool
+          .where((acc) => acc.name.contains(trailingDigits))
+          .toList(growable: false);
+      if (digitMatches.length == 1) return digitMatches.first.id;
+    }
+
     if (provider == SmsProvider.telebirr) {
       final mobileAccounts = spendable
           .where((a) => a.subType == AccountSubType.mobileMoney)
           .toList(growable: false);
       if (mobileAccounts.length == 1) return mobileAccounts.first.id;
+    }
+
+    return null;
+  }
+
+  static String? suggestTransferDestinationAccount(
+    FinanceSmsDraftModel draft,
+    List<AccountModel> accounts,
+  ) {
+    final transferable = accounts.where((a) {
+      if (!DoubleEntryEngine.isActiveVerifiedEtbAccount(a)) return false;
+      if (draft.suggestedAccountId != null && a.id == draft.suggestedAccountId) {
+        return false;
+      }
+      return (a.type == AccountType.asset &&
+              a.subType != AccountSubType.receivable) ||
+          (a.type == AccountType.liability &&
+              a.subType == AccountSubType.creditCard);
+    }).toList(growable: false);
+    if (transferable.isEmpty) return null;
+
+    final trailingDigits = _extractTrailingDigitsHint(draft.counterpartyHint);
+    if (trailingDigits != null) {
+      final digitMatches = transferable
+          .where((acc) => acc.name.contains(trailingDigits))
+          .toList(growable: false);
+      if (digitMatches.length == 1) return digitMatches.first.id;
+    }
+
+    final cpLower = draft.counterpartyName?.trim().toLowerCase();
+    if (cpLower != null && cpLower.isNotEmpty) {
+      final nameMatches = transferable.where((acc) {
+        final accLower = acc.name.trim().toLowerCase();
+        return accLower == cpLower ||
+            cpLower.contains(accLower) ||
+            accLower.contains(cpLower);
+      }).toList(growable: false);
+      if (nameMatches.length == 1) return nameMatches.first.id;
     }
 
     return null;
@@ -331,11 +387,34 @@ class FinanceSmsParsers {
     return providerHint == SmsProvider.unknown ? null : providerHint;
   }
 
-  static String? _nonTransactionalIgnoreReason(
-    SmsProvider provider,
-    String rawSmsText,
-  ) {
-    final hasTxMarker = RegExp(
+  static const List<String> _nonTransactionalNoiseMarkers = <String>[
+    'pin or password is incorrect',
+    'pin is incorrect',
+    'invalid pin',
+    'incorrect pin',
+    'wrong pin',
+    'wrong password',
+    'pin locked',
+    'pin blocked',
+    'failed login',
+    'password will expire',
+    'never share your pin',
+    'never share your password',
+    'do not share your otp',
+    'verification code',
+    'one time password',
+    'otp is',
+    'security alert',
+    'security tip',
+    'download our',
+    'special offer',
+    'win a',
+    'happy holiday',
+    'promotion',
+  ];
+
+  static bool _hasCompletedTransactionMarker(String rawSmsText) {
+    return RegExp(
           r'was (?:debited|credited) with etb',
           caseSensitive: false,
         ).hasMatch(rawSmsText) ||
@@ -353,32 +432,19 @@ class FinanceSmsParsers {
             ).hasMatch(rawSmsText) &&
             RegExp(r'pos transaction', caseSensitive: false)
                 .hasMatch(rawSmsText));
+  }
 
-    if (hasTxMarker) return null;
-
+  static bool _matchesNonTransactionalNoise(String rawSmsText) {
+    if (_hasCompletedTransactionMarker(rawSmsText)) return false;
     final lower = rawSmsText.toLowerCase();
-    const markers = <String>[
-      'pin or password is incorrect',
-      'invalid pin',
-      'incorrect pin',
-      'wrong password',
-      'failed login',
-      'password will expire',
-      'never share your pin',
-      'never share your password',
-      'do not share your otp',
-      'verification code',
-      'one time password',
-      'otp is',
-      'security alert',
-      'security tip',
-      'download our',
-      'special offer',
-      'win a',
-      'happy holiday',
-      'promotion',
-    ];
-    if (markers.any(lower.contains)) {
+    return _nonTransactionalNoiseMarkers.any(lower.contains);
+  }
+
+  static String? _nonTransactionalIgnoreReason(
+    SmsProvider provider,
+    String rawSmsText,
+  ) {
+    if (_matchesNonTransactionalNoise(rawSmsText)) {
       return 'Ignored non-transactional ${provider.displayName} security/promotional notice.';
     }
     return null;
@@ -407,7 +473,7 @@ class FinanceSmsParsers {
     final fingerprint = computeSmsFingerprint(trimmed);
     final receipt = extractReceiptUrlAndRef(trimmed);
     final nowUtc = receivedAtUtc.toUtc();
-    final matchedAccountId =
+    final fallbackAccountId =
         suggestEtbAccountForProvider(SmsProvider.boa, accounts);
 
     // POS Locked / Authorization notice — MUST NOT create a normal expense draft
@@ -415,7 +481,7 @@ class FinanceSmsParsers {
             .hasMatch(trimmed) ||
         RegExp(r'pos\s+transaction', caseSensitive: false).hasMatch(trimmed)) {
       final posMatch = RegExp(
-        r'ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+is\s+locked\s+from\s+your\s+account\s+([0-9*xX]+).*?due\s+to\s+pos\s+transaction(?:\s+at\s+([^.\n]+?))?(?:\.\s*your\s+available\s+balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?))?',
+        r'ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+is\s+locked\s+from\s+your\s+account\s+([0-9*xX]+).*?due\s+to\s+pos\s+transaction(?:\s+at\s+([^.\n]+))?(?:\.\s*your\s+available\s+balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?))?',
         caseSensitive: false,
         dotAll: true,
       ).firstMatch(trimmed);
@@ -430,6 +496,13 @@ class FinanceSmsParsers {
           ).firstMatch(trimmed)?.group(1);
       final reportedBalance =
           availRaw != null ? parseSmsAmountToCents(availRaw) : null;
+      final accountHint = maskAccountOrPhoneHint(posMatch?.group(2));
+      final matchedAccountId = suggestEtbAccountForProvider(
+            SmsProvider.boa,
+            accounts,
+            accountHint: accountHint,
+          ) ??
+          fallbackAccountId;
 
       return SmsParseOutcome.draft(
         FinanceSmsDraftModel(
@@ -445,7 +518,7 @@ class FinanceSmsParsers {
           suggestedType: SmsSuggestedTransactionType.unknown,
           direction: SmsDirection.uncertain,
           principalCents: lockedAmount,
-          accountHint: maskAccountOrPhoneHint(posMatch?.group(2)),
+          accountHint: accountHint,
           counterpartyName: _cleanCounterpartyName(posMatch?.group(3)),
           reportedBalanceCents: reportedBalance,
           receivedAtUtc: nowUtc,
@@ -465,13 +538,19 @@ class FinanceSmsParsers {
 
     // BOA Debit
     final debitMatch = RegExp(
-      r'your\s+account\s+([0-9*xX]+)\s+was\s+debited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+(?:for|to|at|by)\s+([^.\n]+?))?(?=\.\s|,\s|https?:|$)',
+      r'your\s+account\s+([0-9*xX]+)\s+was\s+debited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+(?:for|to|at|by)\s+([^.\n]+?))?(?=\.(?:\s|$)|,\s|https?:|$)',
       caseSensitive: false,
       dotAll: true,
     ).firstMatch(trimmed);
 
     if (debitMatch != null) {
       final accountHint = maskAccountOrPhoneHint(debitMatch.group(1));
+      final matchedAccountId = suggestEtbAccountForProvider(
+            SmsProvider.boa,
+            accounts,
+            accountHint: accountHint,
+          ) ??
+          fallbackAccountId;
       final principalCents = parseSmsAmountToCents(debitMatch.group(2)!);
       final counterpartyName = _cleanCounterpartyName(debitMatch.group(3));
       final balanceRaw = RegExp(
@@ -550,13 +629,19 @@ class FinanceSmsParsers {
 
     // BOA Credit
     final creditMatch = RegExp(
-      r'your\s+account\s+([0-9*xX]+)\s+was\s+credited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+by\s+([^.\n]+?))?(?=\.\s|,\s|https?:|$)',
+      r'your\s+account\s+([0-9*xX]+)\s+was\s+credited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+by\s+([^.\n]+?))?(?=\.(?:\s|$)|,\s|https?:|$)',
       caseSensitive: false,
       dotAll: true,
     ).firstMatch(trimmed);
 
     if (creditMatch != null) {
       final accountHint = maskAccountOrPhoneHint(creditMatch.group(1));
+      final matchedAccountId = suggestEtbAccountForProvider(
+            SmsProvider.boa,
+            accounts,
+            accountHint: accountHint,
+          ) ??
+          fallbackAccountId;
       final principalCents = parseSmsAmountToCents(creditMatch.group(2)!);
       final counterpartyName = _cleanCounterpartyName(creditMatch.group(3));
       final balanceRaw = RegExp(
@@ -689,7 +774,7 @@ class FinanceSmsParsers {
     ).firstMatch(trimmed);
     final txRef = receipt.queryRef ?? refTokenMatch?.group(1);
     final nowUtc = receivedAtUtc.toUtc();
-    final matchedAccountId =
+    final fallbackAccountId =
         suggestEtbAccountForProvider(SmsProvider.cbe, accounts);
 
     // CBE Outgoing
@@ -702,6 +787,12 @@ class FinanceSmsParsers {
     if (outgoingMatch != null) {
       final principalCents = parseSmsAmountToCents(outgoingMatch.group(1)!);
       final accountHint = maskAccountOrPhoneHint(outgoingMatch.group(2));
+      final matchedAccountId = suggestEtbAccountForProvider(
+            SmsProvider.cbe,
+            accounts,
+            accountHint: accountHint,
+          ) ??
+          fallbackAccountId;
       final counterpartyHint = maskAccountOrPhoneHint(outgoingMatch.group(3));
       final counterpartyName = _cleanCounterpartyName(outgoingMatch.group(4));
 
@@ -736,11 +827,11 @@ class FinanceSmsParsers {
         caseSensitive: false,
       ).firstMatch(trimmed)?.group(1);
       final vatRaw = RegExp(
-        r'VAT(?:\s*\(\s*\d+%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
+        r'VAT(?:\s*\(\s*\d+(?:\.\d+)?%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
         caseSensitive: false,
       ).firstMatch(trimmed)?.group(1);
       final disasterRaw = RegExp(
-        r'Disaster\s+Recovery(?:\s*\(\s*\d+%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
+        r'Disaster\s+Recovery(?:\s+Fund)?(?:\s*\(\s*\d+(?:\.\d+)?%\s*\))?\s+of\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
         caseSensitive: false,
       ).firstMatch(trimmed)?.group(1);
       final totalRaw = RegExp(
@@ -829,6 +920,12 @@ class FinanceSmsParsers {
       final counterpartyHint = maskAccountOrPhoneHint(incomingMatch.group(2));
       final counterpartyName = _cleanCounterpartyName(incomingMatch.group(3));
       final accountHint = maskAccountOrPhoneHint(incomingMatch.group(4));
+      final matchedAccountId = suggestEtbAccountForProvider(
+            SmsProvider.cbe,
+            accounts,
+            accountHint: accountHint,
+          ) ??
+          fallbackAccountId;
       final balanceRaw = RegExp(
         r'your\s+current\s+balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
         caseSensitive: false,
@@ -951,16 +1048,18 @@ class FinanceSmsParsers {
 
     // Telebirr Outgoing
     final outgoingMatch = RegExp(
-      r'you\s+have\s+(?:transferred|paid)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+to\s+(.+?)\s*\(([^)]+)\)\s+on\s+(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})',
+      r'you\s+have\s+(?:transferred|paid)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+to\s+(?:(.+?)\s*\(([^)]+)\)|(.+?))\s+on\s+(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})',
       caseSensitive: false,
       dotAll: true,
     ).firstMatch(trimmed);
 
     if (outgoingMatch != null) {
       final principalCents = parseSmsAmountToCents(outgoingMatch.group(1)!);
-      final counterpartyName = _cleanCounterpartyName(outgoingMatch.group(2));
+      final counterpartyName = _cleanCounterpartyName(
+        outgoingMatch.group(2) ?? outgoingMatch.group(4),
+      );
       final counterpartyHint = maskAccountOrPhoneHint(outgoingMatch.group(3));
-      final parsedDt = parseAddisAbabaDateTime(outgoingMatch.group(4)!);
+      final parsedDt = parseAddisAbabaDateTime(outgoingMatch.group(5)!);
 
       if (principalCents == null || principalCents <= 0) {
         return SmsParseOutcome.draft(
@@ -997,7 +1096,11 @@ class FinanceSmsParsers {
         caseSensitive: false,
       ).firstMatch(trimmed)?.group(1);
       final vatRaw = RegExp(
-        r'(?:\d+%\s+)?VAT(?:\s+on\s+the\s+service\s+fee)?\s+(?:is|of)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
+        r'(?:\d+(?:\.\d+)?%\s+)?VAT(?:\s+on\s+(?:the\s+)?service\s+fee)?\s+(?:is|of)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
+        caseSensitive: false,
+      ).firstMatch(trimmed)?.group(1);
+      final totalPaidRaw = RegExp(
+        r'(?:with\s+)?(?:the\s+)?total(?:\s+(?:paid|deducted|amount))?(?:\s+is|\s+of)\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
         caseSensitive: false,
       ).firstMatch(trimmed)?.group(1);
       final balanceRaw = RegExp(
@@ -1009,7 +1112,12 @@ class FinanceSmsParsers {
           serviceRaw != null ? (parseSmsAmountToCents(serviceRaw) ?? 0) : 0;
       final vatCents =
           vatRaw != null ? (parseSmsAmountToCents(vatRaw) ?? 0) : 0;
-      final totalAmountCents = principalCents + serviceFeeCents + vatCents;
+      final computedTotal = principalCents + serviceFeeCents + vatCents;
+      final reportedTotal =
+          totalPaidRaw != null ? parseSmsAmountToCents(totalPaidRaw) : null;
+      final hasAmountMismatch =
+          reportedTotal != null && reportedTotal != computedTotal;
+      final totalAmountCents = reportedTotal ?? computedTotal;
       final reportedBalance =
           balanceRaw != null ? parseSmsAmountToCents(balanceRaw) : null;
 
@@ -1030,6 +1138,7 @@ class FinanceSmsParsers {
           serviceFeeCents: serviceFeeCents,
           vatCents: vatCents,
           totalAmountCents: totalAmountCents,
+          hasAmountMismatch: hasAmountMismatch,
           accountHint: 'Telebirr',
           counterpartyName: counterpartyName,
           counterpartyHint: counterpartyHint,
@@ -1037,11 +1146,16 @@ class FinanceSmsParsers {
           transactionTimestampUtc: parsedDt?.timestampUtc,
           transactionDateIso: parsedDt?.dateIso,
           receivedAtUtc: nowUtc,
-          confidence: (txRef != null && parsedDt != null)
-              ? SmsParseConfidence.high
-              : SmsParseConfidence.medium,
+          confidence: hasAmountMismatch
+              ? SmsParseConfidence.medium
+              : (txRef != null && parsedDt != null)
+                  ? SmsParseConfidence.high
+                  : SmsParseConfidence.medium,
           status: SmsDraftStatus.needsReview,
           isNonLedgerNotice: false,
+          parseNotes: hasAmountMismatch
+              ? 'Amount mismatch: principal + fees (${(computedTotal / 100).toStringAsFixed(2)} ETB) differs from reported total (${(reportedTotal / 100).toStringAsFixed(2)} ETB). Verify before approving.'
+              : null,
           suggestedAccountId: matchedAccountId,
           suggestedCategoryId: suggestCategoryForDraft(
             SmsSuggestedTransactionType.expense,
@@ -1057,16 +1171,18 @@ class FinanceSmsParsers {
 
     // Telebirr Incoming
     final incomingMatch = RegExp(
-      r'you\s+have\s+received\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+from\s+(.+?)\s*\(([^)]+)\)\s+on\s+(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})',
+      r'you\s+have\s+received\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)\s+from\s+(?:(.+?)\s*\(([^)]+)\)|(.+?))\s+on\s+(\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}:\d{2})',
       caseSensitive: false,
       dotAll: true,
     ).firstMatch(trimmed);
 
     if (incomingMatch != null) {
       final principalCents = parseSmsAmountToCents(incomingMatch.group(1)!);
-      final counterpartyName = _cleanCounterpartyName(incomingMatch.group(2));
+      final counterpartyName = _cleanCounterpartyName(
+        incomingMatch.group(2) ?? incomingMatch.group(4),
+      );
       final counterpartyHint = maskAccountOrPhoneHint(incomingMatch.group(3));
-      final parsedDt = parseAddisAbabaDateTime(incomingMatch.group(4)!);
+      final parsedDt = parseAddisAbabaDateTime(incomingMatch.group(5)!);
       final balanceRaw = RegExp(
         r'your\s+current\s+(?:E-Money\s+Account\s+)?balance\s+is\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
         caseSensitive: false,
@@ -1193,10 +1309,7 @@ class FinanceSmsParsers {
     final detected = detectSmsProvider(trimmed, providerHint: providerHint);
 
     if (detected == null || detected == SmsProvider.unknown) {
-      if (RegExp(
-        r'pin or password is incorrect|wrong password|one time password|otp is|security alert',
-        caseSensitive: false,
-      ).hasMatch(trimmed)) {
+      if (_matchesNonTransactionalNoise(trimmed)) {
         return const SmsParseOutcome.ignored(
           ignoreReason: 'Ignored non-transactional security/PIN/OTP message.',
         );
@@ -1311,5 +1424,77 @@ class FinanceSmsParsers {
       return '$providerLabel debit$refPart';
     }
     return '$providerLabel SMS$refPart';
+  }
+
+  static CalendarDate resolveDefaultDraftOccurrenceDate(
+    FinanceSmsDraftModel draft,
+  ) {
+    final explicit = draft.transactionDateIso != null
+        ? CalendarDate.tryParse(draft.transactionDateIso)
+        : null;
+    if (explicit != null) return explicit;
+    final addis = draft.receivedAtUtc.toUtc().add(const Duration(hours: 3));
+    return CalendarDate.fromYmd(addis.year, addis.month, addis.day);
+  }
+
+  static String? validateDraftApproval({
+    required FinanceSmsDraftModel draft,
+    required SmsSuggestedTransactionType finalType,
+    required String accountId,
+    String? destinationAccountId,
+  }) {
+    if (draft.status == SmsDraftStatus.approved) {
+      return 'This SMS draft has already been approved and posted to the ledger.';
+    }
+    if (draft.status == SmsDraftStatus.dismissed) {
+      return 'Dismissed SMS drafts cannot be approved directly.';
+    }
+    if (draft.status == SmsDraftStatus.unrecognized ||
+        draft.isNonLedgerNotice ||
+        finalType == SmsSuggestedTransactionType.unknown) {
+      return draft.parseNotes ??
+          'Informational or unrecognized SMS notices cannot be posted automatically.';
+    }
+    if (draft.principalCents <= 0) {
+      return 'Draft principal amount must be greater than zero ETB.';
+    }
+    if (accountId.trim().isEmpty) {
+      return 'Select an active ETB account before approving.';
+    }
+    if (finalType == SmsSuggestedTransactionType.transfer) {
+      if (destinationAccountId == null || destinationAccountId.trim().isEmpty) {
+        return 'Select a destination ETB account for the transfer.';
+      }
+      if (destinationAccountId.trim() == accountId.trim()) {
+        return 'Source and destination accounts must be distinct.';
+      }
+    }
+    return null;
+  }
+
+  static String _formatCentsFixed(int cents) {
+    final whole = cents ~/ 100;
+    final frac = (cents % 100).toString().padLeft(2, '0');
+    return '$whole.$frac';
+  }
+
+  static String formatFeeBreakdownNote(
+    FinanceSmsDraftModel draft,
+    String defaultLabel,
+  ) {
+    final parts = <String>[];
+    if (draft.serviceFeeCents > 0) {
+      parts.add('Service fee: ETB ${_formatCentsFixed(draft.serviceFeeCents)}');
+    }
+    if (draft.vatCents > 0) {
+      parts.add('VAT: ETB ${_formatCentsFixed(draft.vatCents)}');
+    }
+    if (draft.otherChargesCents > 0) {
+      parts.add(
+        'Disaster Recovery / Other: ETB ${_formatCentsFixed(draft.otherChargesCents)}',
+      );
+    }
+    if (parts.isEmpty) return defaultLabel;
+    return '$defaultLabel (${parts.join(', ')})';
   }
 }
