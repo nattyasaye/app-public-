@@ -297,3 +297,123 @@ class SmsImportBatchResult {
     this.ignoredReasons = const <String>[],
   });
 }
+
+enum SmsScanTrigger {
+  manual('manual'),
+  foregroundCatchUp('foreground_catch_up'),
+  backgroundWorker('background_worker'),
+  permissionGrant('permission_grant');
+
+  final String dbValue;
+  const SmsScanTrigger(this.dbValue);
+}
+
+class SmsInboxMessage {
+  final String deviceMessageId;
+  final String senderAddress;
+  final String body;
+  final DateTime receivedAtUtc;
+
+  SmsInboxMessage({
+    required this.deviceMessageId,
+    required this.senderAddress,
+    required this.body,
+    required DateTime receivedAtUtc,
+  }) : receivedAtUtc = receivedAtUtc.toUtc();
+}
+
+class SmsSenderIdentification {
+  final bool isTargetFinancialMessage;
+  final SmsProvider? provider;
+  final String? matchedBy; // 'sender_alias' | 'canonical_sender' | 'message_body'
+  final String? rejectReason;
+
+  const SmsSenderIdentification.accepted({
+    required SmsProvider this.provider,
+    required String this.matchedBy,
+  })  : isTargetFinancialMessage = true,
+        rejectReason = null;
+
+  const SmsSenderIdentification.rejected(String this.rejectReason)
+      : isTargetFinancialMessage = false,
+        provider = null,
+        matchedBy = null;
+}
+
+class SmsScanCheckpointState {
+  final DateTime? lastProcessedReceivedAtUtc;
+  final DateTime? lastScanAttemptUtc;
+  final DateTime? lastSuccessUtc;
+  final bool permissionAsked;
+  final bool dailyScanEnabled;
+  final Map<String, SmsProvider> senderAliases;
+
+  const SmsScanCheckpointState({
+    this.lastProcessedReceivedAtUtc,
+    this.lastScanAttemptUtc,
+    this.lastSuccessUtc,
+    this.permissionAsked = false,
+    this.dailyScanEnabled = true,
+    this.senderAliases = const <String, SmsProvider>{},
+  });
+
+  SmsScanCheckpointState copyWith({
+    DateTime? lastProcessedReceivedAtUtc,
+    bool clearLastProcessedReceivedAtUtc = false,
+    DateTime? lastScanAttemptUtc,
+    bool clearLastScanAttemptUtc = false,
+    DateTime? lastSuccessUtc,
+    bool clearLastSuccessUtc = false,
+    bool? permissionAsked,
+    bool? dailyScanEnabled,
+    Map<String, SmsProvider>? senderAliases,
+  }) {
+    return SmsScanCheckpointState(
+      lastProcessedReceivedAtUtc: clearLastProcessedReceivedAtUtc
+          ? null
+          : (lastProcessedReceivedAtUtc ?? this.lastProcessedReceivedAtUtc),
+      lastScanAttemptUtc: clearLastScanAttemptUtc
+          ? null
+          : (lastScanAttemptUtc ?? this.lastScanAttemptUtc),
+      lastSuccessUtc:
+          clearLastSuccessUtc ? null : (lastSuccessUtc ?? this.lastSuccessUtc),
+      permissionAsked: permissionAsked ?? this.permissionAsked,
+      dailyScanEnabled: dailyScanEnabled ?? this.dailyScanEnabled,
+      senderAliases: senderAliases ?? this.senderAliases,
+    );
+  }
+}
+
+class SmsInboxScanResult {
+  final SmsScanTrigger trigger;
+  final bool executed;
+  final bool skippedBecauseLocked;
+  final bool skippedBecausePermission;
+  final bool skippedBecauseFresh;
+  final int scannedMessageCount;
+  final int importedCount;
+  final int unrecognizedCount;
+  final int duplicateCount;
+  final int ignoredCount;
+  final DateTime? windowStartUtc;
+  final DateTime? checkpointBeforeUtc;
+  final DateTime? checkpointAfterUtc;
+  final String? errorMessage;
+
+  const SmsInboxScanResult({
+    required this.trigger,
+    this.executed = true,
+    this.skippedBecauseLocked = false,
+    this.skippedBecausePermission = false,
+    this.skippedBecauseFresh = false,
+    this.scannedMessageCount = 0,
+    this.importedCount = 0,
+    this.unrecognizedCount = 0,
+    this.duplicateCount = 0,
+    this.ignoredCount = 0,
+    this.windowStartUtc,
+    this.checkpointBeforeUtc,
+    this.checkpointAfterUtc,
+    this.errorMessage,
+  });
+}

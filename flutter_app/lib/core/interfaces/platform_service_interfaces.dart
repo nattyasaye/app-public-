@@ -189,3 +189,44 @@ class UnsupportedDatabaseVersionException implements Exception {
   @override
   String toString() => 'UnsupportedDatabaseVersionException: $message';
 }
+
+/// Runtime permission state for read-only local Android SMS inbox scanning.
+enum DeviceSmsPermissionStatus {
+  granted,
+  notRequested,
+  denied,
+  permanentlyDenied,
+  unavailable,
+}
+
+/// Raw read-only SMS row read from Android's `Telephony.Sms.Inbox` provider.
+class RawDeviceSmsMessage {
+  final String deviceMessageId;
+  final String senderAddress;
+  final String body;
+  final DateTime receivedAtUtc;
+
+  const RawDeviceSmsMessage({
+    required this.deviceMessageId,
+    required this.senderAddress,
+    required this.body,
+    required this.receivedAtUtc,
+  });
+}
+
+/// Abstract contract for read-only local SMS inbox access and daily background
+/// scanning (Android WorkManager).
+abstract class ISmsInboxService {
+  Future<DeviceSmsPermissionStatus> getPermissionStatus();
+  Future<DeviceSmsPermissionStatus> requestPermission();
+  Future<bool> openAppSettings();
+  Future<List<RawDeviceSmsMessage>> readInboxMessages({
+    DateTime? sinceUtc,
+    int limit = 500,
+  });
+  Future<void> scheduleDailyScan();
+  Future<void> cancelDailyScan();
+  Future<bool> isDailyScanScheduled();
+  Future<bool> tryAcquireScanLock();
+  Future<void> releaseScanLock();
+}

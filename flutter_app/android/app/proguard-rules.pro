@@ -21,6 +21,10 @@
 # Android App Widget for Quick Capture
 -keep class com.example.personalmanagement.QuickCaptureWidgetProvider { *; }
 
+# Android WorkManager Daily Finance SMS Scanner
+-keep class com.example.personalmanagement.SmsInboxScanWorker { *; }
+-keep class com.example.personalmanagement.SmsInboxBridge { *; }
+
 # Security and Encrypted SharedPreferences
 -keep class androidx.security.crypto.** { *; }
 -dontwarn androidx.security.crypto.**

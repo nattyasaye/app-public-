@@ -120,6 +120,10 @@ export function DaywellFinanceModule({
   onClearComposerPrefill,
   requestedTab,
 }: DaywellFinanceModuleProps) {
+  useState(() => {
+    FinanceSmsService.recoverPendingApproval();
+    return true;
+  });
   const todayStr = useMemo(() => CalendarDate.today().toIsoString(), []);
   const [activeTab, setActiveTab] = useState<FinanceV7Tab>('overview');
   const isApplyingExternalSyncRef = useRef(false);
@@ -320,6 +324,7 @@ export function DaywellFinanceModule({
   ]);
 
   const reloadFromStorage = useCallback((event?: Event) => {
+    FinanceSmsService.recoverPendingApproval();
     setDailyRhythmTodayRecord(
       dailyRhythmWorkflowService.getDayOrEmpty(todayStr, { todayIso: todayStr })
     );

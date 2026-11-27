@@ -1,4 +1,5 @@
 import '../../core/date/shared_date.dart';
+import '../../core/interfaces/platform_service_interfaces.dart';
 import '../../domain/finance/double_entry_engine.dart';
 import '../../domain/finance/finance_models.dart';
 import '../../domain/finance/finance_sms_models.dart';
@@ -38,6 +39,10 @@ class FinanceModuleState {
   final String? errorMessage;
   final bool isSetupCompleted;
   final bool legacyNonEtbNoticeDismissed;
+  final DeviceSmsPermissionStatus smsPermissionStatus;
+  final SmsScanCheckpointState smsScanCheckpoint;
+  final bool isSmsScanning;
+  final SmsInboxScanResult? lastSmsScanResult;
 
   const FinanceModuleState({
     this.accounts = const [],
@@ -69,6 +74,10 @@ class FinanceModuleState {
     this.errorMessage,
     this.isSetupCompleted = true,
     this.legacyNonEtbNoticeDismissed = false,
+    this.smsPermissionStatus = DeviceSmsPermissionStatus.unavailable,
+    this.smsScanCheckpoint = const SmsScanCheckpointState(),
+    this.isSmsScanning = false,
+    this.lastSmsScanResult,
   });
 
   FinanceModuleState copyWith({
@@ -107,6 +116,11 @@ class FinanceModuleState {
     bool clearError = false,
     bool? isSetupCompleted,
     bool? legacyNonEtbNoticeDismissed,
+    DeviceSmsPermissionStatus? smsPermissionStatus,
+    SmsScanCheckpointState? smsScanCheckpoint,
+    bool? isSmsScanning,
+    SmsInboxScanResult? lastSmsScanResult,
+    bool clearLastSmsScanResult = false,
   }) {
     return FinanceModuleState(
       accounts: accounts ?? this.accounts,
@@ -150,6 +164,12 @@ class FinanceModuleState {
       isSetupCompleted: isSetupCompleted ?? this.isSetupCompleted,
       legacyNonEtbNoticeDismissed:
           legacyNonEtbNoticeDismissed ?? this.legacyNonEtbNoticeDismissed,
+      smsPermissionStatus: smsPermissionStatus ?? this.smsPermissionStatus,
+      smsScanCheckpoint: smsScanCheckpoint ?? this.smsScanCheckpoint,
+      isSmsScanning: isSmsScanning ?? this.isSmsScanning,
+      lastSmsScanResult: clearLastSmsScanResult
+          ? null
+          : (lastSmsScanResult ?? this.lastSmsScanResult),
     );
   }
 

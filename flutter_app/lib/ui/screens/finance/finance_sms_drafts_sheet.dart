@@ -1,7 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../application/finance/finance_controller.dart';
+import '../../../application/finance/finance_state.dart';
 import '../../../core/date/shared_date.dart';
+import '../../../core/interfaces/platform_service_interfaces.dart';
 import '../../../core/shared_foundation.dart';
 import '../../../core/theme/daywell_theme.dart';
 import '../../../domain/finance/finance_contracts.dart';
@@ -70,8 +74,11 @@ class FinanceSmsDraftsSheet extends StatefulWidget {
 
 class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
   final TextEditingController _pasteCtrl = TextEditingController();
+  final TextEditingController _aliasSenderCtrl = TextEditingController();
   _SmsDraftFilter _filter = _SmsDraftFilter.needsReview;
   SmsProvider? _providerHint;
+  SmsProvider _aliasProvider = SmsProvider.cbe;
+  bool _showAliasEditor = false;
   SmsImportBatchResult? _lastImportResult;
   String? _globalError;
   final Map<String, String> _draftErrors = {};
@@ -80,8 +87,19 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
   bool _isBusy = false;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        unawaited(widget.controller.refreshSmsInboxStatus());
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _pasteCtrl.dispose();
+    _aliasSenderCtrl.dispose();
     super.dispose();
   }
 
@@ -327,6 +345,8 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                             onDismiss: () => setState(() => _globalError = null),
                           ),
                         ],
+                        const SizedBox(height: SharedDesignTokens.spacingSm),
+                        _buildAndroidInboxScanCard(context, state),
                         const SizedBox(height: SharedDesignTokens.spacingSm),
                         DaywellCard(
                           color: semantic.surfaceSubtle,
@@ -1027,6 +1047,286 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
               style:
                   textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
             ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _formatUtcAddisLabel(DateTime? utc) {
+    if (utc == null) return 'Never';
+    final addis = utc.toUtc().add(const Duration(hours: 3));
+    final date = CalendarDate(
+      year: addis.year,
+      month: addis.month,
+      day: addis.day,
+    );
+    final hh = addis.hour.toString().padLeft(2, '0');
+    final mm = addis.minute.toString().padLeft(2, '0');
+    return '${SharedDateFormatter.formatDual(date, useAmharic: false)} · $hh:$mm EAT';
+  }
+
+  Widget _buildAndroidInboxScanCard(
+    BuildContext context,
+    FinanceModuleState state,
+  ) {
+    final semantic = context.daywellColors;
+    final textTheme = Theme.of(context).textTheme;
+    final permission = state.smsPermissionStatus;
+    final checkpoint = state.smsScanCheckpoint;
+    final lastScan = state.lastSmsScanResult;
+    final aliases = checkpoint.senderAliases;
+    final busy = _isBusy || state.isSmsScanning;
+
+    final (badgeLabel, badgeTone) = switch (permission) {
+      DeviceSmsPermissionStatus.granted => (
+          'Connected',
+          DaywellStatusTone.success,
+        ),
+      DeviceSmsPermissionStatus.notRequested => (
+          'Not Enabled',
+          DaywellStatusTone.neutral,
+        ),
+      DeviceSmsPermissionStatus.denied => (
+          'Denied',
+          DaywellStatusTone.warning,
+        ),
+      DeviceSmsPermissionStatus.permanentlyDenied => (
+          'Settings Required',
+          DaywellStatusTone.warning,
+        ),
+      DeviceSmsPermissionStatus.unavailable => (
+          'Manual Paste Only',
+          DaywellStatusTone.info,
+        ),
+    };
+
+    return DaywellCard(
+      color: semantic.surfaceSubtle,
+      padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Android SMS Inbox Scanning',
+                  style: textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              DaywellStatusBadge(
+                label: badgeLabel,
+                tone: badgeTone,
+              ),
+            ],
+          ),
+          const SizedBox(height: SharedDesignTokens.spacingXs),
+          Text(
+            'Optional local permission reads received SMS messages on this device only to identify CBE, Telebirr, and BOA transaction alerts and create Finance review drafts. Daywell never sends, modifies, deletes, or changes read/unread status of any SMS.',
+            style: textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+          ),
+          const SizedBox(height: SharedDesignTokens.spacingSm),
+          if (permission == DeviceSmsPermissionStatus.notRequested) ...[
+            DaywellButton(
+              label: 'Allow SMS Inbox Reading',
+              leadingIcon: Icons.shield_outlined,
+              fullWidth: true,
+              isLoading: busy,
+              onPressed: busy
+                  ? null
+                  : () async {
+                      setState(() => _globalError = null);
+                      await widget.controller.requestSmsPermissionAndScan();
+                    },
+            ),
+          ] else if (permission == DeviceSmsPermissionStatus.denied ||
+              permission == DeviceSmsPermissionStatus.permanentlyDenied) ...[
+            const DaywellStatusBanner(
+              tone: DaywellStatusTone.warning,
+              message:
+                  'SMS inbox permission is not granted. Finance and manual SMS paste continue working normally. You can enable Read SMS anytime in Android App Settings.',
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            DaywellButton(
+              label: 'Open App Settings',
+              variant: DaywellButtonVariant.outlined,
+              leadingIcon: Icons.settings_outlined,
+              fullWidth: true,
+              onPressed: busy
+                  ? null
+                  : () async {
+                      await widget.controller.openSmsPermissionSettings();
+                    },
+            ),
+          ] else if (permission == DeviceSmsPermissionStatus.unavailable) ...[
+            Text(
+              'Automatic device SMS inbox scanning is only available on Android builds. Use the manual SMS paste box below on this platform.',
+              style:
+                  textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+            ),
+          ] else ...[
+            DaywellButton(
+              label: state.isSmsScanning
+                  ? 'Scanning SMS Inbox...'
+                  : 'Scan Inbox Now',
+              leadingIcon: Icons.sync,
+              fullWidth: true,
+              isLoading: busy,
+              onPressed: busy
+                  ? null
+                  : () async {
+                      setState(() => _globalError = null);
+                      await widget.controller.scanSmsInboxNow();
+                    },
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            DaywellSwitchTile(
+              title: 'Daily background scan (~24h)',
+              subtitle:
+                  'Schedules one approximate daily WorkManager check on-device. Disabling leaves manual scans and foreground catch-up active.',
+              value: checkpoint.dailyScanEnabled,
+              enabled: !busy,
+              onChanged: (enabled) =>
+                  widget.controller.setSmsDailyScanEnabled(enabled),
+            ),
+            Text(
+              'Last completed scan: ${_formatUtcAddisLabel(checkpoint.lastSuccessUtc)}',
+              style:
+                  textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+            ),
+            Text(
+              'Last SMS checkpoint: ${_formatUtcAddisLabel(checkpoint.lastProcessedReceivedAtUtc)}',
+              style:
+                  textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+            ),
+          ],
+          if (lastScan != null) ...[
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            if (lastScan.errorMessage != null)
+              DaywellStatusBanner(
+                tone: DaywellStatusTone.error,
+                message: lastScan.errorMessage!,
+              )
+            else if (lastScan.executed)
+              DaywellStatusBanner(
+                tone: lastScan.importedCount > 0
+                    ? DaywellStatusTone.success
+                    : DaywellStatusTone.info,
+                message:
+                    'Inbox scan read ${lastScan.scannedMessageCount} SMS · ${lastScan.importedCount} drafts ready · ${lastScan.unrecognizedCount} notices · ${lastScan.duplicateCount} duplicates · ${lastScan.ignoredCount} ignored.',
+              )
+            else if (lastScan.skippedBecauseLocked)
+              const DaywellStatusBanner(
+                tone: DaywellStatusTone.info,
+                message: 'Another SMS inbox scan is already running.',
+              ),
+          ],
+          const SizedBox(height: SharedDesignTokens.spacingXs),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: DaywellButton(
+              label: _showAliasEditor
+                  ? 'Hide Sender Aliases (${aliases.length})'
+                  : 'Optional Sender Aliases (${aliases.length})',
+              variant: DaywellButtonVariant.text,
+              size: DaywellButtonSize.compact,
+              onPressed: () =>
+                  setState(() => _showAliasEditor = !_showAliasEditor),
+            ),
+          ),
+          if (_showAliasEditor) ...[
+            Text(
+              'Map a custom SMS sender label or carrier ID to CBE, Telebirr, or BOA if your carrier alters the sender name.',
+              style:
+                  textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            DaywellTextField(
+              controller: _aliasSenderCtrl,
+              label: 'Sender Name or Address',
+              hintText: 'e.g. CBE-ALERT or ETHIOTELE',
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+            Row(
+              children: [
+                Expanded(
+                  child: DaywellDropdownField<SmsProvider>(
+                    label: 'Provider',
+                    value: _aliasProvider,
+                    items: const [
+                      DropdownMenuItem(
+                        value: SmsProvider.cbe,
+                        child: Text('CBE'),
+                      ),
+                      DropdownMenuItem(
+                        value: SmsProvider.telebirr,
+                        child: Text('Telebirr'),
+                      ),
+                      DropdownMenuItem(
+                        value: SmsProvider.boa,
+                        child: Text('BOA'),
+                      ),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setState(() => _aliasProvider = val);
+                    },
+                  ),
+                ),
+                const SizedBox(width: SharedDesignTokens.spacingSm),
+                DaywellButton(
+                  label: 'Save Alias',
+                  size: DaywellButtonSize.compact,
+                  onPressed: busy
+                      ? null
+                      : () async {
+                          final rawKey = FinanceSmsInboxScanner.normalizeSenderKey(
+                            _aliasSenderCtrl.text,
+                          );
+                          if (rawKey.isEmpty) {
+                            setState(() {
+                              _globalError =
+                                  'Enter a sender name or address to save an alias.';
+                            });
+                            return;
+                          }
+                          final next = Map<String, SmsProvider>.from(aliases)
+                            ..[rawKey] = _aliasProvider;
+                          _aliasSenderCtrl.clear();
+                          await widget.controller.saveSmsSenderAliases(next);
+                        },
+                ),
+              ],
+            ),
+            if (aliases.isNotEmpty) ...[
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+              for (final entry in aliases.entries)
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        '${entry.key} → ${entry.value.displayName}',
+                        style: textTheme.bodySmall,
+                      ),
+                    ),
+                    DaywellIconButton(
+                      icon: Icons.delete_outline,
+                      tooltip: 'Remove alias ${entry.key}',
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              final next =
+                                  Map<String, SmsProvider>.from(aliases)
+                                    ..remove(entry.key);
+                              await widget.controller
+                                  .saveSmsSenderAliases(next);
+                            },
+                    ),
+                  ],
+                ),
+            ],
           ],
         ],
       ),

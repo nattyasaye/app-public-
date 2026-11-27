@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:drift/drift.dart';
+import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/date/shared_date.dart';
@@ -22,6 +23,12 @@ export '../../domain/finance/finance_contracts.dart';
 class DriftFinanceRepository implements IFinanceRepository {
   final AppDatabase _db;
   final Uuid _uuid = const Uuid();
+
+  /// Stage 6 test-only fault-injection hook invoked inside SQLite transaction
+  /// after processing/inserting a draft and BEFORE advancing the checkpoint.
+  @visibleForTesting
+  Future<void> Function(SmsInboxMessage message, int index)?
+      onBeforeCommitInboxMessageForTesting;
 
   DriftFinanceRepository(this._db);
 
@@ -5145,6 +5152,243 @@ class DriftFinanceRepository implements IFinanceRepository {
           .getSingle();
       return (draft: _mapSmsDraftRow(updatedRow), entry: entry);
     });
+  }
+
+  // ==========================================================================
+  // Stage 6: Device-Local Inbox Checkpoint & Atomic Chronological Import
+  // ==========================================================================
+
+  static const String deviceSmsLastCheckpointKey =
+      'device_sms_last_checkpoint_utc';
+  static const String deviceSmsLastAttemptKey =
+      'device_sms_last_scan_attempt_utc';
+  static const String deviceSmsLastSuccessKey =
+      'device_sms_last_success_utc';
+  static const String deviceSmsPermissionAskedKey =
+      'device_sms_permission_asked';
+  static const String deviceSmsDailyScanEnabledKey =
+      'device_sms_daily_scan_enabled';
+  static const String deviceSmsSenderAliasesKey =
+      'device_sms_sender_aliases_json';
+
+  Future<String?> _readDeviceSmsSetting(String key) async {
+    final row = await (_db.select(_db.appSettings)
+          ..where((tbl) => tbl.key.equals(key)))
+        .getSingleOrNull();
+    return row?.value;
+  }
+
+  Future<void> _writeDeviceSmsSetting(
+    String key,
+    String value, {
+    DateTime? now,
+  }) async {
+    await _db.into(_db.appSettings).insertOnConflictUpdate(
+          AppSettingsCompanion.insert(
+            key: key,
+            value: value,
+            updatedAt: (now ?? EthiopiaClock.nowUtc()).toUtc(),
+          ),
+        );
+  }
+
+  @override
+  Future<SmsScanCheckpointState> getSmsScanCheckpointState() async {
+    final checkpointRaw =
+        await _readDeviceSmsSetting(deviceSmsLastCheckpointKey);
+    final attemptRaw = await _readDeviceSmsSetting(deviceSmsLastAttemptKey);
+    final successRaw = await _readDeviceSmsSetting(deviceSmsLastSuccessKey);
+    final askedRaw = await _readDeviceSmsSetting(deviceSmsPermissionAskedKey);
+    final enabledRaw =
+        await _readDeviceSmsSetting(deviceSmsDailyScanEnabledKey);
+    final aliasesRaw = await _readDeviceSmsSetting(deviceSmsSenderAliasesKey);
+
+    return SmsScanCheckpointState(
+      lastProcessedReceivedAtUtc:
+          EthiopiaClock.tryParseInstantUtc(checkpointRaw),
+      lastScanAttemptUtc: EthiopiaClock.tryParseInstantUtc(attemptRaw),
+      lastSuccessUtc: EthiopiaClock.tryParseInstantUtc(successRaw),
+      permissionAsked: askedRaw == 'true',
+      dailyScanEnabled: enabledRaw == null ? true : enabledRaw == 'true',
+      senderAliases: FinanceSmsInboxScanner.parseSenderAliasesJson(aliasesRaw),
+    );
+  }
+
+  @override
+  Future<void> setSmsPermissionAsked(bool asked) async {
+    await _writeDeviceSmsSetting(
+      deviceSmsPermissionAskedKey,
+      asked ? 'true' : 'false',
+    );
+  }
+
+  @override
+  Future<void> setSmsDailyScanEnabled(bool enabled) async {
+    await _writeDeviceSmsSetting(
+      deviceSmsDailyScanEnabledKey,
+      enabled ? 'true' : 'false',
+    );
+  }
+
+  @override
+  Future<void> saveSmsSenderAliases(Map<String, SmsProvider> aliases) async {
+    await _writeDeviceSmsSetting(
+      deviceSmsSenderAliasesKey,
+      FinanceSmsInboxScanner.encodeSenderAliasesJson(aliases),
+    );
+  }
+
+  @override
+  Future<void> recordSmsScanAttempt(DateTime attemptUtc) async {
+    await _writeDeviceSmsSetting(
+      deviceSmsLastAttemptKey,
+      EthiopiaClock.toUtcIsoString(attemptUtc.toUtc()),
+      now: attemptUtc.toUtc(),
+    );
+  }
+
+  @override
+  Future<({
+    SmsImportBatchResult batch,
+    DateTime? updatedCheckpointUtc,
+    DateTime completedAtUtc,
+  })> importInboxSmsBatchWithCheckpoint({
+    required List<SmsInboxMessage> messages,
+    DateTime? completedAtUtc,
+  }) async {
+    final effectiveCompletedAt =
+        (completedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
+    final ordered =
+        FinanceSmsInboxScanner.sortMessagesChronologically(messages);
+
+    final initialCheckpoint = await getSmsScanCheckpointState();
+    final senderAliases = initialCheckpoint.senderAliases;
+    final accounts =
+        await getAccounts(includeArchived: true, includeSystem: true);
+    final categories = await getCategories(includeArchived: true);
+    final existingRows = await _db.select(_db.smsDraftsTable).get();
+    final knownDrafts = existingRows.map(_mapSmsDraftRow).toList();
+
+    var lastCommittedCheckpoint =
+        initialCheckpoint.lastProcessedReceivedAtUtc?.toUtc();
+    var importedCount = 0;
+    var unrecognizedCount = 0;
+    var duplicateCount = 0;
+    var ignoredCount = 0;
+    final importedDrafts = <FinanceSmsDraftModel>[];
+    final ignoredReasons = <String>[];
+
+    for (var i = 0; i < ordered.length; i++) {
+      final msg = ordered[i];
+      await _db.transaction(() async {
+        final outcome = FinanceSmsInboxScanner.evaluateInboxMessage(
+          msg,
+          userAliases: senderAliases,
+          accounts: accounts,
+          categories: categories,
+        );
+
+        var insertedNow = false;
+        FinanceSmsDraftModel? candidate;
+
+        if (outcome.isIgnoredNonTransactional || outcome.draft == null) {
+          ignoredCount++;
+          if (outcome.ignoreReason != null &&
+              outcome.ignoreReason!.trim().isNotEmpty) {
+            ignoredReasons.add(outcome.ignoreReason!.trim());
+          }
+        } else {
+          candidate = outcome.draft!;
+          final dup =
+              FinanceSmsParsers.findDuplicateDraft(candidate, knownDrafts);
+          if (dup.isDuplicate) {
+            duplicateCount++;
+          } else {
+            await _db.into(_db.smsDraftsTable).insert(
+                  SmsDraftsTableCompanion.insert(
+                    id: candidate.id,
+                    provider: candidate.provider.dbValue,
+                    fingerprint: candidate.fingerprint,
+                    transactionReference: Value(candidate.transactionReference),
+                    receiptUrl: Value(candidate.receiptUrl),
+                    suggestedType: Value(candidate.suggestedType.dbValue),
+                    direction: Value(candidate.direction.dbValue),
+                    principalCents: Value(candidate.principalCents),
+                    serviceFeeCents: Value(candidate.serviceFeeCents),
+                    vatCents: Value(candidate.vatCents),
+                    otherChargesCents: Value(candidate.otherChargesCents),
+                    totalAmountCents: Value(candidate.totalAmountCents),
+                    hasAmountMismatch: Value(candidate.hasAmountMismatch),
+                    currencyCode: Value(candidate.currencyCode),
+                    accountHint: Value(candidate.accountHint),
+                    counterpartyName: Value(candidate.counterpartyName),
+                    counterpartyHint: Value(candidate.counterpartyHint),
+                    reportedBalanceCents: Value(candidate.reportedBalanceCents),
+                    transactionTimestampUtc:
+                        Value(candidate.transactionTimestampUtc),
+                    transactionDateIso: Value(candidate.transactionDateIso),
+                    receivedAtUtc: candidate.receivedAtUtc,
+                    confidence: Value(candidate.confidence.dbValue),
+                    status: Value(candidate.status.dbValue),
+                    isNonLedgerNotice: Value(candidate.isNonLedgerNotice),
+                    parseNotes: Value(candidate.parseNotes),
+                    suggestedAccountId: Value(candidate.suggestedAccountId),
+                    suggestedCategoryId: Value(candidate.suggestedCategoryId),
+                    approvedEntryId: Value(candidate.approvedEntryId),
+                    rawSmsText: candidate.rawSmsText,
+                    createdAt: candidate.createdAt,
+                    updatedAt: candidate.updatedAt,
+                  ),
+                );
+            insertedNow = true;
+          }
+        }
+
+        if (onBeforeCommitInboxMessageForTesting != null) {
+          await onBeforeCommitInboxMessageForTesting!(msg, i);
+        }
+
+        final candidateCheckpoint = msg.receivedAtUtc.toUtc();
+        if (lastCommittedCheckpoint == null ||
+            candidateCheckpoint.isAfter(lastCommittedCheckpoint!)) {
+          await _writeDeviceSmsSetting(
+            deviceSmsLastCheckpointKey,
+            EthiopiaClock.toUtcIsoString(candidateCheckpoint),
+            now: effectiveCompletedAt,
+          );
+          lastCommittedCheckpoint = candidateCheckpoint;
+        }
+
+        if (insertedNow && candidate != null) {
+          knownDrafts.add(candidate);
+          importedDrafts.add(candidate);
+          if (candidate.status == SmsDraftStatus.unrecognized) {
+            unrecognizedCount++;
+          } else {
+            importedCount++;
+          }
+        }
+      });
+    }
+
+    await _writeDeviceSmsSetting(
+      deviceSmsLastSuccessKey,
+      EthiopiaClock.toUtcIsoString(effectiveCompletedAt),
+      now: effectiveCompletedAt,
+    );
+
+    return (
+      batch: SmsImportBatchResult(
+        importedCount: importedCount,
+        unrecognizedCount: unrecognizedCount,
+        duplicateCount: duplicateCount,
+        ignoredCount: ignoredCount,
+        importedDrafts: List<FinanceSmsDraftModel>.unmodifiable(importedDrafts),
+        ignoredReasons: List<String>.unmodifiable(ignoredReasons),
+      ),
+      updatedCheckpointUtc: lastCommittedCheckpoint,
+      completedAtUtc: effectiveCompletedAt,
+    );
   }
 
   String _formatDescription(String description, {String? payee}) {

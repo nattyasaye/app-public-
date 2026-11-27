@@ -352,29 +352,37 @@ class FinanceSmsParsers {
     return null;
   }
 
-  static SmsProvider? detectSmsProvider(
-    String rawSmsText, {
-    SmsProvider? providerHint,
-  }) {
+  /// Returns a provider only when explicit brand names, official domains, or
+  /// unambiguous provider-specific syntax cues match [rawSmsText].
+  /// Generic phrases shared across Ethiopian banks (e.g. "was debited with ETB")
+  /// return `null` here so an explicit inbox sender or user alias isn't overridden.
+  static SmsProvider? detectStrongProviderCue(String rawSmsText) {
     final lower = rawSmsText.toLowerCase();
+    // 1. Explicit provider brand names & official receipt domains take precedence
     if (lower.contains('telebirr') ||
         lower.contains('e-money account') ||
-        lower.contains('transactioninfo.ethiotelecom.et') ||
-        lower.contains('your transaction number is')) {
+        lower.contains('transactioninfo.ethiotelecom.et')) {
       return SmsProvider.telebirr;
     }
     if (lower.contains('bank of abyssinia') ||
-        lower.contains('cs.bankofabyssinia.com') ||
-        lower.contains('was debited with etb') ||
-        lower.contains('was credited with etb') ||
-        (lower.contains('is locked from your account') &&
-            lower.contains('pos transaction'))) {
+        lower.contains('cs.bankofabyssinia.com')) {
       return SmsProvider.boa;
     }
     if (lower.contains('commercial bank of ethiopia') ||
         lower.contains('apps.cbe.com.et') ||
-        lower.contains('disaster recovery') ||
-        RegExp(
+        lower.contains('disaster recovery')) {
+      return SmsProvider.cbe;
+    }
+
+    // 2. Exclusive provider syntax cues
+    if (lower.contains('your transaction number is')) {
+      return SmsProvider.telebirr;
+    }
+    if (lower.contains('is locked from your account') &&
+        lower.contains('pos transaction')) {
+      return SmsProvider.boa;
+    }
+    if (RegExp(
           r'you have successfully transferred etb\s+[0-9,.]+\s+from account',
           caseSensitive: false,
         ).hasMatch(rawSmsText) ||
@@ -384,7 +392,28 @@ class FinanceSmsParsers {
         ).hasMatch(rawSmsText)) {
       return SmsProvider.cbe;
     }
-    return providerHint == SmsProvider.unknown ? null : providerHint;
+    return null;
+  }
+
+  static SmsProvider? detectSmsProvider(
+    String rawSmsText, {
+    SmsProvider? providerHint,
+  }) {
+    final strongCue = detectStrongProviderCue(rawSmsText);
+    if (strongCue != null) {
+      return strongCue;
+    }
+    if (providerHint != null && providerHint != SmsProvider.unknown) {
+      return providerHint;
+    }
+    final lower = rawSmsText.toLowerCase();
+    if (lower.contains('was debited with etb') ||
+        lower.contains('was credited with etb') ||
+        lower.contains('has been debited with etb') ||
+        lower.contains('has been credited with etb')) {
+      return SmsProvider.boa;
+    }
+    return null;
   }
 
   static const List<String> _nonTransactionalNoiseMarkers = <String>[
@@ -976,6 +1005,175 @@ class FinanceSmsParsers {
           reportedBalanceCents: reportedBalance,
           receivedAtUtc: nowUtc,
           confidence: SmsParseConfidence.high,
+          status: SmsDraftStatus.needsReview,
+          isNonLedgerNotice: false,
+          suggestedAccountId: matchedAccountId,
+          suggestedCategoryId: suggestCategoryForDraft(
+            SmsSuggestedTransactionType.income,
+            categories,
+          ),
+          rawSmsText: trimmed,
+          createdAt: nowUtc,
+          updatedAt: nowUtc,
+        ),
+        provider: SmsProvider.cbe,
+      );
+    }
+
+    // CBE Account Debit alert ("Your account ... was/has been debited with ETB ...")
+    final debitAccountMatch = RegExp(
+      r'your\s+account\s+([0-9*xX]+)\s+(?:was|has\s+been)\s+debited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+(?:for|to|at|by)\s+([^.\n]+?))?(?=\.(?:\s|$)|,\s|https?:|$)',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(trimmed);
+
+    if (debitAccountMatch != null) {
+      final accountHint = maskAccountOrPhoneHint(debitAccountMatch.group(1));
+      final matchedAccountId = suggestEtbAccountForProvider(
+            SmsProvider.cbe,
+            accounts,
+            accountHint: accountHint,
+          ) ??
+          fallbackAccountId;
+      final principalCents = parseSmsAmountToCents(debitAccountMatch.group(2)!);
+      final counterpartyName =
+          _cleanCounterpartyName(debitAccountMatch.group(3));
+      final balanceRaw = RegExp(
+        r'(?:(?:your\s+)?current\s+balance|available\s+balance)(?:\s+is|:)\s*ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
+        caseSensitive: false,
+      ).firstMatch(trimmed)?.group(1);
+      final reportedBalance =
+          balanceRaw != null ? parseSmsAmountToCents(balanceRaw) : null;
+
+      if (principalCents == null || principalCents <= 0) {
+        return SmsParseOutcome.draft(
+          FinanceSmsDraftModel(
+            id: _buildDeterministicDraftId(SmsProvider.cbe, fingerprint, txRef),
+            provider: SmsProvider.cbe,
+            fingerprint: fingerprint,
+            transactionReference: txRef,
+            receiptUrl: receipt.receiptUrl,
+            suggestedType: SmsSuggestedTransactionType.unknown,
+            direction: SmsDirection.outgoing,
+            principalCents: 0,
+            accountHint: accountHint,
+            receivedAtUtc: nowUtc,
+            confidence: SmsParseConfidence.unrecognized,
+            status: SmsDraftStatus.unrecognized,
+            isNonLedgerNotice: true,
+            parseNotes:
+                'CBE debit message could not parse a positive ETB amount.',
+            rawSmsText: trimmed,
+            createdAt: nowUtc,
+            updatedAt: nowUtc,
+          ),
+          provider: SmsProvider.cbe,
+        );
+      }
+
+      return SmsParseOutcome.draft(
+        FinanceSmsDraftModel(
+          id: _buildDeterministicDraftId(SmsProvider.cbe, fingerprint, txRef),
+          provider: SmsProvider.cbe,
+          fingerprint: fingerprint,
+          transactionReference: txRef,
+          receiptUrl: receipt.receiptUrl,
+          suggestedType: SmsSuggestedTransactionType.expense,
+          direction: SmsDirection.outgoing,
+          principalCents: principalCents,
+          totalAmountCents: principalCents,
+          accountHint: accountHint,
+          counterpartyName: counterpartyName,
+          reportedBalanceCents: reportedBalance,
+          receivedAtUtc: nowUtc,
+          confidence: (txRef != null || reportedBalance != null)
+              ? SmsParseConfidence.high
+              : SmsParseConfidence.medium,
+          status: SmsDraftStatus.needsReview,
+          isNonLedgerNotice: false,
+          suggestedAccountId: matchedAccountId,
+          suggestedCategoryId: suggestCategoryForDraft(
+            SmsSuggestedTransactionType.expense,
+            categories,
+          ),
+          rawSmsText: trimmed,
+          createdAt: nowUtc,
+          updatedAt: nowUtc,
+        ),
+        provider: SmsProvider.cbe,
+      );
+    }
+
+    // CBE Account Credit alert ("Your account ... was/has been credited with ETB ...")
+    final creditAccountMatch = RegExp(
+      r'your\s+account\s+([0-9*xX]+)\s+(?:was|has\s+been)\s+credited\s+with\s+ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)(?:\s+(?:by|from)\s+([^.\n]+?))?(?=\.(?:\s|$)|,\s|https?:|$)',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(trimmed);
+
+    if (creditAccountMatch != null) {
+      final accountHint = maskAccountOrPhoneHint(creditAccountMatch.group(1));
+      final matchedAccountId = suggestEtbAccountForProvider(
+            SmsProvider.cbe,
+            accounts,
+            accountHint: accountHint,
+          ) ??
+          fallbackAccountId;
+      final principalCents =
+          parseSmsAmountToCents(creditAccountMatch.group(2)!);
+      final counterpartyName =
+          _cleanCounterpartyName(creditAccountMatch.group(3));
+      final balanceRaw = RegExp(
+        r'(?:(?:your\s+)?current\s+balance|available\s+balance)(?:\s+is|:)\s*ETB\s+([0-9,]+(?:\.[0-9]{1,2})?)',
+        caseSensitive: false,
+      ).firstMatch(trimmed)?.group(1);
+      final reportedBalance =
+          balanceRaw != null ? parseSmsAmountToCents(balanceRaw) : null;
+
+      if (principalCents == null || principalCents <= 0) {
+        return SmsParseOutcome.draft(
+          FinanceSmsDraftModel(
+            id: _buildDeterministicDraftId(SmsProvider.cbe, fingerprint, txRef),
+            provider: SmsProvider.cbe,
+            fingerprint: fingerprint,
+            transactionReference: txRef,
+            receiptUrl: receipt.receiptUrl,
+            suggestedType: SmsSuggestedTransactionType.unknown,
+            direction: SmsDirection.incoming,
+            principalCents: 0,
+            accountHint: accountHint,
+            receivedAtUtc: nowUtc,
+            confidence: SmsParseConfidence.unrecognized,
+            status: SmsDraftStatus.unrecognized,
+            isNonLedgerNotice: true,
+            parseNotes:
+                'CBE credit message could not parse a positive ETB amount.',
+            rawSmsText: trimmed,
+            createdAt: nowUtc,
+            updatedAt: nowUtc,
+          ),
+          provider: SmsProvider.cbe,
+        );
+      }
+
+      return SmsParseOutcome.draft(
+        FinanceSmsDraftModel(
+          id: _buildDeterministicDraftId(SmsProvider.cbe, fingerprint, txRef),
+          provider: SmsProvider.cbe,
+          fingerprint: fingerprint,
+          transactionReference: txRef,
+          receiptUrl: receipt.receiptUrl,
+          suggestedType: SmsSuggestedTransactionType.income,
+          direction: SmsDirection.incoming,
+          principalCents: principalCents,
+          totalAmountCents: principalCents,
+          accountHint: accountHint,
+          counterpartyName: counterpartyName,
+          reportedBalanceCents: reportedBalance,
+          receivedAtUtc: nowUtc,
+          confidence: (txRef != null || reportedBalance != null)
+              ? SmsParseConfidence.high
+              : SmsParseConfidence.medium,
           status: SmsDraftStatus.needsReview,
           isNonLedgerNotice: false,
           suggestedAccountId: matchedAccountId,

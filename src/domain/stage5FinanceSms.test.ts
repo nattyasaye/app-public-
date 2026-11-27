@@ -18,6 +18,7 @@ import {
   calculatePeriodComparisonReportV7,
   ensureSystemControlAccounts,
   resolveReportPeriodWithComparisonV7,
+  SharedSavingsGoal,
 } from './financeV7Engine';
 import { SYSTEM_CONTROL_ACCOUNT_IDS } from './sharedFoundation';
 import {
@@ -36,6 +37,7 @@ import {
 } from './financeSms';
 import {
   FINANCE_SMS_DRAFTS_STORAGE_KEY,
+  FINANCE_SMS_PENDING_APPROVAL_KEY,
   FinanceSmsService,
   splitSmsBatchInput,
 } from '../services/financeSmsService';
@@ -785,10 +787,572 @@ describe('STAGE 5 — FINANCE SMS DRAFT FOUNDATION & PROVIDER PARSERS', () => {
       assert.strictEqual(store.has('daywell_finance_transactions'), false);
       assert.strictEqual(store.has('daywell_transactions'), false);
       assert.strictEqual(store.get(FINANCE_SMS_DRAFTS_STORAGE_KEY), draftsBefore);
+      assert.strictEqual(store.has(FINANCE_SMS_PENDING_APPROVAL_KEY), false);
       assert.strictEqual(
         FinanceSmsService.loadDrafts().find((d) => d.id === pendingDraft.id)?.status,
         'needs_review'
       );
+    });
+  });
+
+  it('8. Crash-safe recovery after abrupt termination following the 1st ledger write + clean retry', async () => {
+    await withMockBrowserStorage((store) => {
+      const accounts = makeTestAccounts();
+      const categories = makeTestCategories();
+      const cbeAccount = accounts.find((a) => a.id === 'acc-cbe')!;
+
+      // Pre-existing unrelated ledger transaction (must remain intact)
+      const baselineEntry: JournalEntry = {
+        id: 'je-existing-1',
+        entryType: 'standard',
+        description: 'Existing rent payment',
+        occurrenceDate: '2026-11-10',
+        isVoided: false,
+        createdAt: '2026-11-10T09:00:00.000Z',
+      };
+      const baselinePostings: Posting[] = [
+        {
+          id: 'post-existing-dr',
+          entryId: 'je-existing-1',
+          accountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+          direction: 'debit',
+          amountCents: 100000,
+          accountMovementDate: '2026-11-10',
+          categoryId: 'cat-food',
+        },
+        {
+          id: 'post-existing-cr',
+          entryId: 'je-existing-1',
+          accountId: 'acc-cbe',
+          direction: 'credit',
+          amountCents: 100000,
+          accountMovementDate: '2026-11-10',
+        },
+      ];
+      const baselineSimpleTxs = [
+        {
+          id: 'tx-existing-1',
+          type: 'expense' as const,
+          amountCents: 100000,
+          accountId: 'acc-cbe',
+          categoryId: 'cat-food',
+          description: 'Existing rent payment',
+          transactionDate: '2026-11-10',
+          createdAt: '2026-11-10T09:00:00.000Z',
+          updatedAt: '2026-11-10T09:00:00.000Z',
+          journalEntryId: 'je-existing-1',
+        },
+      ];
+
+      store.set('daywell_accounts', JSON.stringify(accounts));
+      store.set('daywell_categories', JSON.stringify(categories));
+      store.set('daywell_journal_entries', JSON.stringify([baselineEntry]));
+      store.set('daywell_postings', JSON.stringify(baselinePostings));
+      store.set('daywell_finance_transactions', JSON.stringify(baselineSimpleTxs));
+      store.set('daywell_transactions', JSON.stringify(baselineSimpleTxs));
+      store.set('daywell_savings_goals', '[]');
+
+      const imp = FinanceSmsService.importSmsMessages({
+        rawMessages: [
+          'Dear Customer, You have successfully transferred ETB 500.00 from account 1****5678 to account 1****9999 (Abebe) with Service charge of ETB 5.00 and VAT (15%) of ETB 0.75 with total of ETB 505.75. Your Current Balance is ETB 18,494.25. https://apps.cbe.com.et:100/?id=FT26326CRASH1',
+        ],
+        receivedAtUtc: '2026-11-22T12:00:00.000Z',
+        accounts,
+        categories,
+      });
+      const pendingDraft = imp.summary.importedDrafts[0];
+
+      // Baseline balance & P&L report before approval
+      const baselineCbeBalance = calculateAccountBalance(cbeAccount, baselinePostings, undefined, [baselineEntry]);
+      const baselineSafeHarbor = calculateAvailableToSpendBreakdownV7({
+        accounts,
+        postings: baselinePostings,
+        entries: [baselineEntry],
+        debts: [],
+        allocations: [],
+        commitments: [],
+        commitmentSettlements: [],
+        recurringRules: [],
+        savingsGoals: [],
+      });
+      const baselineSpend = calculateCanonicalCategorySpendV7({
+        accounts,
+        categories,
+        entries: [baselineEntry],
+        postings: baselinePostings,
+        debts: [],
+        allocations: [],
+        startDate: '2026-11-01',
+        endDate: '2026-11-30',
+      });
+
+      // Simulate abrupt browser/device termination right after writing the 1st ledger key
+      // (`daywell_journal_entries`), bypassing JS catch rollback completely.
+      const diskWorking = new Map(store);
+      let crashedSnapshot: Map<string, string> | undefined;
+      const crashAfterJournalEntryWrite = {
+        getItem: (k: string) => (diskWorking.has(k) ? diskWorking.get(k)! : null),
+        setItem: (k: string, v: string) => {
+          if (k === 'daywell_postings') {
+            if (!crashedSnapshot) {
+              crashedSnapshot = new Map(diskWorking);
+            }
+            throw new Error('Simulated abrupt process termination after 1st ledger write');
+          }
+          diskWorking.set(k, v);
+        },
+        removeItem: (k: string) => void diskWorking.delete(k),
+      };
+
+      assert.throws(() => {
+        FinanceSmsService.approveDraftAtomically({
+          draftId: pendingDraft.id,
+          finalType: 'expense',
+          accountId: 'acc-cbe',
+          categoryId: 'cat-food',
+          occurrenceDate: '2026-11-22',
+          description: 'Abebe payment',
+          accounts,
+          categories,
+          entries: [baselineEntry],
+          postings: baselinePostings,
+          simpleTransactions: baselineSimpleTxs,
+          savingsGoals: [],
+          entryId: 'entry-sms-crash-1',
+          storage: crashAfterJournalEntryWrite,
+        });
+      }, /Simulated abrupt process termination/);
+
+      assert.ok(crashedSnapshot);
+      const snap1 = crashedSnapshot!;
+      // Verify the crashed snapshot really has the incomplete state (pending intent + new entry + new fee category,
+      // but NO postings, NO simpleTx, and draft still needs_review)
+      assert.ok(snap1.has(FINANCE_SMS_PENDING_APPROVAL_KEY));
+      assert.strictEqual(
+        (JSON.parse(snap1.get('daywell_journal_entries')!) as JournalEntry[]).length,
+        2
+      );
+      assert.strictEqual(
+        (JSON.parse(snap1.get('daywell_postings')!) as Posting[]).length,
+        2
+      );
+
+      // Simulate restarting the application with the crashed disk snapshot
+      store.clear();
+      for (const [k, v] of snap1.entries()) {
+        store.set(k, v);
+      }
+
+      // Restart recovery runs automatically on SharedStateBridge / loadDrafts
+      const recoveredCanonical = SharedStateBridge.loadCanonicalState();
+      const recoveredDrafts = FinanceSmsService.loadDrafts();
+
+      assert.strictEqual(store.has(FINANCE_SMS_PENDING_APPROVAL_KEY), false);
+      assert.strictEqual(recoveredDrafts.find((d) => d.id === pendingDraft.id)?.status, 'needs_review');
+      assert.strictEqual(
+        recoveredDrafts.find((d) => d.id === pendingDraft.id)?.approvedEntryId,
+        undefined
+      );
+      assert.strictEqual(recoveredCanonical.journalEntries?.length, 1);
+      assert.strictEqual(recoveredCanonical.journalEntries?.[0].id, 'je-existing-1');
+      assert.strictEqual(recoveredCanonical.postings?.length, 2);
+      assert.strictEqual(recoveredCanonical.transactions.length, 1);
+      assert.strictEqual(
+        recoveredCanonical.categories.some((c) => c.id === 'cat-fees'),
+        false
+      );
+
+      // Verify zero impact on balances, Safe Harbor, or category spend reports after recovery
+      const recoveredEntries = recoveredCanonical.journalEntries ?? [];
+      const recoveredPostings = recoveredCanonical.postings ?? [];
+      const recoveredCategories = recoveredCanonical.categories as TransactionCategory[];
+      const recoveredSimpleTxs = JSON.parse(store.get('daywell_finance_transactions')!);
+      assert.strictEqual(
+        calculateAccountBalance(cbeAccount, recoveredPostings, undefined, recoveredEntries),
+        baselineCbeBalance
+      );
+      assert.strictEqual(
+        calculateAvailableToSpendBreakdownV7({
+          accounts,
+          postings: recoveredPostings,
+          entries: recoveredEntries,
+          debts: [],
+          allocations: [],
+          commitments: [],
+          commitmentSettlements: [],
+          recurringRules: [],
+          savingsGoals: [],
+        }).availableToSpendCents,
+        baselineSafeHarbor.availableToSpendCents
+      );
+      assert.strictEqual(
+        calculateCanonicalCategorySpendV7({
+          accounts,
+          categories: recoveredCategories,
+          entries: recoveredEntries,
+          postings: recoveredPostings,
+          debts: [],
+          allocations: [],
+          startDate: '2026-11-01',
+          endDate: '2026-11-30',
+        }).totalExpenseCents,
+        baselineSpend.totalExpenseCents
+      );
+
+      // Retry the exact same approval after recovery -> succeeds cleanly with zero duplicates
+      const retried = FinanceSmsService.approveDraftAtomically({
+        draftId: pendingDraft.id,
+        finalType: 'expense',
+        accountId: 'acc-cbe',
+        categoryId: 'cat-food',
+        occurrenceDate: '2026-11-22',
+        description: 'Abebe payment',
+        accounts,
+        categories: recoveredCategories,
+        entries: recoveredEntries,
+        postings: recoveredPostings,
+        simpleTransactions: recoveredSimpleTxs,
+        savingsGoals: [],
+      });
+
+      assert.strictEqual(retried.entries.length, 2);
+      assert.strictEqual(retried.postings.length, 5); // 2 existing + 3 (principal debit, fee debit, combined credit)
+      assert.strictEqual(retried.simpleTransactions.length, 2);
+      assert.strictEqual(
+        retried.drafts.find((d) => d.id === pendingDraft.id)?.status,
+        'approved'
+      );
+      assert.strictEqual(store.has(FINANCE_SMS_PENDING_APPROVAL_KEY), false);
+
+      // Attempting to approve the same draft again fails closed without duplicating
+      assert.throws(() => {
+        FinanceSmsService.approveDraftAtomically({
+          draftId: pendingDraft.id,
+          finalType: 'expense',
+          accountId: 'acc-cbe',
+          categoryId: 'cat-food',
+          occurrenceDate: '2026-11-22',
+          description: 'Duplicate retry',
+          accounts,
+          categories: retried.categories,
+          entries: retried.entries,
+          postings: retried.postings,
+          simpleTransactions: retried.simpleTransactions,
+          savingsGoals: retried.savingsGoals,
+        });
+      }, /already been approved/i);
+    });
+  });
+
+  it('9. Crash-safe recovery after partial multi-key ledger writes (mid-ledger & pre-draft-status)', async () => {
+    const cutPoints = [
+      { name: 'after postings before simpleTx', failOnKey: 'daywell_finance_transactions' },
+      { name: 'after all 6 ledger keys before draft status', failOnKey: FINANCE_SMS_DRAFTS_STORAGE_KEY },
+    ];
+
+    for (const cutPoint of cutPoints) {
+      await withMockBrowserStorage((store) => {
+        const accounts = makeTestAccounts();
+        const categories = makeTestCategories();
+        const initialGoals: SharedSavingsGoal[] = [
+          {
+            id: 'goal-house',
+            title: 'House Fund',
+            targetCents: 500000,
+            currentAllocatedCents: 100000,
+            linkedAccountId: 'acc-vault',
+            status: 'active',
+          },
+        ];
+
+        store.set('daywell_accounts', JSON.stringify(accounts));
+        store.set('daywell_categories', JSON.stringify(categories));
+        store.set('daywell_journal_entries', '[]');
+        store.set('daywell_postings', '[]');
+        store.set('daywell_finance_transactions', '[]');
+        store.set('daywell_transactions', '[]');
+        store.set('daywell_savings_goals', JSON.stringify(initialGoals));
+
+        const imp = FinanceSmsService.importSmsMessages({
+          rawMessages: [
+            'Dear Customer, You have successfully transferred ETB 1,000.00 from account 1****5678 to account 1****0001 (House Vault) with Service charge of ETB 0.50 and VAT (15%) of ETB 0.08 with total of ETB 1,000.58. Your Current Balance is ETB 18,999.42.',
+          ],
+          receivedAtUtc: '2026-11-22T14:00:00.000Z',
+          accounts,
+          categories,
+        });
+        const draft = imp.summary.importedDrafts[0];
+
+        const diskWorking = new Map(store);
+        let crashedSnapshot: Map<string, string> | undefined;
+        const crashInjector = {
+          getItem: (k: string) => (diskWorking.has(k) ? diskWorking.get(k)! : null),
+          setItem: (k: string, v: string) => {
+            if (k === cutPoint.failOnKey) {
+              if (!crashedSnapshot) {
+                crashedSnapshot = new Map(diskWorking);
+              }
+              throw new Error(`Simulated abrupt kill (${cutPoint.name})`);
+            }
+            diskWorking.set(k, v);
+          },
+          removeItem: (k: string) => void diskWorking.delete(k),
+        };
+
+        assert.throws(() => {
+          FinanceSmsService.approveDraftAtomically({
+            draftId: draft.id,
+            finalType: 'transfer',
+            accountId: 'acc-cbe',
+            destinationAccountId: 'acc-vault',
+            occurrenceDate: '2026-11-22',
+            description: 'Vault transfer',
+            accounts,
+            categories,
+            entries: [],
+            postings: [],
+            simpleTransactions: [],
+            savingsGoals: initialGoals,
+            entryId: 'entry-sms-partial-1',
+            storage: crashInjector,
+          });
+        }, /Simulated abrupt kill/);
+
+        assert.ok(crashedSnapshot);
+        const snap2 = crashedSnapshot!;
+        // Confirm postings WERE already written into the crashed snapshot!
+        assert.ok(
+          (JSON.parse(snap2.get('daywell_postings')!) as Posting[]).length > 0
+        );
+
+        // Restart app with crashed disk state
+        store.clear();
+        for (const [k, v] of snap2.entries()) {
+          store.set(k, v);
+        }
+
+        const recovery = FinanceSmsService.recoverPendingApproval();
+        assert.strictEqual(recovery.recovered, true);
+        assert.strictEqual(recovery.outcome, 'rolled_back');
+        assert.strictEqual(store.has(FINANCE_SMS_PENDING_APPROVAL_KEY), false);
+
+        // Verify ALL partial ledger writes AND savings goal allocation were cleanly reverted
+        assert.deepStrictEqual(JSON.parse(store.get('daywell_journal_entries')!), []);
+        assert.deepStrictEqual(JSON.parse(store.get('daywell_postings')!), []);
+        assert.deepStrictEqual(JSON.parse(store.get('daywell_finance_transactions')!), []);
+        assert.deepStrictEqual(JSON.parse(store.get('daywell_transactions')!), []);
+        assert.strictEqual(
+          (JSON.parse(store.get('daywell_savings_goals')!) as SharedSavingsGoal[])[0]
+            .currentAllocatedCents,
+          100000
+        );
+        assert.strictEqual(
+          FinanceSmsService.loadDrafts().find((d) => d.id === draft.id)?.status,
+          'needs_review'
+        );
+
+        // Retry approval after recovery -> exactly 1 transfer entry + 1 updated vault goal
+        const retried = FinanceSmsService.approveDraftAtomically({
+          draftId: draft.id,
+          finalType: 'transfer',
+          accountId: 'acc-cbe',
+          destinationAccountId: 'acc-vault',
+          occurrenceDate: '2026-11-22',
+          description: 'Vault transfer',
+          accounts,
+          categories: JSON.parse(store.get('daywell_categories')!),
+          entries: JSON.parse(store.get('daywell_journal_entries')!),
+          postings: JSON.parse(store.get('daywell_postings')!),
+          simpleTransactions: JSON.parse(store.get('daywell_finance_transactions')!),
+          savingsGoals: JSON.parse(store.get('daywell_savings_goals')!),
+        });
+        assert.strictEqual(retried.entries.length, 1);
+        assert.strictEqual(retried.savingsGoals[0].currentAllocatedCents, 200000);
+        assert.strictEqual(
+          retried.drafts.find((d) => d.id === draft.id)?.status,
+          'approved'
+        );
+      });
+    }
+  });
+
+  it('10. Edge crash cases: post-commit intent cleanup, mid-recovery interruption, and no orphaned approved drafts', async () => {
+    await withMockBrowserStorage((store) => {
+      const accounts = makeTestAccounts();
+      const categories = makeTestCategories();
+      store.set('daywell_accounts', JSON.stringify(accounts));
+      store.set('daywell_categories', JSON.stringify(categories));
+      store.set('daywell_journal_entries', '[]');
+      store.set('daywell_postings', '[]');
+      store.set('daywell_finance_transactions', '[]');
+      store.set('daywell_transactions', '[]');
+      store.set('daywell_savings_goals', '[]');
+
+      const imp = FinanceSmsService.importSmsMessages({
+        rawMessages: [
+          'Your account 1****4321 was debited with ETB 250.00 for Coffee. Available Balance: ETB 14,750.00.',
+          'Your account 1****4321 was debited with ETB 400.00 for Lunch. Available Balance: ETB 14,350.00.',
+        ],
+        receivedAtUtc: '2026-11-22T15:00:00.000Z',
+        accounts,
+        categories,
+      });
+      const [draft1, draft2] = imp.summary.importedDrafts;
+
+      // Case A: All 7 keys committed, crash happens right before clearing PENDING_KEY
+      const diskA = new Map(store);
+      let snapshotPostCommit: Map<string, string> | undefined;
+      const crashOnRemoveIntent = {
+        getItem: (k: string) => (diskA.has(k) ? diskA.get(k)! : null),
+        setItem: (k: string, v: string) => void diskA.set(k, v),
+        removeItem: (k: string) => {
+          if (k === FINANCE_SMS_PENDING_APPROVAL_KEY) {
+            if (!snapshotPostCommit) {
+              snapshotPostCommit = new Map(diskA);
+            }
+            throw new Error('Simulated crash after all 7 keys committed before intent cleanup');
+          }
+          diskA.delete(k);
+        },
+      };
+
+      assert.throws(() => {
+        FinanceSmsService.approveDraftAtomically({
+          draftId: draft1.id,
+          finalType: 'expense',
+          accountId: 'acc-boa',
+          categoryId: 'cat-food',
+          occurrenceDate: '2026-11-22',
+          description: 'Coffee',
+          accounts,
+          categories,
+          entries: [],
+          postings: [],
+          simpleTransactions: [],
+          savingsGoals: [],
+          entryId: 'entry-sms-complete-1',
+          storage: crashOnRemoveIntent,
+        });
+      }, /Simulated crash after all 7 keys/);
+
+      // Restore store to snapshotPostCommit (simulating real process death before catch ran)
+      assert.ok(snapshotPostCommit);
+      const snapA = snapshotPostCommit!;
+      store.clear();
+      for (const [k, v] of snapA.entries()) {
+        store.set(k, v);
+      }
+      const resA = FinanceSmsService.recoverPendingApproval();
+      assert.strictEqual(resA.recovered, true);
+      assert.strictEqual(resA.outcome, 'finalized_completed');
+      assert.strictEqual(store.has(FINANCE_SMS_PENDING_APPROVAL_KEY), false);
+      assert.strictEqual(
+        FinanceSmsService.loadDrafts().find((d) => d.id === draft1.id)?.status,
+        'approved'
+      );
+      assert.strictEqual((JSON.parse(store.get('daywell_journal_entries')!) as JournalEntry[]).length, 1);
+
+      // Retrying draft1 after finalized_completed is rejected with zero duplicates
+      assert.throws(() => {
+        FinanceSmsService.approveDraftAtomically({
+          draftId: draft1.id,
+          finalType: 'expense',
+          accountId: 'acc-boa',
+          categoryId: 'cat-food',
+          occurrenceDate: '2026-11-22',
+          description: 'Coffee duplicate',
+          accounts,
+          categories,
+          entries: JSON.parse(store.get('daywell_journal_entries')!),
+          postings: JSON.parse(store.get('daywell_postings')!),
+          simpleTransactions: JSON.parse(store.get('daywell_finance_transactions')!),
+          savingsGoals: [],
+        });
+      }, /already been approved/i);
+
+      // Case B: Simulate an approved draft written WITHOUT complete postings + interrupted recovery
+      const entriesBeforeB = JSON.parse(store.get('daywell_journal_entries')!) as JournalEntry[];
+      const postingsBeforeB = JSON.parse(store.get('daywell_postings')!) as Posting[];
+      const txsBeforeB = JSON.parse(store.get('daywell_finance_transactions')!);
+      const draftsBeforeB = FinanceSmsService.loadDrafts();
+
+      // Write an inconsistent mid-commit state directly (draft marked approved, entry written, postings missing!)
+      const partialDraft2: FinanceSmsDraft = {
+        ...draft2,
+        status: 'approved',
+        approvedEntryId: 'entry-sms-broken-2',
+        updatedAt: '2026-11-22T15:05:00.000Z',
+      };
+      store.set(
+        FINANCE_SMS_DRAFTS_STORAGE_KEY,
+        JSON.stringify(draftsBeforeB.map((d) => (d.id === draft2.id ? partialDraft2 : d)))
+      );
+      store.set(
+        'daywell_journal_entries',
+        JSON.stringify([
+          {
+            id: 'entry-sms-broken-2',
+            entryType: 'standard',
+            description: 'Lunch',
+            occurrenceDate: '2026-11-22',
+            isVoided: false,
+            createdAt: '2026-11-22T15:05:00.000Z',
+          },
+          ...entriesBeforeB,
+        ])
+      );
+      store.set(
+        FINANCE_SMS_PENDING_APPROVAL_KEY,
+        JSON.stringify({
+          version: 1,
+          draftId: draft2.id,
+          entryId: 'entry-sms-broken-2',
+          postingIds: ['p-missing-1', 'p-missing-2'],
+          simpleTxId: 'tx-entry-sms-broken-2',
+          previousDraft: draft2,
+          createdAt: '2026-11-22T15:05:00.000Z',
+        })
+      );
+
+      // Interrupt recovery mid-way after restoring draft, before cleaning journal_entries
+      const diskB = new Map(store);
+      const midRecoveryFault = {
+        getItem: (k: string) => (diskB.has(k) ? diskB.get(k)! : null),
+        setItem: (k: string, v: string) => {
+          if (k === 'daywell_journal_entries') {
+            throw new Error('Simulated crash during recovery rollback');
+          }
+          diskB.set(k, v);
+        },
+        removeItem: (k: string) => void diskB.delete(k),
+      };
+      assert.throws(() => {
+        FinanceSmsService.recoverPendingApproval(midRecoveryFault);
+      }, /Simulated crash during recovery rollback/);
+      assert.ok(diskB.has(FINANCE_SMS_PENDING_APPROVAL_KEY));
+
+      // Second restart recovery finishes idempotently
+      store.clear();
+      for (const [k, v] of diskB.entries()) {
+        store.set(k, v);
+      }
+      const resB = FinanceSmsService.recoverPendingApproval();
+      assert.strictEqual(resB.recovered, true);
+      assert.strictEqual(resB.outcome, 'rolled_back');
+      assert.strictEqual(store.has(FINANCE_SMS_PENDING_APPROVAL_KEY), false);
+      assert.strictEqual(
+        FinanceSmsService.loadDrafts().find((d) => d.id === draft2.id)?.status,
+        'needs_review'
+      );
+      assert.strictEqual((JSON.parse(store.get('daywell_journal_entries')!) as JournalEntry[]).length, 1);
+      assert.strictEqual((JSON.parse(store.get('daywell_postings')!) as Posting[]).length, postingsBeforeB.length);
+      assert.strictEqual(JSON.parse(store.get('daywell_finance_transactions')!).length, txsBeforeB.length);
+
+      // Verify full & finance-only exports exclude both smsDrafts and pending approval key
+      const fullBackup = SharedStateBridge.exportToAndroidJson();
+      const financeOnlyBackup = SharedStateBridge.exportFinanceOnlyJson();
+      assert.ok(!fullBackup.includes('daywell_finance_sms_pending_approval'));
+      assert.ok(!financeOnlyBackup.includes('daywell_finance_sms_pending_approval'));
     });
   });
 });

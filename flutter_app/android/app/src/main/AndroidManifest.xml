@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Local-only read-only SMS permission for Finance transaction draft scanning -->
+    <uses-permission android:name="android.permission.READ_SMS" />
+
     <application
         android:label="Personal Management"
         android:name="${applicationName}"

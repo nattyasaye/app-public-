@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.OpenableColumns
+import androidx.core.app.ActivityCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -17,7 +18,9 @@ class MainActivity : FlutterActivity() {
     private var pendingQuickCapture: Boolean = false
     private var sharedText: String? = null
     private var methodChannel: MethodChannel? = null
+    private var smsInboxChannel: MethodChannel? = null
     private var pendingPackagePickResult: MethodChannel.Result? = null
+    private var pendingSmsPermissionResult: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -100,6 +103,42 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        smsInboxChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SmsInboxBridge.CHANNEL_NAME
+        ).also { channel ->
+            SmsInboxBridge.registerForegroundChannel(channel)
+            channel.setMethodCallHandler { call, result ->
+                SmsInboxBridge.handleCommonMethodCall(
+                    context = this,
+                    activity = this,
+                    call = call,
+                    result = result,
+                    onRequestPermission = {
+                        if (SmsInboxBridge.hasReadSmsPermission(this)) {
+                            result.success("granted")
+                            return@handleCommonMethodCall
+                        }
+                        if (pendingSmsPermissionResult != null) {
+                            result.error(
+                                "PERMISSION_IN_PROGRESS",
+                                "A READ_SMS permission request is already active.",
+                                null
+                            )
+                            return@handleCommonMethodCall
+                        }
+                        pendingSmsPermissionResult = result
+                        SmsInboxBridge.markPermissionRequested(this)
+                        ActivityCompat.requestPermissions(
+                            this,
+                            arrayOf(android.Manifest.permission.READ_SMS),
+                            SmsInboxBridge.REQUEST_READ_SMS
+                        )
+                    }
+                )
+            }
+        }
+
         // If an intent was received before the engine was attached, dispatch now
         if (pendingQuickCapture) {
             methodChannel?.invokeMethod("onQuickCaptureTriggered", null)
@@ -107,6 +146,28 @@ class MainActivity : FlutterActivity() {
         if (sharedText != null) {
             methodChannel?.invokeMethod("onTextShared", sharedText)
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        smsInboxChannel?.let { SmsInboxBridge.unregisterForegroundChannel(it) }
+        smsInboxChannel?.setMethodCallHandler(null)
+        smsInboxChannel = null
+        pendingSmsPermissionResult = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        if (requestCode == SmsInboxBridge.REQUEST_READ_SMS) {
+            val pending = pendingSmsPermissionResult
+            pendingSmsPermissionResult = null
+            pending?.success(SmsInboxBridge.getPermissionStatus(this, this))
+            return
+        }
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {

@@ -807,6 +807,108 @@ class _FakeFinanceRepository implements IFinanceRepository {
     journalEntries = <JournalEntryModel>[entry, ...journalEntries];
     return (draft: updated, entry: entry);
   }
+
+  SmsScanCheckpointState _smsCheckpoint = const SmsScanCheckpointState();
+
+  @override
+  Future<SmsScanCheckpointState> getSmsScanCheckpointState() async =>
+      _smsCheckpoint;
+
+  @override
+  Future<void> setSmsPermissionAsked(bool asked) async {
+    _smsCheckpoint = _smsCheckpoint.copyWith(permissionAsked: asked);
+  }
+
+  @override
+  Future<void> setSmsDailyScanEnabled(bool enabled) async {
+    _smsCheckpoint = _smsCheckpoint.copyWith(dailyScanEnabled: enabled);
+  }
+
+  @override
+  Future<void> saveSmsSenderAliases(Map<String, SmsProvider> aliases) async {
+    _smsCheckpoint = _smsCheckpoint.copyWith(
+      senderAliases: Map<String, SmsProvider>.unmodifiable(aliases),
+    );
+  }
+
+  @override
+  Future<void> recordSmsScanAttempt(DateTime attemptUtc) async {
+    _smsCheckpoint = _smsCheckpoint.copyWith(
+      lastScanAttemptUtc: attemptUtc.toUtc(),
+    );
+  }
+
+  @override
+  Future<({
+    SmsImportBatchResult batch,
+    DateTime? updatedCheckpointUtc,
+    DateTime completedAtUtc,
+  })> importInboxSmsBatchWithCheckpoint({
+    required List<SmsInboxMessage> messages,
+    DateTime? completedAtUtc,
+  }) async {
+    final effectiveCompletedAt =
+        (completedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
+    final ordered =
+        FinanceSmsInboxScanner.sortMessagesChronologically(messages);
+    var checkpoint = _smsCheckpoint.lastProcessedReceivedAtUtc?.toUtc();
+    var importedCount = 0;
+    var unrecognizedCount = 0;
+    var duplicateCount = 0;
+    var ignoredCount = 0;
+    final imported = <FinanceSmsDraftModel>[];
+    final ignoredReasons = <String>[];
+
+    for (final msg in ordered) {
+      final outcome = FinanceSmsInboxScanner.evaluateInboxMessage(
+        msg,
+        userAliases: _smsCheckpoint.senderAliases,
+        accounts: accounts,
+        categories: categories,
+      );
+      if (outcome.isIgnoredNonTransactional || outcome.draft == null) {
+        ignoredCount++;
+        if (outcome.ignoreReason != null) {
+          ignoredReasons.add(outcome.ignoreReason!);
+        }
+      } else {
+        final candidate = outcome.draft!;
+        final dedup = FinanceSmsParsers.findDuplicateDraft(candidate, smsDrafts);
+        if (dedup.isDuplicate) {
+          duplicateCount++;
+        } else {
+          smsDrafts = <FinanceSmsDraftModel>[candidate, ...smsDrafts];
+          imported.add(candidate);
+          if (candidate.status == SmsDraftStatus.unrecognized) {
+            unrecognizedCount++;
+          } else {
+            importedCount++;
+          }
+        }
+      }
+      if (checkpoint == null || msg.receivedAtUtc.isAfter(checkpoint)) {
+        checkpoint = msg.receivedAtUtc.toUtc();
+      }
+    }
+
+    _smsCheckpoint = _smsCheckpoint.copyWith(
+      lastProcessedReceivedAtUtc: checkpoint,
+      lastSuccessUtc: effectiveCompletedAt,
+    );
+
+    return (
+      batch: SmsImportBatchResult(
+        importedCount: importedCount,
+        unrecognizedCount: unrecognizedCount,
+        duplicateCount: duplicateCount,
+        ignoredCount: ignoredCount,
+        importedDrafts: List<FinanceSmsDraftModel>.unmodifiable(imported),
+        ignoredReasons: List<String>.unmodifiable(ignoredReasons),
+      ),
+      updatedCheckpointUtc: checkpoint,
+      completedAtUtc: effectiveCompletedAt,
+    );
+  }
 }
 
 class _FakeTasksRepository implements ITasksRepository {

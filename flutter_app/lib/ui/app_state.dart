@@ -23,8 +23,10 @@ import '../data/repositories/notes_repository.dart';
 import '../data/repositories/projects_repository.dart';
 import '../data/repositories/search_repository.dart';
 import '../data/repositories/tasks_repository.dart';
+import '../domain/finance/finance_contracts.dart';
 import '../services/backup/encryption_backup_service.dart';
 import '../services/notifications/local_notification_service.dart';
+import '../services/sms/android_sms_inbox_service.dart';
 
 export '../domain/finance/finance_models.dart';
 
@@ -236,6 +238,9 @@ class AppStateManager extends ChangeNotifier {
   final AppDatabase Function()? _databaseBuilder;
   final RawDatabaseRecoveryExporter _recoveryExporter;
   final INotificationService _notificationService;
+  final ISmsInboxService? _smsInboxService;
+  final bool _ownsSmsInboxService;
+  final DateTime Function() _nowUtcProvider;
   late DatabasePersistenceCoordinator _persistenceCoordinator;
   final EncryptionBackupService _backupService = EncryptionBackupService();
 
@@ -280,11 +285,17 @@ class AppStateManager extends ChangeNotifier {
     AppDatabase Function()? databaseBuilder,
     RawDatabaseRecoveryExporter? recoveryExporter,
     INotificationService? notificationService,
+    ISmsInboxService? smsInboxService,
+    DateTime Function()? nowUtcProvider,
   })  : _databaseBuilder =
             databaseBuilder ?? (db == null ? AppDatabase.new : null),
         _recoveryExporter = recoveryExporter ?? RawDatabaseRecoveryExporter(),
         _notificationService =
-            notificationService ?? LocalNotificationService() {
+            notificationService ?? LocalNotificationService(),
+        _smsInboxService =
+            smsInboxService ?? (kIsWeb ? null : AndroidSmsInboxService()),
+        _ownsSmsInboxService = smsInboxService == null,
+        _nowUtcProvider = nowUtcProvider ?? EthiopiaClock.nowUtc {
     _db = db ?? _databaseBuilder!();
     _bindControllersForDb(_db);
   }
@@ -295,7 +306,27 @@ class AppStateManager extends ChangeNotifier {
     _persistenceCoordinator = DatabasePersistenceCoordinator(db);
     financeController = FinanceController(
       repository: DriftFinanceRepository(db),
+      smsInboxService: _smsInboxService,
+      nowUtcProvider: _nowUtcProvider,
     );
+    final smsService = _smsInboxService;
+    if (smsService is AndroidSmsInboxService) {
+      smsService.registerBackgroundScanHandler(() async {
+        if (_isDisposed) return false;
+        if (!_isInitialized) {
+          final activeInit = _initFuture;
+          if (activeInit != null) {
+            try {
+              await activeInit.timeout(const Duration(seconds: 20));
+            } catch (_) {
+              return false;
+            }
+          }
+        }
+        if (_isDisposed || !_isInitialized) return false;
+        return financeController.runBackgroundWorkerSmsScan();
+      });
+    }
     dailyRhythmController = DailyRhythmController(
       repository: DriftDailyRhythmRepository(db),
     );
@@ -511,6 +542,7 @@ class AppStateManager extends ChangeNotifier {
       _diagnosticFilePersisted = true;
       await _recoveryExporter.clearFailureDiagnostic();
       unawaited(syncFinanceDueReminders());
+      unawaited(financeController.runForegroundCatchUpSmsScanIfNeeded());
       notifyListeners();
     } catch (e) {
       _isInitializing = false;
@@ -843,6 +875,9 @@ class AppStateManager extends ChangeNotifier {
     if (service is LocalNotificationService) {
       service.dispose();
     }
+    if (_ownsSmsInboxService && _smsInboxService is AndroidSmsInboxService) {
+      (_smsInboxService as AndroidSmsInboxService).dispose();
+    }
     if (!alreadySuperDisposed) {
       super.dispose();
     }
@@ -859,9 +894,88 @@ class AppStateManager extends ChangeNotifier {
     if (service is LocalNotificationService) {
       service.dispose();
     }
+    if (_ownsSmsInboxService && _smsInboxService is AndroidSmsInboxService) {
+      (_smsInboxService as AndroidSmsInboxService).dispose();
+    }
     super.dispose();
     _disposeFuture ??= _closeDatabaseAfterPendingInit();
     unawaited(_disposeFuture!);
+  }
+
+  /// Headless entrypoint handler invoked by Android WorkManager when Daywell's
+  /// foreground UI engine is not attached.
+  static Future<bool> runHeadlessBackgroundSmsScan({
+    AppDatabase Function()? databaseBuilder,
+    ISmsInboxService? smsInboxService,
+    DateTime Function()? nowUtcProvider,
+  }) async {
+    final ownsService = smsInboxService == null;
+    final service = smsInboxService ?? AndroidSmsInboxService();
+    final nowUtc = (nowUtcProvider ?? EthiopiaClock.nowUtc)().toUtc();
+    final db = (databaseBuilder ?? AppDatabase.new)();
+    var success = false;
+    try {
+      final permission = await service.getPermissionStatus();
+      if (permission != DeviceSmsPermissionStatus.granted) {
+        if (permission != DeviceSmsPermissionStatus.unavailable) {
+          try {
+            await service.cancelDailyScan();
+          } catch (_) {}
+        }
+        success = true;
+        return true;
+      }
+
+      await db.ensureInitialized();
+      final repo = DriftFinanceRepository(db);
+      final checkpoint = await repo.getSmsScanCheckpointState();
+      if (!checkpoint.dailyScanEnabled) {
+        try {
+          await service.cancelDailyScan();
+        } catch (_) {}
+        success = true;
+        return true;
+      }
+
+      await repo.recordSmsScanAttempt(nowUtc);
+      final windowStart =
+          FinanceSmsInboxScanner.computeInboxReadWindowStartUtc(
+        checkpointUtc: checkpoint.lastProcessedReceivedAtUtc,
+        nowUtc: nowUtc,
+      );
+      final rawMessages = await service.readInboxMessages(
+        sinceUtc: windowStart,
+      );
+      final inboxMessages = rawMessages
+          .map(
+            (m) => SmsInboxMessage(
+              deviceMessageId: m.deviceMessageId,
+              senderAddress: m.senderAddress,
+              body: m.body,
+              receivedAtUtc: m.receivedAtUtc,
+            ),
+          )
+          .toList(growable: false);
+      await repo.importInboxSmsBatchWithCheckpoint(
+        messages: inboxMessages,
+        completedAtUtc: nowUtc,
+      );
+      success = true;
+      return true;
+    } catch (_) {
+      success = false;
+      return false;
+    } finally {
+      try {
+        await db.close();
+      } catch (_) {}
+      if (service is AndroidSmsInboxService) {
+        await service.completeBackgroundScan(success);
+        if (ownsService) {
+          service.dispose();
+        }
+      }
+    }
   }
 
   /// Cold-copies `.sqlite`, `-wal`, `-shm`, diagnostics, and SHA-256

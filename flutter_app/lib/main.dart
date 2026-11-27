@@ -33,6 +33,12 @@ void main() {
   runApp(const DaywellApp());
 }
 
+@pragma('vm:entry-point')
+Future<void> smsBackgroundScanMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppStateManager.runHeadlessBackgroundSmsScan();
+}
+
 class DaywellApp extends StatefulWidget {
   final ThemeMode themeMode;
   final DaywellThemeController? themeController;
@@ -142,7 +148,8 @@ class MainDaywellScreen extends StatefulWidget {
   State<MainDaywellScreen> createState() => _MainDaywellScreenState();
 }
 
-class _MainDaywellScreenState extends State<MainDaywellScreen> {
+class _MainDaywellScreenState extends State<MainDaywellScreen>
+    with WidgetsBindingObserver {
   static const MethodChannel _quickCaptureChannel =
       MethodChannel('com.example.personalmanagement/quick_capture');
 
@@ -179,6 +186,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _ownsState = widget.stateManager == null;
     _state = widget.stateManager ?? AppStateManager();
     _lastInitialized = _state.isInitialized;
@@ -197,6 +205,18 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
     unawaited(_state.initialize());
     _setupMethodChannelListener();
     unawaited(_checkInitialIntentTriggers());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed &&
+        mounted &&
+        _state.isInitialized &&
+        !_state.isDisposed) {
+      unawaited(
+        _state.financeController.runForegroundCatchUpSmsScanIfNeeded(),
+      );
+    }
   }
 
   @override
@@ -257,6 +277,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _quickCaptureChannel.setMethodCallHandler(null);
     _state.removeListener(_onInitializationStateChanged);
     _shellController.removeListener(_onShellNavigationChanged);

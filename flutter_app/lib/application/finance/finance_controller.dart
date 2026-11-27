@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../core/date/shared_date.dart';
+import '../../core/interfaces/platform_service_interfaces.dart';
 import '../../domain/finance/finance_contracts.dart';
 import 'finance_state.dart';
 
@@ -11,14 +14,21 @@ import 'finance_state.dart';
 /// [IFinanceRepository] (authoritative Drift SQLite double-entry ledger).
 class FinanceController extends ChangeNotifier {
   final IFinanceRepository _repository;
+  final ISmsInboxService? _smsInboxService;
+  final DateTime Function() _nowUtcProvider;
   final Uuid _uuid = const Uuid();
   FinanceModuleState _state;
+  Future<SmsInboxScanResult>? _inFlightSmsScanFuture;
   bool _isDisposed = false;
 
   FinanceController({
     required IFinanceRepository repository,
+    ISmsInboxService? smsInboxService,
+    DateTime Function()? nowUtcProvider,
     FinanceModuleState? initialState,
   })  : _repository = repository,
+        _smsInboxService = smsInboxService,
+        _nowUtcProvider = nowUtcProvider ?? EthiopiaClock.nowUtc,
         _state = initialState ?? const FinanceModuleState();
 
   FinanceModuleState get state => _state;
@@ -60,6 +70,10 @@ class FinanceController extends ChangeNotifier {
     final debtControlAudit = await _repository.auditDebtControlBalances();
     final legacyNoticeDismissed =
         await _repository.getLegacyNonEtbNoticeDismissed();
+    final smsCheckpoint = await _repository.getSmsScanCheckpointState();
+    final smsPermission = _smsInboxService != null
+        ? await _smsInboxService!.getPermissionStatus()
+        : DeviceSmsPermissionStatus.unavailable;
 
     _state = _state.copyWith(
       accounts: List<AccountModel>.unmodifiable(accounts),
@@ -81,6 +95,8 @@ class FinanceController extends ChangeNotifier {
       openingBalanceCents: settings.openingBalanceCents,
       isSetupCompleted: settings.isSetupCompleted,
       legacyNonEtbNoticeDismissed: legacyNoticeDismissed,
+      smsPermissionStatus: smsPermission,
+      smsScanCheckpoint: smsCheckpoint,
       migrationReport: migrationReport,
       clearMigrationReport: migrationReport == null,
       debtControlAudit: debtControlAudit,
@@ -1797,6 +1813,480 @@ class FinanceController extends ChangeNotifier {
       _state = _state.copyWith(errorMessage: e.toString());
       notifyListeners();
       return null;
+    }
+  }
+
+  // --- Stage 6: Android Read-Only SMS Inbox & Daily Scan Workflows ---
+
+  Future<void> _reconcileDailySchedule({
+    required DeviceSmsPermissionStatus permissionStatus,
+    required SmsScanCheckpointState checkpoint,
+  }) async {
+    final service = _smsInboxService;
+    if (service == null ||
+        permissionStatus == DeviceSmsPermissionStatus.unavailable) {
+      return;
+    }
+    try {
+      if (permissionStatus == DeviceSmsPermissionStatus.granted &&
+          checkpoint.dailyScanEnabled) {
+        await service.scheduleDailyScan();
+      } else {
+        await service.cancelDailyScan();
+      }
+    } catch (_) {
+      // Non-fatal in headless test environments or if WorkManager is unavailable.
+    }
+  }
+
+  Future<void> refreshSmsInboxStatus() async {
+    try {
+      final checkpoint = await _repository.getSmsScanCheckpointState();
+      final permission = _smsInboxService != null
+          ? await _smsInboxService!.getPermissionStatus()
+          : DeviceSmsPermissionStatus.unavailable;
+      if (_isDisposed) return;
+      _state = _state.copyWith(
+        smsPermissionStatus: permission,
+        smsScanCheckpoint: checkpoint,
+      );
+      notifyListeners();
+      await _reconcileDailySchedule(
+        permissionStatus: permission,
+        checkpoint: checkpoint,
+      );
+    } catch (e) {
+      if (_isDisposed) return;
+      _state = _state.copyWith(errorMessage: 'Unable to check SMS status.');
+      notifyListeners();
+    }
+  }
+
+  Future<SmsInboxScanResult> requestSmsPermissionAndScan() async {
+    final service = _smsInboxService;
+    if (service == null) {
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.permissionGrant,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+
+    final currentStatus = await service.getPermissionStatus();
+    if (currentStatus == DeviceSmsPermissionStatus.unavailable) {
+      if (!_isDisposed) {
+        _state = _state.copyWith(smsPermissionStatus: currentStatus);
+        notifyListeners();
+      }
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.permissionGrant,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+
+    if (currentStatus == DeviceSmsPermissionStatus.permanentlyDenied) {
+      if (!_isDisposed) {
+        _state = _state.copyWith(smsPermissionStatus: currentStatus);
+        notifyListeners();
+      }
+      await _reconcileDailySchedule(
+        permissionStatus: currentStatus,
+        checkpoint: _state.smsScanCheckpoint,
+      );
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.permissionGrant,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+
+    final nextStatus = currentStatus == DeviceSmsPermissionStatus.granted
+        ? DeviceSmsPermissionStatus.granted
+        : await service.requestPermission();
+    await _repository.setSmsPermissionAsked(true);
+    final checkpoint = await _repository.getSmsScanCheckpointState();
+    if (_isDisposed) {
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.permissionGrant,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+
+    _state = _state.copyWith(
+      smsPermissionStatus: nextStatus,
+      smsScanCheckpoint: checkpoint,
+      clearError: true,
+    );
+    notifyListeners();
+
+    await _reconcileDailySchedule(
+      permissionStatus: nextStatus,
+      checkpoint: checkpoint,
+    );
+
+    if (nextStatus != DeviceSmsPermissionStatus.granted) {
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.permissionGrant,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+
+    return _runLockedInboxScan(
+      trigger: SmsScanTrigger.permissionGrant,
+      acquireNativeLock: true,
+    );
+  }
+
+  Future<bool> openSmsPermissionSettings() async {
+    final service = _smsInboxService;
+    if (service == null) return false;
+    return await service.openAppSettings();
+  }
+
+  Future<void> setSmsDailyScanEnabled(bool enabled) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      await _repository.setSmsDailyScanEnabled(enabled);
+      final checkpoint = await _repository.getSmsScanCheckpointState();
+      final permission = _smsInboxService != null
+          ? await _smsInboxService!.getPermissionStatus()
+          : DeviceSmsPermissionStatus.unavailable;
+      if (_isDisposed) return;
+      _state = _state.copyWith(
+        smsPermissionStatus: permission,
+        smsScanCheckpoint: checkpoint,
+      );
+      notifyListeners();
+      await _reconcileDailySchedule(
+        permissionStatus: permission,
+        checkpoint: checkpoint,
+      );
+    } catch (_) {
+      if (_isDisposed) return;
+      _state = _state.copyWith(
+        errorMessage: 'Unable to update daily SMS scan preference.',
+      );
+      notifyListeners();
+    }
+  }
+
+  Future<void> saveSmsSenderAliases(Map<String, SmsProvider> aliases) async {
+    _state = _state.copyWith(clearError: true);
+    try {
+      await _repository.saveSmsSenderAliases(aliases);
+      final checkpoint = await _repository.getSmsScanCheckpointState();
+      if (_isDisposed) return;
+      _state = _state.copyWith(smsScanCheckpoint: checkpoint);
+      notifyListeners();
+    } catch (_) {
+      if (_isDisposed) return;
+      _state = _state.copyWith(
+        errorMessage: 'Unable to save SMS sender aliases.',
+      );
+      notifyListeners();
+    }
+  }
+
+  Future<SmsInboxScanResult> scanSmsInboxNow() {
+    return _runLockedInboxScan(
+      trigger: SmsScanTrigger.manual,
+      acquireNativeLock: true,
+    );
+  }
+
+  Future<SmsInboxScanResult> runForegroundCatchUpSmsScanIfNeeded() async {
+    final service = _smsInboxService;
+    if (service == null || _isDisposed) {
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.foregroundCatchUp,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+    if (_inFlightSmsScanFuture != null) {
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.foregroundCatchUp,
+        executed: false,
+        skippedBecauseLocked: true,
+      );
+    }
+
+    try {
+      final status = await service.getPermissionStatus();
+      final checkpoint = await _repository.getSmsScanCheckpointState();
+      if (_isDisposed) {
+        return const SmsInboxScanResult(
+          trigger: SmsScanTrigger.foregroundCatchUp,
+          executed: false,
+          skippedBecauseFresh: true,
+        );
+      }
+
+      if (status != _state.smsPermissionStatus ||
+          checkpoint.lastProcessedReceivedAtUtc !=
+              _state.smsScanCheckpoint.lastProcessedReceivedAtUtc ||
+          checkpoint.lastSuccessUtc !=
+              _state.smsScanCheckpoint.lastSuccessUtc ||
+          checkpoint.dailyScanEnabled !=
+              _state.smsScanCheckpoint.dailyScanEnabled) {
+        _state = _state.copyWith(
+          smsPermissionStatus: status,
+          smsScanCheckpoint: checkpoint,
+        );
+        notifyListeners();
+      }
+
+      await _reconcileDailySchedule(
+        permissionStatus: status,
+        checkpoint: checkpoint,
+      );
+
+      if (status != DeviceSmsPermissionStatus.granted) {
+        return SmsInboxScanResult(
+          trigger: SmsScanTrigger.foregroundCatchUp,
+          executed: false,
+          skippedBecausePermission: true,
+          checkpointBeforeUtc: checkpoint.lastProcessedReceivedAtUtc,
+          checkpointAfterUtc: checkpoint.lastProcessedReceivedAtUtc,
+        );
+      }
+
+      final shouldScan = FinanceSmsInboxScanner.shouldRunForegroundCatchUp(
+        isPermissionGranted: true,
+        checkpoint: checkpoint,
+        nowUtc: _nowUtcProvider(),
+      );
+      if (!shouldScan) {
+        return SmsInboxScanResult(
+          trigger: SmsScanTrigger.foregroundCatchUp,
+          executed: false,
+          skippedBecauseFresh: true,
+          checkpointBeforeUtc: checkpoint.lastProcessedReceivedAtUtc,
+          checkpointAfterUtc: checkpoint.lastProcessedReceivedAtUtc,
+        );
+      }
+
+      return _runLockedInboxScan(
+        trigger: SmsScanTrigger.foregroundCatchUp,
+        acquireNativeLock: true,
+      );
+    } catch (_) {
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.foregroundCatchUp,
+        executed: false,
+        errorMessage: 'Unable to check foreground SMS catch-up.',
+      );
+    }
+  }
+
+  Future<bool> runBackgroundWorkerSmsScan() async {
+    final res = await _runLockedInboxScan(
+      trigger: SmsScanTrigger.backgroundWorker,
+      acquireNativeLock: false,
+    );
+    return res.errorMessage == null;
+  }
+
+  Future<SmsInboxScanResult> _runLockedInboxScan({
+    required SmsScanTrigger trigger,
+    required bool acquireNativeLock,
+  }) {
+    if (_inFlightSmsScanFuture != null) {
+      return Future<SmsInboxScanResult>.value(
+        SmsInboxScanResult(
+          trigger: trigger,
+          executed: false,
+          skippedBecauseLocked: true,
+          checkpointBeforeUtc:
+              _state.smsScanCheckpoint.lastProcessedReceivedAtUtc,
+          checkpointAfterUtc:
+              _state.smsScanCheckpoint.lastProcessedReceivedAtUtc,
+        ),
+      );
+    }
+
+    final future = _executeInboxScan(
+      trigger: trigger,
+      acquireNativeLock: acquireNativeLock,
+    );
+    _inFlightSmsScanFuture = future;
+    return future.whenComplete(() {
+      if (identical(_inFlightSmsScanFuture, future)) {
+        _inFlightSmsScanFuture = null;
+      }
+    });
+  }
+
+  Future<SmsInboxScanResult> _executeInboxScan({
+    required SmsScanTrigger trigger,
+    required bool acquireNativeLock,
+  }) async {
+    final service = _smsInboxService;
+    if (service == null || _isDisposed) {
+      return SmsInboxScanResult(
+        trigger: trigger,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+
+    final permissionStatus = await service.getPermissionStatus();
+    if (permissionStatus != DeviceSmsPermissionStatus.granted) {
+      final checkpoint = await _repository.getSmsScanCheckpointState();
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          smsPermissionStatus: permissionStatus,
+          smsScanCheckpoint: checkpoint,
+        );
+        notifyListeners();
+      }
+      await _reconcileDailySchedule(
+        permissionStatus: permissionStatus,
+        checkpoint: checkpoint,
+      );
+      return SmsInboxScanResult(
+        trigger: trigger,
+        executed: false,
+        skippedBecausePermission: true,
+        checkpointBeforeUtc: checkpoint.lastProcessedReceivedAtUtc,
+        checkpointAfterUtc: checkpoint.lastProcessedReceivedAtUtc,
+      );
+    }
+
+    final checkpointBefore = await _repository.getSmsScanCheckpointState();
+    if (trigger == SmsScanTrigger.backgroundWorker &&
+        !checkpointBefore.dailyScanEnabled) {
+      await _reconcileDailySchedule(
+        permissionStatus: permissionStatus,
+        checkpoint: checkpointBefore,
+      );
+      return SmsInboxScanResult(
+        trigger: trigger,
+        executed: false,
+        skippedBecauseFresh: true,
+        checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        checkpointAfterUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+      );
+    }
+
+    if (acquireNativeLock) {
+      final acquired = await service.tryAcquireScanLock();
+      if (!acquired) {
+        return SmsInboxScanResult(
+          trigger: trigger,
+          executed: false,
+          skippedBecauseLocked: true,
+          checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+          checkpointAfterUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        );
+      }
+    }
+
+    DateTime? windowStartUtc;
+    try {
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          isSmsScanning: true,
+          smsPermissionStatus: permissionStatus,
+          smsScanCheckpoint: checkpointBefore,
+          clearError: true,
+        );
+        notifyListeners();
+      }
+
+      final nowUtc = _nowUtcProvider().toUtc();
+      await _repository.recordSmsScanAttempt(nowUtc);
+
+      windowStartUtc = FinanceSmsInboxScanner.computeInboxReadWindowStartUtc(
+        checkpointUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        nowUtc: nowUtc,
+      );
+      final rawMessages = await service.readInboxMessages(
+        sinceUtc: windowStartUtc,
+      );
+      final inboxMessages = rawMessages
+          .map(
+            (m) => SmsInboxMessage(
+              deviceMessageId: m.deviceMessageId,
+              senderAddress: m.senderAddress,
+              body: m.body,
+              receivedAtUtc: m.receivedAtUtc,
+            ),
+          )
+          .toList(growable: false);
+
+      final committed = await _repository.importInboxSmsBatchWithCheckpoint(
+        messages: inboxMessages,
+        completedAtUtc: nowUtc,
+      );
+
+      if (trigger != SmsScanTrigger.backgroundWorker) {
+        await _reconcileDailySchedule(
+          permissionStatus: permissionStatus,
+          checkpoint: checkpointBefore,
+        );
+      }
+
+      if (!_isDisposed) {
+        await _hydrateState();
+      }
+
+      final result = SmsInboxScanResult(
+        trigger: trigger,
+        executed: true,
+        scannedMessageCount: inboxMessages.length,
+        importedCount: committed.batch.importedCount,
+        unrecognizedCount: committed.batch.unrecognizedCount,
+        duplicateCount: committed.batch.duplicateCount,
+        ignoredCount: committed.batch.ignoredCount,
+        windowStartUtc: windowStartUtc,
+        checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        checkpointAfterUtc: committed.updatedCheckpointUtc ??
+            checkpointBefore.lastProcessedReceivedAtUtc,
+      );
+
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          isSmsScanning: false,
+          lastSmsScanResult: result,
+          clearError: true,
+        );
+        notifyListeners();
+      }
+      return result;
+    } catch (_) {
+      SmsScanCheckpointState? latestCheckpoint;
+      try {
+        latestCheckpoint = await _repository.getSmsScanCheckpointState();
+      } catch (_) {}
+      final failResult = SmsInboxScanResult(
+        trigger: trigger,
+        executed: false,
+        windowStartUtc: windowStartUtc,
+        checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        checkpointAfterUtc: latestCheckpoint?.lastProcessedReceivedAtUtc ??
+            checkpointBefore.lastProcessedReceivedAtUtc,
+        errorMessage: 'Unable to complete SMS inbox scan.',
+      );
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          isSmsScanning: false,
+          smsScanCheckpoint: latestCheckpoint ?? _state.smsScanCheckpoint,
+          lastSmsScanResult: failResult,
+          errorMessage: failResult.errorMessage,
+        );
+        notifyListeners();
+      }
+      return failResult;
+    } finally {
+      if (acquireNativeLock) {
+        try {
+          await service.releaseScanLock();
+        } catch (_) {}
+      }
     }
   }
 

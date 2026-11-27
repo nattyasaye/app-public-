@@ -2,12 +2,14 @@ import '../../core/date/shared_date.dart';
 import 'double_entry_engine.dart';
 import 'financial_engine.dart';
 import 'finance_models.dart';
+import 'finance_sms_inbox_scanner.dart';
 import 'finance_sms_models.dart';
 import 'finance_sms_parsers.dart';
 
 export 'double_entry_engine.dart';
 export 'financial_engine.dart';
 export 'finance_models.dart';
+export 'finance_sms_inbox_scanner.dart';
 export 'finance_sms_models.dart';
 export 'finance_sms_parsers.dart';
 
@@ -353,6 +355,27 @@ abstract class ISmsDraftRepositoryContract {
     CalendarDate? movementDate,
     required String description,
     String? payee,
+  });
+
+  // --- Stage 6: Device-Local Inbox Checkpoint & Reliable Batch Import ---
+
+  Future<SmsScanCheckpointState> getSmsScanCheckpointState();
+
+  Future<void> setSmsPermissionAsked(bool asked);
+
+  Future<void> setSmsDailyScanEnabled(bool enabled);
+
+  Future<void> saveSmsSenderAliases(Map<String, SmsProvider> aliases);
+
+  Future<void> recordSmsScanAttempt(DateTime attemptUtc);
+
+  Future<({
+    SmsImportBatchResult batch,
+    DateTime? updatedCheckpointUtc,
+    DateTime completedAtUtc,
+  })> importInboxSmsBatchWithCheckpoint({
+    required List<SmsInboxMessage> messages,
+    DateTime? completedAtUtc,
   });
 }
 

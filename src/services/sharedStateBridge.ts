@@ -72,6 +72,7 @@ import { BackupFailureKind, BackupValidationError } from '../domain/backupTypes'
 import { normalizeDailyRhythmTimeline } from '../domain/dailyRhythm';
 import { normalizeNoteLinkPair } from '../domain/noteHelpers';
 import { interpretSnapshotVersions } from '../domain/snapshotVersionPolicy';
+import { FinanceSmsService } from './financeSmsService';
 
 export interface SharedMilestone {
   id: string;
@@ -1317,6 +1318,7 @@ export class SharedStateBridge {
     }
 
     try {
+      FinanceSmsService.recoverPendingApproval();
       const canonicalStored = this.readCanonicalStoredState();
 
       // 1. Accounts (explicit [] stays [])

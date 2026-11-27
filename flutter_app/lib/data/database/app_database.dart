@@ -658,7 +658,8 @@ class AppDatabase extends _$AppDatabase {
         }
       },
       beforeOpen: (details) async {
-        // Enforce foreign key constraints in SQLite
+        // Enforce foreign key constraints and lock wait timeout in SQLite
+        await customStatement('PRAGMA busy_timeout = 5000');
         await customStatement('PRAGMA foreign_keys = ON');
       },
     );

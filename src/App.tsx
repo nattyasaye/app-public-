@@ -82,6 +82,7 @@ import { DaywellNotesModule, DaywellNote } from './components/DaywellNotesModule
 import { DashboardRecentNotesSection } from './components/notes/DashboardRecentNotesSection';
 import { FirstTimeSetupWizard, UserProfile } from './components/FirstTimeSetupWizard';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog';
+import { FinanceSmsService } from './services/financeSmsService';
 import { SharedStateBridge } from './services/sharedStateBridge';
 import { dailyPlanningService } from './services/dailyPlanningService';
 import { dailyRhythmService } from './services/dailyRhythmService';
@@ -513,6 +514,7 @@ export default function App() {
   }, []);
 
   const todayFinanceSummary = useMemo(() => {
+    FinanceSmsService.recoverPendingApproval();
     const readArr = <T,>(key: string): T[] => {
       try {
         const raw = localStorage.getItem(key);
