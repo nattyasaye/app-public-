@@ -80,15 +80,46 @@ const List<DaywellDestinationSpec> kDaywellPrimaryDestinations =
   ),
 ];
 
-/// Typed navigation and lazy tab-activation controller for [DaywellAdaptiveScaffold].
+/// Asynchronous back-navigation handler registered by a module or secondary
+/// view. Returns `true` if the back action was consumed internally.
+typedef DaywellBackNavigationHandler = Future<bool> Function();
+
+/// Result of resolving a system back press inside [DaywellShellController].
+enum DaywellShellBackOutcome {
+  handledSecondaryRoute,
+  handledByModule,
+  handledTabHistory,
+  promptExitApp,
+  exitApp,
+}
+
+/// Typed navigation, tab history, module back-delegation, and lazy
+/// tab-activation controller for [DaywellAdaptiveScaffold].
 class DaywellShellController extends ChangeNotifier {
+  static const Duration defaultExitConfirmWindow = Duration(seconds: 2);
+
   DaywellTabId _currentTab;
   DaywellSecondaryRoute? _activeSecondaryRoute;
   final Set<DaywellTabId> _visitedTabs = <DaywellTabId>{};
+  final List<DaywellTabId> _tabHistory;
+  final Map<DaywellTabId, DaywellBackNavigationHandler> _tabBackHandlers =
+      <DaywellTabId, DaywellBackNavigationHandler>{};
+  final Map<DaywellSecondaryRoute, DaywellBackNavigationHandler>
+      _secondaryBackHandlers =
+      <DaywellSecondaryRoute, DaywellBackNavigationHandler>{};
+  final DateTime Function() _clock;
+  final Duration exitConfirmWindow;
+  DateTime? _lastRootBackAttemptAt;
 
   DaywellShellController({
     DaywellTabId initialTab = DaywellTabId.today,
-  }) : _currentTab = initialTab {
+    DateTime Function()? clock,
+    this.exitConfirmWindow = defaultExitConfirmWindow,
+  })  : _currentTab = initialTab,
+        _clock = clock ?? DateTime.now,
+        _tabHistory = initialTab == DaywellTabId.today
+            ? <DaywellTabId>[DaywellTabId.today]
+            : <DaywellTabId>[DaywellTabId.today, initialTab] {
     _visitedTabs.add(initialTab);
   }
 
@@ -96,8 +127,51 @@ class DaywellShellController extends ChangeNotifier {
   int get currentTabIndex => indexIn();
   DaywellSecondaryRoute? get activeSecondaryRoute => _activeSecondaryRoute;
   bool get hasSecondaryRoute => _activeSecondaryRoute != null;
+  List<DaywellTabId> get tabHistory =>
+      List<DaywellTabId>.unmodifiable(_tabHistory);
+  bool get isAtTodayRoot =>
+      _activeSecondaryRoute == null &&
+      _currentTab == DaywellTabId.today &&
+      _tabHistory.length <= 1;
 
   bool hasVisited(DaywellTabId tab) => _visitedTabs.contains(tab);
+
+  void registerTabBackHandler(
+    DaywellTabId tab,
+    DaywellBackNavigationHandler handler,
+  ) {
+    _tabBackHandlers[tab] = handler;
+  }
+
+  void unregisterTabBackHandler(
+    DaywellTabId tab, [
+    DaywellBackNavigationHandler? handler,
+  ]) {
+    if (handler == null || identical(_tabBackHandlers[tab], handler)) {
+      _tabBackHandlers.remove(tab);
+    }
+  }
+
+  void registerSecondaryBackHandler(
+    DaywellSecondaryRoute route,
+    DaywellBackNavigationHandler handler,
+  ) {
+    _secondaryBackHandlers[route] = handler;
+  }
+
+  void unregisterSecondaryBackHandler(
+    DaywellSecondaryRoute route, [
+    DaywellBackNavigationHandler? handler,
+  ]) {
+    if (handler == null ||
+        identical(_secondaryBackHandlers[route], handler)) {
+      _secondaryBackHandlers.remove(route);
+    }
+  }
+
+  void resetExitBackPrompt() {
+    _lastRootBackAttemptAt = null;
+  }
 
   /// Resolves the active destination index within [destinations] without
   /// assuming [DaywellTabId.values] order matches UI destination ordering.
@@ -111,10 +185,19 @@ class DaywellShellController extends ChangeNotifier {
   }
 
   void selectTab(DaywellTabId tab) {
+    _lastRootBackAttemptAt = null;
     if (_currentTab == tab && _activeSecondaryRoute == null) return;
     _currentTab = tab;
     _visitedTabs.add(tab);
     _activeSecondaryRoute = null;
+    if (tab == DaywellTabId.today) {
+      _tabHistory
+        ..clear()
+        ..add(DaywellTabId.today);
+    } else {
+      _tabHistory.remove(tab);
+      _tabHistory.add(tab);
+    }
     notifyListeners();
   }
 
@@ -133,17 +216,96 @@ class DaywellShellController extends ChangeNotifier {
   }
 
   void openSecondaryRoute(DaywellSecondaryRoute route) {
+    _lastRootBackAttemptAt = null;
     if (_activeSecondaryRoute == route) return;
     _activeSecondaryRoute = route;
     notifyListeners();
   }
 
-  /// Unwinds an active secondary route and returns true when handled.
+  /// Unwinds an active secondary route synchronously and returns true when
+  /// handled. Used by secondary AppBar back buttons and unit tests.
   bool handleBackNavigation() {
+    _lastRootBackAttemptAt = null;
     if (_activeSecondaryRoute == null) return false;
     _activeSecondaryRoute = null;
     notifyListeners();
     return true;
+  }
+
+  /// Pops one entry from main-tab navigation history back toward
+  /// [DaywellTabId.today], returning `true` when the active tab changed.
+  bool popTabHistory() {
+    if (_activeSecondaryRoute != null) return false;
+    if (_tabHistory.length > 1) {
+      _tabHistory.removeLast();
+      final previousTab = _tabHistory.last;
+      if (_currentTab != previousTab) {
+        _currentTab = previousTab;
+        _visitedTabs.add(previousTab);
+        _lastRootBackAttemptAt = null;
+        notifyListeners();
+        return true;
+      }
+    }
+    if (_currentTab != DaywellTabId.today) {
+      _tabHistory
+        ..clear()
+        ..add(DaywellTabId.today);
+      _currentTab = DaywellTabId.today;
+      _visitedTabs.add(DaywellTabId.today);
+      _lastRootBackAttemptAt = null;
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  /// Resolves an Android system back press at the shell level in strict
+  /// priority order:
+  /// 1. Secondary shell routes (nested screens)
+  /// 2. Active module internal back handler (split-view, subtabs, filters, etc.)
+  /// 3. Main-tab navigation history back toward [DaywellTabId.today]
+  /// 4. Double-back-to-exit within [exitConfirmWindow] at [DaywellTabId.today]
+  Future<DaywellShellBackOutcome> handleSystemBack() async {
+    final secondary = _activeSecondaryRoute;
+    if (secondary != null) {
+      _lastRootBackAttemptAt = null;
+      final secondaryHandler = _secondaryBackHandlers[secondary];
+      if (secondaryHandler != null) {
+        final consumed = await secondaryHandler();
+        if (consumed) {
+          return DaywellShellBackOutcome.handledSecondaryRoute;
+        }
+      }
+      _activeSecondaryRoute = null;
+      notifyListeners();
+      return DaywellShellBackOutcome.handledSecondaryRoute;
+    }
+
+    final moduleHandler = _tabBackHandlers[_currentTab];
+    if (moduleHandler != null) {
+      final consumed = await moduleHandler();
+      if (consumed) {
+        _lastRootBackAttemptAt = null;
+        return DaywellShellBackOutcome.handledByModule;
+      }
+    }
+
+    if (popTabHistory()) {
+      return DaywellShellBackOutcome.handledTabHistory;
+    }
+
+    final now = _clock();
+    final last = _lastRootBackAttemptAt;
+    if (last != null &&
+        !now.isBefore(last) &&
+        now.difference(last) <= exitConfirmWindow) {
+      _lastRootBackAttemptAt = null;
+      return DaywellShellBackOutcome.exitApp;
+    }
+
+    _lastRootBackAttemptAt = now;
+    return DaywellShellBackOutcome.promptExitApp;
   }
 
   /// Resolves string route identifiers from secondary entry points into typed

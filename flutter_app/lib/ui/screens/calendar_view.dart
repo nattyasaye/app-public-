@@ -16,6 +16,7 @@ import '../../domain/notes/note_helpers.dart';
 import '../../domain/notes/note_models.dart';
 import '../../domain/tasks/task_calendar_engine.dart';
 import '../../domain/tasks/task_models.dart';
+import '../shell/daywell_shell_routes.dart';
 import '../widgets/daily_rhythm_dashboard_widgets.dart';
 import '../widgets/shared_ui_widgets.dart';
 
@@ -28,6 +29,7 @@ class CalendarView extends StatefulWidget {
   final ProjectsController? projectsController;
   final DailyRhythmController? dailyRhythmController;
   final NotesController? notesController;
+  final DaywellShellController? shellController;
   final void Function(String taskId)? onOpenTask;
   final void Function(String noteId)? onOpenNote;
   final VoidCallback? onOpenTasks;
@@ -39,6 +41,7 @@ class CalendarView extends StatefulWidget {
     this.projectsController,
     this.dailyRhythmController,
     this.notesController,
+    this.shellController,
     this.onOpenTask,
     this.onOpenNote,
     this.onOpenTasks,
@@ -73,6 +76,9 @@ class _CalendarViewState extends State<CalendarView> {
   String _categoryFilter = 'all';
   String _searchQuery = '';
   late final TextEditingController _searchController;
+  final List<({String viewMode, CalendarDate selectedDate})> _navHistory =
+      <({String viewMode, CalendarDate selectedDate})>[];
+  bool _isPoppingNavHistory = false;
 
   @override
   void initState() {
@@ -85,7 +91,14 @@ class _CalendarViewState extends State<CalendarView> {
       month: _lastSyncedSelectedDate.month,
       day: 1,
     );
+    _navHistory.add(
+      (viewMode: _viewMode, selectedDate: _lastSyncedSelectedDate),
+    );
     widget.calendarController.addListener(_onCalendarStateChanged);
+    widget.shellController?.registerTabBackHandler(
+      DaywellTabId.calendar,
+      _handleModuleBack,
+    );
   }
 
   @override
@@ -96,13 +109,69 @@ class _CalendarViewState extends State<CalendarView> {
       widget.calendarController.addListener(_onCalendarStateChanged);
       _syncDisplayedMonthFromController();
     }
+    if (!identical(oldWidget.shellController, widget.shellController)) {
+      oldWidget.shellController?.unregisterTabBackHandler(
+        DaywellTabId.calendar,
+        _handleModuleBack,
+      );
+      widget.shellController?.registerTabBackHandler(
+        DaywellTabId.calendar,
+        _handleModuleBack,
+      );
+    }
   }
 
   @override
   void dispose() {
+    widget.shellController?.unregisterTabBackHandler(
+      DaywellTabId.calendar,
+      _handleModuleBack,
+    );
     widget.calendarController.removeListener(_onCalendarStateChanged);
     _searchController.dispose();
     super.dispose();
+  }
+
+  void _recordNavState({
+    required String viewMode,
+    required CalendarDate selectedDate,
+  }) {
+    if (_isPoppingNavHistory) return;
+    if (_navHistory.isNotEmpty &&
+        _navHistory.last.viewMode == viewMode &&
+        _navHistory.last.selectedDate == selectedDate) {
+      return;
+    }
+    _navHistory.add((viewMode: viewMode, selectedDate: selectedDate));
+    if (_navHistory.length > 30) {
+      _navHistory.removeAt(0);
+    }
+  }
+
+  Future<bool> _handleModuleBack() async {
+    if (_navHistory.length <= 1) {
+      return false;
+    }
+    _navHistory.removeLast();
+    final target = _navHistory.last;
+    _isPoppingNavHistory = true;
+    try {
+      if (mounted) {
+        setState(() {
+          _viewMode = target.viewMode;
+          _lastSyncedSelectedDate = target.selectedDate;
+          _displayedMonth = CalendarDate(
+            year: target.selectedDate.year,
+            month: target.selectedDate.month,
+            day: 1,
+          );
+        });
+      }
+      widget.calendarController.setSelectedCalendarDate(target.selectedDate);
+    } finally {
+      _isPoppingNavHistory = false;
+    }
+    return true;
   }
 
   void _onCalendarStateChanged() {
@@ -113,6 +182,7 @@ class _CalendarViewState extends State<CalendarView> {
     final selected = widget.calendarController.state.selectedCalendarDate;
     if (selected != _lastSyncedSelectedDate) {
       _lastSyncedSelectedDate = selected;
+      _recordNavState(viewMode: _viewMode, selectedDate: selected);
       if (selected.year != _displayedMonth.year ||
           selected.month != _displayedMonth.month) {
         if (mounted) {
@@ -313,6 +383,31 @@ class _CalendarViewState extends State<CalendarView> {
     var hasReminder = existing?.hasReminder ?? true;
     String? titleError;
     String? timeError;
+    final initialTitle = titleCtrl.text;
+    final initialNotes = notesCtrl.text;
+    final initialEventDate = eventDate;
+    final initialEndDate = endDate;
+    final initialIsAllDay = isAllDay;
+    final initialStartTime = startTime;
+    final initialEndTime = endTime;
+    final initialCategory = category;
+    final initialHasReminder = hasReminder;
+    var didCommitOrDelete = false;
+    var isPromptingDiscard = false;
+    var lastDirty = false;
+
+    bool hasUnsavedChanges() {
+      if (didCommitOrDelete) return false;
+      return titleCtrl.text != initialTitle ||
+          notesCtrl.text != initialNotes ||
+          eventDate != initialEventDate ||
+          endDate != initialEndDate ||
+          isAllDay != initialIsAllDay ||
+          startTime != initialStartTime ||
+          endTime != initialEndTime ||
+          category != initialCategory ||
+          hasReminder != initialHasReminder;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -325,19 +420,112 @@ class _CalendarViewState extends State<CalendarView> {
       builder: (ctx) => StatefulBuilder(
         builder: (modalContext, setModalState) {
           final semantic = modalContext.daywellColors;
-          return Padding(
-            padding: EdgeInsets.only(
-              top: SharedDesignTokens.spacingMd,
-              left: SharedDesignTokens.spacingMd,
-              right: SharedDesignTokens.spacingMd,
-              bottom: MediaQuery.of(modalContext).viewInsets.bottom +
-                  SharedDesignTokens.spacingMd,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
+          final dirty = hasUnsavedChanges();
+
+          Future<bool> commitEvent() async {
+            final title = titleCtrl.text.trim();
+            if (title.isEmpty) {
+              setModalState(
+                () => titleError = 'Event title is required',
+              );
+              return false;
+            }
+            if (!isAllDay && (endDate == null || endDate == eventDate)) {
+              final startTod = DayTimeOfDay.parse(startTime);
+              final endTod = DayTimeOfDay.parse(endTime);
+              if (endTod < startTod) {
+                setModalState(
+                  () => timeError = 'End time cannot precede start time',
+                );
+                return false;
+              }
+            }
+            if (isEditing) {
+              final updated = existing.copyWith(
+                title: title,
+                dateIso: eventDate.toIsoString(),
+                endDateIso: endDate?.toIsoString(),
+                clearEndDate: endDate == null,
+                startTime: isAllDay ? null : startTime,
+                endTime: isAllDay ? null : endTime,
+                isAllDay: isAllDay,
+                category: category,
+                hasReminder: hasReminder,
+                notes: notesCtrl.text.trim().isEmpty
+                    ? null
+                    : notesCtrl.text.trim(),
+              );
+              await widget.calendarController.updateEvent(updated);
+            } else {
+              await widget.calendarController.createEvent(
+                title: title,
+                dateIso: eventDate.toIsoString(),
+                endDateIso: endDate?.toIsoString(),
+                startTime: isAllDay ? null : startTime,
+                endTime: isAllDay ? null : endTime,
+                isAllDay: isAllDay,
+                category: category,
+                hasReminder: hasReminder,
+                notes: notesCtrl.text.trim().isEmpty
+                    ? null
+                    : notesCtrl.text.trim(),
+              );
+              widget.calendarController.setSelectedCalendarDate(eventDate);
+            }
+            didCommitOrDelete = true;
+            if (ctx.mounted) Navigator.pop(ctx);
+            return true;
+          }
+
+          Future<void> handleAttemptPop() async {
+            if (isPromptingDiscard || didCommitOrDelete) return;
+            if (!hasUnsavedChanges()) {
+              if (ctx.mounted) Navigator.pop(ctx);
+              return;
+            }
+            isPromptingDiscard = true;
+            try {
+              final action = await DaywellUnsavedChangesDialog.show(
+                modalContext,
+                saveLabel: isEditing ? 'Save' : 'Add Event',
+              );
+              if (!modalContext.mounted || !ctx.mounted) return;
+              switch (action) {
+                case DaywellUnsavedChangesAction.save:
+                  await commitEvent();
+                  return;
+                case DaywellUnsavedChangesAction.discard:
+                  didCommitOrDelete = true;
+                  Navigator.pop(ctx);
+                  return;
+                case DaywellUnsavedChangesAction.cancel:
+                  return;
+              }
+            } finally {
+              isPromptingDiscard = false;
+            }
+          }
+
+          return PopScope<Object?>(
+            canPop: !dirty,
+            onPopInvokedWithResult: (bool didPop, Object? _) {
+              if (!didPop) {
+                unawaited(handleAttemptPop());
+              }
+            },
+            child: Padding(
+              padding: EdgeInsets.only(
+                top: SharedDesignTokens.spacingMd,
+                left: SharedDesignTokens.spacingMd,
+                right: SharedDesignTokens.spacingMd,
+                bottom: MediaQuery.of(modalContext).viewInsets.bottom +
+                    SharedDesignTokens.spacingMd,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                   Text(
                     isEditing ? 'Edit Event' : 'Add Event',
                     style: Theme.of(modalContext).textTheme.titleLarge,
@@ -351,7 +539,9 @@ class _CalendarViewState extends State<CalendarView> {
                     hintText: 'e.g. Clinic Appointment',
                     errorText: titleError,
                     onChanged: (_) {
-                      if (titleError != null) {
+                      final nowDirty = hasUnsavedChanges();
+                      if (titleError != null || nowDirty != lastDirty) {
+                        lastDirty = nowDirty;
                         setModalState(() => titleError = null);
                       }
                     },
@@ -362,6 +552,13 @@ class _CalendarViewState extends State<CalendarView> {
                     label: 'Notes (optional)',
                     hintText: 'Location or details...',
                     maxLines: 2,
+                    onChanged: (_) {
+                      final nowDirty = hasUnsavedChanges();
+                      if (nowDirty != lastDirty) {
+                        lastDirty = nowDirty;
+                        setModalState(() {});
+                      }
+                    },
                   ),
                   const SizedBox(height: SharedDesignTokens.spacingCompact),
                   DaywellDropdownField<String>(
@@ -520,6 +717,7 @@ class _CalendarViewState extends State<CalendarView> {
                             if (!confirmed) return;
                             await widget.calendarController
                                 .deleteEvent(existing.id);
+                            didCommitOrDelete = true;
                             if (ctx.mounted) Navigator.pop(ctx);
                           },
                         )
@@ -531,69 +729,15 @@ class _CalendarViewState extends State<CalendarView> {
                             label: 'Cancel',
                             variant: DaywellButtonVariant.text,
                             size: DaywellButtonSize.compact,
-                            onPressed: () => Navigator.pop(ctx),
+                            onPressed: () =>
+                                unawaited(Navigator.of(ctx).maybePop()),
                           ),
                           const SizedBox(width: SharedDesignTokens.spacingSm),
                           DaywellButton(
                             label: isEditing ? 'Save' : 'Add Event',
                             variant: DaywellButtonVariant.primary,
                             size: DaywellButtonSize.compact,
-                            onPressed: () async {
-                              final title = titleCtrl.text.trim();
-                              if (title.isEmpty) {
-                                setModalState(
-                                  () => titleError = 'Event title is required',
-                                );
-                                return;
-                              }
-                              if (!isAllDay &&
-                                  (endDate == null || endDate == eventDate)) {
-                                final startTod = DayTimeOfDay.parse(startTime);
-                                final endTod = DayTimeOfDay.parse(endTime);
-                                if (endTod < startTod) {
-                                  setModalState(
-                                    () => timeError =
-                                        'End time cannot precede start time',
-                                  );
-                                  return;
-                                }
-                              }
-                              if (isEditing) {
-                                final updated = existing.copyWith(
-                                  title: title,
-                                  dateIso: eventDate.toIsoString(),
-                                  endDateIso: endDate?.toIsoString(),
-                                  clearEndDate: endDate == null,
-                                  startTime: isAllDay ? null : startTime,
-                                  endTime: isAllDay ? null : endTime,
-                                  isAllDay: isAllDay,
-                                  category: category,
-                                  hasReminder: hasReminder,
-                                  notes: notesCtrl.text.trim().isEmpty
-                                      ? null
-                                      : notesCtrl.text.trim(),
-                                );
-                                await widget.calendarController
-                                    .updateEvent(updated);
-                              } else {
-                                await widget.calendarController.createEvent(
-                                  title: title,
-                                  dateIso: eventDate.toIsoString(),
-                                  endDateIso: endDate?.toIsoString(),
-                                  startTime: isAllDay ? null : startTime,
-                                  endTime: isAllDay ? null : endTime,
-                                  isAllDay: isAllDay,
-                                  category: category,
-                                  hasReminder: hasReminder,
-                                  notes: notesCtrl.text.trim().isEmpty
-                                      ? null
-                                      : notesCtrl.text.trim(),
-                                );
-                                widget.calendarController
-                                    .setSelectedCalendarDate(eventDate);
-                              }
-                              if (ctx.mounted) Navigator.pop(ctx);
-                            },
+                            onPressed: () => unawaited(commitEvent()),
                           ),
                         ],
                       ),
@@ -602,7 +746,8 @@ class _CalendarViewState extends State<CalendarView> {
                 ],
               ),
             ),
-          );
+          ),
+        );
         },
       ),
     );
@@ -1449,7 +1594,13 @@ class _CalendarViewState extends State<CalendarView> {
                       selected: <String>{_viewMode},
                       onSelectionChanged: (Set<String> next) {
                         if (next.isNotEmpty) {
-                          setState(() => _viewMode = next.first);
+                          final nextMode = next.first;
+                          setState(() => _viewMode = nextMode);
+                          _recordNavState(
+                            viewMode: nextMode,
+                            selectedDate: widget
+                                .calendarController.state.selectedCalendarDate,
+                          );
                         }
                       },
                     ),

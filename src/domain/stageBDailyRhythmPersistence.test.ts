@@ -184,7 +184,7 @@ describe('STAGE B: DAILY RHYTHM PERSISTENCE & BACKUP/RESTORE (WEB & CROSS-PLATFO
       const exported = JSON.parse(exportedRaw);
       assert.strictEqual(exported.schemaVersion, 5);
       assert.strictEqual(exported.snapshotFormatVersion, 2);
-      assert.strictEqual(exported.databaseSchemaVersion, 12);
+      assert.strictEqual(exported.databaseSchemaVersion, 13);
       assert.strictEqual(exported.dailyRhythmDays.length, 17);
 
       // Clear localStorage completely and restore
@@ -304,12 +304,12 @@ describe('STAGE B: DAILY RHYTHM PERSISTENCE & BACKUP/RESTORE (WEB & CROSS-PLATFO
           kind: 'invalid_payload',
         },
         {
-          name: 'future databaseSchemaVersion 13',
+          name: 'future databaseSchemaVersion 14',
           payload: {
             ...CANONICAL_SEED_DATABASE,
             schemaVersion: 5,
             snapshotFormatVersion: 2,
-            databaseSchemaVersion: 13,
+            databaseSchemaVersion: 14,
             dailyRhythmDays: [],
           },
           kind: 'unsupported_future_schema',
@@ -357,7 +357,7 @@ describe('STAGE B: DAILY RHYTHM PERSISTENCE & BACKUP/RESTORE (WEB & CROSS-PLATFO
       const financeExportStr = SharedStateBridge.exportFinanceOnlyJson();
       const financeExport = JSON.parse(financeExportStr);
       assert.strictEqual(financeExport.financeOnly, true);
-      assert.strictEqual(financeExport.databaseSchemaVersion, 12);
+      assert.strictEqual(financeExport.databaseSchemaVersion, 13);
       assert.strictEqual('dailyRhythmDays' in financeExport, false);
 
       // Finance-only import rejects contamination with dailyRhythmDays
@@ -410,7 +410,7 @@ describe('STAGE B: DAILY RHYTHM PERSISTENCE & BACKUP/RESTORE (WEB & CROSS-PLATFO
 
     const appDb = readRepoFile('flutter_app/lib/data/database/app_database.dart');
     assert.match(appDb, /DailyRhythmDays,/);
-    assert.match(appDb, /int get schemaVersion => 12;/);
+    assert.match(appDb, /int get schemaVersion => 13;/);
     assert.match(appDb, /if \(from < 12\)/);
     assert.match(appDb, /_createV12DailyRhythmPerformanceIndices\(\)/);
     assert.match(appDb, /idx_daily_rhythm_days_updated_at/);
@@ -426,11 +426,11 @@ describe('STAGE B: DAILY RHYTHM PERSISTENCE & BACKUP/RESTORE (WEB & CROSS-PLATFO
     assert.doesNotMatch(repo, /evaluateTimeline/);
 
     const policy = readRepoFile('flutter_app/lib/core/snapshot_version_policy.dart');
-    assert.match(policy, /supportedDatabaseSchemaVersion = 12;/);
-    assert.match(policy, /maxSupportedDatabaseSchemaVersion = 12;/);
+    assert.match(policy, /supportedDatabaseSchemaVersion = 13;/);
+    assert.match(policy, /maxSupportedDatabaseSchemaVersion = 13;/);
 
     const enc = readRepoFile('flutter_app/lib/services/backup/encryption_backup_service.dart');
-    assert.match(enc, /maxSupportedDatabaseSchemaVersion = 12;/);
+    assert.match(enc, /maxSupportedDatabaseSchemaVersion = 13;/);
 
     const coord = readRepoFile('flutter_app/lib/data/database/database_persistence_coordinator.dart');
     assert.match(coord, /'dailyRhythmDays':\s*dailyRhythmDays/);

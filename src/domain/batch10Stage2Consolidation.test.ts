@@ -189,7 +189,12 @@ describe('STAGE 2 FINAL INTEGRATION & ARCHITECTURAL CONSOLIDATION AUDIT', () => 
       path.join(libDir, 'ui', 'screens', 'finance', 'finance_setup_wizard.dart'),
       'utf8'
     );
-    assert.strictEqual(financeView.includes('FinanceSetupWizard(controller: ctrl)'), true);
+    assert.strictEqual(
+      financeView.includes('FinanceSetupWizard(controller: ctrl)') ||
+        (financeView.includes('FinanceSetupWizard(') &&
+          financeView.includes('controller: ctrl')),
+      true
+    );
     assert.strictEqual(financeWizard.includes('widget.controller.completeSetup('), true);
 
     const testFiles = collectDartFiles(path.join(rootDir, 'flutter_app', 'test'));

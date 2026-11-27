@@ -379,7 +379,7 @@ Keep nullable upcaster defaults during import of pre-v8 snapshots.
   it('6. Schema-version guard aligns AppDatabase.schemaVersion with schema_contracts.json while preserving seed v5 & bridge v5', () => {
     const tmpDir = createIsolatedFoundationRoot();
     try {
-      // Confirm canonical_seed_database.json=5 & schema_contracts.json.version="2.0.0" remain valid alongside schemaVersion=12
+      // Confirm canonical_seed_database.json=5 & schema_contracts.json.version="2.0.0" remain valid alongside schemaVersion=13
       const seed = JSON.parse(
         fs.readFileSync(path.join(tmpDir, 'shared_foundation/canonical_seed_database.json'), 'utf8')
       );
@@ -387,7 +387,7 @@ Keep nullable upcaster defaults during import of pre-v8 snapshots.
         fs.readFileSync(path.join(tmpDir, 'shared_foundation/schema_contracts.json'), 'utf8')
       );
       assert.strictEqual(seed.schemaVersion, 5);
-      assert.strictEqual(contracts.schemaVersion, 12);
+      assert.strictEqual(contracts.schemaVersion, 13);
       assert.strictEqual(contracts.version, '2.0.0');
       assert.strictEqual(checkFoundation({ rootDir: tmpDir, silent: true }).fresh, true);
 
@@ -395,12 +395,12 @@ Keep nullable upcaster defaults during import of pre-v8 snapshots.
       const appDbPath = path.join(tmpDir, 'flutter_app/lib/data/database/app_database.dart');
       const appDbSource = fs
         .readFileSync(appDbPath, 'utf8')
-        .replace('int get schemaVersion => 12;', 'int get schemaVersion => 9;');
+        .replace('int get schemaVersion => 13;', 'int get schemaVersion => 9;');
       fs.writeFileSync(appDbPath, appDbSource, 'utf8');
 
       assert.throws(
         () => checkFoundation({ rootDir: tmpDir, silent: true }),
-        /Schema version mismatch: shared_foundation\/schema_contracts\.json declares schemaVersion=12, while flutter_app\/lib\/data\/database\/app_database\.dart declares schemaVersion=9/
+        /Schema version mismatch: shared_foundation\/schema_contracts\.json declares schemaVersion=13, while flutter_app\/lib\/data\/database\/app_database\.dart declares schemaVersion=9/
       );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });

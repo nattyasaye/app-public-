@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "version": "2.0.0",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "timeConvention": {
     "id": "Africa/Addis_Ababa",
     "fixedUtcOffsetMinutes": 180,
@@ -462,6 +462,44 @@
           "default": "open"
         },
         "financeClosedAt": { "type": "string", "format": "date-time", "required": false },
+        "updatedAt": { "type": "string", "format": "date-time", "required": true }
+      }
+    },
+    "SmsDraft": {
+      "plannedDatabaseSchemaVersion": 13,
+      "localOnly": true,
+      "uniqueKey": ["id"],
+      "fields": {
+        "id": { "type": "string", "required": true },
+        "provider": { "type": "string", "enum": ["cbe", "telebirr", "boa", "unknown"], "required": true },
+        "fingerprint": { "type": "string", "required": true },
+        "transactionReference": { "type": "string", "required": false },
+        "receiptUrl": { "type": "string", "required": false },
+        "suggestedType": { "type": "string", "enum": ["expense", "income", "transfer", "unknown"], "default": "unknown" },
+        "direction": { "type": "string", "enum": ["incoming", "outgoing", "uncertain"], "default": "uncertain" },
+        "principalCents": { "type": "integer", "minimum": 0, "required": true },
+        "serviceFeeCents": { "type": "integer", "minimum": 0, "default": 0 },
+        "vatCents": { "type": "integer", "minimum": 0, "default": 0 },
+        "otherChargesCents": { "type": "integer", "minimum": 0, "default": 0 },
+        "totalAmountCents": { "type": "integer", "minimum": 0, "required": false },
+        "hasAmountMismatch": { "type": "boolean", "default": false },
+        "currencyCode": { "type": "string", "default": "ETB" },
+        "accountHint": { "type": "string", "required": false },
+        "counterpartyName": { "type": "string", "required": false },
+        "counterpartyHint": { "type": "string", "required": false },
+        "reportedBalanceCents": { "type": "integer", "required": false },
+        "transactionTimestampIso": { "type": "string", "format": "date-time", "required": false },
+        "transactionDateIso": { "type": "string", "format": "date", "required": false },
+        "receivedAtUtc": { "type": "string", "format": "date-time", "required": true },
+        "confidence": { "type": "string", "enum": ["high", "medium", "low", "unrecognized"], "default": "unrecognized" },
+        "status": { "type": "string", "enum": ["needs_review", "approved", "dismissed", "unrecognized"], "default": "needs_review" },
+        "isNonLedgerNotice": { "type": "boolean", "default": false },
+        "parseNotes": { "type": "string", "required": false },
+        "suggestedAccountId": { "type": "string", "required": false },
+        "suggestedCategoryId": { "type": "string", "required": false },
+        "approvedEntryId": { "type": "string", "required": false },
+        "rawSmsText": { "type": "string", "required": true },
+        "createdAt": { "type": "string", "format": "date-time", "required": true },
         "updatedAt": { "type": "string", "format": "date-time", "required": true }
       }
     }

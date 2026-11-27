@@ -549,3 +549,50 @@ class DailyRhythmDays extends Table {
   @override
   Set<Column> get primaryKey => {dateIso};
 }
+
+/// Finance SMS Review Drafts (Schema v13; local-only staging table).
+///
+/// Never creates ledger postings automatically and rawSmsText is excluded from
+/// portable backups/snapshots/exports by default.
+class SmsDraftsTable extends Table {
+  TextColumn get id => text()();
+  TextColumn get provider => text()(); // cbe | telebirr | boa | unknown
+  TextColumn get fingerprint => text()(); // SHA-256 hex of normalized SMS body
+  TextColumn get transactionReference => text().nullable()();
+  TextColumn get receiptUrl => text().nullable()();
+  TextColumn get suggestedType =>
+      text().withDefault(const Constant('unknown'))(); // expense | income | transfer | unknown
+  TextColumn get direction =>
+      text().withDefault(const Constant('uncertain'))(); // incoming | outgoing | uncertain
+  IntColumn get principalCents => integer().withDefault(const Constant(0))();
+  IntColumn get serviceFeeCents => integer().withDefault(const Constant(0))();
+  IntColumn get vatCents => integer().withDefault(const Constant(0))();
+  IntColumn get otherChargesCents => integer().withDefault(const Constant(0))();
+  IntColumn get totalAmountCents => integer().nullable()();
+  BoolColumn get hasAmountMismatch =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get currencyCode => text().withDefault(const Constant('ETB'))();
+  TextColumn get accountHint => text().nullable()();
+  TextColumn get counterpartyName => text().nullable()();
+  TextColumn get counterpartyHint => text().nullable()();
+  IntColumn get reportedBalanceCents => integer().nullable()();
+  DateTimeColumn get transactionTimestampUtc => dateTime().nullable()();
+  TextColumn get transactionDateIso => text().nullable()();
+  DateTimeColumn get receivedAtUtc => dateTime()();
+  TextColumn get confidence =>
+      text().withDefault(const Constant('unrecognized'))();
+  TextColumn get status =>
+      text().withDefault(const Constant('needs_review'))(); // needs_review | approved | dismissed | unrecognized
+  BoolColumn get isNonLedgerNotice =>
+      boolean().withDefault(const Constant(false))();
+  TextColumn get parseNotes => text().nullable()();
+  TextColumn get suggestedAccountId => text().nullable()();
+  TextColumn get suggestedCategoryId => text().nullable()();
+  TextColumn get approvedEntryId => text().nullable()();
+  TextColumn get rawSmsText => text()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

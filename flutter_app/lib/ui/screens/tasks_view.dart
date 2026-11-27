@@ -23,6 +23,7 @@ import '../../domain/tasks/task_models.dart';
 import '../../domain/tasks/task_recurrence_engine.dart';
 import '../../domain/tasks/task_reminder_engine.dart';
 import '../app_state.dart';
+import '../shell/daywell_shell_routes.dart';
 import '../widgets/daily_rhythm_workflow_widgets.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'projects/project_form_sheet.dart';
@@ -39,6 +40,7 @@ class TasksView extends StatefulWidget {
   final NotesController? notesController;
   final CalendarController? calendarController;
   final DailyRhythmController? dailyRhythmController;
+  final DaywellShellController? shellController;
   final ({String taskId, int nonce})? requestedTaskFocus;
   final ({int tabIndex, int nonce})? requestedSubTab;
   final void Function(CalendarDate date)? onOpenCalendarDate;
@@ -53,6 +55,7 @@ class TasksView extends StatefulWidget {
     this.notesController,
     this.calendarController,
     this.dailyRhythmController,
+    this.shellController,
     this.requestedTaskFocus,
     this.requestedSubTab,
     this.onOpenCalendarDate,
@@ -91,25 +94,86 @@ class _TasksViewState extends State<TasksView>
   bool _showFilters = false;
   int? _lastHandledTaskFocusNonce;
   int? _lastHandledSubTabNonce;
+  late final List<int> _subTabHistory;
+  late int _lastRecordedSubTabIndex;
+  bool _isPoppingSubTab = false;
+  late final List<String> _viewFilterHistory;
+  late String _lastRecordedViewFilter;
+  bool _isPoppingViewFilter = false;
 
   @override
   void initState() {
     super.initState();
+    final initialSubTab = (widget.requestedSubTab?.tabIndex ?? 0).clamp(0, 1);
     _tabController = TabController(
       length: 2,
       vsync: this,
-      initialIndex: (widget.requestedSubTab?.tabIndex ?? 0).clamp(0, 1),
+      initialIndex: initialSubTab,
     );
     _lastHandledSubTabNonce = widget.requestedSubTab?.nonce;
-    _tabController.addListener(() {
-      if (mounted) setState(() {});
-    });
+    _subTabHistory = <int>[initialSubTab];
+    _lastRecordedSubTabIndex = initialSubTab;
+    _tabController.addListener(_onSubTabChanged);
     final ctrl = widget.effectiveController;
+    _lastRecordedViewFilter = ctrl.state.viewFilter;
+    _viewFilterHistory = <String>[_lastRecordedViewFilter];
     _searchController = TextEditingController(
       text: ctrl.state.searchQuery,
     );
     ctrl.addListener(_syncSearchControllerWithState);
+    widget.shellController
+        ?.registerTabBackHandler(DaywellTabId.tasks, _handleModuleBack);
     _scheduleTaskFocusIfNeeded();
+  }
+
+  void _onSubTabChanged() {
+    final next = _tabController.index;
+    if (next != _lastRecordedSubTabIndex) {
+      _lastRecordedSubTabIndex = next;
+      if (!_isPoppingSubTab) {
+        if (next == 0) {
+          _subTabHistory
+            ..clear()
+            ..add(0);
+        } else {
+          _subTabHistory.remove(next);
+          _subTabHistory.add(next);
+        }
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  Future<bool> _handleModuleBack() async {
+    final controller = widget.effectiveController;
+    if (controller.state.isSelectionMode) {
+      controller.clearSelection();
+      return true;
+    }
+    if (_showFilters) {
+      setState(() => _showFilters = false);
+      return true;
+    }
+    if (_subTabHistory.length > 1) {
+      _subTabHistory.removeLast();
+      final previousSubTab = _subTabHistory.last;
+      _isPoppingSubTab = true;
+      _lastRecordedSubTabIndex = previousSubTab;
+      _tabController.animateTo(previousSubTab);
+      _isPoppingSubTab = false;
+      if (mounted) setState(() {});
+      return true;
+    }
+    if (_tabController.index == 0 && _viewFilterHistory.length > 1) {
+      _viewFilterHistory.removeLast();
+      final previousFilter = _viewFilterHistory.last;
+      _isPoppingViewFilter = true;
+      _lastRecordedViewFilter = previousFilter;
+      controller.setViewFilter(previousFilter);
+      _isPoppingViewFilter = false;
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -120,6 +184,12 @@ class _TasksViewState extends State<TasksView>
           .removeListener(_syncSearchControllerWithState);
       widget.effectiveController.addListener(_syncSearchControllerWithState);
       _syncSearchControllerWithState();
+    }
+    if (oldWidget.shellController != widget.shellController) {
+      oldWidget.shellController
+          ?.unregisterTabBackHandler(DaywellTabId.tasks, _handleModuleBack);
+      widget.shellController
+          ?.registerTabBackHandler(DaywellTabId.tasks, _handleModuleBack);
     }
     _scheduleSubTabIfNeeded();
     _scheduleTaskFocusIfNeeded();
@@ -162,11 +232,28 @@ class _TasksViewState extends State<TasksView>
         selection: TextSelection.collapsed(offset: nextQuery.length),
       );
     }
+    final nextFilter = widget.effectiveController.state.viewFilter;
+    if (nextFilter != _lastRecordedViewFilter) {
+      _lastRecordedViewFilter = nextFilter;
+      if (!_isPoppingViewFilter) {
+        if (nextFilter == 'today') {
+          _viewFilterHistory
+            ..clear()
+            ..add('today');
+        } else {
+          _viewFilterHistory.remove(nextFilter);
+          _viewFilterHistory.add(nextFilter);
+        }
+      }
+    }
   }
 
   @override
   void dispose() {
+    widget.shellController
+        ?.unregisterTabBackHandler(DaywellTabId.tasks, _handleModuleBack);
     widget.effectiveController.removeListener(_syncSearchControllerWithState);
+    _tabController.removeListener(_onSubTabChanged);
     _tabController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -447,10 +534,10 @@ class _TasksViewState extends State<TasksView>
 
   void _showQuickAddModal() => _showTaskFormModal();
 
-  void _showTaskFormModal({
+  Future<void> _showTaskFormModal({
     TaskEntity? existingTask,
     InboxItemEntity? sourceInboxItem,
-  }) {
+  }) async {
     final controller = widget.effectiveController;
     final isEditing = existingTask != null;
     final isConvertingInbox = sourceInboxItem != null && !isEditing;
@@ -538,19 +625,257 @@ class _TasksViewState extends State<TasksView>
         : (DayTimeOfDay.tryParse(scheduledTime) ?? fallbackWall.timeOfDay);
     bool? reminderPermissionGranted;
 
-    unawaited(
-      showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(SharedDesignTokens.radiusSheet),
-          ),
+    final initialTitle = titleCtrl.text.trim();
+    final initialDesc = descCtrl.text.trim();
+    final initialPriority = priority;
+    final initialStatus = status;
+    final initialProjectId = selectedProjectId;
+    final initialMilestoneId = selectedMilestoneId;
+    final initialScheduledDate = scheduledDate;
+    final initialScheduledTime = scheduledTime;
+    final initialDueDate = dueDate;
+    final initialLabelsSig = modalLabels.join('\x00');
+    String subtasksSig(List<TaskSubtask> items) =>
+        items.map((s) => '${s.id}|${s.title}|${s.isCompleted}').join('\x00');
+    final initialSubtasksSig = subtasksSig(modalSubtasks);
+    String recSig() =>
+        '$modalIsRecurring|$modalRecFrequency|$modalRecInterval|${modalRecWeekdays.join(',')}|$modalRecStartDate|$modalRecEndDate|$modalRecRepeatFrom';
+    final initialRecSig = recSig();
+    String remSig() =>
+        '$reminderEnabled|${reminderPreset.name}|$reminderCustomDate|$reminderCustomTime';
+    final initialRemSig = remSig();
+
+    bool didSave = false;
+    bool isPromptingDiscard = false;
+    bool lastDirty = false;
+    void Function(VoidCallback)? updateModal;
+
+    bool hasUnsaved() {
+      if (didSave) return false;
+      return titleCtrl.text.trim() != initialTitle ||
+          descCtrl.text.trim() != initialDesc ||
+          priority != initialPriority ||
+          status != initialStatus ||
+          selectedProjectId != initialProjectId ||
+          selectedMilestoneId != initialMilestoneId ||
+          scheduledDate != initialScheduledDate ||
+          scheduledTime != initialScheduledTime ||
+          dueDate != initialDueDate ||
+          modalLabels.join('\x00') != initialLabelsSig ||
+          subtasksSig(modalSubtasks) != initialSubtasksSig ||
+          recSig() != initialRecSig ||
+          remSig() != initialRemSig;
+    }
+
+    void syncDirty() {
+      final dirty = hasUnsaved();
+      if (dirty != lastDirty) {
+        lastDirty = dirty;
+        updateModal?.call(() {});
+      }
+    }
+
+    titleCtrl.addListener(syncDirty);
+    descCtrl.addListener(syncDirty);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(SharedDesignTokens.radiusSheet),
         ),
-        builder: (ctx) => StatefulBuilder(
-          builder: (modalContext, setModalState) {
-            final semantic = modalContext.daywellColors;
-            return Padding(
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (modalContext, setModalState) {
+          updateModal = setModalState;
+          final semantic = modalContext.daywellColors;
+
+          Future<void> submitTask() async {
+            final title = titleCtrl.text.trim();
+            if (title.isEmpty) {
+              setModalState(
+                () => titleError = 'Task title is required',
+              );
+              return;
+            }
+            final desc = descCtrl.text.trim();
+            final TaskRecurrenceConfig? recConfig = modalIsRecurring
+                ? TaskRecurrenceConfig(
+                    frequency: modalRecFrequency,
+                    interval: modalRecInterval,
+                    weekdays: modalRecFrequency == 'weekly' &&
+                            modalRecWeekdays.isNotEmpty
+                        ? List<int>.unmodifiable(modalRecWeekdays)
+                        : null,
+                    startDate: modalRecStartDate,
+                    endDate: modalRecEndDate,
+                    repeatFrom: modalRecRepeatFrom,
+                  )
+                : null;
+            if (recConfig != null) {
+              final recValidation =
+                  TaskRecurrenceEngine.validateConfig(recConfig);
+              if (!recValidation.isValid) {
+                setModalState(
+                  () => modalRecError = recValidation.errors.values.first,
+                );
+                return;
+              }
+            }
+            final resolvedMilestoneId =
+                selectedProjectId != null ? selectedMilestoneId : null;
+            final projectsCtrl = widget.effectiveProjectsController;
+            final DateTime? nextReminderTriggerUtc = reminderEnabled
+                ? TaskReminderEngine.computeTriggerFromPreset(
+                    task: TaskEntity(
+                      id: existingTask?.id ?? 'draft',
+                      title: title,
+                      dueDate: dueDate,
+                      scheduledDate: scheduledDate,
+                      scheduledTime: scheduledTime,
+                    ),
+                    preset: reminderPreset,
+                    customDate: reminderCustomDate,
+                    customTime: reminderCustomTime,
+                  )
+                : null;
+            if (isEditing) {
+              if (nextReminderTriggerUtc != null && existingReminder == null) {
+                await controller.requestNotificationPermission();
+              }
+              final updateRes = await controller.updateTaskWithRecurrence(
+                id: existingTask.id,
+                title: title,
+                description: desc.isEmpty ? null : desc,
+                clearDescription: desc.isEmpty,
+                priority: priority,
+                status: status,
+                dueDate: dueDate,
+                clearDueDate: dueDate == null,
+                scheduledDate: scheduledDate,
+                clearScheduledDate: scheduledDate == null,
+                scheduledTime: scheduledTime,
+                clearScheduledTime: scheduledTime == null,
+                projectId: selectedProjectId,
+                clearProject: selectedProjectId == null,
+                milestoneId: resolvedMilestoneId,
+                clearMilestone: resolvedMilestoneId == null,
+                subtasks: modalSubtasks,
+                labels: modalLabels,
+                recurrenceRule: recConfig?.frequency,
+                clearRecurrenceRule: !modalIsRecurring,
+                recurrenceConfig: recConfig,
+                clearRecurrenceConfig: !modalIsRecurring,
+                reminderTriggerUtc: nextReminderTriggerUtc,
+                clearReminder: !reminderEnabled,
+              );
+              final updated = updateRes.updatedTask;
+              if (projectsCtrl != null &&
+                  existingTask.projectId != null &&
+                  existingTask.projectId != selectedProjectId) {
+                await projectsCtrl.detachTaskFromProjectSections(
+                  existingTask.projectId!,
+                  existingTask.id,
+                );
+              } else if (projectsCtrl != null &&
+                  updated != null &&
+                  selectedProjectId != null) {
+                await projectsCtrl.syncTaskSectionLink(
+                  selectedProjectId!,
+                  updated,
+                );
+              }
+              if (updateRes.generatedNextTask != null &&
+                  projectsCtrl != null &&
+                  updateRes.generatedNextTask!.projectId != null) {
+                await projectsCtrl.copyTaskSectionLink(
+                  updateRes.generatedNextTask!.projectId!,
+                  existingTask.id,
+                  updateRes.generatedNextTask!,
+                );
+              }
+            } else {
+              final createdTask = await controller.createTask(
+                title: title,
+                description: desc.isEmpty ? null : desc,
+                priority: priority,
+                status: status,
+                dueDate: dueDate,
+                scheduledDate: scheduledDate,
+                scheduledTime: scheduledTime,
+                projectId: selectedProjectId,
+                milestoneId: resolvedMilestoneId,
+                subtasks: modalSubtasks,
+                labels: modalLabels,
+                recurrenceRule: recConfig?.frequency,
+                recurrenceConfig: recConfig,
+                isMyDay: controller.state.viewFilter == 'my_day',
+                myDayDate: controller.state.viewFilter == 'my_day'
+                    ? controller.state.effectivePlanDate
+                    : null,
+                reminderTriggerUtc: nextReminderTriggerUtc,
+                requestReminderPermission: nextReminderTriggerUtc != null,
+              );
+              if (createdTask != null) {
+                if (projectsCtrl != null && selectedProjectId != null) {
+                  await projectsCtrl.syncTaskSectionLink(
+                    selectedProjectId!,
+                    createdTask,
+                  );
+                }
+                if (sourceInboxItem != null) {
+                  await widget.effectiveInboxController
+                      ?.markProcessed(sourceInboxItem.id);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).clearSnackBars();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Converted "${createdTask.title}" to Task',
+                        ),
+                        duration: const Duration(seconds: 3),
+                      ),
+                    );
+                  }
+                }
+              }
+            }
+            didSave = true;
+            if (ctx.mounted) Navigator.pop(ctx);
+          }
+
+          return PopScope<Object?>(
+            canPop: !hasUnsaved(),
+            onPopInvokedWithResult: (bool didPop, Object? _) async {
+              if (didPop || isPromptingDiscard) return;
+              isPromptingDiscard = true;
+              try {
+                final action = await DaywellUnsavedChangesDialog.show(
+                  modalContext,
+                  title: isEditing ? 'Discard Task Changes?' : 'Discard Task?',
+                  message: isEditing
+                      ? 'Save your task changes or discard them?'
+                      : 'Save this task or discard your edits?',
+                  saveLabel: isEditing
+                      ? 'Save Changes'
+                      : isConvertingInbox
+                          ? 'Convert to Task'
+                          : 'Save Task',
+                  discardLabel: 'Discard',
+                );
+                if (!modalContext.mounted) return;
+                if (action == DaywellUnsavedChangesAction.save) {
+                  await submitTask();
+                } else if (action == DaywellUnsavedChangesAction.discard) {
+                  didSave = true;
+                  if (ctx.mounted) Navigator.pop(ctx);
+                }
+              } finally {
+                isPromptingDiscard = false;
+              }
+            },
+            child: Padding(
               padding: EdgeInsets.only(
                 top: SharedDesignTokens.spacingMd,
                 left: SharedDesignTokens.spacingMd,
@@ -1219,173 +1544,22 @@ class _TasksViewState extends State<TasksView>
                               : 'Save Task',
                       leadingIcon: Icons.check,
                       fullWidth: true,
-                      onPressed: () async {
-                        final title = titleCtrl.text.trim();
-                        if (title.isEmpty) {
-                          setModalState(
-                            () => titleError = 'Task title is required',
-                          );
-                          return;
-                        }
-                        final desc = descCtrl.text.trim();
-                        final TaskRecurrenceConfig? recConfig = modalIsRecurring
-                            ? TaskRecurrenceConfig(
-                                frequency: modalRecFrequency,
-                                interval: modalRecInterval,
-                                weekdays: modalRecFrequency == 'weekly' &&
-                                        modalRecWeekdays.isNotEmpty
-                                    ? List<int>.unmodifiable(modalRecWeekdays)
-                                    : null,
-                                startDate: modalRecStartDate,
-                                endDate: modalRecEndDate,
-                                repeatFrom: modalRecRepeatFrom,
-                              )
-                            : null;
-                        if (recConfig != null) {
-                          final recValidation =
-                              TaskRecurrenceEngine.validateConfig(recConfig);
-                          if (!recValidation.isValid) {
-                            setModalState(
-                              () => modalRecError =
-                                  recValidation.errors.values.first,
-                            );
-                            return;
-                          }
-                        }
-                        final resolvedMilestoneId = selectedProjectId != null
-                            ? selectedMilestoneId
-                            : null;
-                        final projectsCtrl = widget.effectiveProjectsController;
-                        final DateTime? nextReminderTriggerUtc = reminderEnabled
-                            ? TaskReminderEngine.computeTriggerFromPreset(
-                                task: TaskEntity(
-                                  id: existingTask?.id ?? 'draft',
-                                  title: title,
-                                  dueDate: dueDate,
-                                  scheduledDate: scheduledDate,
-                                  scheduledTime: scheduledTime,
-                                ),
-                                preset: reminderPreset,
-                                customDate: reminderCustomDate,
-                                customTime: reminderCustomTime,
-                              )
-                            : null;
-                        if (isEditing) {
-                          if (nextReminderTriggerUtc != null &&
-                              existingReminder == null) {
-                            await controller.requestNotificationPermission();
-                          }
-                          final updateRes =
-                              await controller.updateTaskWithRecurrence(
-                            id: existingTask.id,
-                            title: title,
-                            description: desc.isEmpty ? null : desc,
-                            clearDescription: desc.isEmpty,
-                            priority: priority,
-                            status: status,
-                            dueDate: dueDate,
-                            clearDueDate: dueDate == null,
-                            scheduledDate: scheduledDate,
-                            clearScheduledDate: scheduledDate == null,
-                            scheduledTime: scheduledTime,
-                            clearScheduledTime: scheduledTime == null,
-                            projectId: selectedProjectId,
-                            clearProject: selectedProjectId == null,
-                            milestoneId: resolvedMilestoneId,
-                            clearMilestone: resolvedMilestoneId == null,
-                            subtasks: modalSubtasks,
-                            labels: modalLabels,
-                            recurrenceRule: recConfig?.frequency,
-                            clearRecurrenceRule: !modalIsRecurring,
-                            recurrenceConfig: recConfig,
-                            clearRecurrenceConfig: !modalIsRecurring,
-                            reminderTriggerUtc: nextReminderTriggerUtc,
-                            clearReminder: !reminderEnabled,
-                          );
-                          final updated = updateRes.updatedTask;
-                          if (projectsCtrl != null &&
-                              existingTask.projectId != null &&
-                              existingTask.projectId != selectedProjectId) {
-                            await projectsCtrl.detachTaskFromProjectSections(
-                              existingTask.projectId!,
-                              existingTask.id,
-                            );
-                          } else if (projectsCtrl != null &&
-                              updated != null &&
-                              selectedProjectId != null) {
-                            await projectsCtrl.syncTaskSectionLink(
-                              selectedProjectId!,
-                              updated,
-                            );
-                          }
-                          if (updateRes.generatedNextTask != null &&
-                              projectsCtrl != null &&
-                              updateRes.generatedNextTask!.projectId != null) {
-                            await projectsCtrl.copyTaskSectionLink(
-                              updateRes.generatedNextTask!.projectId!,
-                              existingTask.id,
-                              updateRes.generatedNextTask!,
-                            );
-                          }
-                        } else {
-                          final createdTask = await controller.createTask(
-                            title: title,
-                            description: desc.isEmpty ? null : desc,
-                            priority: priority,
-                            status: status,
-                            dueDate: dueDate,
-                            scheduledDate: scheduledDate,
-                            scheduledTime: scheduledTime,
-                            projectId: selectedProjectId,
-                            milestoneId: resolvedMilestoneId,
-                            subtasks: modalSubtasks,
-                            labels: modalLabels,
-                            recurrenceRule: recConfig?.frequency,
-                            recurrenceConfig: recConfig,
-                            isMyDay: controller.state.viewFilter == 'my_day',
-                            myDayDate: controller.state.viewFilter == 'my_day'
-                                ? controller.state.effectivePlanDate
-                                : null,
-                            reminderTriggerUtc: nextReminderTriggerUtc,
-                            requestReminderPermission:
-                                nextReminderTriggerUtc != null,
-                          );
-                          if (createdTask != null) {
-                            if (projectsCtrl != null &&
-                                selectedProjectId != null) {
-                              await projectsCtrl.syncTaskSectionLink(
-                                selectedProjectId!,
-                                createdTask,
-                              );
-                            }
-                            if (sourceInboxItem != null) {
-                              await widget.effectiveInboxController
-                                  ?.markProcessed(sourceInboxItem.id);
-                              if (mounted) {
-                                ScaffoldMessenger.of(context).clearSnackBars();
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(
-                                      'Converted "${createdTask.title}" to Task',
-                                    ),
-                                    duration: const Duration(seconds: 3),
-                                  ),
-                                );
-                              }
-                            }
-                          }
-                        }
-                        if (ctx.mounted) Navigator.pop(ctx);
-                      },
+                      onPressed: submitTask,
                     ),
                   ],
                 ),
               ),
-            );
-          },
-        ),
+            ),
+          );
+        },
       ),
     );
+    updateModal = null;
+    titleCtrl.dispose();
+    descCtrl.dispose();
+    modalTagAddCtrl.dispose();
+    modalSubtaskAddCtrl.dispose();
+    modalSubtaskEditCtrl.dispose();
   }
 
   void _showSubtaskDeletedUndo(
@@ -2517,9 +2691,30 @@ class _TasksViewState extends State<TasksView>
     InboxItemEntity item,
     InboxController inboxCtrl,
   ) async {
+    final initialText = item.rawText.trim();
+    final initialCategory = item.category;
     final textCtrl = TextEditingController(text: item.rawText);
-    String selectedCategory = item.category;
+    String selectedCategory = initialCategory;
     String? errorText;
+    bool didSave = false;
+    bool isPromptingDiscard = false;
+    bool lastDirty = false;
+    void Function(VoidCallback)? updateDialog;
+
+    bool hasUnsaved() {
+      if (didSave) return false;
+      return textCtrl.text.trim() != initialText ||
+          selectedCategory != initialCategory;
+    }
+
+    textCtrl.addListener(() {
+      final dirty = hasUnsaved();
+      if (dirty != lastDirty) {
+        lastDirty = dirty;
+        updateDialog?.call(() {});
+      }
+    });
+
     const categoryChoices = [
       ('task', 'Task'),
       ('idea', 'Idea'),
@@ -2532,70 +2727,104 @@ class _TasksViewState extends State<TasksView>
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (dialogCtx, setDialogState) => AlertDialog(
-          title: const Text('Edit Inbox Item'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                DaywellTextField(
-                  controller: textCtrl,
-                  autofocus: true,
-                  isRequired: true,
-                  label: 'Captured Note / Thought',
-                  errorText: errorText,
-                  maxLines: 4,
-                  onChanged: (_) {
-                    if (errorText != null) {
-                      setDialogState(() => errorText = null);
-                    }
-                  },
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellDropdownField<String>(
-                  label: 'Category',
-                  value: categoryChoices.any((c) => c.$1 == selectedCategory)
-                      ? selectedCategory
-                      : 'general',
-                  items: [
-                    for (final c in categoryChoices)
-                      DropdownMenuItem(value: c.$1, child: Text(c.$2)),
+        builder: (dialogCtx, setDialogState) {
+          updateDialog = setDialogState;
+
+          Future<void> submitInboxEdit() async {
+            final trimmed = textCtrl.text.trim();
+            if (trimmed.isEmpty) {
+              setDialogState(() => errorText = 'Inbox text is required');
+              return;
+            }
+            await inboxCtrl.updateItemText(
+              item.id,
+              trimmed,
+              category: selectedCategory,
+            );
+            didSave = true;
+            if (ctx.mounted) Navigator.pop(ctx);
+          }
+
+          return PopScope<Object?>(
+            canPop: !hasUnsaved(),
+            onPopInvokedWithResult: (bool didPop, Object? _) async {
+              if (didPop || isPromptingDiscard) return;
+              isPromptingDiscard = true;
+              try {
+                final action = await DaywellUnsavedChangesDialog.show(
+                  dialogCtx,
+                  title: 'Discard Inbox Changes?',
+                  message: 'Save your Inbox edits or discard them?',
+                  saveLabel: 'Save',
+                  discardLabel: 'Discard',
+                );
+                if (!dialogCtx.mounted) return;
+                if (action == DaywellUnsavedChangesAction.save) {
+                  await submitInboxEdit();
+                } else if (action == DaywellUnsavedChangesAction.discard) {
+                  didSave = true;
+                  if (ctx.mounted) Navigator.pop(ctx);
+                }
+              } finally {
+                isPromptingDiscard = false;
+              }
+            },
+            child: AlertDialog(
+              title: const Text('Edit Inbox Item'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    DaywellTextField(
+                      controller: textCtrl,
+                      autofocus: true,
+                      isRequired: true,
+                      label: 'Captured Note / Thought',
+                      errorText: errorText,
+                      maxLines: 4,
+                      onChanged: (_) {
+                        if (errorText != null) {
+                          setDialogState(() => errorText = null);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellDropdownField<String>(
+                      label: 'Category',
+                      value: categoryChoices.any((c) => c.$1 == selectedCategory)
+                          ? selectedCategory
+                          : 'general',
+                      items: [
+                        for (final c in categoryChoices)
+                          DropdownMenuItem(value: c.$1, child: Text(c.$2)),
+                      ],
+                      onChanged: (v) {
+                        if (v != null) {
+                          setDialogState(() => selectedCategory = v);
+                        }
+                      },
+                    ),
                   ],
-                  onChanged: (v) {
-                    if (v != null) {
-                      setDialogState(() => selectedCategory = v);
-                    }
-                  },
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).maybePop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: submitInboxEdit,
+                  child: const Text('Save'),
                 ),
               ],
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final trimmed = textCtrl.text.trim();
-                if (trimmed.isEmpty) {
-                  setDialogState(() => errorText = 'Inbox text is required');
-                  return;
-                }
-                await inboxCtrl.updateItemText(
-                  item.id,
-                  trimmed,
-                  category: selectedCategory,
-                );
-                if (ctx.mounted) Navigator.pop(ctx);
-              },
-              child: const Text('Save'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
+    updateDialog = null;
+    textCtrl.dispose();
   }
 
   Future<void> _dismissInboxItem(

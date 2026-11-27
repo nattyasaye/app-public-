@@ -38,6 +38,7 @@ class DaywellApp extends StatefulWidget {
   final DaywellThemeController? themeController;
   final AppStateManager? stateManager;
   final DaywellShellController? shellController;
+  final Future<void> Function()? onExitApp;
 
   const DaywellApp({
     super.key,
@@ -45,6 +46,7 @@ class DaywellApp extends StatefulWidget {
     this.themeController,
     this.stateManager,
     this.shellController,
+    this.onExitApp,
   }) : assert(
           themeController == null || themeMode == ThemeMode.system,
           'Pass either themeMode or themeController to DaywellApp, not a non-system themeMode together with themeController.',
@@ -114,6 +116,7 @@ class _DaywellAppState extends State<DaywellApp> {
             stateManager: widget.stateManager,
             shellController: widget.shellController,
             themeController: _themeController,
+            onExitApp: widget.onExitApp,
           ),
         );
       },
@@ -125,12 +128,14 @@ class MainDaywellScreen extends StatefulWidget {
   final AppStateManager? stateManager;
   final DaywellShellController? shellController;
   final DaywellThemeController? themeController;
+  final Future<void> Function()? onExitApp;
 
   const MainDaywellScreen({
     super.key,
     this.stateManager,
     this.shellController,
     this.themeController,
+    this.onExitApp,
   });
 
   @override
@@ -457,6 +462,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           calendarController: _state.calendarController,
           requestedTaskFocus: _requestedTaskFocus,
           requestedSubTab: _requestedTasksSubTab,
+          shellController: _shellController,
           onOpenCalendarDate: (CalendarDate date) {
             _state.calendarController.setSelectedCalendarDate(date);
             _shellController.selectTab(DaywellTabId.calendar);
@@ -475,6 +481,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           projectsController: _state.projectsController,
           dailyRhythmController: _state.dailyRhythmController,
           notesController: _state.notesController,
+          shellController: _shellController,
           onOpenTasks: () => _shellController.selectTab(DaywellTabId.tasks),
           onOpenTask: (String taskId) {
             setState(() {
@@ -497,6 +504,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           projectsController: _state.projectsController,
           calendarController: _state.calendarController,
           requestedNoteFocus: _requestedNoteFocus,
+          shellController: _shellController,
           onRegisterPendingSaveFlush: (handler) {
             _flushNotesPendingEdits = handler;
           },
@@ -517,6 +525,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
           controller: _state.financeController,
           dailyRhythmController: _state.dailyRhythmController,
           requestedTab: _requestedFinanceTab,
+          shellController: _shellController,
           onOpenQuickCapture: () => _openQuickCapture(),
         );
       case DaywellTabId.more:
@@ -698,6 +707,7 @@ class _MainDaywellScreenState extends State<MainDaywellScreen> {
       shellController: _shellController,
       tabBuilder: _buildTabPage,
       secondaryRouteBuilder: _buildSecondaryRoute,
+      onExitApp: widget.onExitApp,
     );
   }
 }

@@ -2264,8 +2264,8 @@ export class SharedStateBridge {
   public static readonly LEGACY_OMITTED_SNAPSHOT_FORMAT_VERSION = 1;
   public static readonly MIN_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 1;
   public static readonly MAX_SUPPORTED_SNAPSHOT_FORMAT_VERSION = 2;
-  public static readonly SUPPORTED_DATABASE_SCHEMA_VERSION = 12;
-  public static readonly MAX_SUPPORTED_DATABASE_SCHEMA_VERSION = 12;
+  public static readonly SUPPORTED_DATABASE_SCHEMA_VERSION = 13;
+  public static readonly MAX_SUPPORTED_DATABASE_SCHEMA_VERSION = 13;
   public static readonly MIN_SUPPORTED_CANONICAL_SCHEMA_VERSION = 4;
   public static readonly MAX_SUPPORTED_CANONICAL_SCHEMA_VERSION = 9;
   public static readonly SUPPORTED_FINANCE_SCHEMA_VERSION = 7;

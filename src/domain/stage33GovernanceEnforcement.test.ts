@@ -142,8 +142,8 @@ describe('GOVERNANCE STAGE 3.3: ARCHITECTURE BOUNDARIES, MIGRATION COMPATIBILITY
 
     const migRes = checkMigrationCompatibility({ rootDir: REPO_ROOT, silent: true });
     assert.strictEqual(migRes.passed, true);
-    assert.strictEqual(migRes.schemaVersion, 12);
-    assert.deepStrictEqual(migRes.upgradeSteps, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    assert.strictEqual(migRes.schemaVersion, 13);
+    assert.deepStrictEqual(migRes.upgradeSteps, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     assert.strictEqual(migRes.downgradeMode, 'on-upgrade-explicit-throw-fail-closed');
 
     const foundRes = checkFoundation({ rootDir: REPO_ROOT, silent: true });
@@ -366,12 +366,12 @@ describe('GOVERNANCE STAGE 3.3: ARCHITECTURE BOUNDARIES, MIGRATION COMPATIBILITY
       const dbPath = path.join(decDir, 'flutter_app/lib/data/database/app_database.dart');
       fs.writeFileSync(
         dbPath,
-        fs.readFileSync(dbPath, 'utf8').replace('int get schemaVersion => 12;', 'int get schemaVersion => 11;'),
+        fs.readFileSync(dbPath, 'utf8').replace('int get schemaVersion => 13;', 'int get schemaVersion => 12;'),
         'utf8'
       );
       assert.throws(
         () => checkMigrationCompatibility({ rootDir: decDir, silent: true }),
-        /below minimumSchemaVersion=12/
+        /below minimumSchemaVersion=13/
       );
     } finally {
       fs.rmSync(decDir, { recursive: true, force: true });
@@ -410,34 +410,34 @@ describe('GOVERNANCE STAGE 3.3: ARCHITECTURE BOUNDARIES, MIGRATION COMPATIBILITY
       fs.rmSync(orderDir, { recursive: true, force: true });
     }
 
-    // 4d. Bumping schemaVersion => 13 without `if (from < 13)` fails, and adding `if (from < 13)` passes
+    // 4d. Bumping schemaVersion => 14 without `if (from < 14)` fails, and adding `if (from < 14)` passes
     const bumpDir = createMigrationTestRepo();
     try {
       const dbPath = path.join(bumpDir, 'flutter_app/lib/data/database/app_database.dart');
       const orig = fs.readFileSync(dbPath, 'utf8');
       fs.writeFileSync(
         dbPath,
-        orig.replace('int get schemaVersion => 12;', 'int get schemaVersion => 13;'),
+        orig.replace('int get schemaVersion => 13;', 'int get schemaVersion => 14;'),
         'utf8'
       );
       assert.throws(
         () => checkMigrationCompatibility({ rootDir: bumpDir, silent: true }),
-        /missing required sequential upgrade branch "if \(from < 13\)"/
+        /missing required sequential upgrade branch "if \(from < 14\)"/
       );
 
       fs.writeFileSync(
         dbPath,
         orig
-          .replace('int get schemaVersion => 12;', 'int get schemaVersion => 13;')
+          .replace('int get schemaVersion => 13;', 'int get schemaVersion => 14;')
           .replace(
             '        }\n      },\n      beforeOpen: (details) async {',
-            '        }\n        if (from < 13) {\n          await customStatement("SELECT 1;");\n        }\n      },\n      beforeOpen: (details) async {'
+            '        }\n        if (from < 14) {\n          await customStatement("SELECT 1;");\n        }\n      },\n      beforeOpen: (details) async {'
           ),
         'utf8'
       );
       const res = checkMigrationCompatibility({ rootDir: bumpDir, silent: true });
-      assert.strictEqual(res.schemaVersion, 13);
-      assert.deepStrictEqual(res.upgradeSteps, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+      assert.strictEqual(res.schemaVersion, 14);
+      assert.deepStrictEqual(res.upgradeSteps, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]);
     } finally {
       fs.rmSync(bumpDir, { recursive: true, force: true });
     }

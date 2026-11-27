@@ -43,10 +43,10 @@ class FinanceSetupWizard extends StatefulWidget {
   });
 
   @override
-  State<FinanceSetupWizard> createState() => _FinanceSetupWizardState();
+  State<FinanceSetupWizard> createState() => FinanceSetupWizardState();
 }
 
-class _FinanceSetupWizardState extends State<FinanceSetupWizard> {
+class FinanceSetupWizardState extends State<FinanceSetupWizard> {
   int _step = 1;
   bool _isSaving = false;
   String? _errorText;
@@ -55,6 +55,17 @@ class _FinanceSetupWizardState extends State<FinanceSetupWizard> {
   final TextEditingController _customBalanceController =
       TextEditingController();
   AccountSubType _customSubType = AccountSubType.bank;
+
+  bool get canStepBack => _step > 1 && !_isSaving;
+
+  bool handleBackStep() {
+    if (!canStepBack) return false;
+    setState(() {
+      _errorText = null;
+      _step--;
+    });
+    return true;
+  }
 
   @override
   void initState() {

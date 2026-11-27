@@ -809,7 +809,7 @@ class DatabasePersistenceCoordinator {
   static const int legacyOmittedSnapshotFormatVersion = 1;
   static const int minSupportedSnapshotFormatVersion = 1;
   static const int maxSupportedSnapshotFormatVersion = 2;
-  static const int maxSupportedDatabaseSchemaVersion = 12;
+  static const int maxSupportedDatabaseSchemaVersion = 13;
   static const int minSupportedCanonicalSnapshotVersion = 4;
   static const int maxSupportedCanonicalSnapshotVersion = 9;
   static const int legacyOmittedSnapshotVersion = 5;

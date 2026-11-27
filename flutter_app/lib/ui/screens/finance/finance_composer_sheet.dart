@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -83,9 +85,55 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   bool _showNewPartyField = false;
   bool _isSaving = false;
   bool _didSubmit = false;
+  bool _isPromptingDiscard = false;
   String? _validationError;
 
+  late FinanceComposerMode _initialMode;
+  late String _initialAmount;
+  late String _initialFee;
+  late String _initialTheirShare;
+  late String _initialDescription;
+  late String _initialPayee;
+  late String _initialCorrectionReason;
+  late String _initialNewParty;
+  late CalendarDate _initialSelectedDate;
+  late CalendarDate _initialMovementDate;
+  late bool _initialIsMovementDateSynced;
+  CalendarDate? _initialDueDate;
+  String? _initialAccountId;
+  String? _initialDestinationAccountId;
+  String? _initialCategoryId;
+  String? _initialFeeCategoryId;
+  String? _initialPartyId;
+  bool _lastHasUnsavedChanges = false;
+
   bool get _isEditing => widget.editingEntry != null;
+
+  bool get _hasUnsavedChanges {
+    if (_didSubmit) return false;
+    final hasTextChanges = _amountCtrl.text.trim() != _initialAmount ||
+        _feeCtrl.text.trim() != _initialFee ||
+        _theirShareCtrl.text.trim() != _initialTheirShare ||
+        _descriptionCtrl.text.trim() != _initialDescription ||
+        _payeeCtrl.text.trim() != _initialPayee ||
+        _correctionReasonCtrl.text.trim() != _initialCorrectionReason ||
+        _newPartyCtrl.text.trim() != _initialNewParty;
+    final hasDateChanges =
+        _selectedDate != _initialSelectedDate ||
+            _movementDate != _initialMovementDate ||
+            _isMovementDateSynced != _initialIsMovementDateSynced ||
+            _dueDate != _initialDueDate;
+    if (_isEditing) {
+      final hasSelectionChanges = _mode != _initialMode ||
+          _accountId != _initialAccountId ||
+          _destinationAccountId != _initialDestinationAccountId ||
+          _categoryId != _initialCategoryId ||
+          _feeCategoryId != _initialFeeCategoryId ||
+          _partyId != _initialPartyId;
+      return hasTextChanges || hasDateChanges || hasSelectionChanges;
+    }
+    return hasTextChanges || hasDateChanges;
+  }
 
   bool get _modeUsesCategory =>
       _mode == FinanceComposerMode.expense ||
@@ -130,9 +178,21 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
 
   void _onControllerTextChanged() {
     if (!mounted) return;
+    final nextHasUnsaved = _hasUnsavedChanges;
     if (_mode == FinanceComposerMode.expense ||
         _mode == FinanceComposerMode.transfer ||
-        _mode == FinanceComposerMode.split) {
+        _mode == FinanceComposerMode.split ||
+        nextHasUnsaved != _lastHasUnsavedChanges) {
+      _lastHasUnsavedChanges = nextHasUnsaved;
+      setState(() {});
+    }
+  }
+
+  void _onSecondaryTextChanged() {
+    if (!mounted) return;
+    final nextHasUnsaved = _hasUnsavedChanges;
+    if (nextHasUnsaved != _lastHasUnsavedChanges) {
+      _lastHasUnsavedChanges = nextHasUnsaved;
       setState(() {});
     }
   }
@@ -158,6 +218,10 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     _amountCtrl.addListener(_onControllerTextChanged);
     _feeCtrl.addListener(_onControllerTextChanged);
     _theirShareCtrl.addListener(_onControllerTextChanged);
+    _descriptionCtrl.addListener(_onSecondaryTextChanged);
+    _payeeCtrl.addListener(_onSecondaryTextChanged);
+    _correctionReasonCtrl.addListener(_onSecondaryTextChanged);
+    _newPartyCtrl.addListener(_onSecondaryTextChanged);
 
     final activeParties =
         state.parties.where((p) => !p.isArchived).toList(growable: false);
@@ -173,6 +237,24 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       _syncAccountsForMode();
       _syncDefaultCategory();
     }
+
+    _initialMode = _mode;
+    _initialAmount = _amountCtrl.text.trim();
+    _initialFee = _feeCtrl.text.trim();
+    _initialTheirShare = _theirShareCtrl.text.trim();
+    _initialDescription = _descriptionCtrl.text.trim();
+    _initialPayee = _payeeCtrl.text.trim();
+    _initialCorrectionReason = _correctionReasonCtrl.text.trim();
+    _initialNewParty = _newPartyCtrl.text.trim();
+    _initialSelectedDate = _selectedDate;
+    _initialMovementDate = _movementDate;
+    _initialIsMovementDateSynced = _isMovementDateSynced;
+    _initialDueDate = _dueDate;
+    _initialAccountId = _accountId;
+    _initialDestinationAccountId = _destinationAccountId;
+    _initialCategoryId = _categoryId;
+    _initialFeeCategoryId = _feeCategoryId;
+    _initialPartyId = _partyId;
   }
 
   void _syncAccountsForMode() {
@@ -391,6 +473,10 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     _amountCtrl.removeListener(_onControllerTextChanged);
     _feeCtrl.removeListener(_onControllerTextChanged);
     _theirShareCtrl.removeListener(_onControllerTextChanged);
+    _descriptionCtrl.removeListener(_onSecondaryTextChanged);
+    _payeeCtrl.removeListener(_onSecondaryTextChanged);
+    _correctionReasonCtrl.removeListener(_onSecondaryTextChanged);
+    _newPartyCtrl.removeListener(_onSecondaryTextChanged);
     _amountCtrl.dispose();
     _feeCtrl.dispose();
     _theirShareCtrl.dispose();
@@ -399,6 +485,31 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     _correctionReasonCtrl.dispose();
     _newPartyCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _handlePopBlocked() async {
+    if (_isSaving || _isPromptingDiscard || !mounted) return;
+    _isPromptingDiscard = true;
+    try {
+      final action = await DaywellUnsavedChangesDialog.show(
+        context,
+        title: _isEditing ? 'Discard Correction?' : 'Discard Entry?',
+        message: _isEditing
+            ? 'Save this ledger correction or discard your changes?'
+            : 'Save this ledger entry or discard your changes?',
+        saveLabel: _isEditing ? 'Save Correction' : 'Save',
+        discardLabel: 'Discard',
+      );
+      if (!mounted) return;
+      if (action == DaywellUnsavedChangesAction.save) {
+        await _submit();
+      } else if (action == DaywellUnsavedChangesAction.discard) {
+        setState(() => _didSubmit = true);
+        Navigator.of(context).pop(false);
+      }
+    } finally {
+      _isPromptingDiscard = false;
+    }
   }
 
   Future<void> _submit() async {
@@ -866,33 +977,44 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     final theirSharePreviewCents =
         FinanceUiFormatters.parseEtbToCents(_theirShareCtrl.text) ?? 0;
 
-    return Padding(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.viewInsetsOf(context).bottom,
-      ),
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _isEditing ? 'Correct Ledger Entry' : 'Record Ledger Entry',
-                    style: textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.bold,
+    return PopScope<Object?>(
+      canPop: !_hasUnsavedChanges && !_isSaving,
+      onPopInvokedWithResult: (bool didPop, Object? _) {
+        if (!didPop) {
+          unawaited(_handlePopBlocked());
+        }
+      },
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _isEditing
+                          ? 'Correct Ledger Entry'
+                          : 'Record Ledger Entry',
+                      style: textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                DaywellIconButton(
-                  icon: Icons.close,
-                  tooltip: 'Close',
-                  onPressed: () => Navigator.of(context).pop(false),
-                ),
-              ],
-            ),
+                  DaywellIconButton(
+                    icon: Icons.close,
+                    tooltip: 'Close',
+                    onPressed: _isSaving
+                        ? null
+                        : () => Navigator.of(context).maybePop(false),
+                  ),
+                ],
+              ),
             if (!_isEditing) ...[
               const SizedBox(height: SharedDesignTokens.spacingSm),
               Wrap(
@@ -1309,6 +1431,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           ],
         ),
       ),
+    ),
     );
   }
 }

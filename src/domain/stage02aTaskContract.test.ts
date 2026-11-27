@@ -31,7 +31,7 @@ describe('STAGE 0.2A — CANONICAL TASK DATA CONTRACT ALIGNMENT', () => {
     );
 
     assert.strictEqual(contracts.version, '2.0.0');
-    assert.strictEqual(contracts.schemaVersion, 12);
+    assert.strictEqual(contracts.schemaVersion, 13);
     assert.strictEqual(contracts.timeConvention.id, 'Africa/Addis_Ababa');
     assert.strictEqual(contracts.timeConvention.fixedUtcOffsetMinutes, 180);
 

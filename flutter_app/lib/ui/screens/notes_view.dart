@@ -22,6 +22,7 @@ import '../../application/tasks/tasks_controller.dart';
 import '../../services/export/note_markdown_io_service.dart';
 import '../app_state.dart';
 import '../widgets/notes/note_markdown_preview.dart';
+import '../shell/daywell_shell_routes.dart';
 import '../widgets/shared_ui_widgets.dart';
 
 typedef _NoteDraftSnapshot = ({
@@ -160,6 +161,7 @@ class NotesView extends StatefulWidget {
   final void Function(CalendarEventEntity event)? onOpenCalendarEvent;
   final void Function(Future<bool> Function()? flushHandler)?
       onRegisterPendingSaveFlush;
+  final DaywellShellController? shellController;
 
   const NotesView({
     super.key,
@@ -172,6 +174,7 @@ class NotesView extends StatefulWidget {
     this.onOpenTask,
     this.onOpenCalendarEvent,
     this.onRegisterPendingSaveFlush,
+    this.shellController,
   }) : assert(state != null || controller != null,
             'Either state or controller must be provided to NotesView');
 
@@ -206,26 +209,139 @@ class _NotesViewState extends State<NotesView> {
       GlobalKey<_NoteEditorSurfaceState>();
   GlobalKey<_NoteEditorSurfaceState>? _activeNarrowEditorKey;
   ModalRoute<void>? _activeNarrowRoute;
+  final List<String> _sectionHistory = <String>['active'];
+  bool _isPoppingSection = false;
+  NotesController? _listeningNotesController;
 
   @override
   void initState() {
     super.initState();
+    _listeningNotesController = widget.effectiveController;
+    _syncSectionHistory(_listeningNotesController!.state.sectionFilter);
+    _listeningNotesController!.addListener(_onNotesControllerChanged);
     _searchController = TextEditingController(
       text: widget.effectiveController.state.searchQuery,
     );
     widget.onRegisterPendingSaveFlush?.call(_flushActiveEditorEdits);
+    widget.shellController?.registerTabBackHandler(
+      DaywellTabId.notes,
+      _handleModuleBack,
+    );
     _scheduleNoteFocusIfNeeded();
   }
 
   @override
   void didUpdateWidget(covariant NotesView oldWidget) {
     super.didUpdateWidget(oldWidget);
+    final nextNotesController = widget.effectiveController;
+    if (!identical(_listeningNotesController, nextNotesController)) {
+      _listeningNotesController?.removeListener(_onNotesControllerChanged);
+      _listeningNotesController = nextNotesController;
+      _sectionHistory
+        ..clear()
+        ..add('active');
+      _syncSectionHistory(nextNotesController.state.sectionFilter);
+      nextNotesController.addListener(_onNotesControllerChanged);
+    }
+    if (!identical(widget.shellController, oldWidget.shellController)) {
+      oldWidget.shellController?.unregisterTabBackHandler(
+        DaywellTabId.notes,
+        _handleModuleBack,
+      );
+      widget.shellController?.registerTabBackHandler(
+        DaywellTabId.notes,
+        _handleModuleBack,
+      );
+    }
     if (widget.onRegisterPendingSaveFlush !=
         oldWidget.onRegisterPendingSaveFlush) {
       oldWidget.onRegisterPendingSaveFlush?.call(null);
       widget.onRegisterPendingSaveFlush?.call(_flushActiveEditorEdits);
     }
     _scheduleNoteFocusIfNeeded();
+  }
+
+  void _onNotesControllerChanged() {
+    if (_isPoppingSection) return;
+    final ctrl = _listeningNotesController;
+    if (ctrl == null) return;
+    _syncSectionHistory(ctrl.state.sectionFilter);
+  }
+
+  void _syncSectionHistory(String section) {
+    if (section == 'active') {
+      _sectionHistory
+        ..clear()
+        ..add('active');
+      return;
+    }
+    if (_sectionHistory.isEmpty) {
+      _sectionHistory.add('active');
+    }
+    if (_sectionHistory.last != section) {
+      _sectionHistory.remove(section);
+      _sectionHistory.add(section);
+    }
+  }
+
+  Future<bool> _handleModuleBack() async {
+    if (!mounted) return false;
+    if (_isWideLayout && (_selectedNoteId != null || _isNewDraftSelected)) {
+      final surface = _editorSurfaceKey.currentState;
+      if (surface != null && surface.hasPendingChanges) {
+        final flushed = await surface.flushPendingSaves();
+        if (!mounted) return true;
+        if (!flushed || surface.hasPendingChanges) {
+          final action = await DaywellUnsavedChangesDialog.show(
+            context,
+            title: 'Unsaved Note Changes',
+            message:
+                'Your latest edits could not be saved yet. Retry saving or discard changes?',
+            saveLabel: 'Retry Save',
+            discardLabel: 'Discard',
+            cancelLabel: 'Cancel',
+          );
+          if (!mounted) return true;
+          switch (action) {
+            case DaywellUnsavedChangesAction.cancel:
+              return true;
+            case DaywellUnsavedChangesAction.save:
+              final retryOk = await surface.flushPendingSaves();
+              if (!mounted) return true;
+              if (!retryOk || surface.hasPendingChanges) {
+                return true;
+              }
+              await _selectWideDetailTarget(clearSelection: true);
+              return true;
+            case DaywellUnsavedChangesAction.discard:
+              surface.discardPendingEditsForWideClose();
+              setState(() {
+                _selectedNoteId = null;
+                _isNewDraftSelected = false;
+                _detailPreviewMode = false;
+                _editorSessionToken++;
+              });
+              return true;
+          }
+        }
+      }
+      await _selectWideDetailTarget(clearSelection: true);
+      return true;
+    }
+
+    if (_sectionHistory.length > 1) {
+      _sectionHistory.removeLast();
+      final previousSection = _sectionHistory.last;
+      _isPoppingSection = true;
+      try {
+        widget.effectiveController.setSectionFilter(previousSection);
+      } finally {
+        _isPoppingSection = false;
+      }
+      return true;
+    }
+
+    return false;
   }
 
   Future<bool> _flushActiveEditorEdits() async {
@@ -414,6 +530,11 @@ class _NotesViewState extends State<NotesView> {
 
   @override
   void dispose() {
+    widget.shellController?.unregisterTabBackHandler(
+      DaywellTabId.notes,
+      _handleModuleBack,
+    );
+    _listeningNotesController?.removeListener(_onNotesControllerChanged);
     widget.onRegisterPendingSaveFlush?.call(null);
     _searchController.dispose();
     super.dispose();
@@ -2467,6 +2588,11 @@ class _NoteEditorSurfaceState extends State<_NoteEditorSurface> {
       _editRevision > _savedRevision || _saveErrorMessage != null;
 
   Future<bool> flushPendingSaves() => _flushPendingSaves();
+
+  void discardPendingEditsForWideClose() {
+    _autosaveTimer?.cancel();
+    _allowDiscardOnNextPop = true;
+  }
 
   NoteChecklistLineStatus? _resolveActiveWriteChecklist(
     TextEditingValue value,

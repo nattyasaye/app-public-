@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "governedBy": "docs/architecture/decisions/ADR-007-mandatory-backward-compatibility.md",
   "appDatabasePath": "flutter_app/lib/data/database/app_database.dart",
-  "minimumSchemaVersion": 12,
+  "minimumSchemaVersion": 13,
   "downgradePolicy": "on-upgrade-explicit-throw-fail-closed",
   "forbiddenDestructivePatterns": [
     "fallbackToDestructiveMigration"
@@ -100,16 +100,22 @@
       "requiredMarkers": [
         "m.createTable(dailyRhythmDays)"
       ]
+    },
+    {
+      "version": 13,
+      "requiredMarkers": [
+        "m.createTable(smsDraftsTable)"
+      ]
     }
   ],
   "verifiedHistoricalNotes": [
-    "AppDatabase.schemaVersion is 12 (Stage B Daily Rhythm persistence v12 schema baseline) and released onUpgrade branches execute sequentially in ascending order for from < 2 through from < 12.",
+    "AppDatabase.schemaVersion is 13 (Stage 5 Finance SMS Drafts local staging v13 schema baseline) and released onUpgrade branches execute sequentially in ascending order for from < 2 through from < 13.",
     "AppDatabase.migration.onUpgrade enforces an explicit fail-closed if (from > to) guard throwing UnsupportedDatabaseVersionException before any from < N branch or createPerformanceIndices() runs (Drift MigrationStrategy has no onDowngrade callback).",
     "SQLite runtime execution of Flutter migration tests and build_runner regeneration of app_database.g.dart require Flutter SDK / Dart / SQLite native bindings in CI (not available locally in this container)."
   ],
   "knownUnresolvedCompatibilityGaps": {
-    "snapshotUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and updated in Stage B: DatabasePersistenceCoordinator and SharedStateBridge emit canonical exchange schemaVersion 5 + snapshotFormatVersion 2 (with databaseSchemaVersion 12 on Flutter and financeSchemaVersion 7 on Web), accept exchange schemaVersion 4..9 (omitted default 5), snapshotFormatVersion 1..2 (omitted default 1), and optional databaseSchemaVersion 1..12 (format-2 accepts 9, 10, 11, or 12), and reject future (>9 exchange / snapshotFormatVersion>2 / databaseSchemaVersion>=13) and malformed payloads fail-closed before mutation. Flutter runtime verification remains CI-pending.",
-    "backupUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and updated in Stage B: EncryptionBackupService exports header.schema_version 5 matching inner exchange schemaVersion 5 (+ snapshotFormatVersion 2, databaseSchemaVersion 12) and together with Web backupCrypto.ts validates format_version 1, PBKDF2-HMAC-SHA256, exact 100000 iterations, envelope headers, and inner bounds (exchange 4..9, snapshotFormatVersion 1..2, optional databaseSchemaVersion 1..12 on Flutter; LocalDatabaseState v3 on Web) fail-closed before decryption or quarantine. Flutter runtime verification remains CI-pending.",
-    "legacySeedAndBridgeSchemaVersion5": "Resolved by version-domain separation in Projects Stage 1.1 and maintained in Stage B (ADR-007 / ADR-009): canonical_seed_database.json, DatabasePersistenceCoordinator.exportSnapshot(), and SharedStateBridge emit canonical exchange schemaVersion=5 (+ snapshotFormatVersion=2, databaseSchemaVersion=12 on Flutter, financeSchemaVersion=7 on Web) while AppDatabase and schema_contracts.json advance independently at schemaVersion=12."
+    "snapshotUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and updated in Stage 5: DatabasePersistenceCoordinator and SharedStateBridge emit canonical exchange schemaVersion 5 + snapshotFormatVersion 2 (with databaseSchemaVersion 13 on Flutter and financeSchemaVersion 7 on Web), accept exchange schemaVersion 4..9 (omitted default 5), snapshotFormatVersion 1..2 (omitted default 1), and optional databaseSchemaVersion 1..13 (format-2 accepts 9, 10, 11, 12, or 13), and reject future (>9 exchange / snapshotFormatVersion>2 / databaseSchemaVersion>=14) and malformed payloads fail-closed before mutation. Local-only sms_drafts_table drafts (including rawSmsText) remain intentionally excluded from portable snapshots. Flutter runtime verification remains CI-pending.",
+    "backupUpperBoundVersionRejection": "Implemented in Stage 3.4.2 and updated in Stage 5: EncryptionBackupService exports header.schema_version 5 matching inner exchange schemaVersion 5 (+ snapshotFormatVersion 2, databaseSchemaVersion 13) and together with Web backupCrypto.ts validates format_version 1, PBKDF2-HMAC-SHA256, exact 100000 iterations, envelope headers, and inner bounds (exchange 4..9, snapshotFormatVersion 1..2, optional databaseSchemaVersion 1..13 on Flutter; LocalDatabaseState v3 on Web) fail-closed before decryption or quarantine. Flutter runtime verification remains CI-pending.",
+    "legacySeedAndBridgeSchemaVersion5": "Resolved by version-domain separation in Projects Stage 1.1 and maintained in Stage 5 (ADR-007 / ADR-009): canonical_seed_database.json, DatabasePersistenceCoordinator.exportSnapshot(), and SharedStateBridge emit canonical exchange schemaVersion=5 (+ snapshotFormatVersion=2, databaseSchemaVersion=13 on Flutter, financeSchemaVersion=7 on Web) while AppDatabase and schema_contracts.json advance independently at schemaVersion=13."
   }
 }

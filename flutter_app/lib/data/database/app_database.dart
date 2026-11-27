@@ -41,6 +41,7 @@ part 'app_database.g.dart';
   ProjectTrackingRecords,
   DailyPlanningEntries,
   DailyRhythmDays,
+  SmsDraftsTable,
 ])
 class AppDatabase extends _$AppDatabase {
   static const String seedSentinelKey = 'initial_seed_completed';
@@ -50,7 +51,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? e]) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 12;
+  int get schemaVersion => 13;
 
   @override
   MigrationStrategy get migration {
@@ -638,6 +639,23 @@ class AppDatabase extends _$AppDatabase {
             );
           }
         }
+        if (from < 13) {
+          // Schema v12 -> v13: Non-destructive Finance SMS Drafts staging table
+          await _createTableIfMissing(
+            table: 'sms_drafts_table',
+            createFn: () => m.createTable(smsDraftsTable),
+          );
+          await _createV13SmsDraftPerformanceIndices();
+
+          final fkViolations =
+              await customSelect('PRAGMA foreign_key_check').get();
+          if (fkViolations.isNotEmpty) {
+            throw LedgerMigrationException(
+              'Schema v13 upgrade aborted due to foreign key violations '
+              '(${fkViolations.length} row(s)).',
+            );
+          }
+        }
       },
       beforeOpen: (details) async {
         // Enforce foreign key constraints in SQLite
@@ -1005,6 +1023,13 @@ class AppDatabase extends _$AppDatabase {
     if (dailyRhythmTableRows.isNotEmpty) {
       await _createV12DailyRhythmPerformanceIndices();
     }
+    final smsDraftsTableRows = await customSelect(
+      "SELECT name FROM sqlite_master WHERE type='table' "
+      "AND name = 'sms_drafts_table';",
+    ).get();
+    if (smsDraftsTableRows.isNotEmpty) {
+      await _createV13SmsDraftPerformanceIndices();
+    }
   }
 
   Future<void> _createV9ProjectPerformanceIndices() async {
@@ -1060,6 +1085,21 @@ class AppDatabase extends _$AppDatabase {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_daily_rhythm_days_updated_at '
       'ON daily_rhythm_days(updated_at);',
+    );
+  }
+
+  Future<void> _createV13SmsDraftPerformanceIndices() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_sms_drafts_status_received '
+      'ON sms_drafts_table(status, received_at_utc);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_sms_drafts_provider_ref '
+      'ON sms_drafts_table(provider, transaction_reference);',
+    );
+    await customStatement(
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_sms_drafts_fingerprint '
+      'ON sms_drafts_table(fingerprint);',
     );
   }
 

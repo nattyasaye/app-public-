@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'daywell_shell_routes.dart';
 
@@ -9,9 +11,10 @@ import 'daywell_shell_routes.dart';
 /// and [NavigationRail] on medium/expanded widths (>= 600dp), keeps the
 /// content subtree keyed at an identical depth across layouts so visited tab
 /// states survive breakpoint resizing, disables [HeroMode] on inactive/covered
-/// tabs to prevent duplicate FAB hero tag assertions, and unwinds secondary
-/// routes cleanly via [PopScope].
-class DaywellAdaptiveScaffold extends StatelessWidget {
+/// tabs to prevent duplicate FAB hero tag assertions, and coordinates Android
+/// system-back navigation across secondary routes, active modules, main-tab
+/// history, and Today root double-back-to-exit via [PopScope].
+class DaywellAdaptiveScaffold extends StatefulWidget {
   static const double wideBreakpoint = 600.0;
   static const double compactRailMinHeight = 440.0;
   static const ValueKey<String> _contentSlotKey =
@@ -21,6 +24,7 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
   final Widget Function(DaywellTabId tab) tabBuilder;
   final Widget Function(DaywellSecondaryRoute route) secondaryRouteBuilder;
   final List<DaywellDestinationSpec> destinations;
+  final Future<void> Function()? onExitApp;
 
   const DaywellAdaptiveScaffold({
     super.key,
@@ -28,7 +32,49 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
     required this.tabBuilder,
     required this.secondaryRouteBuilder,
     this.destinations = kDaywellPrimaryDestinations,
+    this.onExitApp,
   });
+
+  @override
+  State<DaywellAdaptiveScaffold> createState() =>
+      _DaywellAdaptiveScaffoldState();
+}
+
+class _DaywellAdaptiveScaffoldState extends State<DaywellAdaptiveScaffold> {
+  bool _isHandlingSystemBack = false;
+
+  Future<void> _handleSystemBack() async {
+    if (_isHandlingSystemBack) return;
+    _isHandlingSystemBack = true;
+    try {
+      final outcome = await widget.shellController.handleSystemBack();
+      if (!mounted) return;
+      switch (outcome) {
+        case DaywellShellBackOutcome.handledSecondaryRoute:
+        case DaywellShellBackOutcome.handledByModule:
+        case DaywellShellBackOutcome.handledTabHistory:
+          return;
+        case DaywellShellBackOutcome.promptExitApp:
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          messenger?.hideCurrentSnackBar();
+          messenger?.showSnackBar(
+            SnackBar(
+              content: const Text('Press back again to exit'),
+              duration: widget.shellController.exitConfirmWindow,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        case DaywellShellBackOutcome.exitApp:
+          ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
+          final exitFn = widget.onExitApp ?? () => SystemNavigator.pop();
+          await exitFn();
+          return;
+      }
+    } finally {
+      _isHandlingSystemBack = false;
+    }
+  }
 
   Widget _buildNavigationRail(int selectedIndex) {
     return LayoutBuilder(
@@ -36,12 +82,12 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
         final rail = NavigationRail(
           selectedIndex: selectedIndex,
           onDestinationSelected: (int index) =>
-              shellController.selectDestinationAt(
+              widget.shellController.selectDestinationAt(
             index,
-            destinations: destinations,
+            destinations: widget.destinations,
           ),
           labelType: NavigationRailLabelType.all,
-          destinations: destinations
+          destinations: widget.destinations
               .map(
                 (DaywellDestinationSpec dest) => NavigationRailDestination(
                   icon: Icon(dest.icon),
@@ -52,13 +98,17 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
               .toList(growable: false),
         );
 
-        if (railConstraints.maxHeight >= compactRailMinHeight) {
+        if (railConstraints.maxHeight >=
+            DaywellAdaptiveScaffold.compactRailMinHeight) {
           return rail;
         }
 
         return SingleChildScrollView(
           child: SizedBox(
-            height: math.max(railConstraints.maxHeight, compactRailMinHeight),
+            height: math.max(
+              railConstraints.maxHeight,
+              DaywellAdaptiveScaffold.compactRailMinHeight,
+            ),
             child: rail,
           ),
         );
@@ -69,11 +119,12 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: shellController,
+      listenable: widget.shellController,
       builder: (BuildContext context, Widget? _) {
-        final secondaryRoute = shellController.activeSecondaryRoute;
+        final secondaryRoute = widget.shellController.activeSecondaryRoute;
         final hasSecondary = secondaryRoute != null;
-        final selectedIndex = shellController.indexIn(destinations);
+        final selectedIndex =
+            widget.shellController.indexIn(widget.destinations);
 
         final Widget tabStack = Visibility(
           visible: !hasSecondary,
@@ -81,17 +132,17 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
           child: IndexedStack(
             index: selectedIndex,
             children: List<Widget>.generate(
-              destinations.length,
+              widget.destinations.length,
               (int index) {
-                final tab = destinations[index].id;
-                if (!shellController.hasVisited(tab)) {
+                final tab = widget.destinations[index].id;
+                if (!widget.shellController.hasVisited(tab)) {
                   return const SizedBox.shrink();
                 }
                 final isActiveTab =
-                    !hasSecondary && shellController.currentTab == tab;
+                    !hasSecondary && widget.shellController.currentTab == tab;
                 return HeroMode(
                   enabled: isActiveTab,
-                  child: tabBuilder(tab),
+                  child: widget.tabBuilder(tab),
                 );
               },
               growable: false,
@@ -103,20 +154,21 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
           fit: StackFit.expand,
           children: [
             tabStack,
-            if (hasSecondary) secondaryRouteBuilder(secondaryRoute),
+            if (hasSecondary) widget.secondaryRouteBuilder(secondaryRoute),
           ],
         );
 
         return PopScope<Object?>(
-          canPop: !hasSecondary,
+          canPop: false,
           onPopInvokedWithResult: (bool didPop, Object? _) {
             if (!didPop) {
-              shellController.handleBackNavigation();
+              unawaited(_handleSystemBack());
             }
           },
           child: LayoutBuilder(
             builder: (BuildContext context, BoxConstraints constraints) {
-              final isWide = constraints.maxWidth >= wideBreakpoint;
+              final isWide = constraints.maxWidth >=
+                  DaywellAdaptiveScaffold.wideBreakpoint;
 
               return Scaffold(
                 body: SafeArea(
@@ -128,7 +180,7 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
                         const VerticalDivider(width: 1),
                       ],
                       Expanded(
-                        key: _contentSlotKey,
+                        key: DaywellAdaptiveScaffold._contentSlotKey,
                         child: contentHost,
                       ),
                     ],
@@ -139,11 +191,11 @@ class DaywellAdaptiveScaffold extends StatelessWidget {
                     : NavigationBar(
                         selectedIndex: selectedIndex,
                         onDestinationSelected: (int index) =>
-                            shellController.selectDestinationAt(
+                            widget.shellController.selectDestinationAt(
                           index,
-                          destinations: destinations,
+                          destinations: widget.destinations,
                         ),
-                        destinations: destinations
+                        destinations: widget.destinations
                             .map(
                               (DaywellDestinationSpec dest) =>
                                   NavigationDestination(

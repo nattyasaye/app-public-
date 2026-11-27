@@ -4,6 +4,7 @@ import '../../application/daily_rhythm/daily_rhythm_controller.dart';
 import '../../application/finance/finance_controller.dart';
 import '../../core/shared_foundation.dart';
 import '../app_state.dart';
+import '../shell/daywell_shell_routes.dart';
 import '../widgets/shared_ui_widgets.dart';
 import 'finance/finance_composer_sheet.dart';
 import 'finance/finance_overview_tab.dart';
@@ -18,6 +19,7 @@ class FinanceView extends StatefulWidget {
   final AppStateManager? state;
   final FinanceController? controller;
   final DailyRhythmController? dailyRhythmController;
+  final DaywellShellController? shellController;
   final VoidCallback? onOpenQuickCapture;
   final ({int tabIndex, int nonce})? requestedTab;
 
@@ -26,6 +28,7 @@ class FinanceView extends StatefulWidget {
     this.state,
     this.controller,
     this.dailyRhythmController,
+    this.shellController,
     this.onOpenQuickCapture,
     this.requestedTab,
   }) : assert(
@@ -46,6 +49,11 @@ class FinanceView extends StatefulWidget {
 class _FinanceViewState extends State<FinanceView>
     with SingleTickerProviderStateMixin {
   late final TabController _tabController;
+  final GlobalKey<FinanceSetupWizardState> _setupWizardKey =
+      GlobalKey<FinanceSetupWizardState>();
+  late final List<int> _tabHistory;
+  late int _lastRecordedTabIndex;
+  bool _isPoppingTab = false;
 
   @override
   void initState() {
@@ -56,11 +64,47 @@ class _FinanceViewState extends State<FinanceView>
       initialIndex: initialIndex,
       vsync: this,
     );
+    _tabHistory = <int>[initialIndex];
+    _lastRecordedTabIndex = initialIndex;
+    _tabController.addListener(_onTabChanged);
     widget.effectiveController.addListener(_onControllerChanged);
+    widget.shellController
+        ?.registerTabBackHandler(DaywellTabId.finance, _handleModuleBack);
   }
 
   void _onControllerChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _onTabChanged() {
+    final next = _tabController.index;
+    if (next == _lastRecordedTabIndex) return;
+    _lastRecordedTabIndex = next;
+    if (_isPoppingTab) return;
+    if (next == 0) {
+      _tabHistory
+        ..clear()
+        ..add(0);
+    } else {
+      _tabHistory.remove(next);
+      _tabHistory.add(next);
+    }
+  }
+
+  Future<bool> _handleModuleBack() async {
+    if (!widget.effectiveController.state.isSetupCompleted) {
+      return _setupWizardKey.currentState?.handleBackStep() ?? false;
+    }
+    if (_tabHistory.length > 1) {
+      _tabHistory.removeLast();
+      final previousIndex = _tabHistory.last;
+      _isPoppingTab = true;
+      _lastRecordedTabIndex = previousIndex;
+      _tabController.animateTo(previousIndex);
+      _isPoppingTab = false;
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -69,6 +113,12 @@ class _FinanceViewState extends State<FinanceView>
     if (oldWidget.effectiveController != widget.effectiveController) {
       oldWidget.effectiveController.removeListener(_onControllerChanged);
       widget.effectiveController.addListener(_onControllerChanged);
+    }
+    if (oldWidget.shellController != widget.shellController) {
+      oldWidget.shellController
+          ?.unregisterTabBackHandler(DaywellTabId.finance, _handleModuleBack);
+      widget.shellController
+          ?.registerTabBackHandler(DaywellTabId.finance, _handleModuleBack);
     }
     if (widget.requestedTab != null &&
         widget.requestedTab != oldWidget.requestedTab) {
@@ -81,7 +131,10 @@ class _FinanceViewState extends State<FinanceView>
 
   @override
   void dispose() {
+    widget.shellController
+        ?.unregisterTabBackHandler(DaywellTabId.finance, _handleModuleBack);
     widget.effectiveController.removeListener(_onControllerChanged);
+    _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     super.dispose();
   }
@@ -143,7 +196,10 @@ class _FinanceViewState extends State<FinanceView>
         loadingLabel: 'Loading double-entry ledger...',
         contentBuilder: (ctx) {
           if (!financeState.isSetupCompleted) {
-            return FinanceSetupWizard(controller: ctrl);
+            return FinanceSetupWizard(
+              key: _setupWizardKey,
+              controller: ctrl,
+            );
           }
 
           return Column(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -1225,118 +1227,171 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
       state.activeCategories,
       type: 'expense',
     );
-    String? catId = existing?.categoryId ??
+    final initialCatId = existing?.categoryId ??
         (categoryItems.isNotEmpty ? categoryItems.first.value : null);
-    final limitCtrl = TextEditingController(
-      text: existing != null
-          ? FinanceUiFormatters.formatCentsAsInput(existing.limitCents)
-          : '',
-    );
-    var rollover = existing?.rolloverEnabled ?? false;
+    final initialLimitText = existing != null
+        ? FinanceUiFormatters.formatCentsAsInput(existing.limitCents)
+        : '';
+    final initialRollover = existing?.rolloverEnabled ?? false;
+
+    String? catId = initialCatId;
+    final limitCtrl = TextEditingController(text: initialLimitText);
+    var rollover = initialRollover;
     String? error;
+    var didSave = false;
+    var isPromptingDiscard = false;
+    var lastDirty = false;
+    void Function(VoidCallback)? updateModal;
+
+    bool hasUnsaved() {
+      if (didSave) return false;
+      return limitCtrl.text.trim() != initialLimitText.trim() ||
+          catId != initialCatId ||
+          rollover != initialRollover;
+    }
+
+    limitCtrl.addListener(() {
+      final dirty = hasUnsaved();
+      if (dirty != lastDirty) {
+        lastDirty = dirty;
+        updateModal?.call(() {});
+      }
+    });
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetCtx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            left: SharedDesignTokens.spacingMd,
-            right: SharedDesignTokens.spacingMd,
-            top: SharedDesignTokens.spacingMd,
-            bottom: MediaQuery.viewInsetsOf(ctx).bottom +
-                SharedDesignTokens.spacingMd,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  existing == null
-                      ? 'Set Budget ($_budgetMonthIso)'
-                      : 'Edit Budget (${existing.monthIso})',
-                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
+        builder: (ctx, setModalState) {
+          updateModal = setModalState;
+
+          Future<void> submitBudget() async {
+            if (catId == null) {
+              setModalState(() => error = 'Select an expense category.');
+              return;
+            }
+            final cents = FinanceUiFormatters.parseEtbToCents(limitCtrl.text);
+            if (cents == null || cents <= 0) {
+              setModalState(
+                () => error = 'Enter a valid limit greater than 0.',
+              );
+              return;
+            }
+            await widget.controller.upsertBudget(
+              BudgetModel(
+                id: existing?.id ?? 'budget-${_uuid.v4()}',
+                categoryId: catId!,
+                monthIso: existing?.monthIso ?? _budgetMonthIso,
+                limitCents: cents,
+                rolloverEnabled: rollover,
+              ),
+            );
+            final err = widget.controller.state.errorMessage;
+            if (err != null) {
+              setModalState(() => error = err);
+              return;
+            }
+            didSave = true;
+            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+          }
+
+          return PopScope<Object?>(
+            canPop: !hasUnsaved(),
+            onPopInvokedWithResult: (bool didPop, Object? _) async {
+              if (didPop || isPromptingDiscard) return;
+              isPromptingDiscard = true;
+              try {
+                final action = await DaywellUnsavedChangesDialog.show(
+                  ctx,
+                  title: existing == null
+                      ? 'Discard Budget?'
+                      : 'Discard Budget Changes?',
+                  message: 'Save this budget or discard your changes?',
+                  saveLabel: 'Save Budget',
+                  discardLabel: 'Discard',
+                );
+                if (!ctx.mounted) return;
+                if (action == DaywellUnsavedChangesAction.save) {
+                  await submitBudget();
+                } else if (action == DaywellUnsavedChangesAction.discard) {
+                  didSave = true;
+                  if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                }
+              } finally {
+                isPromptingDiscard = false;
+              }
+            },
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: SharedDesignTokens.spacingMd,
+                right: SharedDesignTokens.spacingMd,
+                top: SharedDesignTokens.spacingMd,
+                bottom: MediaQuery.viewInsetsOf(ctx).bottom +
+                    SharedDesignTokens.spacingMd,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      existing == null
+                          ? 'Set Budget ($_budgetMonthIso)'
+                          : 'Edit Budget (${existing.monthIso})',
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    if (error != null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      DaywellStatusBanner(
+                        message: error!,
+                        tone: DaywellStatusTone.error,
                       ),
-                ),
-                if (error != null) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingSm),
-                  DaywellStatusBanner(
-                    message: error!,
-                    tone: DaywellStatusTone.error,
-                  ),
-                ],
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellDropdownField<String>(
-                  label: 'Expense Category',
-                  value: categoryItems.any((i) => i.value == catId)
-                      ? catId
-                      : (categoryItems.isNotEmpty
-                          ? categoryItems.first.value
-                          : null),
-                  items: categoryItems,
-                  onChanged: (v) => setModalState(() => catId = v),
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: limitCtrl,
-                  label: 'Monthly Limit (ETB)',
-                  hintText: '5000.00',
-                  isRequired: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                ),
-                DaywellSwitchTile(
-                  title: 'Enable Rollover',
-                  subtitle: 'Carry unused budget guidance forward',
-                  value: rollover,
-                  onChanged: (v) => setModalState(() => rollover = v),
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingMd),
-                DaywellButton(
-                  label: 'Save Budget',
-                  fullWidth: true,
-                  onPressed: () async {
-                    if (catId == null) {
-                      setModalState(
-                          () => error = 'Select an expense category.');
-                      return;
-                    }
-                    final cents = FinanceUiFormatters.parseEtbToCents(
-                      limitCtrl.text,
-                    );
-                    if (cents == null || cents <= 0) {
-                      setModalState(
-                        () => error = 'Enter a valid limit greater than 0.',
-                      );
-                      return;
-                    }
-                    await widget.controller.upsertBudget(
-                      BudgetModel(
-                        id: existing?.id ?? 'budget-${_uuid.v4()}',
-                        categoryId: catId!,
-                        monthIso: existing?.monthIso ?? _budgetMonthIso,
-                        limitCents: cents,
-                        rolloverEnabled: rollover,
+                    ],
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellDropdownField<String>(
+                      label: 'Expense Category',
+                      value: categoryItems.any((i) => i.value == catId)
+                          ? catId
+                          : (categoryItems.isNotEmpty
+                              ? categoryItems.first.value
+                              : null),
+                      items: categoryItems,
+                      onChanged: (v) => setModalState(() => catId = v),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: limitCtrl,
+                      label: 'Monthly Limit (ETB)',
+                      hintText: '5000.00',
+                      isRequired: true,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
                       ),
-                    );
-                    final err = widget.controller.state.errorMessage;
-                    if (err != null) {
-                      setModalState(() => error = err);
-                      return;
-                    }
-                    if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                  },
+                    ),
+                    DaywellSwitchTile(
+                      title: 'Enable Rollover',
+                      subtitle: 'Carry unused budget guidance forward',
+                      value: rollover,
+                      onChanged: (v) => setModalState(() => rollover = v),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
+                    DaywellButton(
+                      label: 'Save Budget',
+                      fullWidth: true,
+                      onPressed: submitBudget,
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
+    updateModal = null;
     limitCtrl.dispose();
   }
 
@@ -1345,32 +1400,37 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
     CommitmentModel? existing,
   }) async {
     final state = widget.controller.state;
-    final titleCtrl = TextEditingController(text: existing?.title ?? '');
-    final amountCtrl = TextEditingController(
-      text: existing != null
-          ? FinanceUiFormatters.formatCentsAsInput(existing.amountCents)
-          : '',
-    );
-    var dueDate = existing?.dueDate ?? CalendarDate.today();
+    final initialTitle = existing?.title ?? '';
+    final initialAmountText = existing != null
+        ? FinanceUiFormatters.formatCentsAsInput(existing.amountCents)
+        : '';
+    final initialDueDate = existing?.dueDate ?? CalendarDate.today();
+
+    final titleCtrl = TextEditingController(text: initialTitle);
+    final amountCtrl = TextEditingController(text: initialAmountText);
+    var dueDate = initialDueDate;
     final catItems =
         FinanceUiFormatters.buildCategoryDropdownItemsWithPreserved(
       state.categories,
       type: 'expense',
       preserveCategoryId: existing?.categoryId,
     );
-    String? catId = FinanceUiFormatters.resolveCategorySelectionValue(
+    final initialCatId = FinanceUiFormatters.resolveCategorySelectionValue(
           existing?.categoryId,
           state.categories,
           type: 'expense',
           preserveUnmatchedHistorical: existing != null,
         ) ??
         (catItems.isNotEmpty ? catItems.first.value : null);
-    String? linkedDebtId = existing?.linkedDebtId;
+    String? catId = initialCatId;
+    final initialLinkedDebtId = existing?.linkedDebtId;
+    String? linkedDebtId = initialLinkedDebtId;
     final etbAccounts = state.activeEtbSpendableAccounts;
-    String? linkedAccountId = existing?.linkedAccountId ??
+    final initialLinkedAccountId = existing?.linkedAccountId ??
         (linkedDebtId == null && etbAccounts.isNotEmpty
             ? etbAccounts.first.id
             : null);
+    String? linkedAccountId = initialLinkedAccountId;
     final activePayables = state.debts
         .where(
           (d) =>
@@ -1380,194 +1440,252 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
         )
         .toList();
     String? error;
+    var didSave = false;
+    var isPromptingDiscard = false;
+    var lastDirty = false;
+    void Function(VoidCallback)? updateModal;
+
+    bool hasUnsaved() {
+      if (didSave) return false;
+      return titleCtrl.text.trim() != initialTitle.trim() ||
+          amountCtrl.text.trim() != initialAmountText.trim() ||
+          dueDate != initialDueDate ||
+          catId != initialCatId ||
+          linkedAccountId != initialLinkedAccountId ||
+          linkedDebtId != initialLinkedDebtId;
+    }
+
+    void syncDirty() {
+      final dirty = hasUnsaved();
+      if (dirty != lastDirty) {
+        lastDirty = dirty;
+        updateModal?.call(() {});
+      }
+    }
+
+    titleCtrl.addListener(syncDirty);
+    amountCtrl.addListener(syncDirty);
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetCtx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            left: SharedDesignTokens.spacingMd,
-            right: SharedDesignTokens.spacingMd,
-            top: SharedDesignTokens.spacingMd,
-            bottom: MediaQuery.viewInsetsOf(ctx).bottom +
-                SharedDesignTokens.spacingMd,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  existing == null
-                      ? 'New Commitment / Bill'
-                      : 'Edit Commitment',
-                  style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                ),
-                if (error != null) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingSm),
-                  DaywellStatusBanner(
-                    message: error!,
-                    tone: DaywellStatusTone.error,
-                  ),
-                ],
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: titleCtrl,
-                  label: 'Title',
-                  hintText: 'e.g. Apartment Rent',
-                  isRequired: true,
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellTextField(
-                  controller: amountCtrl,
-                  label: 'Amount (ETB)',
-                  isRequired: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                ),
-                const SizedBox(height: SharedDesignTokens.spacingCompact),
-                DaywellDropdownField<String>(
-                  label: 'Category',
-                  value: catItems.any((i) => i.value == catId)
-                      ? catId
-                      : (catItems.isNotEmpty ? catItems.first.value : null),
-                  items: catItems,
-                  onChanged: (v) => setModalState(() => catId = v),
-                ),
-                if (etbAccounts.isNotEmpty) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  DaywellDropdownField<String?>(
-                    label: 'Linked ETB Account',
-                    value: etbAccounts.any((a) => a.id == linkedAccountId)
-                        ? linkedAccountId
-                        : null,
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('None (Requires Debt or Account Link)'),
-                      ),
-                      for (final a in etbAccounts)
-                        DropdownMenuItem<String?>(
-                          value: a.id,
-                          child: Text(a.name),
-                        ),
-                    ],
-                    onChanged: (v) => setModalState(() => linkedAccountId = v),
-                  ),
-                ],
-                if (activePayables.isNotEmpty) ...[
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  DaywellDropdownField<String?>(
-                    label: 'Linked Payable Debt (Optional)',
-                    value: activePayables.any((d) => d.id == linkedDebtId)
-                        ? linkedDebtId
-                        : null,
-                    items: [
-                      const DropdownMenuItem<String?>(
-                        value: null,
-                        child: Text('None (Standard Bill)'),
-                      ),
-                      for (final d in activePayables)
-                        DropdownMenuItem<String?>(
-                          value: d.id,
-                          child: Text(
-                            'Payable ${FinanceUiFormatters.formatEtbCents(d.outstandingCents)}',
-                          ),
-                        ),
-                    ],
-                    onChanged: (v) => setModalState(() => linkedDebtId = v),
-                  ),
-                ],
-                const SizedBox(height: SharedDesignTokens.spacingSm),
-                Wrap(
-                  spacing: SharedDesignTokens.spacingSm,
-                  crossAxisAlignment: WrapCrossAlignment.center,
+        builder: (ctx, setModalState) {
+          updateModal = setModalState;
+
+          Future<void> submitCommitment() async {
+            final title = titleCtrl.text.trim();
+            final cents = FinanceUiFormatters.parseEtbToCents(amountCtrl.text);
+            if (title.isEmpty) {
+              setModalState(() => error = 'Enter a commitment title.');
+              return;
+            }
+            if (cents == null || cents <= 0) {
+              setModalState(() => error = 'Enter a valid amount > 0.');
+              return;
+            }
+            if (linkedAccountId == null && linkedDebtId == null) {
+              setModalState(
+                () => error = 'Link an active ETB account or ETB payable debt.',
+              );
+              return;
+            }
+            final model = CommitmentModel(
+              id: existing?.id ?? 'com-${_uuid.v4()}',
+              title: title,
+              amountCents: cents,
+              dueDate: dueDate,
+              isPaid: existing?.isPaid ?? false,
+              direction: existing?.direction ?? CommitmentDirection.outflow,
+              verifiedSettledCents: existing?.verifiedSettledCents ?? 0,
+              legacyPaidUnverified: existing?.legacyPaidUnverified ?? false,
+              categoryId: catId,
+              linkedAccountId: linkedAccountId,
+              linkedDebtId: linkedDebtId,
+              settlementEntryId: existing?.settlementEntryId,
+              recurringRuleId: existing?.recurringRuleId,
+            );
+            if (existing == null) {
+              await widget.controller.addCommitment(model);
+            } else {
+              await widget.controller.updateCommitment(model);
+            }
+            final err = widget.controller.state.errorMessage;
+            if (err != null) {
+              setModalState(() => error = err);
+              return;
+            }
+            didSave = true;
+            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+          }
+
+          return PopScope<Object?>(
+            canPop: !hasUnsaved(),
+            onPopInvokedWithResult: (bool didPop, Object? _) async {
+              if (didPop || isPromptingDiscard) return;
+              isPromptingDiscard = true;
+              try {
+                final action = await DaywellUnsavedChangesDialog.show(
+                  ctx,
+                  title: existing == null
+                      ? 'Discard Commitment?'
+                      : 'Discard Commitment Changes?',
+                  message: 'Save this commitment or discard your changes?',
+                  saveLabel:
+                      existing == null ? 'Add Commitment' : 'Save Changes',
+                  discardLabel: 'Discard',
+                );
+                if (!ctx.mounted) return;
+                if (action == DaywellUnsavedChangesAction.save) {
+                  await submitCommitment();
+                } else if (action == DaywellUnsavedChangesAction.discard) {
+                  didSave = true;
+                  if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                }
+              } finally {
+                isPromptingDiscard = false;
+              }
+            },
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: SharedDesignTokens.spacingMd,
+                right: SharedDesignTokens.spacingMd,
+                top: SharedDesignTokens.spacingMd,
+                bottom: MediaQuery.viewInsetsOf(ctx).bottom +
+                    SharedDesignTokens.spacingMd,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Due Date: ${SharedDateFormatter.formatDual(dueDate, useAmharic: false)}',
+                      existing == null
+                          ? 'New Commitment / Bill'
+                          : 'Edit Commitment',
+                      style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                     ),
+                    if (error != null) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingSm),
+                      DaywellStatusBanner(
+                        message: error!,
+                        tone: DaywellStatusTone.error,
+                      ),
+                    ],
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: titleCtrl,
+                      label: 'Title',
+                      hintText: 'e.g. Apartment Rent',
+                      isRequired: true,
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellTextField(
+                      controller: amountCtrl,
+                      label: 'Amount (ETB)',
+                      isRequired: true,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingCompact),
+                    DaywellDropdownField<String>(
+                      label: 'Category',
+                      value: catItems.any((i) => i.value == catId)
+                          ? catId
+                          : (catItems.isNotEmpty ? catItems.first.value : null),
+                      items: catItems,
+                      onChanged: (v) => setModalState(() => catId = v),
+                    ),
+                    if (etbAccounts.isNotEmpty) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                      DaywellDropdownField<String?>(
+                        label: 'Linked ETB Account',
+                        value: etbAccounts.any((a) => a.id == linkedAccountId)
+                            ? linkedAccountId
+                            : null,
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('None (Requires Debt or Account Link)'),
+                          ),
+                          for (final a in etbAccounts)
+                            DropdownMenuItem<String?>(
+                              value: a.id,
+                              child: Text(a.name),
+                            ),
+                        ],
+                        onChanged: (v) =>
+                            setModalState(() => linkedAccountId = v),
+                      ),
+                    ],
+                    if (activePayables.isNotEmpty) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                      DaywellDropdownField<String?>(
+                        label: 'Linked Payable Debt (Optional)',
+                        value: activePayables.any((d) => d.id == linkedDebtId)
+                            ? linkedDebtId
+                            : null,
+                        items: [
+                          const DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('None (Standard Bill)'),
+                          ),
+                          for (final d in activePayables)
+                            DropdownMenuItem<String?>(
+                              value: d.id,
+                              child: Text(
+                                'Payable ${FinanceUiFormatters.formatEtbCents(d.outstandingCents)}',
+                              ),
+                            ),
+                        ],
+                        onChanged: (v) => setModalState(() => linkedDebtId = v),
+                      ),
+                    ],
+                    const SizedBox(height: SharedDesignTokens.spacingSm),
+                    Wrap(
+                      spacing: SharedDesignTokens.spacingSm,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'Due Date: ${SharedDateFormatter.formatDual(dueDate, useAmharic: false)}',
+                        ),
+                        DaywellButton(
+                          label: 'Change',
+                          variant: DaywellButtonVariant.text,
+                          size: DaywellButtonSize.compact,
+                          onPressed: () async {
+                            final picked =
+                                await FinanceUiFormatters.pickCalendarDate(
+                              ctx,
+                              initialDate: dueDate,
+                            );
+                            if (picked != null) {
+                              setModalState(() => dueDate = picked);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: SharedDesignTokens.spacingMd),
                     DaywellButton(
-                      label: 'Change',
-                      variant: DaywellButtonVariant.text,
-                      size: DaywellButtonSize.compact,
-                      onPressed: () async {
-                        final picked =
-                            await FinanceUiFormatters.pickCalendarDate(
-                          ctx,
-                          initialDate: dueDate,
-                        );
-                        if (picked != null) {
-                          setModalState(() => dueDate = picked);
-                        }
-                      },
+                      label:
+                          existing == null ? 'Add Commitment' : 'Save Changes',
+                      fullWidth: true,
+                      onPressed: submitCommitment,
                     ),
                   ],
                 ),
-                const SizedBox(height: SharedDesignTokens.spacingMd),
-                DaywellButton(
-                  label: existing == null ? 'Add Commitment' : 'Save Changes',
-                  fullWidth: true,
-                  onPressed: () async {
-                    final title = titleCtrl.text.trim();
-                    final cents = FinanceUiFormatters.parseEtbToCents(
-                      amountCtrl.text,
-                    );
-                    if (title.isEmpty) {
-                      setModalState(() => error = 'Enter a commitment title.');
-                      return;
-                    }
-                    if (cents == null || cents <= 0) {
-                      setModalState(() => error = 'Enter a valid amount > 0.');
-                      return;
-                    }
-                    if (linkedAccountId == null && linkedDebtId == null) {
-                      setModalState(
-                        () => error =
-                            'Link an active ETB account or ETB payable debt.',
-                      );
-                      return;
-                    }
-                    final model = CommitmentModel(
-                      id: existing?.id ?? 'com-${_uuid.v4()}',
-                      title: title,
-                      amountCents: cents,
-                      dueDate: dueDate,
-                      isPaid: existing?.isPaid ?? false,
-                      direction:
-                          existing?.direction ?? CommitmentDirection.outflow,
-                      verifiedSettledCents: existing?.verifiedSettledCents ?? 0,
-                      legacyPaidUnverified:
-                          existing?.legacyPaidUnverified ?? false,
-                      categoryId: catId,
-                      linkedAccountId: linkedAccountId,
-                      linkedDebtId: linkedDebtId,
-                      settlementEntryId: existing?.settlementEntryId,
-                      recurringRuleId: existing?.recurringRuleId,
-                    );
-                    if (existing == null) {
-                      await widget.controller.addCommitment(model);
-                    } else {
-                      await widget.controller.updateCommitment(model);
-                    }
-                    final err = widget.controller.state.errorMessage;
-                    if (err != null) {
-                      setModalState(() => error = err);
-                      return;
-                    }
-                    if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                  },
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
+    updateModal = null;
     titleCtrl.dispose();
     amountCtrl.dispose();
   }

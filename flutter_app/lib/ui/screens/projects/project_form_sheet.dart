@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../application/projects/projects_controller.dart';
@@ -153,8 +155,48 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
   String? _titleError;
   String? _formError;
   bool _isSaving = false;
+  bool _didSave = false;
+  bool _isPromptingDiscard = false;
+  bool _lastHasUnsavedChanges = false;
+
+  late String _initialTitle;
+  late String _initialDesc;
+  late String _initialStatus;
+  CalendarDate? _initialStartDate;
+  CalendarDate? _initialTargetDate;
+  String? _initialPrimaryDraftId;
+  late String _initialBlocksSignature;
 
   bool get _isEditing => widget.existingProject != null;
+
+  String _computeBlocksSignature() {
+    return _blocks
+        .map(
+          (b) =>
+              '${b.tempId}|${b.blockType.name}|${b.title.trim()}|${b.unitLabel.trim()}|${b.targetValue}|${b.dailyTargetValue}|${b.isRollup}|${b.rollupSourceTempId}|${b.showGroupTotals}|${b.showDailyTotals}|${b.completionRule.name}|${b.thresholdPercent}|${b.trackActualDuration}',
+        )
+        .join(';;');
+  }
+
+  bool get _hasUnsavedChanges {
+    if (_didSave) return false;
+    return _titleCtrl.text.trim() != _initialTitle ||
+        _descCtrl.text.trim() != _initialDesc ||
+        _status != _initialStatus ||
+        _startDate != _initialStartDate ||
+        _targetDate != _initialTargetDate ||
+        _primaryDraftId != _initialPrimaryDraftId ||
+        _computeBlocksSignature() != _initialBlocksSignature;
+  }
+
+  void _onTextDirtyChanged() {
+    if (!mounted) return;
+    final next = _hasUnsavedChanges;
+    if (next != _lastHasUnsavedChanges) {
+      _lastHasUnsavedChanges = next;
+      setState(() {});
+    }
+  }
 
   @override
   void initState() {
@@ -180,13 +222,51 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
         _primaryDraftId = existingPrimary;
       }
     }
+
+    _initialTitle = _titleCtrl.text.trim();
+    _initialDesc = _descCtrl.text.trim();
+    _initialStatus = _status;
+    _initialStartDate = _startDate;
+    _initialTargetDate = _targetDate;
+    _initialPrimaryDraftId = _primaryDraftId;
+    _initialBlocksSignature = _computeBlocksSignature();
+
+    _titleCtrl.addListener(_onTextDirtyChanged);
+    _descCtrl.addListener(_onTextDirtyChanged);
   }
 
   @override
   void dispose() {
+    _titleCtrl.removeListener(_onTextDirtyChanged);
+    _descCtrl.removeListener(_onTextDirtyChanged);
     _titleCtrl.dispose();
     _descCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _handlePopBlocked() async {
+    if (_isSaving || _isPromptingDiscard || !mounted) return;
+    _isPromptingDiscard = true;
+    try {
+      final action = await DaywellUnsavedChangesDialog.show(
+        context,
+        title: _isEditing ? 'Discard Project Changes?' : 'Discard Project?',
+        message: _isEditing
+            ? 'Save your project changes or discard them?'
+            : 'Create this project or discard your edits?',
+        saveLabel: _isEditing ? 'Save Changes' : 'Create Project',
+        discardLabel: 'Discard',
+      );
+      if (!mounted) return;
+      if (action == DaywellUnsavedChangesAction.save) {
+        await _handleSave();
+      } else if (action == DaywellUnsavedChangesAction.discard) {
+        setState(() => _didSave = true);
+        Navigator.of(context).pop();
+      }
+    } finally {
+      _isPromptingDiscard = false;
+    }
   }
 
   Future<void> _openInlineBlockEditor({_InlineBlockDraft? editingDraft}) async {
@@ -410,6 +490,7 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
       syncTasksControllerProjects(widget.tasksController);
 
       if (!mounted) return;
+      _didSave = true;
       Navigator.of(context).pop(savedProject);
     } catch (e) {
       if (!mounted) return;
@@ -430,16 +511,23 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
         ? _primaryDraftId
         : null;
 
-    return Padding(
-      padding: EdgeInsets.only(
-        left: SharedDesignTokens.spacingMd,
-        right: SharedDesignTokens.spacingMd,
-        top: SharedDesignTokens.spacingMd,
-        bottom: MediaQuery.of(context).viewInsets.bottom +
-            SharedDesignTokens.spacingMd,
-      ),
-      child: SingleChildScrollView(
-        child: Column(
+    return PopScope<Object?>(
+      canPop: !_hasUnsavedChanges && !_isSaving,
+      onPopInvokedWithResult: (bool didPop, Object? _) {
+        if (!didPop) {
+          unawaited(_handlePopBlocked());
+        }
+      },
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: SharedDesignTokens.spacingMd,
+          right: SharedDesignTokens.spacingMd,
+          top: SharedDesignTokens.spacingMd,
+          bottom: MediaQuery.of(context).viewInsets.bottom +
+              SharedDesignTokens.spacingMd,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -712,7 +800,8 @@ class _ProjectFormSheetState extends State<ProjectFormSheet> {
                 ),
               ],
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );

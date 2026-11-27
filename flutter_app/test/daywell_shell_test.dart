@@ -1079,4 +1079,153 @@ void main() {
       expect(openTasksTapped, 1);
     });
   });
+
+  group('Stage 4 Shell Back Navigation & Double-Back-to-Exit Tests', () {
+    test(
+        'Deduplicates main-tab history, avoids loops, resets on Today, and enforces priority order',
+        () async {
+      var now = DateTime.utc(2026, 4, 10, 12, 0, 0);
+      final shell = DaywellShellController(clock: () => now);
+      addTearDown(shell.dispose);
+
+      expect(shell.tabHistory, [DaywellTabId.today]);
+      expect(shell.isAtTodayRoot, isTrue);
+
+      // Selecting already-active tab is a no-op
+      shell.selectTab(DaywellTabId.today);
+      expect(shell.tabHistory, [DaywellTabId.today]);
+
+      // Visit Tasks -> Finance -> Tasks (loop-free deduplication)
+      shell.selectTab(DaywellTabId.tasks);
+      shell.selectTab(DaywellTabId.tasks); // duplicate tap ignored
+      shell.selectTab(DaywellTabId.finance);
+      shell.selectTab(DaywellTabId.tasks);
+      expect(
+        shell.tabHistory,
+        [DaywellTabId.today, DaywellTabId.finance, DaywellTabId.tasks],
+      );
+
+      // Priority 2: Secondary route before module handler & tab history
+      var tasksHandlerCalls = 0;
+      var tasksConsumes = true;
+      shell.registerTabBackHandler(DaywellTabId.tasks, () async {
+        tasksHandlerCalls++;
+        return tasksConsumes;
+      });
+      shell.openSecondaryRoute(DaywellSecondaryRoute.backup);
+      expect(
+        await shell.handleSystemBack(),
+        DaywellShellBackOutcome.handledSecondaryRoute,
+      );
+      expect(shell.hasSecondaryRoute, isFalse);
+      expect(tasksHandlerCalls, 0);
+      expect(shell.currentTab, DaywellTabId.tasks);
+
+      // Priority 3: Active module handler consumes internal state first
+      expect(
+        await shell.handleSystemBack(),
+        DaywellShellBackOutcome.handledByModule,
+      );
+      expect(tasksHandlerCalls, 1);
+      expect(shell.currentTab, DaywellTabId.tasks);
+
+      // Priority 4: When module handler returns false, pop tab history (Tasks -> Finance -> Today)
+      tasksConsumes = false;
+      expect(
+        await shell.handleSystemBack(),
+        DaywellShellBackOutcome.handledTabHistory,
+      );
+      expect(shell.currentTab, DaywellTabId.finance);
+
+      expect(
+        await shell.handleSystemBack(),
+        DaywellShellBackOutcome.handledTabHistory,
+      );
+      expect(shell.currentTab, DaywellTabId.today);
+      expect(shell.isAtTodayRoot, isTrue);
+
+      // Navigating directly to Today clears prior non-Today tab history
+      shell.selectTab(DaywellTabId.notes);
+      shell.selectTab(DaywellTabId.calendar);
+      shell.selectTab(DaywellTabId.today);
+      expect(shell.tabHistory, [DaywellTabId.today]);
+      expect(shell.isAtTodayRoot, isTrue);
+
+      // Priority 5: Double-back-to-exit at Today root with 2s timeout reset
+      expect(
+        await shell.handleSystemBack(),
+        DaywellShellBackOutcome.promptExitApp,
+      );
+
+      now = now.add(const Duration(seconds: 3));
+      expect(
+        await shell.handleSystemBack(),
+        DaywellShellBackOutcome.promptExitApp,
+      );
+
+      now = now.add(const Duration(seconds: 1));
+      expect(
+        await shell.handleSystemBack(),
+        DaywellShellBackOutcome.exitApp,
+      );
+    });
+
+    testWidgets(
+        'Shows Press back again to exit at Today root, exits on second press within 2s, and never exits from other modules',
+        (WidgetTester tester) async {
+      await tester.binding.setSurfaceSize(const Size(412, 840));
+      addTearDown(() => unawaited(tester.binding.setSurfaceSize(null)));
+
+      var now = DateTime.utc(2026, 4, 10, 12, 0, 0);
+      var exitCalls = 0;
+      final shell = DaywellShellController(clock: () => now);
+      addTearDown(shell.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: DaywellAdaptiveScaffold(
+            shellController: shell,
+            onExitApp: () async => exitCalls++,
+            tabBuilder: (DaywellTabId tab) => Scaffold(
+              body: Center(child: Text('Tab:${tab.name}')),
+            ),
+            secondaryRouteBuilder: (DaywellSecondaryRoute route) => Scaffold(
+              body: Center(child: Text('Secondary:${route.name}')),
+            ),
+          ),
+        ),
+      );
+      await settleShell(tester);
+
+      // On Tasks tab, back returns to Today instead of prompting exit or exiting
+      shell.selectTab(DaywellTabId.tasks);
+      await settleShell(tester);
+      expect(shell.currentTab, DaywellTabId.tasks);
+
+      await tester.binding.handlePopRoute();
+      await settleShell(tester);
+      expect(shell.currentTab, DaywellTabId.today);
+      expect(exitCalls, 0);
+      expect(find.text('Press back again to exit'), findsNothing);
+
+      // First back at Today root shows unobtrusive prompt without exiting
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.text('Press back again to exit'), findsOneWidget);
+      expect(exitCalls, 0);
+
+      // After > 2 seconds, resets instead of exiting
+      now = now.add(const Duration(milliseconds: 2500));
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(exitCalls, 0);
+      expect(find.text('Press back again to exit'), findsOneWidget);
+
+      // Second press within 2 seconds exits
+      now = now.add(const Duration(milliseconds: 900));
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(exitCalls, 1);
+    });
+  });
 }

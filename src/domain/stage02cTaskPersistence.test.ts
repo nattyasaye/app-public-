@@ -284,7 +284,7 @@ describe('STAGE 0.2C: CROSS-PLATFORM TASK PERSISTENCE, BACKUP & RESTORE (WEB)', 
     });
   });
 
-  it('3. Full v12 backup export declares schemaVersion 5, snapshotFormatVersion 2, databaseSchemaVersion 12 and round-trips losslessly', () => {
+  it('3. Full v13 backup export declares schemaVersion 5, snapshotFormatVersion 2, databaseSchemaVersion 13 and round-trips losslessly', () => {
     withMockBrowserStorage((store) => {
       const recurrenceConfig: SharedTaskRecurrenceConfig = {
         frequency: 'weekly',
@@ -359,7 +359,7 @@ describe('STAGE 0.2C: CROSS-PLATFORM TASK PERSISTENCE, BACKUP & RESTORE (WEB)', 
       const exported = JSON.parse(exportedRaw);
       assert.strictEqual(exported.schemaVersion, 5);
       assert.strictEqual(exported.snapshotFormatVersion, 2);
-      assert.strictEqual(exported.databaseSchemaVersion, 12);
+      assert.strictEqual(exported.databaseSchemaVersion, 13);
       assert.strictEqual(exported.financeSchemaVersion, 7);
 
       // Re-import into a completely cleared store
@@ -439,9 +439,9 @@ describe('STAGE 0.2C: CROSS-PLATFORM TASK PERSISTENCE, BACKUP & RESTORE (WEB)', 
         ]);
         assert.deepStrictEqual(res.state?.dailyPlanningEntries, []);
 
-        // Subsequent export upgrades cleanly to v12
+        // Subsequent export upgrades cleanly to v13
         const upgraded = JSON.parse(SharedStateBridge.exportToAndroidJson());
-        assert.strictEqual(upgraded.databaseSchemaVersion, 12);
+        assert.strictEqual(upgraded.databaseSchemaVersion, 13);
       }
     });
   });
@@ -494,7 +494,7 @@ describe('STAGE 0.2C: CROSS-PLATFORM TASK PERSISTENCE, BACKUP & RESTORE (WEB)', 
       const financeExportStr = SharedStateBridge.exportFinanceOnlyJson();
       const financeExport = JSON.parse(financeExportStr);
       assert.strictEqual(financeExport.financeOnly, true);
-      assert.strictEqual(financeExport.databaseSchemaVersion, 12);
+      assert.strictEqual(financeExport.databaseSchemaVersion, 13);
       assert.strictEqual('tasks' in financeExport, false);
       assert.strictEqual('dailyPlanningEntries' in financeExport, false);
 
@@ -628,8 +628,8 @@ describe('STAGE 0.2C: CROSS-PLATFORM TASK PERSISTENCE, BACKUP & RESTORE (WEB)', 
       const futureVersions = [
         { schemaVersion: 10 },
         { snapshotFormatVersion: 3 },
-        { snapshotFormatVersion: 2, databaseSchemaVersion: 13 },
-        { snapshotFormatVersion: 1, databaseSchemaVersion: 13 },
+        { snapshotFormatVersion: 2, databaseSchemaVersion: 14 },
+        { snapshotFormatVersion: 1, databaseSchemaVersion: 14 },
       ];
       for (const fv of futureVersions) {
         const res = SharedStateBridge.importFromAndroidJson(

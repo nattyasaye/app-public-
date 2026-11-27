@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 
@@ -1007,19 +1009,45 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
     BuildContext context, {
     AccountModel? existing,
   }) async {
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final balCtrl = TextEditingController(
-      text: existing != null
-          ? FinanceUiFormatters.formatCentsAsInput(existing.openingBalanceCents)
-          : '0.00',
-    );
-    var subType = existing?.subType ?? AccountSubType.bank;
-    var openingDate = existing != null
+    final initialName = existing?.name ?? '';
+    final initialBalanceText = existing != null
+        ? FinanceUiFormatters.formatCentsAsInput(existing.openingBalanceCents)
+        : '0.00';
+    final initialSubType = existing?.subType ?? AccountSubType.bank;
+    final initialOpeningDate = existing != null
         ? SharedDateFormatter.parseFlexibleToCalendarDate(
             existing.openingBalanceDate,
           )
         : CalendarDate.today();
+
+    final nameCtrl = TextEditingController(text: initialName);
+    final balCtrl = TextEditingController(text: initialBalanceText);
+    var subType = initialSubType;
+    var openingDate = initialOpeningDate;
     String? error;
+    var didSave = false;
+    var isPromptingDiscard = false;
+    var lastDirty = false;
+    void Function(VoidCallback)? updateModal;
+
+    bool hasUnsaved() {
+      if (didSave) return false;
+      return nameCtrl.text.trim() != initialName.trim() ||
+          balCtrl.text.trim() != initialBalanceText.trim() ||
+          subType != initialSubType ||
+          openingDate != initialOpeningDate;
+    }
+
+    void syncDirty() {
+      final dirty = hasUnsaved();
+      if (dirty != lastDirty) {
+        lastDirty = dirty;
+        updateModal?.call(() {});
+      }
+    }
+
+    nameCtrl.addListener(syncDirty);
+    balCtrl.addListener(syncDirty);
 
     final isLegacyLockedCurrency =
         existing != null && !DoubleEntryEngine.isEtb(existing.currencyCode);
@@ -1032,21 +1060,115 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
       isScrollControlled: true,
       useSafeArea: true,
       builder: (sheetCtx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: EdgeInsets.only(
-            left: SharedDesignTokens.spacingMd,
-            right: SharedDesignTokens.spacingMd,
-            top: SharedDesignTokens.spacingMd,
-            bottom: MediaQuery.viewInsetsOf(ctx).bottom +
-                SharedDesignTokens.spacingMd,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  existing == null ? 'New Account' : 'Edit Account',
+        builder: (ctx, setModalState) {
+          updateModal = setModalState;
+
+          Future<void> submitAccount() async {
+            final name = nameCtrl.text.trim();
+            if (name.isEmpty) {
+              setModalState(() => error = 'Enter an account name.');
+              return;
+            }
+            if (isLegacyLockedCurrency) {
+              await widget.controller.updateAccount(
+                existing.copyWith(
+                  name: name,
+                  subType: subType,
+                ),
+              );
+              final err = widget.controller.state.errorMessage;
+              if (err != null) {
+                setModalState(() => error = err);
+                return;
+              }
+              didSave = true;
+              if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+              return;
+            }
+            final rawBal = balCtrl.text.trim();
+            final cents = rawBal.isEmpty
+                ? 0
+                : FinanceUiFormatters.parseEtbToCents(rawBal);
+            if (cents == null) {
+              setModalState(
+                () => error = 'Enter a valid decimal balance.',
+              );
+              return;
+            }
+            final type = subType == AccountSubType.creditCard
+                ? AccountType.liability
+                : AccountType.asset;
+            if (existing == null) {
+              await widget.controller.addAccount(
+                name: name,
+                type: type,
+                subType: subType,
+                currencyCode: 'ETB',
+                openingBalanceCents: cents,
+                openingBalanceDate: openingDate.toIsoString(),
+              );
+            } else {
+              await widget.controller.updateAccount(
+                existing.copyWith(
+                  name: name,
+                  type: type,
+                  subType: subType,
+                  openingBalanceCents: cents,
+                  openingBalanceDate: openingDate.toIsoString(),
+                ),
+              );
+            }
+            final err = widget.controller.state.errorMessage;
+            if (err != null) {
+              setModalState(() => error = err);
+              return;
+            }
+            didSave = true;
+            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+          }
+
+          return PopScope<Object?>(
+            canPop: !hasUnsaved(),
+            onPopInvokedWithResult: (bool didPop, Object? _) async {
+              if (didPop || isPromptingDiscard) return;
+              isPromptingDiscard = true;
+              try {
+                final action = await DaywellUnsavedChangesDialog.show(
+                  ctx,
+                  title: existing == null
+                      ? 'Discard Account?'
+                      : 'Discard Account Changes?',
+                  message: 'Save this account or discard your changes?',
+                  saveLabel:
+                      existing == null ? 'Create Account' : 'Save Account',
+                  discardLabel: 'Discard',
+                );
+                if (!ctx.mounted) return;
+                if (action == DaywellUnsavedChangesAction.save) {
+                  await submitAccount();
+                } else if (action == DaywellUnsavedChangesAction.discard) {
+                  didSave = true;
+                  if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                }
+              } finally {
+                isPromptingDiscard = false;
+              }
+            },
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: SharedDesignTokens.spacingMd,
+                right: SharedDesignTokens.spacingMd,
+                top: SharedDesignTokens.spacingMd,
+                bottom: MediaQuery.viewInsetsOf(ctx).bottom +
+                    SharedDesignTokens.spacingMd,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Text(
+                      existing == null ? 'New Account' : 'Edit Account',
                   style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
@@ -1143,77 +1265,20 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                   ],
                 ),
                 const SizedBox(height: SharedDesignTokens.spacingMd),
-                DaywellButton(
-                  label: existing == null ? 'Create Account' : 'Save Account',
-                  fullWidth: true,
-                  onPressed: () async {
-                    final name = nameCtrl.text.trim();
-                    if (name.isEmpty) {
-                      setModalState(() => error = 'Enter an account name.');
-                      return;
-                    }
-                    if (isLegacyLockedCurrency) {
-                      await widget.controller.updateAccount(
-                        existing.copyWith(
-                          name: name,
-                          subType: subType,
-                        ),
-                      );
-                      final err = widget.controller.state.errorMessage;
-                      if (err != null) {
-                        setModalState(() => error = err);
-                        return;
-                      }
-                      if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                      return;
-                    }
-                    final rawBal = balCtrl.text.trim();
-                    final cents = rawBal.isEmpty
-                        ? 0
-                        : FinanceUiFormatters.parseEtbToCents(rawBal);
-                    if (cents == null) {
-                      setModalState(
-                        () => error = 'Enter a valid decimal balance.',
-                      );
-                      return;
-                    }
-                    final type = subType == AccountSubType.creditCard
-                        ? AccountType.liability
-                        : AccountType.asset;
-                    if (existing == null) {
-                      await widget.controller.addAccount(
-                        name: name,
-                        type: type,
-                        subType: subType,
-                        currencyCode: 'ETB',
-                        openingBalanceCents: cents,
-                        openingBalanceDate: openingDate.toIsoString(),
-                      );
-                    } else {
-                      await widget.controller.updateAccount(
-                        existing.copyWith(
-                          name: name,
-                          type: type,
-                          subType: subType,
-                          openingBalanceCents: cents,
-                          openingBalanceDate: openingDate.toIsoString(),
-                        ),
-                      );
-                    }
-                    final err = widget.controller.state.errorMessage;
-                    if (err != null) {
-                      setModalState(() => error = err);
-                      return;
-                    }
-                    if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                  },
-                ),
-              ],
+                  DaywellButton(
+                    label: existing == null ? 'Create Account' : 'Save Account',
+                    fullWidth: true,
+                    onPressed: submitAccount,
+                  ),
+                ],
+              ),
             ),
           ),
-        ),
+          );
+        },
       ),
     );
+    updateModal = null;
     nameCtrl.dispose();
     balCtrl.dispose();
   }
@@ -1222,11 +1287,36 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
     BuildContext context, {
     TransactionCategoryModel? existing,
   }) async {
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    var catType = existing?.type ?? _categoryTabType;
-    var parentId = existing?.parentId;
-    var colorHex = existing?.colorHex ?? '#1B4D3E';
+    final initialName = existing?.name ?? '';
+    final initialCatType = existing?.type ?? _categoryTabType;
+    final initialParentId = existing?.parentId;
+    final initialColorHex = existing?.colorHex ?? '#1B4D3E';
+
+    final nameCtrl = TextEditingController(text: initialName);
+    var catType = initialCatType;
+    var parentId = initialParentId;
+    var colorHex = initialColorHex;
     String? error;
+    var didSave = false;
+    var isPromptingDiscard = false;
+    var lastDirty = false;
+    void Function(VoidCallback)? updateModal;
+
+    bool hasUnsaved() {
+      if (didSave) return false;
+      return nameCtrl.text.trim() != initialName.trim() ||
+          catType != initialCatType ||
+          parentId != initialParentId ||
+          colorHex != initialColorHex;
+    }
+
+    nameCtrl.addListener(() {
+      final dirty = hasUnsaved();
+      if (dirty != lastDirty) {
+        lastDirty = dirty;
+        updateModal?.call(() {});
+      }
+    });
 
     const palette = [
       '#1B4D3E',
@@ -1244,6 +1334,7 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
       useSafeArea: true,
       builder: (sheetCtx) => StatefulBuilder(
         builder: (ctx, setModalState) {
+          updateModal = setModalState;
           final parentCandidates = widget.controller.state.categories
               .where(
                 (c) =>
@@ -1254,19 +1345,82 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
               )
               .toList();
 
-          return Padding(
-            padding: EdgeInsets.only(
-              left: SharedDesignTokens.spacingMd,
-              right: SharedDesignTokens.spacingMd,
-              top: SharedDesignTokens.spacingMd,
-              bottom: MediaQuery.viewInsetsOf(ctx).bottom +
-                  SharedDesignTokens.spacingMd,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
+          Future<void> submitCategory() async {
+            final name = nameCtrl.text.trim();
+            if (name.isEmpty) {
+              setModalState(
+                () => error = 'Enter a category name.',
+              );
+              return;
+            }
+            if (existing == null) {
+              await widget.controller.addCategory(
+                TransactionCategoryModel(
+                  id: 'cat-${_uuid.v4()}',
+                  name: name,
+                  type: catType,
+                  colorHex: colorHex,
+                  parentId: parentId,
+                ),
+              );
+            } else {
+              await widget.controller.updateCategoryDetails(
+                existing.id,
+                name: name,
+                colorHex: colorHex,
+                parentId: parentId,
+                clearParentId: parentId == null,
+              );
+            }
+            final err = widget.controller.state.errorMessage;
+            if (err != null) {
+              setModalState(() => error = err);
+              return;
+            }
+            didSave = true;
+            if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+          }
+
+          return PopScope<Object?>(
+            canPop: !hasUnsaved(),
+            onPopInvokedWithResult: (bool didPop, Object? _) async {
+              if (didPop || isPromptingDiscard) return;
+              isPromptingDiscard = true;
+              try {
+                final action = await DaywellUnsavedChangesDialog.show(
+                  ctx,
+                  title: existing == null
+                      ? 'Discard Category?'
+                      : 'Discard Category Changes?',
+                  message: 'Save this category or discard your changes?',
+                  saveLabel:
+                      existing == null ? 'Create Category' : 'Save Changes',
+                  discardLabel: 'Discard',
+                );
+                if (!ctx.mounted) return;
+                if (action == DaywellUnsavedChangesAction.save) {
+                  await submitCategory();
+                } else if (action == DaywellUnsavedChangesAction.discard) {
+                  didSave = true;
+                  if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+                }
+              } finally {
+                isPromptingDiscard = false;
+              }
+            },
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: SharedDesignTokens.spacingMd,
+                right: SharedDesignTokens.spacingMd,
+                top: SharedDesignTokens.spacingMd,
+                bottom: MediaQuery.viewInsetsOf(ctx).bottom +
+                    SharedDesignTokens.spacingMd,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                   Text(
                     existing == null ? 'New Category' : 'Edit Category',
                     style: Theme.of(ctx).textTheme.titleLarge?.copyWith(
@@ -1365,48 +1519,17 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                     label:
                         existing == null ? 'Create Category' : 'Save Changes',
                     fullWidth: true,
-                    onPressed: () async {
-                      final name = nameCtrl.text.trim();
-                      if (name.isEmpty) {
-                        setModalState(
-                          () => error = 'Enter a category name.',
-                        );
-                        return;
-                      }
-                      if (existing == null) {
-                        await widget.controller.addCategory(
-                          TransactionCategoryModel(
-                            id: 'cat-${_uuid.v4()}',
-                            name: name,
-                            type: catType,
-                            colorHex: colorHex,
-                            parentId: parentId,
-                          ),
-                        );
-                      } else {
-                        await widget.controller.updateCategoryDetails(
-                          existing.id,
-                          name: name,
-                          colorHex: colorHex,
-                          parentId: parentId,
-                          clearParentId: parentId == null,
-                        );
-                      }
-                      final err = widget.controller.state.errorMessage;
-                      if (err != null) {
-                        setModalState(() => error = err);
-                        return;
-                      }
-                      if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
-                    },
+                    onPressed: submitCategory,
                   ),
                 ],
               ),
             ),
+          ),
           );
         },
       ),
     );
+    updateModal = null;
     nameCtrl.dispose();
   }
 }

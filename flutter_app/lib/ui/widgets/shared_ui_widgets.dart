@@ -18,4 +18,5 @@ export 'patterns/daywell_confirmation_dialog.dart';
 export 'patterns/daywell_content_state.dart';
 export 'patterns/daywell_search_filter_bar.dart';
 export 'patterns/daywell_section_container.dart';
+export 'patterns/daywell_unsaved_changes_dialog.dart';
 export 'selection/daywell_selection_controls.dart';

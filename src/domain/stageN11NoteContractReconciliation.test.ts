@@ -55,7 +55,7 @@ function withMockBrowserStorage(fn: (store: Map<string, string>) => void): void 
 describe('Stage N1.1 — Canonical Note Contract Reconciliation & Compatibility', () => {
   it('1. schema_contracts.json reconciles Note fields, bounds, relationships, and fieldMappings without schema version bump', () => {
     const contracts = JSON.parse(read('shared_foundation/schema_contracts.json'));
-    assert.strictEqual(contracts.schemaVersion, 12);
+    assert.strictEqual(contracts.schemaVersion, 13);
 
     const note = contracts.entities.Note;
     assert.ok(note, 'entities.Note must exist in schema_contracts.json');
