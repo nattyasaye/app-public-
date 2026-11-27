@@ -180,7 +180,7 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
       case SmsDraftStatus.approved:
         return DaywellStatusTone.success;
       case SmsDraftStatus.dismissed:
-        return DaywellStatusTone.neutral;
+        return DaywellStatusTone.info;
       case SmsDraftStatus.unrecognized:
         return DaywellStatusTone.info;
     }
@@ -202,11 +202,11 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
   DaywellStatusTone _directionTone(SmsDirection dir) {
     switch (dir) {
       case SmsDirection.incoming:
-        return DaywellStatusTone.income;
+        return DaywellStatusTone.success;
       case SmsDirection.outgoing:
-        return DaywellStatusTone.expense;
+        return DaywellStatusTone.error;
       case SmsDirection.uncertain:
-        return DaywellStatusTone.neutral;
+        return DaywellStatusTone.info;
     }
   }
 
@@ -1083,7 +1083,7 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
         ),
       DeviceSmsPermissionStatus.notRequested => (
           'Not Enabled',
-          DaywellStatusTone.neutral,
+          DaywellStatusTone.info,
         ),
       DeviceSmsPermissionStatus.denied => (
           'Denied',
@@ -1138,7 +1138,7 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                     ? ('Partial / Denied', DaywellStatusTone.warning)
                     : bothUnavailable
                         ? ('Manual Paste Only', DaywellStatusTone.info)
-                        : ('Not Enabled', DaywellStatusTone.neutral);
+                        : ('Not Enabled', DaywellStatusTone.info);
 
     return DaywellCard(
       color: semantic.surfaceSubtle,

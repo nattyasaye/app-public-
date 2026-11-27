@@ -6,18 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/finance/finance_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
-import 'package:personal_management_app/core/shared_foundation.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/app_settings_policy.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
-import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
 import 'package:personal_management_app/ui/app_state.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_composer_sheet.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_overview_tab.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_reports_tab.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_transactions_tab.dart';
-import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
 
 import 'support/sqlite_test_helper.dart';
 
@@ -148,8 +145,8 @@ void main() {
         expect(state.hasLegacyNonEtbRecords, true);
 
         // ETB Safe Harbor & Net Worth exclude the USD 1,000 balance cleanly (only 2,500 ETB = 250,000 cents)
-        expect(state.safeHarborCents, 250000);
-        expect(state.breakdown.liquidCashCents, 250000);
+        expect(state.availableToSpendCents, 250000);
+        expect(state.availableToSpendBreakdown.liquidCashCents, 250000);
 
         // Record ordinary ETB expense
         final created = await fixture.controller.recordDirectExpense(
@@ -160,13 +157,13 @@ void main() {
           description: 'Shoa Groceries',
         );
         expect(created, isNotNull);
-        expect(fixture.controller.state.safeHarborCents, 220000);
+        expect(fixture.controller.state.availableToSpendCents, 220000);
 
         // Legacy USD entry stays untouched and protected from replacement/refund/unvoid
         final canReplace = DoubleEntryEngine.canCorrectEntry(
-          entry: fixture.controller.state.entries
+          entry: fixture.controller.state.journalEntries
               .firstWhere((e) => e.id == 'je-usd-legacy'),
-          entries: fixture.controller.state.entries,
+          entries: fixture.controller.state.journalEntries,
           postings: fixture.controller.state.postings,
           accounts: fixture.controller.state.accounts,
         );
@@ -176,7 +173,7 @@ void main() {
 
         final refundSummary = DoubleEntryEngine.getExpenseRefundSummary(
           originalEntryId: 'je-usd-legacy',
-          entries: fixture.controller.state.entries,
+          entries: fixture.controller.state.journalEntries,
           postings: fixture.controller.state.postings,
           accounts: fixture.controller.state.accounts,
         );
@@ -200,7 +197,7 @@ void main() {
       '3. One-time legacy notice dismissal persists across controller reloads and is registered in AppSettingsBackupPolicy',
       () async {
         expect(
-          AppSettingsBackupPolicy.isExportableKey(
+          AppSettingsBackupPolicy.isExportableUserSetting(
             DriftFinanceRepository.legacyNonEtbNoticeDismissedKey,
           ),
           isTrue,

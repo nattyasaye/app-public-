@@ -666,6 +666,30 @@ class PostingModel {
     }
   }
 
+  PostingModel copyWith({
+    String? id,
+    String? entryId,
+    String? accountId,
+    int? amountCents,
+    PostingDirection? direction,
+    String? accountMovementDate,
+    String? categoryId,
+    bool clearCategoryId = false,
+    String? note,
+    bool clearNote = false,
+  }) {
+    return PostingModel(
+      id: id ?? this.id,
+      entryId: entryId ?? this.entryId,
+      accountId: accountId ?? this.accountId,
+      amountCents: amountCents ?? this.amountCents,
+      direction: direction ?? this.direction,
+      accountMovementDate: accountMovementDate ?? this.accountMovementDate,
+      categoryId: clearCategoryId ? null : (categoryId ?? this.categoryId),
+      note: clearNote ? null : (note ?? this.note),
+    );
+  }
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'entryId': entryId,

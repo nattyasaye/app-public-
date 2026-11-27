@@ -23,7 +23,6 @@ import '../data/repositories/notes_repository.dart';
 import '../data/repositories/projects_repository.dart';
 import '../data/repositories/search_repository.dart';
 import '../data/repositories/tasks_repository.dart';
-import '../domain/finance/finance_contracts.dart';
 import '../services/backup/encryption_backup_service.dart';
 import '../services/notifications/local_notification_service.dart';
 import '../services/sms/android_sms_inbox_service.dart';
@@ -896,8 +895,9 @@ class AppStateManager extends ChangeNotifier {
     if (service is LocalNotificationService) {
       service.dispose();
     }
-    if (_ownsSmsInboxService && _smsInboxService is AndroidSmsInboxService) {
-      (_smsInboxService as AndroidSmsInboxService).dispose();
+    final smsService = _smsInboxService;
+    if (_ownsSmsInboxService && smsService is AndroidSmsInboxService) {
+      smsService.dispose();
     }
     if (!alreadySuperDisposed) {
       super.dispose();
@@ -915,8 +915,9 @@ class AppStateManager extends ChangeNotifier {
     if (service is LocalNotificationService) {
       service.dispose();
     }
-    if (_ownsSmsInboxService && _smsInboxService is AndroidSmsInboxService) {
-      (_smsInboxService as AndroidSmsInboxService).dispose();
+    final smsService = _smsInboxService;
+    if (_ownsSmsInboxService && smsService is AndroidSmsInboxService) {
+      smsService.dispose();
     }
     super.dispose();
     _disposeFuture ??= _closeDatabaseAfterPendingInit();

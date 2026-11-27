@@ -1197,8 +1197,6 @@ class _FinanceActivityPreviewItem {
   final int amountCents;
   final String kind; // 'income' | 'expense' | 'transfer'
   final String amountText;
-  final String? isolationBadgeLabel;
-  final bool needsCurrencyReview;
 
   const _FinanceActivityPreviewItem({
     required this.title,
@@ -1206,8 +1204,6 @@ class _FinanceActivityPreviewItem {
     required this.amountCents,
     required this.kind,
     required this.amountText,
-    this.isolationBadgeLabel,
-    this.needsCurrencyReview = false,
   });
 }
 
@@ -1367,17 +1363,13 @@ class _FinanceTransactionsPreview extends StatelessWidget {
                 ...items.take(3).map(
                   (_FinanceActivityPreviewItem item) {
                     final Color amountColor;
-                    if (item.needsCurrencyReview) {
-                      amountColor = semantic.warning;
-                    } else {
-                      switch (item.kind) {
-                        case 'income':
-                          amountColor = semantic.income;
-                        case 'transfer':
-                          amountColor = semantic.transfer;
-                        default:
-                          amountColor = semantic.expense;
-                      }
+                    switch (item.kind) {
+                      case 'income':
+                        amountColor = semantic.income;
+                      case 'transfer':
+                        amountColor = semantic.transfer;
+                      default:
+                        amountColor = semantic.expense;
                     }
 
                     return Padding(
@@ -1405,14 +1397,6 @@ class _FinanceTransactionsPreview extends StatelessWidget {
                                 color: semantic.textSecondary,
                               ),
                             ),
-                            if (item.isolationBadgeLabel != null) ...[
-                              const SizedBox(height: 4),
-                              DaywellStatusBadge(
-                                label: item.isolationBadgeLabel!,
-                                tone: DaywellStatusTone.warning,
-                                showIcon: false,
-                              ),
-                            ],
                           ],
                         ),
                         trailing: Text(

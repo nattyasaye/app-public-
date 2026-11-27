@@ -6,13 +6,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/finance/finance_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
-import 'package:personal_management_app/core/shared_foundation.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/app_settings_policy.dart';
 import 'package:personal_management_app/data/database/database_persistence_coordinator.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
-import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
 import 'package:personal_management_app/services/backup/encryption_backup_service.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_overview_tab.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_transactions_tab.dart';
@@ -704,7 +702,7 @@ void main() {
           '',
         );
         expect(
-          AppSettingsBackupPolicy.isExportableKey(
+          AppSettingsBackupPolicy.isExportableUserSetting(
             DriftFinanceRepository.legacyNonEtbNoticeDismissedKey,
           ),
           isTrue,

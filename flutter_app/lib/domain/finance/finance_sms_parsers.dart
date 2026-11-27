@@ -1692,7 +1692,7 @@ class FinanceSmsParsers {
         : null;
     if (explicit != null) return explicit;
     final addis = draft.receivedAtUtc.toUtc().add(const Duration(hours: 3));
-    return CalendarDate.fromYmd(addis.year, addis.month, addis.day);
+    return CalendarDate(year: addis.year, month: addis.month, day: addis.day);
   }
 
   static String? validateDraftApproval({

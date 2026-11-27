@@ -72,10 +72,10 @@ class FinanceController extends ChangeNotifier {
         await _repository.getLegacyNonEtbNoticeDismissed();
     final smsCheckpoint = await _repository.getSmsScanCheckpointState();
     final smsPermission = _smsInboxService != null
-        ? await _smsInboxService!.getPermissionStatus()
+        ? await _smsInboxService.getPermissionStatus()
         : DeviceSmsPermissionStatus.unavailable;
     final smsReceivePermission = _smsInboxService != null
-        ? await _smsInboxService!.getReceivePermissionStatus()
+        ? await _smsInboxService.getReceivePermissionStatus()
         : DeviceSmsPermissionStatus.unavailable;
 
     _state = _state.copyWith(
@@ -1847,10 +1847,10 @@ class FinanceController extends ChangeNotifier {
     try {
       final checkpoint = await _repository.getSmsScanCheckpointState();
       final permission = _smsInboxService != null
-          ? await _smsInboxService!.getPermissionStatus()
+          ? await _smsInboxService.getPermissionStatus()
           : DeviceSmsPermissionStatus.unavailable;
       final receivePermission = _smsInboxService != null
-          ? await _smsInboxService!.getReceivePermissionStatus()
+          ? await _smsInboxService.getReceivePermissionStatus()
           : DeviceSmsPermissionStatus.unavailable;
       if (_isDisposed) return;
       _state = _state.copyWith(
@@ -2009,10 +2009,10 @@ class FinanceController extends ChangeNotifier {
       await _repository.setSmsDailyScanEnabled(enabled);
       final checkpoint = await _repository.getSmsScanCheckpointState();
       final permission = _smsInboxService != null
-          ? await _smsInboxService!.getPermissionStatus()
+          ? await _smsInboxService.getPermissionStatus()
           : DeviceSmsPermissionStatus.unavailable;
       final receivePermission = _smsInboxService != null
-          ? await _smsInboxService!.getReceivePermissionStatus()
+          ? await _smsInboxService.getReceivePermissionStatus()
           : DeviceSmsPermissionStatus.unavailable;
       if (_isDisposed) return;
       _state = _state.copyWith(

@@ -1,19 +1,17 @@
 import 'dart:io';
 
-import 'package:drift/drift.dart';
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:personal_management_app/application/finance/finance_controller.dart';
 import 'package:personal_management_app/application/notes/notes_controller.dart';
 import 'package:personal_management_app/core/date/shared_date.dart';
-import 'package:personal_management_app/core/shared_foundation.dart';
 import 'package:personal_management_app/core/theme/daywell_theme.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/database/v7_ledger_hardener.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
 import 'package:personal_management_app/data/repositories/notes_repository.dart';
-import 'package:personal_management_app/domain/finance/double_entry_engine.dart';
 import 'package:personal_management_app/services/export/finance_export_service.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_composer_sheet.dart';
 import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
@@ -66,13 +64,11 @@ void main() {
 
   group('Finance Stage 2 — Remove Transaction-Level Note Functionality', () {
     late AppDatabase db;
-    late DriftFinanceRepository repo;
     late FinanceController controller;
 
     setUp(() async {
       final fixture = await _createFixture();
       db = fixture.db;
-      repo = fixture.repo;
       controller = fixture.controller;
     });
 

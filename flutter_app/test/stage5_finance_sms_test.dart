@@ -6,7 +6,6 @@ import 'package:personal_management_app/application/finance/finance_controller.d
 import 'package:personal_management_app/core/date/shared_date.dart';
 import 'package:personal_management_app/data/database/app_database.dart';
 import 'package:personal_management_app/data/repositories/finance_repository.dart';
-import 'package:personal_management_app/domain/finance/finance_contracts.dart';
 
 import 'support/sqlite_test_helper.dart';
 

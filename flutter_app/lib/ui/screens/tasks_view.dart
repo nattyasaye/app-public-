@@ -636,7 +636,7 @@ class _TasksViewState extends State<TasksView>
     final initialDueDate = dueDate;
     final initialLabelsSig = modalLabels.join('\x00');
     String subtasksSig(List<TaskSubtask> items) =>
-        items.map((s) => '${s.id}|${s.title}|${s.isCompleted}').join('\x00');
+        items.map((s) => '${s.id}|${s.title}|${s.done}').join('\x00');
     final initialSubtasksSig = subtasksSig(modalSubtasks);
     String recSig() =>
         '$modalIsRecurring|$modalRecFrequency|$modalRecInterval|${modalRecWeekdays.join(',')}|$modalRecStartDate|$modalRecEndDate|$modalRecRepeatFrom';

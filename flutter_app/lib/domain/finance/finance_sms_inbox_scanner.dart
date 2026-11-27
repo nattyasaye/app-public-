@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'double_entry_engine.dart';
 import 'finance_models.dart';
 import 'finance_sms_models.dart';
 import 'finance_sms_parsers.dart';
