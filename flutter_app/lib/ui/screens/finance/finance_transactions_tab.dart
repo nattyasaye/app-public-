@@ -34,7 +34,7 @@ class FinanceTransactionsTab extends StatefulWidget {
 class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
   final TextEditingController _searchCtrl = TextEditingController();
   bool _showVoided = false;
-  String _statusFilter = 'all';
+  bool _showLegacyEntries = false;
 
   @override
   void initState() {
@@ -64,11 +64,18 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
       categoryById: categoryById,
       accountById: accountById,
     );
+    final classifications = state.classificationsByEntryId;
+    final etbFiltered = filtered
+        .where((e) => (classifications[e.id] ?? state.classifyEntry(e)).isEligibleEtb)
+        .toList(growable: false);
+    final legacyFiltered = filtered
+        .where((e) => !(classifications[e.id] ?? state.classifyEntry(e)).isEligibleEtb)
+        .toList(growable: false);
 
-    final visibleCount = state.txDisplayLimit < filtered.length
+    final visibleCount = state.txDisplayLimit < etbFiltered.length
         ? state.txDisplayLimit
-        : filtered.length;
-    final visibleEntries = filtered.take(visibleCount).toList(growable: false);
+        : etbFiltered.length;
+    final visibleEntries = etbFiltered.take(visibleCount).toList(growable: false);
 
     return Column(
       children: [
@@ -88,14 +95,12 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
               controller: widget.controller,
             ),
           ),
-          hasActiveFilters:
-              state.isAnyFilterActive || _showVoided || _statusFilter != 'all',
-          activeSummary: '${filtered.length} ledger entries',
+          hasActiveFilters: state.isAnyFilterActive || _showVoided,
+          activeSummary: '${etbFiltered.length} ETB entries',
           onClearFilters: () {
             _searchCtrl.clear();
             setState(() {
               _showVoided = false;
-              _statusFilter = 'all';
             });
             widget.controller.clearAllFilters();
           },
@@ -107,10 +112,6 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
             _compactTypeChip('split', 'Split'),
             _compactTypeChip('debt', 'Debt'),
             _compactTypeChip('settlement', 'Settlement'),
-            _compactStatusChip('all', 'All Currencies'),
-            _compactStatusChip('eligible_etb', 'ETB Eligible'),
-            _compactStatusChip('excluded_non_etb', 'Excluded (Foreign)'),
-            _compactStatusChip('mixed_or_ambiguous', 'Currency Review'),
             FilterChip(
               label: const Text('Show Voided'),
               selected: _showVoided,
@@ -124,7 +125,8 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
           child: _buildTransactionsBody(
             context,
             state: state,
-            filtered: filtered,
+            filtered: etbFiltered,
+            legacyFiltered: legacyFiltered,
             visibleEntries: visibleEntries,
             visibleCount: visibleCount,
             postingsByEntry: postingsByEntry,
@@ -184,6 +186,7 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     BuildContext context, {
     required dynamic state,
     required List<JournalEntryModel> filtered,
+    required List<JournalEntryModel> legacyFiltered,
     required List<JournalEntryModel> visibleEntries,
     required int visibleCount,
     required Map<String, List<PostingModel>> postingsByEntry,
@@ -191,10 +194,10 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     required Map<String, AccountModel> accountById,
   }) {
     final hasCloseCard = widget.dailyRhythmController != null;
-    final hasActiveFilters =
-        state.isAnyFilterActive || _showVoided || _statusFilter != 'all';
+    final hasActiveFilters = state.isAnyFilterActive || _showVoided;
+    final hasLegacySection = legacyFiltered.isNotEmpty;
 
-    if (visibleEntries.isEmpty) {
+    if (visibleEntries.isEmpty && !hasLegacySection) {
       final emptyState = DaywellEmptyState(
         icon: Icons.receipt_long_outlined,
         message: hasActiveFilters
@@ -208,7 +211,6 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                 _searchCtrl.clear();
                 setState(() {
                   _showVoided = false;
-                  _statusFilter = 'all';
                 });
                 widget.controller.clearAllFilters();
               }
@@ -231,39 +233,127 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
       );
     }
 
-    final headerOffset = hasCloseCard ? 1 : 0;
     final hasMoreButton = filtered.length > visibleCount;
-    return ListView.separated(
+    return ListView(
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
-      itemCount: headerOffset + visibleEntries.length + (hasMoreButton ? 1 : 0),
-      separatorBuilder: (_, __) =>
+      children: [
+        if (hasCloseCard) ...[
+          _buildFinanceCloseCard(context),
           const SizedBox(height: SharedDesignTokens.spacingSm),
-      itemBuilder: (context, index) {
-        if (hasCloseCard && index == 0) {
-          return _buildFinanceCloseCard(context);
-        }
-        final entryIndex = index - headerOffset;
-        if (entryIndex >= visibleEntries.length) {
-          return Center(
-            child: DaywellButton(
-              label: 'Load More (${filtered.length - visibleCount} remaining)',
-              variant: DaywellButtonVariant.outlined,
-              onPressed: () => widget.controller
-                  .setTxDisplayLimit(state.txDisplayLimit + 25),
+        ],
+        if (visibleEntries.isEmpty)
+          DaywellCard(
+            padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
+            child: Center(
+              child: Text(
+                hasActiveFilters
+                    ? 'No matching ETB ledger entries.'
+                    : 'No ETB ledger entries recorded yet.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: context.daywellColors.textSecondary,
+                    ),
+              ),
             ),
-          );
-        }
-        final entry = visibleEntries[entryIndex];
-        final entryPostings =
-            postingsByEntry[entry.id] ?? const <PostingModel>[];
-        return _buildEntryCard(
-          context,
-          entry: entry,
-          postings: entryPostings,
-          categoryById: categoryById,
-          accountById: accountById,
-        );
-      },
+          )
+        else ...[
+          for (final entry in visibleEntries) ...[
+            _buildEntryCard(
+              context,
+              entry: entry,
+              postings: postingsByEntry[entry.id] ?? const <PostingModel>[],
+              categoryById: categoryById,
+              accountById: accountById,
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingSm),
+          ],
+          if (hasMoreButton)
+            Center(
+              child: DaywellButton(
+                label: 'Load More (${filtered.length - visibleCount} remaining)',
+                variant: DaywellButtonVariant.outlined,
+                onPressed: () => widget.controller
+                    .setTxDisplayLimit(state.txDisplayLimit + 25),
+              ),
+            ),
+        ],
+        if (hasLegacySection) ...[
+          const SizedBox(height: SharedDesignTokens.spacingSm),
+          _buildLegacyEntriesCard(
+            context,
+            legacyEntries: legacyFiltered,
+            postingsByEntry: postingsByEntry,
+            categoryById: categoryById,
+            accountById: accountById,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildLegacyEntriesCard(
+    BuildContext context, {
+    required List<JournalEntryModel> legacyEntries,
+    required Map<String, List<PostingModel>> postingsByEntry,
+    required Map<String, TransactionCategoryModel> categoryById,
+    required Map<String, AccountModel> accountById,
+  }) {
+    final semantic = context.daywellColors;
+    final textTheme = Theme.of(context).textTheme;
+    return DaywellCard(
+      padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          InkWell(
+            borderRadius: BorderRadius.circular(SharedDesignTokens.radiusSm),
+            onTap: () =>
+                setState(() => _showLegacyEntries = !_showLegacyEntries),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Legacy Non-ETB Entries (${legacyEntries.length}) · Read-Only',
+                          style: textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          'Historical non-ETB or unclassified entries preserved separately and excluded from ETB totals',
+                          style: textTheme.bodySmall?.copyWith(
+                            color: semantic.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(
+                    _showLegacyEntries ? Icons.expand_less : Icons.expand_more,
+                    color: semantic.textMuted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_showLegacyEntries) ...[
+            const Divider(),
+            for (final entry in legacyEntries) ...[
+              _buildEntryCard(
+                context,
+                entry: entry,
+                postings: postingsByEntry[entry.id] ?? const <PostingModel>[],
+                categoryById: categoryById,
+                accountById: accountById,
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingSm),
+            ],
+          ],
+        ],
+      ),
     );
   }
 
@@ -276,19 +366,9 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     );
   }
 
-  Widget _compactStatusChip(String value, String label) {
-    final selected = _statusFilter == value;
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => setState(() => _statusFilter = value),
-    );
-  }
-
   Widget _buildAccountFilterDropdown(BuildContext context) {
     final state = widget.controller.state;
-    final accounts =
-        state.accounts.where((a) => !a.isSystem).toList(growable: false);
+    final accounts = state.etbUserAccounts;
     return DropdownButton<String>(
       value: state.accountFilter == 'all' ||
               accounts.any((a) => a.id == state.accountFilter)
@@ -300,11 +380,7 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
         for (final a in accounts)
           DropdownMenuItem(
             value: a.id,
-            child: Text(
-              DoubleEntryEngine.isEtb(a.currencyCode)
-                  ? a.name
-                  : '${a.name} (${FinanceUiFormatters.currencyDisplayLabel(a.currencyCode)})',
-            ),
+            child: Text(a.name),
           ),
       ],
       onChanged: (val) {
@@ -358,25 +434,10 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
     final state = widget.controller.state;
     final today = CalendarDate.today();
     final query = state.searchQuery.trim().toLowerCase();
-    final classificationsByEntryId = state.classificationsByEntryId;
 
     final list = entries.where((entry) {
       if (!_showVoided && entry.isVoided) return false;
       final ps = postingsByEntry[entry.id] ?? const <PostingModel>[];
-
-      if (_statusFilter != 'all') {
-        final cls =
-            classificationsByEntryId[entry.id] ?? state.classifyEntry(entry);
-        if (_statusFilter == 'eligible_etb' && !cls.isEligibleEtb) {
-          return false;
-        }
-        if (_statusFilter == 'excluded_non_etb' && !cls.isExcludedNonEtb) {
-          return false;
-        }
-        if (_statusFilter == 'mixed_or_ambiguous' && !cls.needsCurrencyReview) {
-          return false;
-        }
-      }
 
       if (state.accountFilter != 'all' &&
           !ps.any((p) => p.accountId == state.accountFilter)) {
@@ -403,12 +464,32 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
             .join(' ')
             .toLowerCase();
         final accNames = ps
+            .where((p) =>
+                !SystemControlAccounts.isSystemControlId(p.accountId) &&
+                !(accountById[p.accountId]?.isSystem ?? false))
             .map((p) => accountById[p.accountId]?.name ?? '')
             .join(' ')
             .toLowerCase();
-        final notes = ps.map((p) => p.note ?? '').join(' ').toLowerCase();
+        final transferLabel = entry.entryType == EntryType.transfer
+            ? (() {
+                final ep = DoubleEntryEngine.resolveTransferDisplayEndpoints(
+                  postings: ps,
+                  accounts: accountById.values,
+                );
+                return ep.isUnambiguous
+                    ? '${ep.sourceName} → ${ep.destinationName}'
+                    : ep.fallbackAccountNames.join(' · ');
+              })().toLowerCase()
+            : '';
+        final resolvedDesc =
+            DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
+          description: entry.description,
+          legacyNote: DoubleEntryEngine.resolveUnambiguousHistoricalPostingNote(
+            ps,
+          ),
+        );
         final haystack =
-            '${entry.description.toLowerCase()} $catNames $accNames $notes';
+            '${resolvedDesc.toLowerCase()} $catNames $accNames $transferLabel';
         if (!haystack.contains(query)) return false;
       }
       return true;
@@ -497,8 +578,23 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
               p.direction == PostingDirection.debit,
         );
 
+    final expenseSummary = DoubleEntryEngine.summarizeDirectExpense(
+      entry: entry,
+      postings: postings,
+      accounts: accountById.values,
+    );
+    final transferEndpoints = entry.entryType == EntryType.transfer
+        ? DoubleEntryEngine.resolveTransferDisplayEndpoints(
+            postings: postings,
+            accounts: accountById.values,
+          )
+        : null;
+
     final primaryPosting = postings.firstWhere(
-      (p) => p.categoryId != null,
+      (p) =>
+          p.categoryId != null &&
+          (!expenseSummary.isDirectExpense ||
+              !DoubleEntryEngine.isExpenseFeePosting(p)),
       orElse: () => postings.isNotEmpty
           ? postings.first
           : PostingModel(
@@ -514,15 +610,32 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
         .where((p) => p.direction == PostingDirection.debit)
         .fold<int>(0, (s, p) => s + p.amountCents);
 
-    final userAccountsInvolved = postings
-        .where((p) => !SystemControlAccounts.isSystemControlId(p.accountId))
-        .map((p) => accountById[p.accountId]?.name ?? p.accountId)
-        .toSet()
-        .join(' -> ');
+    final String userAccountsInvolved;
+    if (transferEndpoints != null) {
+      userAccountsInvolved = transferEndpoints.isUnambiguous
+          ? '${transferEndpoints.sourceName} → ${transferEndpoints.destinationName}'
+          : transferEndpoints.fallbackAccountNames.join(' · ');
+    } else if (expenseSummary.isDirectExpense &&
+        expenseSummary.paidAccountId != null) {
+      userAccountsInvolved =
+          accountById[expenseSummary.paidAccountId!]?.name ??
+              expenseSummary.paidAccountId!;
+    } else {
+      userAccountsInvolved = postings
+          .where((p) =>
+              !SystemControlAccounts.isSystemControlId(p.accountId) &&
+              !(accountById[p.accountId]?.isSystem ?? false))
+          .map((p) => accountById[p.accountId]?.name ?? p.accountId)
+          .toSet()
+          .join(' · ');
+    }
 
-    final categoryBreadcrumb = primaryPosting.categoryId != null
+    final primaryCategoryId = expenseSummary.isDirectExpense
+        ? expenseSummary.primaryCategoryId
+        : primaryPosting.categoryId;
+    final categoryBreadcrumb = primaryCategoryId != null
         ? FinanceUiFormatters.formatCategoryBreadcrumb(
-            primaryPosting.categoryId,
+            primaryCategoryId,
             categoryById,
           )
         : FinanceUiFormatters.formatEntryTypeLabel(entry.entryType);
@@ -539,6 +652,14 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
 
     final isMixedMultiCurrency = classification.touchedCurrencies.length > 1;
     final signPrefix = isIncome ? '+' : (isExpense ? '-' : '');
+    final displayAmountCents = expenseSummary.isDirectExpense
+        ? expenseSummary.totalOutflowCents
+        : totalDebit;
+    final displayCurrency = classification.nativeCurrencyCode ??
+        (classification.touchedCurrencies.length == 1 &&
+                classification.touchedCurrencies.first != 'UNVERIFIED'
+            ? classification.touchedCurrencies.first
+            : null);
     final String amountDisplay;
     if (isMixedMultiCurrency) {
       final legDisplays = postings
@@ -554,17 +675,27 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
           ? legDisplays.join(' / ')
           : 'Mixed (${classification.touchedCurrencies.join(' / ')})';
     } else {
-      final displayCurrency = classification.nativeCurrencyCode ??
-          (classification.touchedCurrencies.length == 1 &&
-                  classification.touchedCurrencies.first != 'UNVERIFIED'
-              ? classification.touchedCurrencies.first
-              : null);
       final formatted = FinanceUiFormatters.formatCurrencyCents(
-        totalDebit,
+        displayAmountCents,
         currencyCode: displayCurrency,
       );
       amountDisplay = '$signPrefix$formatted';
     }
+    final showExpenseFeeDetail = expenseSummary.isDirectExpense &&
+        expenseSummary.feeCents > 0 &&
+        !isMixedMultiCurrency;
+    final formattedExpenseFee = showExpenseFeeDetail
+        ? FinanceUiFormatters.formatCurrencyCents(
+            expenseSummary.feeCents,
+            currencyCode: displayCurrency,
+          )
+        : null;
+    final formattedExpensePrincipal = showExpenseFeeDetail
+        ? FinanceUiFormatters.formatCurrencyCents(
+            expenseSummary.principalCents,
+            currencyCode: displayCurrency,
+          )
+        : null;
 
     final dateObj = SharedDateFormatter.tryParseFlexibleToCalendarDate(
       entry.occurrenceDate,
@@ -593,7 +724,13 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      entry.description,
+                      DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
+                        description: entry.description,
+                        legacyNote: DoubleEntryEngine
+                            .resolveUnambiguousHistoricalPostingNote(
+                          postings,
+                        ),
+                      ),
                       style: textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.bold,
                         color: entry.isVoided ? semantic.textMuted : null,
@@ -610,6 +747,16 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                         color: semantic.textSecondary,
                       ),
                     ),
+                    if (formattedExpenseFee != null &&
+                        formattedExpensePrincipal != null) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        'Principal $formattedExpensePrincipal · Includes $formattedExpenseFee fee',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: semantic.textMuted,
+                        ),
+                      ),
+                    ],
                     if (!entry.isVoided &&
                         classification.needsCurrencyReview &&
                         classification.reason != null) ...[
@@ -625,12 +772,24 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                 ),
               ),
               const SizedBox(width: SharedDesignTokens.spacingSm),
-              Text(
-                amountDisplay,
-                style: textTheme.titleSmall?.copyWith(
-                  fontWeight: FontWeight.bold,
-                  color: amountColor,
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    amountDisplay,
+                    style: textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: amountColor,
+                    ),
+                  ),
+                  if (formattedExpenseFee != null)
+                    Text(
+                      'Includes $formattedExpenseFee fee',
+                      style: textTheme.labelSmall?.copyWith(
+                        color: semantic.textMuted,
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
@@ -676,14 +835,15 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
               else if (classification.isExcludedNonEtb)
                 DaywellStatusBadge(
                   label:
-                      'Excluded (${classification.nativeCurrencyCode ?? 'Non-ETB'})',
+                      'Legacy (${classification.nativeCurrencyCode ?? 'Non-ETB'})',
                   tone: DaywellStatusTone.warning,
                   showIcon: false,
                 )
               else if (classification.needsCurrencyReview)
                 const DaywellStatusBadge(
-                  label: 'Currency Review',
+                  label: 'Legacy · Unclassified',
                   tone: DaywellStatusTone.warning,
+                  showIcon: false,
                 ),
               if (DoubleEntryEngine.isRefundEntry(entry))
                 const DaywellStatusBadge(
@@ -754,7 +914,13 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                   children: [
                     Expanded(
                       child: Text(
-                        entry.description,
+                        DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
+                          description: entry.description,
+                          legacyNote: DoubleEntryEngine
+                              .resolveUnambiguousHistoricalPostingNote(
+                            postings,
+                          ),
+                        ),
                         style: textTheme.titleLarge?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
@@ -792,10 +958,10 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                     ),
                     child: DaywellStatusBanner(
                       title: classification.isExcludedNonEtb
-                          ? 'Excluded (${classification.nativeCurrencyCode ?? 'Non-ETB'})'
-                          : 'Currency Review Required',
-                      message: classification.reason ??
-                          'Excluded from first-release ETB reports.',
+                          ? 'Legacy (${classification.nativeCurrencyCode ?? 'Non-ETB'}) · Read-Only'
+                          : 'Legacy Record · Read-Only',
+                      message:
+                          'Preserved with original amounts and excluded from ETB totals. Editing is disabled.',
                       tone: DaywellStatusTone.warning,
                     ),
                   ),
@@ -813,6 +979,33 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                       tone: DaywellStatusTone.info,
                     ),
                   ),
+                Builder(
+                  builder: (_) {
+                    final auditExpenseSummary =
+                        DoubleEntryEngine.summarizeDirectExpense(
+                      entry: entry,
+                      postings: postings,
+                      accounts: accountById.values,
+                    );
+                    if (!auditExpenseSummary.isDirectExpense ||
+                        auditExpenseSummary.feeCents <= 0) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(
+                        top: SharedDesignTokens.spacingSm,
+                      ),
+                      child: DaywellStatusBanner(
+                        title: 'Expense Fee Breakdown',
+                        message:
+                            'Principal ${FinanceUiFormatters.formatEtbCents(auditExpenseSummary.principalCents)} + '
+                            'Fee ${FinanceUiFormatters.formatEtbCents(auditExpenseSummary.feeCents)} = '
+                            'Total deduction ${FinanceUiFormatters.formatEtbCents(auditExpenseSummary.totalOutflowCents)}.',
+                        tone: DaywellStatusTone.info,
+                      ),
+                    );
+                  },
+                ),
                 const SizedBox(height: SharedDesignTokens.spacingMd),
                 Text(
                   'Balanced Ledger Postings',
@@ -873,13 +1066,6 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                                       ),
                                       style: textTheme.bodySmall?.copyWith(
                                         color: semantic.textSecondary,
-                                      ),
-                                    ),
-                                  if (p.note != null && p.note!.isNotEmpty)
-                                    Text(
-                                      p.note!,
-                                      style: textTheme.bodySmall?.copyWith(
-                                        color: semantic.textMuted,
                                       ),
                                     ),
                                 ],
@@ -1056,7 +1242,6 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
         summary.remainingRefundableCents,
       ),
     );
-    final noteCtrl = TextEditingController();
     final minDate = SharedDateFormatter.parseFlexibleToCalendarDate(
       summary.originalOccurrenceDate ?? entry.occurrenceDate,
     );
@@ -1111,11 +1296,19 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingXs),
                     Text(
-                      '${entry.description} · Remaining refundable: ${FinanceUiFormatters.formatEtbCents(summary.remainingRefundableCents)}',
+                      '${DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(description: entry.description, legacyNote: DoubleEntryEngine.resolveUnambiguousHistoricalPostingNote(state.postings.where((p) => p.entryId == entry.id).toList()))} · Remaining refundable: ${FinanceUiFormatters.formatEtbCents(summary.remainingRefundableCents)}',
                       style: textTheme.bodySmall?.copyWith(
                         color: semantic.textSecondary,
                       ),
                     ),
+                    if (summary.originalFeeCents > 0) ...[
+                      const SizedBox(height: SharedDesignTokens.spacingCompact),
+                      DaywellStatusBanner(
+                        tone: DaywellStatusTone.info,
+                        message:
+                            'Maximum normal refund is principal only (${FinanceUiFormatters.formatEtbCents(summary.originalAmountCents)}). Bank fee (${FinanceUiFormatters.formatEtbCents(summary.originalFeeCents)}) is excluded.',
+                      ),
+                    ],
                     if (validationError != null) ...[
                       const SizedBox(height: SharedDesignTokens.spacingCompact),
                       DaywellStatusBanner(
@@ -1153,12 +1346,6 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                       isRequired: true,
                       keyboardType:
                           const TextInputType.numberWithOptions(decimal: true),
-                    ),
-                    const SizedBox(height: SharedDesignTokens.spacingCompact),
-                    DaywellTextField(
-                      controller: noteCtrl,
-                      label: 'Note (optional)',
-                      hintText: 'e.g. Returned defective item',
                     ),
                     const SizedBox(height: SharedDesignTokens.spacingCompact),
                     Wrap(
@@ -1227,9 +1414,6 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                                 refundAccountId: selectedAccountId,
                                 refundCents: refundCents,
                                 date: refundDate,
-                                note: noteCtrl.text.trim().isEmpty
-                                    ? null
-                                    : noteCtrl.text.trim(),
                               );
                               if (!sheetCtx.mounted) return;
                               if (created == null) {
@@ -1253,6 +1437,5 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
       },
     );
     amountCtrl.dispose();
-    noteCtrl.dispose();
   }
 }

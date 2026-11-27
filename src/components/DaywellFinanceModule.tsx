@@ -61,12 +61,13 @@ import {
   voidJournalEntryGuardedV7,
 } from '../domain/financeV7Engine';
 import {
+  DEFAULT_EXPENSE_CATEGORIES,
   DoubleEntryValidationError,
   FOUNDATION_DEFAULT_EXPENSE_CATEGORIES,
   FOUNDATION_DEFAULT_INCOME_CATEGORIES,
   isDuplicateCategoryName,
 } from '../domain/doubleEntryFinance';
-import { SYSTEM_CONTROL_ACCOUNT_IDS } from '../domain/sharedFoundation';
+import { SHARED_DESIGN_TOKENS, SYSTEM_CONTROL_ACCOUNT_IDS } from '../domain/sharedFoundation';
 import { CalendarDate, EthiopiaClock } from '../domain/date';
 import { DailyRhythmDayRecord } from '../domain/dailyRhythm';
 import { formatBirr, parseDecimalToCentsStrict } from '../domain/financialEngine';
@@ -216,6 +217,13 @@ export function DaywellFinanceModule({
       return null;
     }
   });
+  const [legacyNoticeDismissed, setLegacyNoticeDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('daywell_finance_legacy_non_etb_notice_dismissed_v1') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [dailyRhythmTodayRecord, setDailyRhythmTodayRecord] =
     useState<DailyRhythmDayRecord>(() =>
       dailyRhythmWorkflowService.getDayOrEmpty(todayStr, { todayIso: todayStr })
@@ -350,6 +358,10 @@ export function DaywellFinanceModule({
       setBudgets((canonical.budgets || []) as SharedBudget[]);
       setRecurringRules((canonical.recurringRules || []) as SharedRecurringRule[]);
       setPlanningPeriodEnd(localStorage.getItem('daywell_finance_planning_horizon') || null);
+      setLegacyNoticeDismissed(
+        localStorage.getItem(SharedStateBridge.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY) ===
+          'true'
+      );
       setIsSetupCompleted(
         Boolean(canonical.isFinanceSetupCompleted) ||
           hydrated.accounts.some((a) => !a.isSystem)
@@ -450,7 +462,6 @@ export function DaywellFinanceModule({
       feeText: prefill?.feeText,
       feeCategoryId: prefill?.feeCategoryId,
       payee: prefill?.payee,
-      note: prefill?.note,
     });
     setComposerOpen(true);
   };
@@ -597,7 +608,7 @@ export function DaywellFinanceModule({
       if (requestedNormCur !== targetNormCur) {
         return {
           ok: false,
-          error: 'Account currency cannot be changed after creation in first-release ETB mode.',
+          error: 'Account currency cannot be changed. Daywell Finance supports ETB only.',
         };
       }
 
@@ -665,7 +676,7 @@ export function DaywellFinanceModule({
       if (normalized !== 'ETB') {
         return {
           ok: false,
-          error: 'Only Verified ETB accounts can be created in first-release ETB mode.',
+          error: 'Only ETB accounts can be created in Daywell Finance.',
         };
       }
       const newAcc: Account = {
@@ -889,7 +900,6 @@ export function DaywellFinanceModule({
     dueDate?: string;
     description: string;
     payee?: string;
-    note?: string;
     correctedFromEntryId?: string;
   }): { ok: boolean; error?: string } => {
     try {
@@ -923,7 +933,7 @@ export function DaywellFinanceModule({
         return {
           ok: false,
           error:
-            'Unbacked third-party entries without an active Verified ETB account leg are disabled in ETB first-release mode. Use Split Expense or Borrow from an ETB account.',
+            'Third-party entries must reference an active ETB account. Use Split Expense or Borrow instead.',
         };
       }
 
@@ -952,17 +962,48 @@ export function DaywellFinanceModule({
       let newDebt: Debt | undefined;
       let newSimpleTx: SimpleTransaction | undefined;
 
+      const ensureFeeCategoryIfNeeded = (feeCents?: number, feeCategoryId?: string) => {
+        if (!feeCents || feeCents <= 0) return;
+        const effectiveFeeCatId =
+          feeCategoryId && feeCategoryId.trim() ? feeCategoryId.trim() : 'cat-fees';
+        if (categories.some((c) => c.id === effectiveFeeCatId)) return;
+        if (effectiveFeeCatId === 'cat-fees') {
+          setCategories((prev) =>
+            prev.some((c) => c.id === 'cat-fees')
+              ? prev
+              : [
+                  ...prev,
+                  {
+                    id: 'cat-fees',
+                    name: 'Financial Fees',
+                    type: 'expense',
+                    colorHex:
+                      DEFAULT_EXPENSE_CATEGORIES.find((c) => c.id === 'cat-fees')?.colorHex ??
+                      SHARED_DESIGN_TOKENS.colors.text.mutedLight,
+                    isArchived: false,
+                  },
+                ]
+          );
+        }
+      };
+
       if (payload.kind === 'expense') {
+        const feeCents = payload.feeCents || 0;
+        const feeCategoryId =
+          feeCents > 0 ? payload.feeCategoryId || 'cat-fees' : undefined;
+        ensureFeeCategoryIfNeeded(feeCents, feeCategoryId);
         const res = buildDirectExpense({
           id: entryId,
           assetAccountId: payload.accountId,
           expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
           categoryId: payload.categoryId || 'cat-other-exp',
           amountCents: payload.amountCents,
+          feeCents,
+          feeExpenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+          feeCategoryId,
           occurrenceDate: payload.occurrenceDate,
           movementDate: payload.movementDate,
           description: formattedDescription,
-          note: payload.note,
         });
         newEntry = res.entry;
         newPostings = res.postings;
@@ -989,7 +1030,6 @@ export function DaywellFinanceModule({
           occurrenceDate: payload.occurrenceDate,
           movementDate: payload.movementDate,
           description: formattedDescription,
-          note: payload.note,
         });
         newEntry = res.entry;
         newPostings = res.postings;
@@ -1010,18 +1050,21 @@ export function DaywellFinanceModule({
         if (!payload.destinationAccountId) {
           return { ok: false, error: 'Destination account is required.' };
         }
+        const feeCents = payload.feeCents || 0;
+        const feeCategoryId =
+          feeCents > 0 ? payload.feeCategoryId || 'cat-fees' : undefined;
+        ensureFeeCategoryIfNeeded(feeCents, feeCategoryId);
         const res = buildTransfer({
           id: entryId,
           fromAssetAccountId: payload.accountId,
           toAssetAccountId: payload.destinationAccountId,
           amountCents: payload.amountCents,
-          transferFeeCents: payload.feeCents || 0,
+          transferFeeCents: feeCents,
           feeExpenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
-          feeCategoryId: payload.feeCategoryId,
+          feeCategoryId,
           date: payload.occurrenceDate,
           movementDate: payload.movementDate,
           description: payload.description,
-          note: payload.note,
         });
         newEntry = res.entry;
         newPostings = res.postings;
@@ -1267,7 +1310,6 @@ export function DaywellFinanceModule({
     refundAccountId: string;
     refundCents: number;
     refundDateIso: string;
-    note?: string;
   }): { ok: boolean; error?: string } => {
     try {
       const res = recordExpenseRefundV7({
@@ -1275,7 +1317,6 @@ export function DaywellFinanceModule({
         refundAccountId: payload.refundAccountId,
         refundCents: payload.refundCents,
         refundDateIso: payload.refundDateIso,
-        note: payload.note,
         entries,
         postings,
         accounts,
@@ -2310,6 +2351,15 @@ export function DaywellFinanceModule({
           onNavigateTab={(tab) => setActiveTab(tab)}
           onRequestConfirm={requestConfirm}
           hasIntegrityNotices={!integrityReport.isHealthy}
+          legacyNoticeDismissed={legacyNoticeDismissed}
+          onDismissLegacyNotice={() => {
+            setLegacyNoticeDismissed(true);
+            try {
+              localStorage.setItem('daywell_finance_legacy_non_etb_notice_dismissed_v1', 'true');
+            } catch {
+              // ignore storage errors in restricted environments
+            }
+          }}
         />
       )}
 

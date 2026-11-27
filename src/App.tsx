@@ -566,6 +566,10 @@ export default function App() {
       postingsByEntry.set(p.entryId, list);
     }
     const recentEntries = [...hydrated.entries]
+      .filter((entry) => {
+        const cls = classificationsByEntryId.get(entry.id);
+        return cls?.status === 'eligible_etb';
+      })
       .sort((a, b) =>
         a.occurrenceDate !== b.occurrenceDate
           ? b.occurrenceDate.localeCompare(a.occurrenceDate)
@@ -576,38 +580,7 @@ export default function App() {
         const cls = classificationsByEntryId.get(entry.id);
         const list = postingsByEntry.get(entry.id) || [];
         const maxAmount = list.reduce((m, p) => Math.max(m, p.amountCents), 0);
-        const displayCurrency =
-          cls?.nativeCurrencyCode
-            ? cls.nativeCurrencyCode
-            : cls && cls.touchedCurrencies.length === 1
-            ? cls.touchedCurrencies[0]
-            : cls && cls.touchedCurrencies.length > 1
-            ? 'MIXED'
-            : cls?.status === 'eligible_etb'
-            ? 'ETB'
-            : '';
-        const nonSystemLegs = list.filter((p) => !accountById.get(p.accountId)?.isSystem);
-        const formattedAmount =
-          displayCurrency === 'MIXED'
-            ? nonSystemLegs.length > 0
-              ? nonSystemLegs
-                  .map((p) =>
-                    formatCurrencyCents(
-                      p.amountCents,
-                      accountById.get(p.accountId)?.currencyCode || ''
-                    )
-                  )
-                  .join(' / ')
-              : `${(maxAmount / 100).toFixed(2)} (${cls!.touchedCurrencies.join('/')})`
-            : formatCurrencyCents(
-                maxAmount,
-                displayCurrency === 'UNVERIFIED'
-                  ? ''
-                  : displayCurrency ||
-                      accountById.get(list.find((p) => !accountById.get(p.accountId)?.isSystem)?.accountId || '')
-                        ?.currencyCode ||
-                      ''
-              );
+        const formattedAmount = formatBirr(maxAmount);
         return { entry, cls, formattedAmount };
       });
     return { breakdown, recentEntries, entries: hydrated.entries };
@@ -1966,30 +1939,12 @@ export default function App() {
                           />
                         </div>
                         {(todaySafeHarbor.prepaidCardCreditCents > 0 ||
-                          todaySafeHarbor.nonEtbAccountCount > 0 ||
-                          (todaySafeHarbor.unverifiedAccountCount || 0) > 0 ||
-                          todaySafeHarbor.currencyReviewEntryCount > 0 ||
                           todaySafeHarbor.unverifiedLegacyPaidCount > 0) && (
                           <div className="text-[11px] text-[var(--dw-text-muted)] flex flex-wrap gap-x-3 gap-y-0.5 tabular-nums">
                             {todaySafeHarbor.prepaidCardCreditCents > 0 && (
                               <span className="text-[var(--dw-on-income-container)] font-medium">
                                 Includes +{formatBirr(todaySafeHarbor.prepaidCardCreditCents)} Prepaid
                                 Credit
-                              </span>
-                            )}
-                            {todaySafeHarbor.nonEtbAccountCount > 0 && (
-                              <span>
-                                {todaySafeHarbor.nonEtbAccountCount} non-ETB account(s) excluded
-                              </span>
-                            )}
-                            {(todaySafeHarbor.unverifiedAccountCount || 0) > 0 && (
-                              <span className="text-[var(--dw-on-warning-container)]">
-                                {todaySafeHarbor.unverifiedAccountCount} unverified account(s) excluded
-                              </span>
-                            )}
-                            {todaySafeHarbor.currencyReviewEntryCount > 0 && (
-                              <span className="text-[var(--dw-on-expense-container)] font-medium">
-                                {todaySafeHarbor.currencyReviewEntryCount} entry review notice(s)
                               </span>
                             )}
                             {todaySafeHarbor.unverifiedLegacyPaidCount > 0 && (
@@ -2001,7 +1956,7 @@ export default function App() {
                         )}
                         {todayFinanceSummary.recentEntries.length > 0 && (
                           <div className="pt-2 space-y-1.5 border-t border-[var(--dw-divider)]">
-                            {todayFinanceSummary.recentEntries.map(({ entry, cls, formattedAmount }) => (
+                            {todayFinanceSummary.recentEntries.map(({ entry, formattedAmount }) => (
                               <div
                                 key={entry.id}
                                 className={`flex items-center justify-between gap-2 text-[11px] ${
@@ -2016,21 +1971,9 @@ export default function App() {
                                   >
                                     {entry.description}
                                   </span>
-                                  {entry.isVoided ? (
+                                  {entry.isVoided && (
                                     <DaywellStatusBadge tone="neutral" showIcon={false} label="Voided" />
-                                  ) : cls?.status === 'excluded_non_etb' ? (
-                                    <DaywellStatusBadge
-                                      tone="warning"
-                                      showIcon={false}
-                                      label={`Excluded (${cls.nativeCurrencyCode || cls.touchedCurrencies[0] || 'Non-ETB'})`}
-                                    />
-                                  ) : cls?.status === 'mixed_or_ambiguous' ? (
-                                    <DaywellStatusBadge
-                                      tone="error"
-                                      showIcon={false}
-                                      label="Currency Review"
-                                    />
-                                  ) : null}
+                                  )}
                                 </div>
                                 <span className="dw-type-mono font-semibold text-[var(--dw-text-secondary)] shrink-0">
                                   {formattedAmount}
@@ -3133,7 +3076,7 @@ export default function App() {
                           if (parsed.rejectedCurrency) {
                             setQuickCaptureError(
                               parsed.error ||
-                                `Only ETB amounts are supported in Quick Capture (detected ${parsed.rejectedCurrency}).`
+                                `Daywell Finance supports ETB only. Please enter this amount in ETB (detected ${parsed.rejectedCurrency}).`
                             );
                             return;
                           }

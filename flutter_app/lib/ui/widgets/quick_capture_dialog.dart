@@ -53,7 +53,7 @@ class _QuickCaptureDialogState extends State<QuickCaptureDialog> {
       if (rejected != null) {
         setState(() {
           _errorText =
-              'Only ETB amounts are supported in Quick Capture (detected $rejected).';
+              'Daywell Finance supports ETB only. Please enter this amount in ETB (detected $rejected).';
         });
         return;
       }
@@ -88,7 +88,7 @@ class _QuickCaptureDialogState extends State<QuickCaptureDialog> {
     if (rejected != null) {
       setState(() {
         _errorText =
-            'Only ETB amounts are supported in Quick Capture (detected $rejected).';
+            'Daywell Finance supports ETB only. Please enter this amount in ETB (detected $rejected).';
       });
       return;
     }

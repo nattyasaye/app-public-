@@ -763,7 +763,9 @@ class DashboardFinanceSection extends StatelessWidget {
           status = DaywellContentStatus.content;
         }
 
-        final pendingCommitments = financeState.pendingCommitments;
+        final pendingCommitments = financeState.pendingCommitments
+            .where((c) => !financeState.resolveCommitmentCurrency(c).isExcludedNonEtb)
+            .toList(growable: false);
         final recentActivity = _buildRecentFinanceActivity(financeState);
 
         return DaywellSectionContainer(
@@ -808,34 +810,6 @@ class DashboardFinanceSection extends StatelessWidget {
                     title: 'Safe Harbor Shortfall',
                     message:
                         'Obligations due through ${SharedDateFormatter.formatGregorianShort(financeState.effectivePlanningPeriodEnd)} exceed liquid cash by ${FinancialEngine.formatBirr(-financeState.availableToSpendCents)}.',
-                    actionLabel: 'Open Finance',
-                    onActionPressed: onOpenFinance,
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                ],
-                if (financeState.nonEtbAccountCount > 0) ...[
-                  DaywellStatusBanner(
-                    tone: DaywellStatusTone.warning,
-                    title: 'Non-ETB accounts excluded',
-                    message: financeState.unverifiedAccountCount > 0
-                        ? '${financeState.nonEtbAccountCount} non-ETB/unverified account(s) (${financeState.unverifiedAccountCount} unverified) are excluded from ETB Safe Harbor totals.'
-                        : '${financeState.nonEtbAccountCount} active non-ETB account(s) are excluded from ETB Safe Harbor totals.',
-                    actionLabel: 'Review',
-                    onActionPressed: onOpenFinance,
-                  ),
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                ],
-                if (financeState.currencyReviewEntryCount > 0 ||
-                    financeState.excludedNonEtbEntryCount > 0) ...[
-                  DaywellStatusBanner(
-                    tone: financeState.currencyReviewEntryCount > 0
-                        ? DaywellStatusTone.warning
-                        : DaywellStatusTone.info,
-                    title: financeState.currencyReviewEntryCount > 0
-                        ? 'Ledger currency review needed'
-                        : 'Foreign-currency entries isolated',
-                    message:
-                        '${financeState.excludedNonEtbEntryCount} foreign and ${financeState.currencyReviewEntryCount} unverified/mixed entry(s) remain visible in history but excluded from ETB totals.',
                     actionLabel: 'Open Finance',
                     onActionPressed: onOpenFinance,
                   ),
@@ -1131,17 +1105,12 @@ class _FinanceCommitmentsPreview extends StatelessWidget {
                   (CommitmentModel commitment) {
                     final res =
                         financeState.resolveCommitmentCurrency(commitment);
-                    final amountLabel = FinanceUiFormatters.formatCurrencyCents(
+                    final amountLabel = FinancialEngine.formatBirr(
                       commitment.amountCents,
-                      currencyCode:
-                          res.isEligibleEtb ? 'ETB' : res.currencyCode,
                     );
                     final String? isolationLabel;
-                    if (res.isExcludedNonEtb) {
-                      isolationLabel =
-                          'Excluded (${res.currencyCode ?? 'Foreign'})';
-                    } else if (res.needsReview) {
-                      isolationLabel = 'Currency Review';
+                    if (res.needsReview) {
+                      isolationLabel = 'Account Needed';
                     } else if (commitment.direction ==
                         CommitmentDirection.inflow) {
                       isolationLabel = 'Expected Income';
@@ -1245,7 +1214,12 @@ List<_FinanceActivityPreviewItem> _buildRecentFinanceActivity(
   final accountById = {for (final a in financeState.accounts) a.id: a};
   final classifications = financeState.classificationsByEntryId;
   final ledgerEntries = financeState.activeJournalEntries
-      .where((e) => e.entryType != EntryType.adjustment)
+      .where(
+        (e) =>
+            e.entryType != EntryType.adjustment &&
+            (classifications[e.id] ?? financeState.classifyEntry(e))
+                .isEligibleEtb,
+      )
       .toList();
 
   if (ledgerEntries.isNotEmpty) {
@@ -1262,8 +1236,6 @@ List<_FinanceActivityPreviewItem> _buildRecentFinanceActivity(
 
     return ledgerEntries.map((entry) {
       final entryPostings = postingsByEntry[entry.id] ?? const <PostingModel>[];
-      final cls =
-          classifications[entry.id] ?? financeState.classifyEntry(entry);
       final hasIncome = entryPostings.any(
         (p) =>
             p.accountId == SystemControlAccounts.income &&
@@ -1306,42 +1278,7 @@ List<_FinanceActivityPreviewItem> _buildRecentFinanceActivity(
       }
 
       final sign = kind == 'income' ? '+' : (kind == 'transfer' ? '' : '-');
-      final isMixed = cls.touchedCurrencies.length > 1;
-      final String amountText;
-      if (isMixed) {
-        final legs = entryPostings
-            .where((p) =>
-                !SystemControlAccounts.isSystemControlId(p.accountId) &&
-                !(accountById[p.accountId]?.isSystem ?? false))
-            .map((p) => FinanceUiFormatters.formatCurrencyCents(
-                  p.amountCents,
-                  currencyCode: accountById[p.accountId]?.currencyCode,
-                ))
-            .toList(growable: false);
-        amountText = legs.isNotEmpty
-            ? legs.join(' / ')
-            : 'Mixed (${cls.touchedCurrencies.join(' / ')})';
-      } else {
-        final displayCurrency = cls.nativeCurrencyCode ??
-            (cls.touchedCurrencies.length == 1 &&
-                    cls.touchedCurrencies.first != 'UNVERIFIED'
-                ? cls.touchedCurrencies.first
-                : null);
-        amountText = '$sign${FinanceUiFormatters.formatCurrencyCents(
-          amountCents,
-          currencyCode: displayCurrency,
-        )}';
-      }
-
-      final String? isolationBadgeLabel;
-      if (cls.isExcludedNonEtb) {
-        isolationBadgeLabel =
-            'Excluded (${cls.nativeCurrencyCode ?? 'Non-ETB'})';
-      } else if (cls.needsCurrencyReview) {
-        isolationBadgeLabel = 'Currency Review';
-      } else {
-        isolationBadgeLabel = null;
-      }
+      final amountText = '$sign${FinancialEngine.formatBirr(amountCents)}';
 
       final title = kind == 'transfer'
           ? 'Transfer'
@@ -1364,15 +1301,17 @@ List<_FinanceActivityPreviewItem> _buildRecentFinanceActivity(
         amountCents: amountCents,
         kind: kind,
         amountText: amountText,
-        isolationBadgeLabel: isolationBadgeLabel,
-        needsCurrencyReview: cls.needsCurrencyReview,
       );
     }).toList(growable: false);
   }
 
-  final recentTransactions = List<TransactionModel>.from(
-    financeState.activeTransactions,
-  )..sort(
+  final recentTransactions = financeState.activeTransactions
+      .where((tx) {
+        final txAcc = tx.accountId != null ? accountById[tx.accountId] : null;
+        return txAcc != null && DoubleEntryEngine.isEtb(txAcc.currencyCode);
+      })
+      .toList()
+    ..sort(
       (TransactionModel a, TransactionModel b) =>
           b.transactionDate.compareTo(a.transactionDate),
     );
@@ -1385,30 +1324,13 @@ List<_FinanceActivityPreviewItem> _buildRecentFinanceActivity(
                 tx.transactionDate,
                 useAmharic: false,
               );
-    final txAcc = tx.accountId != null ? accountById[tx.accountId] : null;
     final sign = tx.type == 'income' ? '+' : (tx.type == 'transfer' ? '' : '-');
-    final currencyCode = txAcc != null ? txAcc.currencyCode : '';
-    final tier = DoubleEntryEngine.classifyCurrencyCode(currencyCode);
-    final String? badgeLabel;
-    if (tier == CurrencyValidationTier.verifiedNonEtb) {
-      badgeLabel =
-          'Excluded (${DoubleEntryEngine.normalizeCurrencyCode(currencyCode)})';
-    } else if (tier == CurrencyValidationTier.unverified) {
-      badgeLabel = 'Currency Review';
-    } else {
-      badgeLabel = null;
-    }
     return _FinanceActivityPreviewItem(
       title: tx.categoryName,
       detail: detail,
       amountCents: tx.amountCents,
       kind: tx.type,
-      amountText: '$sign${FinanceUiFormatters.formatCurrencyCents(
-        tx.amountCents,
-        currencyCode: currencyCode,
-      )}',
-      isolationBadgeLabel: badgeLabel,
-      needsCurrencyReview: tier == CurrencyValidationTier.unverified,
+      amountText: '$sign${FinancialEngine.formatBirr(tx.amountCents)}',
     );
   }).toList(growable: false);
 }

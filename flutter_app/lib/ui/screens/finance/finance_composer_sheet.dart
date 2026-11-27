@@ -69,7 +69,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   String? _accountId;
   String? _destinationAccountId;
   String? _categoryId;
-  String? _transferFeeCategoryId;
+  String? _feeCategoryId;
   String? _partyId;
 
   late final TextEditingController _amountCtrl;
@@ -77,7 +77,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   late final TextEditingController _theirShareCtrl;
   late final TextEditingController _descriptionCtrl;
   late final TextEditingController _payeeCtrl;
-  late final TextEditingController _noteCtrl;
   late final TextEditingController _correctionReasonCtrl;
   late final TextEditingController _newPartyCtrl;
 
@@ -93,6 +92,10 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       _mode == FinanceComposerMode.income ||
       _mode == FinanceComposerMode.split;
 
+  bool get _modeUsesFee =>
+      _mode == FinanceComposerMode.expense ||
+      _mode == FinanceComposerMode.transfer;
+
   bool get _modeUsesParty =>
       _mode == FinanceComposerMode.split ||
       _mode == FinanceComposerMode.lend ||
@@ -104,14 +107,13 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       _mode == FinanceComposerMode.expense ||
       _mode == FinanceComposerMode.income;
 
-  int get _parsedTransferFeeCents {
+  int get _parsedFeeCents {
     final text = _feeCtrl.text.trim();
     if (text.isEmpty) return 0;
     return FinanceUiFormatters.parseEtbToCents(text) ?? 0;
   }
 
-  bool get _showTransferFeeCategory =>
-      _mode == FinanceComposerMode.transfer && _parsedTransferFeeCents > 0;
+  bool get _showFeeCategory => _modeUsesFee && _parsedFeeCents > 0;
 
   List<AccountModel> _eligibleAccountsForMode(
     FinanceModuleState state,
@@ -128,7 +130,8 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
 
   void _onControllerTextChanged() {
     if (!mounted) return;
-    if (_mode == FinanceComposerMode.transfer ||
+    if (_mode == FinanceComposerMode.expense ||
+        _mode == FinanceComposerMode.transfer ||
         _mode == FinanceComposerMode.split) {
       setState(() {});
     }
@@ -141,15 +144,14 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     _mode = widget.initialMode;
     _selectedDate = CalendarDate.today();
     _movementDate = _selectedDate;
-    _transferFeeCategoryId = SystemControlAccounts.feeCategoryId;
+    _feeCategoryId = SystemControlAccounts.feeCategoryId;
 
     _amountCtrl = TextEditingController(text: widget.initialAmountText ?? '');
-    _feeCtrl = TextEditingController();
+    _feeCtrl = TextEditingController(text: '0');
     _theirShareCtrl = TextEditingController();
     _descriptionCtrl =
         TextEditingController(text: widget.initialDescription ?? '');
     _payeeCtrl = TextEditingController();
-    _noteCtrl = TextEditingController();
     _correctionReasonCtrl = TextEditingController();
     _newPartyCtrl = TextEditingController();
 
@@ -204,9 +206,17 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     final entryPostings =
         state.postings.where((p) => p.entryId == entry.id).toList();
 
+    final resolvedEntryDescription =
+        DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
+      description: entry.description,
+      legacyNote: DoubleEntryEngine.resolveUnambiguousHistoricalPostingNote(
+        entryPostings,
+      ),
+    );
+
     if (entry.entryType == EntryType.transfer) {
       _mode = FinanceComposerMode.transfer;
-      _descriptionCtrl.text = entry.description.replaceFirst(
+      _descriptionCtrl.text = resolvedEntryDescription.replaceFirst(
         RegExp(r'\s*\(Fee:\s*[0-9.,]+\s*ETB\)\s*$'),
         '',
       );
@@ -225,7 +235,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       _accountId = src?.accountId ?? _accountId;
       _destinationAccountId = dst?.accountId ?? _destinationAccountId;
       final feeCatRaw = fee?.categoryId;
-      _transferFeeCategoryId = feeCatRaw != null
+      _feeCategoryId = feeCatRaw != null
           ? (FinanceUiFormatters.resolveCategorySelectionValue(
                 feeCatRaw,
                 state.categories,
@@ -246,22 +256,21 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         _amountCtrl.text =
             FinanceUiFormatters.formatCentsAsInput(dst.amountCents);
       }
-      if (fee != null && fee.amountCents > 0) {
-        _feeCtrl.text = FinanceUiFormatters.formatCentsAsInput(fee.amountCents);
-      }
-      _noteCtrl.text = src?.note ?? dst?.note ?? '';
+      _feeCtrl.text = (fee != null && fee.amountCents > 0)
+          ? FinanceUiFormatters.formatCentsAsInput(fee.amountCents)
+          : '0';
       _syncAccountsForMode();
       return;
     }
 
     const payeeSep = ' — ';
-    final sepIdx = entry.description.indexOf(payeeSep);
+    final sepIdx = resolvedEntryDescription.indexOf(payeeSep);
     if (sepIdx > 0) {
-      _payeeCtrl.text = entry.description.substring(0, sepIdx).trim();
+      _payeeCtrl.text = resolvedEntryDescription.substring(0, sepIdx).trim();
       _descriptionCtrl.text =
-          entry.description.substring(sepIdx + payeeSep.length).trim();
+          resolvedEntryDescription.substring(sepIdx + payeeSep.length).trim();
     } else {
-      _descriptionCtrl.text = entry.description;
+      _descriptionCtrl.text = resolvedEntryDescription;
     }
 
     final isIncome = entryPostings.any(
@@ -291,11 +300,17 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           _movementDate.toIsoString() == _selectedDate.toIsoString();
       _amountCtrl.text =
           FinanceUiFormatters.formatCentsAsInput(drAcc.amountCents);
-      _noteCtrl.text = drAcc.note ?? crInc.note ?? '';
     } else {
       _mode = FinanceComposerMode.expense;
+      final expenseSummary = DoubleEntryEngine.summarizeDirectExpense(
+        entry: entry,
+        postings: entryPostings,
+        accounts: state.accounts,
+      );
       final drExp = entryPostings.firstWhere(
-        (p) => p.accountId == SystemControlAccounts.expense,
+        (p) =>
+            p.accountId == SystemControlAccounts.expense &&
+            !DoubleEntryEngine.isExpenseFeePosting(p),
         orElse: () => entryPostings.first,
       );
       final crAcc = entryPostings.firstWhere(
@@ -304,17 +319,40 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
             !SystemControlAccounts.isSystemControlId(p.accountId),
         orElse: () => entryPostings.first,
       );
-      _accountId = crAcc.accountId;
-      _categoryId = drExp.categoryId;
+      _accountId = expenseSummary.isDirectExpense &&
+              expenseSummary.paidAccountId != null
+          ? expenseSummary.paidAccountId
+          : crAcc.accountId;
+      _categoryId = expenseSummary.isDirectExpense
+          ? expenseSummary.primaryCategoryId
+          : drExp.categoryId;
+      final feeCents =
+          expenseSummary.isDirectExpense ? expenseSummary.feeCents : 0;
+      _feeCtrl.text = feeCents > 0
+          ? FinanceUiFormatters.formatCentsAsInput(feeCents)
+          : '0';
+      final rawFeeCat =
+          expenseSummary.isDirectExpense ? expenseSummary.feeCategoryId : null;
+      _feeCategoryId = rawFeeCat != null
+          ? (FinanceUiFormatters.resolveCategorySelectionValue(
+                rawFeeCat,
+                state.categories,
+                type: 'expense',
+                preserveUnmatchedHistorical: true,
+              ) ??
+              SystemControlAccounts.feeCategoryId)
+          : SystemControlAccounts.feeCategoryId;
       final movementIso = crAcc.accountMovementDate;
       _movementDate = movementIso.trim().isNotEmpty
           ? SharedDateFormatter.parseFlexibleToCalendarDate(movementIso)
           : _selectedDate;
       _isMovementDateSynced =
           _movementDate.toIsoString() == _selectedDate.toIsoString();
-      _amountCtrl.text =
-          FinanceUiFormatters.formatCentsAsInput(drExp.amountCents);
-      _noteCtrl.text = drExp.note ?? crAcc.note ?? '';
+      _amountCtrl.text = FinanceUiFormatters.formatCentsAsInput(
+        expenseSummary.isDirectExpense
+            ? expenseSummary.principalCents
+            : drExp.amountCents,
+      );
     }
     _syncAccountsForMode();
     _syncDefaultCategory(onlyIfMissing: true);
@@ -358,7 +396,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     _theirShareCtrl.dispose();
     _descriptionCtrl.dispose();
     _payeeCtrl.dispose();
-    _noteCtrl.dispose();
     _correctionReasonCtrl.dispose();
     _newPartyCtrl.dispose();
     super.dispose();
@@ -408,13 +445,17 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         );
         return;
       }
+    }
+
+    if (_modeUsesFee) {
       final feeText = _feeCtrl.text.trim();
       if (feeText.isNotEmpty) {
         final feeCents = FinanceUiFormatters.parseEtbToCents(feeText);
         if (feeCents == null || feeCents < 0) {
           setState(() {
-            _validationError =
-                'Enter a valid non-negative transfer fee (up to 2 decimal places).';
+            _validationError = _mode == FinanceComposerMode.transfer
+                ? 'Enter a valid non-negative transfer fee (up to 2 decimal places).'
+                : 'Enter a valid non-negative bank/service fee (up to 2 decimal places).';
           });
           return;
         }
@@ -548,22 +589,28 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     required int amountCents,
     required String description,
   }) async {
-    final note = _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim();
     final payee =
         _payeeCtrl.text.trim().isEmpty ? null : _payeeCtrl.text.trim();
     final effectiveMovementDate = _effectiveMovementDate;
 
     switch (_mode) {
       case FinanceComposerMode.expense:
+        final feeText = _feeCtrl.text.trim();
+        final feeCents =
+            feeText.isEmpty ? 0 : FinanceUiFormatters.parseEtbToCents(feeText)!;
+        final feeCategoryId = feeCents > 0
+            ? (_feeCategoryId ?? SystemControlAccounts.feeCategoryId)
+            : null;
         final created = await widget.controller.recordDirectExpense(
           accountId: _accountId!,
           categoryId: _categoryId!,
           amountCents: amountCents,
+          feeCents: feeCents,
+          feeCategoryId: feeCategoryId,
           date: _selectedDate,
           movementDate: effectiveMovementDate,
           description: description,
           payee: payee,
-          note: note,
         );
         if (created == null) {
           throw StateError(
@@ -580,7 +627,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           movementDate: effectiveMovementDate,
           description: description,
           payee: payee,
-          note: note,
         );
         if (created == null) {
           throw StateError(
@@ -593,7 +639,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         final feeCents =
             feeText.isEmpty ? 0 : FinanceUiFormatters.parseEtbToCents(feeText)!;
         final feeCategoryId = feeCents > 0
-            ? (_transferFeeCategoryId ?? SystemControlAccounts.feeCategoryId)
+            ? (_feeCategoryId ?? SystemControlAccounts.feeCategoryId)
             : null;
         await widget.controller.recordTransfer(
           fromAssetAccountId: _accountId!,
@@ -604,7 +650,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           date: _selectedDate.toIsoString(),
           movementDate: effectiveMovementDate.toIsoString(),
           description: description,
-          note: note,
         );
       case FinanceComposerMode.split:
         final theirCents =
@@ -620,7 +665,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           movementDate: effectiveMovementDate,
           dueDate: _dueDate,
           description: description,
-          note: note,
         );
         if (created == null) {
           throw StateError(
@@ -638,7 +682,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           movementDate: effectiveMovementDate,
           dueDate: _dueDate,
           description: description,
-          note: note,
         );
         if (created == null) {
           throw StateError(
@@ -656,7 +699,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
           movementDate: effectiveMovementDate,
           dueDate: _dueDate,
           description: description,
-          note: note,
         );
         if (created == null) {
           throw StateError(
@@ -680,7 +722,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     final replacementId = 'entry-corr-${_uuid.v4()}';
     final dateIso = _selectedDate.toIsoString();
     final movementDateIso = _effectiveMovementDate.toIsoString();
-    final note = _noteCtrl.text.trim().isEmpty ? null : _noteCtrl.text.trim();
     final cleanPayee = _payeeCtrl.text.trim();
     final effectiveDescription = (cleanPayee.isNotEmpty &&
             _mode != FinanceComposerMode.transfer &&
@@ -694,7 +735,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
       final feeCents =
           feeText.isEmpty ? 0 : FinanceUiFormatters.parseEtbToCents(feeText)!;
       final effectiveFeeCategoryId = feeCents > 0
-          ? (_transferFeeCategoryId ?? SystemControlAccounts.feeCategoryId)
+          ? (_feeCategoryId ?? SystemControlAccounts.feeCategoryId)
           : null;
       built = DoubleEntryEngine.buildTransfer(
         entryId: replacementId,
@@ -708,7 +749,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         date: dateIso,
         movementDate: movementDateIso,
         description: description,
-        note: note,
       );
       final rawEntry = built['entry'] as JournalEntryModel;
       built['entry'] = rawEntry.copyWith(correctedFromEntryId: original.id);
@@ -721,19 +761,25 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
         date: dateIso,
         movementDate: movementDateIso,
         description: effectiveDescription,
-        note: note,
         correctedFromEntryId: original.id,
       );
     } else {
+      final feeText = _feeCtrl.text.trim();
+      final feeCents =
+          feeText.isEmpty ? 0 : FinanceUiFormatters.parseEtbToCents(feeText)!;
+      final effectiveFeeCategoryId = feeCents > 0
+          ? (_feeCategoryId ?? SystemControlAccounts.feeCategoryId)
+          : null;
       built = DoubleEntryEngine.buildDirectExpense(
         entryId: replacementId,
         paidAccountId: _accountId!,
         categoryId: _categoryId!,
         amountCents: amountCents,
+        feeCents: feeCents,
+        feeCategoryId: effectiveFeeCategoryId,
         date: dateIso,
         movementDate: movementDateIso,
         description: effectiveDescription,
-        note: note,
         correctedFromEntryId: original.id,
       );
     }
@@ -810,7 +856,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     );
     final feeCategoryItems = FinanceUiFormatters.buildFeeCategoryDropdownItems(
       state.categories,
-      preserveCategoryId: _isEditing ? _transferFeeCategoryId : null,
+      preserveCategoryId: _isEditing ? _feeCategoryId : null,
     );
     final semantic = context.daywellColors;
     final textTheme = Theme.of(context).textTheme;
@@ -893,14 +939,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                 message: _validationError!,
                 tone: DaywellStatusTone.error,
                 onDismiss: () => setState(() => _validationError = null),
-              ),
-            ],
-            if (state.nonEtbAccountCount > 0) ...[
-              const SizedBox(height: SharedDesignTokens.spacingCompact),
-              DaywellStatusBanner(
-                tone: DaywellStatusTone.warning,
-                message:
-                    'First-release posting supports ETB accounts only; ${state.nonEtbAccountCount} non-ETB or unverified account(s) are hidden.',
               ),
             ],
             const SizedBox(height: SharedDesignTokens.spacingCompact),
@@ -997,7 +1035,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                 keyboardType:
                     const TextInputType.numberWithOptions(decimal: true),
               ),
-              if (_mode == FinanceComposerMode.transfer) ...[
+              if (_modeUsesFee) ...[
                 const SizedBox(height: SharedDesignTokens.spacingCompact),
                 DaywellTextField(
                   controller: _feeCtrl,
@@ -1006,19 +1044,31 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                   keyboardType:
                       const TextInputType.numberWithOptions(decimal: true),
                 ),
-                if (_showTransferFeeCategory) ...[
+                if (_showFeeCategory) ...[
                   const SizedBox(height: SharedDesignTokens.spacingCompact),
                   DaywellDropdownField<String>(
                     label: 'Fee Category',
-                    value: feeCategoryItems
-                            .any((i) => i.value == _transferFeeCategoryId)
-                        ? _transferFeeCategoryId
+                    value: feeCategoryItems.any((i) => i.value == _feeCategoryId)
+                        ? _feeCategoryId
                         : (feeCategoryItems.isNotEmpty
                             ? feeCategoryItems.first.value
                             : null),
                     items: feeCategoryItems,
-                    onChanged: (val) =>
-                        setState(() => _transferFeeCategoryId = val),
+                    onChanged: (val) => setState(() => _feeCategoryId = val),
+                  ),
+                ],
+                if (_mode == FinanceComposerMode.expense &&
+                    _parsedFeeCents > 0 &&
+                    mySharePreviewCents > 0) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingXs),
+                  Text(
+                    'Total deduction: ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents + _parsedFeeCents)} '
+                    '(Principal ${FinanceUiFormatters.formatEtbCents(mySharePreviewCents)} + '
+                    'Fee ${FinanceUiFormatters.formatEtbCents(_parsedFeeCents)})',
+                    style: textTheme.bodySmall?.copyWith(
+                      color: semantic.textSecondary,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ],
               ],
@@ -1151,12 +1201,6 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
                   hintText: 'Optional',
                 ),
               ],
-              const SizedBox(height: SharedDesignTokens.spacingCompact),
-              DaywellTextField(
-                controller: _noteCtrl,
-                label: 'Note (optional)',
-                maxLines: 2,
-              ),
               if (_isEditing) ...[
                 const SizedBox(height: SharedDesignTokens.spacingCompact),
                 DaywellTextField(

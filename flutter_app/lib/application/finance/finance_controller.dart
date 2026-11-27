@@ -57,6 +57,8 @@ class FinanceController extends ChangeNotifier {
     final recurringRules = await _repository.getRecurringRules();
     final migrationReport = await _repository.getLatestMigrationReport();
     final debtControlAudit = await _repository.auditDebtControlBalances();
+    final legacyNoticeDismissed =
+        await _repository.getLegacyNonEtbNoticeDismissed();
 
     _state = _state.copyWith(
       accounts: List<AccountModel>.unmodifiable(accounts),
@@ -76,12 +78,23 @@ class FinanceController extends ChangeNotifier {
       recurringRules: List<RecurringRuleModel>.unmodifiable(recurringRules),
       openingBalanceCents: settings.openingBalanceCents,
       isSetupCompleted: settings.isSetupCompleted,
+      legacyNonEtbNoticeDismissed: legacyNoticeDismissed,
       migrationReport: migrationReport,
       clearMigrationReport: migrationReport == null,
       debtControlAudit: debtControlAudit,
       isLoading: false,
       clearError: true,
     );
+  }
+
+  Future<void> dismissLegacyNonEtbNotice() async {
+    _state = _state.copyWith(legacyNonEtbNoticeDismissed: true);
+    notifyListeners();
+    try {
+      await _repository.dismissLegacyNonEtbNotice();
+    } catch (_) {
+      // Non-fatal: dismissal remains active for current session.
+    }
   }
 
   Future<void> refreshAuditDiagnostics() async {
@@ -202,7 +215,7 @@ class FinanceController extends ChangeNotifier {
                 acc.subType == AccountSubType.creditCard));
     if (!isSpendable) {
       throw DoubleEntryValidationError(
-        '$roleLabel "${acc.name}" cannot be used here; select an active Verified ETB liquid asset or credit card account (Savings Vaults are allowed in Transfers only).',
+        '$roleLabel "${acc.name}" cannot be used here; select an active ETB liquid asset or credit card account (Savings Vaults are allowed in Transfers only).',
       );
     }
   }
@@ -246,7 +259,7 @@ class FinanceController extends ChangeNotifier {
     if (!DoubleEntryEngine.isEtb(currencyCode)) {
       _state = _state.copyWith(
         errorMessage: DoubleEntryValidationError(
-          'First-release reporting supports ETB accounts only; currency '
+          'Daywell Finance supports ETB accounts only; currency '
           '"${currencyCode.trim().isEmpty ? 'Unverified' : currencyCode.trim()}" '
           'cannot be created.',
         ).toString(),
@@ -484,6 +497,8 @@ class FinanceController extends ChangeNotifier {
     required String accountId,
     required String categoryId,
     required int amountCents,
+    int feeCents = 0,
+    String? feeCategoryId,
     required CalendarDate date,
     CalendarDate? movementDate,
     required String description,
@@ -500,6 +515,8 @@ class FinanceController extends ChangeNotifier {
         accountId: accountId,
         categoryId: categoryId,
         amountCents: amountCents,
+        feeCents: feeCents,
+        feeCategoryId: feeCategoryId,
         date: date,
         movementDate: movementDate,
         description: description,
@@ -613,8 +630,7 @@ class FinanceController extends ChangeNotifier {
         final origCls = _state.classifyEntry(orig);
         if (!origCls.isEligibleEtb) {
           throw DoubleEntryValidationError(
-            'Only active ETB journal entries can be corrected or replaced '
-            'in first-release ETB mode.',
+            'Legacy non-ETB journal entries are read-only and cannot be edited or replaced.',
           );
         }
         final check = DoubleEntryEngine.canCorrectEntry(
@@ -1599,7 +1615,7 @@ class FinanceController extends ChangeNotifier {
       for (final acc in setupAccounts) {
         if (!acc.isSystem && !DoubleEntryEngine.isEtb(acc.currencyCode)) {
           throw DoubleEntryValidationError(
-            'First-release reporting supports ETB accounts only; account '
+            'Daywell Finance supports ETB accounts only; account '
             '"${acc.name}" (${acc.currencyCode}) cannot be created.',
           );
         }

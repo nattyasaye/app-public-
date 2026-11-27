@@ -35,6 +35,7 @@ class FinanceOverviewTab extends StatefulWidget {
 class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
   static const Uuid _uuid = Uuid();
   bool _showArchivedAccounts = false;
+  bool _showLegacyArchive = false;
   String _categoryTabType = 'expense';
 
   @override
@@ -44,8 +45,10 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
     final semantic = context.daywellColors;
     final colorScheme = Theme.of(context).colorScheme;
     final textTheme = Theme.of(context).textTheme;
-    final activeUserAccounts = state.activeUserAccounts;
-    final archivedAccounts = state.archivedAccounts;
+    final activeUserAccounts = state.activeEtbUserAccounts;
+    final archivedAccounts = state.archivedEtbAccounts;
+    final legacyNonEtbAccounts = state.legacyNonEtbAccounts;
+    final legacyEntriesCount = state.legacyNonEtbEntryCount;
 
     return ListView(
       padding: const EdgeInsets.all(SharedDesignTokens.spacingMd),
@@ -214,31 +217,15 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
             onActionPressed: widget.onOpenPlan,
           ),
         ],
-        if (state.nonEtbAccountCount > 0) ...[
+        if (state.hasLegacyNonEtbRecords &&
+            !state.legacyNonEtbNoticeDismissed) ...[
           const SizedBox(height: SharedDesignTokens.spacingCompact),
           DaywellStatusBanner(
-            tone: DaywellStatusTone.warning,
-            title: 'Non-ETB Accounts Excluded',
-            message: state.unverifiedAccountCount > 0
-                ? '${state.nonEtbAccountCount} active non-ETB or unverified account(s) (${state.unverifiedAccountCount} unverified) are excluded from ETB Safe Harbor, P&L, and Net Worth totals.'
-                : '${state.nonEtbAccountCount} active non-ETB account(s) are excluded from ETB Safe Harbor, P&L, and Net Worth totals.',
-          ),
-        ],
-        if (state.currencyReviewEntryCount > 0 ||
-            state.excludedNonEtbEntryCount > 0) ...[
-          const SizedBox(height: SharedDesignTokens.spacingCompact),
-          DaywellStatusBanner(
-            tone: state.currencyReviewEntryCount > 0
-                ? DaywellStatusTone.warning
-                : DaywellStatusTone.info,
-            title: state.currencyReviewEntryCount > 0
-                ? 'Ledger Entries Pending Currency Review'
-                : 'Foreign-Currency Entries Isolated',
+            tone: DaywellStatusTone.info,
+            title: 'Historical Non-ETB Records Preserved',
             message:
-                '${state.excludedNonEtbEntryCount} foreign-currency entry(s) and ${state.currencyReviewEntryCount} unverified/mixed entry(s) are kept visible in ledger history but excluded from ETB reports.',
-            actionLabel:
-                widget.onOpenTransactions != null ? 'Review Ledger' : null,
-            onActionPressed: widget.onOpenTransactions,
+                'Daywell Finance operates in ETB only. Historical non-ETB records are preserved read-only in Legacy Archive and excluded from ETB totals.',
+            onDismiss: widget.controller.dismissLegacyNonEtbNotice,
           ),
         ],
         if (state.unverifiedLegacyPaidCount > 0) ...[
@@ -402,6 +389,83 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
               _buildAccountCard(context, acc, isArchivedView: true),
             ],
         ],
+        if (legacyNonEtbAccounts.isNotEmpty || legacyEntriesCount > 0) ...[
+          const SizedBox(height: SharedDesignTokens.spacingCompact),
+          DaywellCard(
+            padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                InkWell(
+                  borderRadius:
+                      BorderRadius.circular(SharedDesignTokens.radiusSm),
+                  onTap: () =>
+                      setState(() => _showLegacyArchive = !_showLegacyArchive),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Legacy Non-ETB Archive (Read-Only)',
+                                style: textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Text(
+                                '${legacyNonEtbAccounts.length} historical account(s) · $legacyEntriesCount legacy entry(s) excluded from ETB totals',
+                                style: textTheme.bodySmall?.copyWith(
+                                  color: semantic.textSecondary,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(
+                          _showLegacyArchive
+                              ? Icons.expand_less
+                              : Icons.expand_more,
+                          color: semantic.textMuted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_showLegacyArchive) ...[
+                  const Divider(),
+                  for (final acc in legacyNonEtbAccounts) ...[
+                    _buildLegacyAccountRow(context, acc),
+                    const SizedBox(height: SharedDesignTokens.spacingSm),
+                  ],
+                  if (legacyEntriesCount > 0)
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '$legacyEntriesCount historical non-ETB or unclassified journal entry(s)',
+                            style: textTheme.bodySmall?.copyWith(
+                              color: semantic.textSecondary,
+                            ),
+                          ),
+                        ),
+                        if (widget.onOpenTransactions != null)
+                          DaywellButton(
+                            label: 'View in Ledger',
+                            variant: DaywellButtonVariant.text,
+                            size: DaywellButtonSize.compact,
+                            onPressed: widget.onOpenTransactions,
+                          ),
+                      ],
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ],
         const SizedBox(height: SharedDesignTokens.spacingLg),
 
         // 4. Hierarchical Categories Manager
@@ -485,6 +549,71 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
     );
   }
 
+  Widget _buildLegacyAccountRow(BuildContext context, AccountModel account) {
+    final state = widget.controller.state;
+    final semantic = context.daywellColors;
+    final textTheme = Theme.of(context).textTheme;
+    final balanceCents = state.getAccountBalanceCents(account);
+    final currencyTier =
+        DoubleEntryEngine.classifyCurrencyCode(account.currencyCode);
+    final normalizedCode =
+        DoubleEntryEngine.normalizeCurrencyCode(account.currencyCode);
+    final formattedBal = FinanceUiFormatters.formatCurrencyCents(
+      balanceCents,
+      currencyCode: account.currencyCode,
+    );
+
+    return DaywellCard(
+      padding: const EdgeInsets.all(SharedDesignTokens.spacingSm),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: SharedDesignTokens.spacingXs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      account.name,
+                      style: textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    DaywellStatusBadge(
+                      label: currencyTier == CurrencyValidationTier.verifiedNonEtb
+                          ? 'Legacy ($normalizedCode) · Read-only'
+                          : 'Legacy · Read-only',
+                      tone: DaywellStatusTone.warning,
+                      showIcon: false,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${FinanceUiFormatters.accountSubTypeLabel(account.subType)}${account.isArchived ? ' · Archived' : ''}',
+                  style: textTheme.bodySmall?.copyWith(
+                    color: semantic.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Text(
+            account.type == AccountType.liability
+                ? 'Owed: $formattedBal'
+                : formattedBal,
+            style: textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: semantic.textSecondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildAccountCard(
     BuildContext context,
     AccountModel account, {
@@ -495,15 +624,7 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
     final semantic = context.daywellColors;
     final textTheme = Theme.of(context).textTheme;
     final isLiability = account.type == AccountType.liability;
-
-    final currencyTier =
-        DoubleEntryEngine.classifyCurrencyCode(account.currencyCode);
-    final normalizedCode =
-        DoubleEntryEngine.normalizeCurrencyCode(account.currencyCode);
-    final formattedBal = FinanceUiFormatters.formatCurrencyCents(
-      balanceCents,
-      currencyCode: account.currencyCode,
-    );
+    final formattedBal = FinanceUiFormatters.formatEtbCents(balanceCents);
 
     return DaywellCard(
       padding: const EdgeInsets.all(SharedDesignTokens.spacingCompact),
@@ -586,13 +707,9 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                 },
                 itemBuilder: (_) => [
                   if (!isArchivedView)
-                    PopupMenuItem(
+                    const PopupMenuItem(
                       value: 'edit',
-                      child: Text(
-                        currencyTier == CurrencyValidationTier.verifiedEtb
-                            ? 'Edit / Opening Balance'
-                            : 'Rename Account',
-                      ),
+                      child: Text('Edit / Opening Balance'),
                     ),
                   PopupMenuItem(
                     value: isArchivedView ? 'unarchive' : 'archive',
@@ -622,18 +739,7 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                       : semantic.textPrimary,
                 ),
               ),
-              if (currencyTier == CurrencyValidationTier.verifiedNonEtb)
-                DaywellStatusBadge(
-                  label: 'Excluded ($normalizedCode)',
-                  tone: DaywellStatusTone.warning,
-                  showIcon: false,
-                )
-              else if (currencyTier == CurrencyValidationTier.unverified)
-                const DaywellStatusBadge(
-                  label: 'Currency Review',
-                  tone: DaywellStatusTone.warning,
-                )
-              else if (account.subType.isSavingsVault)
+              if (account.subType.isSavingsVault)
                 const DaywellStatusBadge(
                   label: 'Protected Vault',
                   tone: DaywellStatusTone.info,
@@ -918,7 +1024,7 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
     final isLegacyLockedCurrency =
         existing != null && !DoubleEntryEngine.isEtb(existing.currencyCode);
     final currencyBadgeLabel = existing == null
-        ? 'ETB (Required in first release)'
+        ? 'ETB'
         : FinanceUiFormatters.currencyDisplayLabel(existing.currencyCode);
 
     await showModalBottomSheet<void>(
@@ -952,16 +1058,15 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
                     tone: DaywellStatusTone.error,
                   ),
                 ],
-                const SizedBox(height: SharedDesignTokens.spacingSm),
-                DaywellStatusBanner(
-                  tone: isLegacyLockedCurrency
-                      ? DaywellStatusTone.warning
-                      : DaywellStatusTone.info,
-                  title: 'Currency: $currencyBadgeLabel',
-                  message: isLegacyLockedCurrency
-                      ? 'First-release reporting supports ETB writes only; historical foreign-currency balances are preserved read-only.'
-                      : 'All new accounts and transactions operate in ETB.',
-                ),
+                if (isLegacyLockedCurrency) ...[
+                  const SizedBox(height: SharedDesignTokens.spacingSm),
+                  DaywellStatusBanner(
+                    tone: DaywellStatusTone.warning,
+                    title: 'Legacy Account ($currencyBadgeLabel)',
+                    message:
+                        'Historical non-ETB balances are preserved read-only and excluded from ETB totals.',
+                  ),
+                ],
                 const SizedBox(height: SharedDesignTokens.spacingCompact),
                 DaywellTextField(
                   controller: nameCtrl,

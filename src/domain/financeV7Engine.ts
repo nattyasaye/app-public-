@@ -78,6 +78,7 @@ import {
   OccurrenceReportSummary,
   parseQuickCaptureExpense,
   Party,
+  resolveDescriptionWithHistoricalNote,
   Posting,
   QuickCaptureParsedExpense,
   resolveCanonicalCategoryId,
@@ -669,7 +670,7 @@ export function recordCommitmentSettlementV7(params: {
     });
     if (cmStatus.status !== 'eligible_etb') {
       throw new DoubleEntryValidationError(
-        'Cannot settle a non-ETB or currency-review commitment in first-release ETB mode.'
+        'Legacy non-ETB commitments are read-only and cannot be settled in ETB Finance.'
       );
     }
   }
@@ -1276,7 +1277,7 @@ export function getExpenseRefundSummaryV7(params: {
   if (cls.status !== 'eligible_etb') {
     return {
       eligible: false,
-      reason: 'Only active Verified ETB expenses can be refunded in first-release ETB mode.',
+      reason: 'Only active ETB expenses can be refunded.',
       originalAmountCents: 0,
       refundedCents: 0,
       remainingRefundableCents: 0,
@@ -1393,7 +1394,7 @@ export function canCorrectJournalEntryV7(params: {
     return {
       ok: false,
       error:
-        'Excluded non-ETB or currency-review entries cannot be replaced in first-release ETB mode.',
+        'Legacy non-ETB entries are read-only and cannot be replaced.',
     };
   }
   if (!isCorrectableEntryTypeV7(entry.entryType)) {
@@ -1506,7 +1507,7 @@ export function recordExpenseRefundV7(params: {
     (destAcc.type !== 'asset' && !(destAcc.type === 'liability' && sub === 'credit_card'))
   ) {
     throw new DoubleEntryValidationError(
-      'Refunds must return to an active Verified ETB liquid asset or credit card account.'
+      'Refunds must return to an active ETB liquid asset or credit card account.'
     );
   }
 
@@ -1524,6 +1525,7 @@ export function recordExpenseRefundV7(params: {
     createdAt: EthiopiaClock.nowUtc().toISOString(),
   };
 
+  const cleanNote = params.note?.trim() || undefined;
   const refundPostings: Posting[] = [
     {
       id: `${entryId}-post-dr`,
@@ -1532,7 +1534,7 @@ export function recordExpenseRefundV7(params: {
       amountCents: params.refundCents,
       direction: 'debit',
       accountMovementDate: params.refundDateIso,
-      note: params.note || `Refund for ${original.description}`,
+      ...(cleanNote !== undefined ? { note: cleanNote } : {}),
     },
     {
       id: `${entryId}-post-cr`,
@@ -1542,7 +1544,7 @@ export function recordExpenseRefundV7(params: {
       direction: 'credit',
       accountMovementDate: params.refundDateIso,
       categoryId: summary.categoryId,
-      note: params.note || `Refund for ${original.description}`,
+      ...(cleanNote !== undefined ? { note: cleanNote } : {}),
     },
   ];
   validateBalancedEntry(refundPostings);
@@ -1753,7 +1755,7 @@ export function unvoidJournalEntryGuardedV7(params: {
   });
   if (cls.status !== 'eligible_etb') {
     throw new DoubleEntryValidationError(
-      'Only Verified ETB entries can be restored in first-release ETB mode.'
+      'Legacy non-ETB entries are read-only and cannot be restored.'
     );
   }
 
@@ -2344,6 +2346,10 @@ export function hydrateLedgerFromSimpleTransactions(params: {
     if (existingEntryIds.has(entryId)) continue;
 
     try {
+      const legacyNote =
+        typeof (tx as { note?: string }).note === 'string'
+          ? (tx as { note?: string }).note
+          : undefined;
       let built: { entry: JournalEntry; postings: Posting[] } | null = null;
       if (tx.type === 'expense') {
         built = buildDirectExpense({
@@ -2354,7 +2360,12 @@ export function hydrateLedgerFromSimpleTransactions(params: {
           amountCents: tx.amountCents,
           occurrenceDate: tx.transactionDate,
           movementDate: tx.transactionDate,
-          description: tx.description || 'Expense',
+          description: resolveDescriptionWithHistoricalNote({
+            description: tx.description,
+            legacyNote,
+            fallback: 'Expense',
+          }),
+          note: legacyNote?.trim() || undefined,
         });
       } else if (tx.type === 'income') {
         built = buildDirectIncome({
@@ -2365,7 +2376,12 @@ export function hydrateLedgerFromSimpleTransactions(params: {
           amountCents: tx.amountCents,
           occurrenceDate: tx.transactionDate,
           movementDate: tx.transactionDate,
-          description: tx.description || 'Income',
+          description: resolveDescriptionWithHistoricalNote({
+            description: tx.description,
+            legacyNote,
+            fallback: 'Income',
+          }),
+          note: legacyNote?.trim() || undefined,
         });
       } else if (
         tx.type === 'transfer' &&
@@ -2378,7 +2394,12 @@ export function hydrateLedgerFromSimpleTransactions(params: {
           toAssetAccountId: tx.destinationAccountId,
           amountCents: tx.amountCents,
           date: tx.transactionDate,
-          description: tx.description || 'Transfer',
+          description: resolveDescriptionWithHistoricalNote({
+            description: tx.description,
+            legacyNote,
+            fallback: 'Transfer',
+          }),
+          note: legacyNote?.trim() || undefined,
         });
       }
       if (built) {
@@ -2641,7 +2662,7 @@ export function buildQuickCaptureExpenseEntryV7(params: {
       parsed,
       error:
         parsed.error ||
-        `Only ETB amounts are supported in Quick Capture (detected ${parsed.rejectedCurrency}).`,
+        `Daywell Finance supports ETB only. Please enter this amount in ETB (detected ${parsed.rejectedCurrency}).`,
     };
   }
   if (!Number.isInteger(parsed.amountCents) || parsed.amountCents <= 0) {
@@ -2684,7 +2705,6 @@ export function buildQuickCaptureExpenseEntryV7(params: {
     occurrenceDate: occurrenceDateIso,
     movementDate: occurrenceDateIso,
     description,
-    note: 'Quick capture',
   });
   entry.legacySourceTxId = txId;
   entry.createdAt = nowIso;
@@ -3315,6 +3335,15 @@ function FOUNDATIONAL_CATEGORIES_WITH_DEFAULTS(
     ...FOUNDATION_DEFAULT_INCOME_CATEGORIES,
   ]) {
     byId.set(c.id, c);
+  }
+  if (!byId.has('cat-fees')) {
+    byId.set('cat-fees', {
+      id: 'cat-fees',
+      name: 'Financial Fees',
+      type: 'expense',
+      colorHex: '#64748B',
+      isArchived: false,
+    });
   }
   for (const c of categories) {
     byId.set(c.id, c);

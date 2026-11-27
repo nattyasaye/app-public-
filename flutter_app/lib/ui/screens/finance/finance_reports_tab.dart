@@ -588,18 +588,11 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Text(
-                'Account Balances (Verified ETB)',
+                'Account Balances (ETB)',
                 style: textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              if (report.nonEtbReviewAccounts.isNotEmpty)
-                DaywellStatusBadge(
-                  label:
-                      '${report.nonEtbReviewAccounts.length} Non-ETB / Review',
-                  tone: DaywellStatusTone.warning,
-                  showIcon: false,
-                ),
               if (report.archivedCount > 0)
                 DaywellStatusBadge(
                   label: '${report.archivedCount} Archived',
@@ -611,7 +604,7 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
           const SizedBox(height: SharedDesignTokens.spacingCompact),
           if (!hasAnyActive)
             Text(
-              'No active Verified ETB accounts configured.',
+              'No active ETB accounts configured.',
               style: textTheme.bodySmall?.copyWith(
                 color: semantic.textSecondary,
               ),
@@ -666,7 +659,7 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
           if (report.nonEtbReviewAccounts.isNotEmpty) ...[
             const Divider(),
             Text(
-              'Read-Only Non-ETB / Currency Review Accounts (Excluded)',
+              'Legacy Non-ETB Accounts (Preserved Read-Only)',
               style: textTheme.labelMedium?.copyWith(
                 color: semantic.warning,
                 fontWeight: FontWeight.w600,
@@ -760,7 +753,7 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
                         ),
                         DaywellStatusBadge(
                           label: goal.isExcludedNonEtbVault
-                              ? 'Excluded'
+                              ? 'Legacy · Excluded'
                               : goal.status.name,
                           tone: goal.isExcludedNonEtbVault
                               ? DaywellStatusTone.warning
@@ -1069,53 +1062,15 @@ class _FinanceReportsTabState extends State<FinanceReportsTab> {
                 color: semantic.textSecondary,
               ),
             ),
-          const Divider(),
-          Text(
-            'ETB Currency Isolation Summary',
-            style: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: SharedDesignTokens.spacingXs),
-          _reportRow(
-            context,
-            'Excluded Non-ETB Accounts',
-            '${state.nonEtbAccountCount}',
-            valueColor: state.nonEtbAccountCount > 0 ? semantic.warning : null,
-          ),
-          _reportRow(
-            context,
-            'Unverified Currency Accounts',
-            '${state.unverifiedAccountCount}',
-            valueColor:
-                state.unverifiedAccountCount > 0 ? semantic.warning : null,
-          ),
-          _reportRow(
-            context,
-            'Excluded Foreign Entries',
-            '${state.excludedNonEtbEntryCount}',
-            valueColor:
-                state.excludedNonEtbEntryCount > 0 ? semantic.warning : null,
-          ),
-          _reportRow(
-            context,
-            'Currency Review Entries',
-            '${state.currencyReviewEntryCount}',
-            valueColor:
-                state.currencyReviewEntryCount > 0 ? semantic.warning : null,
-          ),
-          _reportRow(
-            context,
-            'Unverified Legacy Paid Commitments',
-            '${state.unverifiedLegacyPaidCount}',
-            valueColor:
-                state.unverifiedLegacyPaidCount > 0 ? semantic.warning : null,
-          ),
-          if (state.currencyIsolationAudit.excludedVaultGoalCount > 0)
+          if (state.unverifiedLegacyPaidCount > 0) ...[
+            const Divider(),
             _reportRow(
               context,
-              'Excluded / Invalid Goal Vaults',
-              '${state.currencyIsolationAudit.excludedVaultGoalCount}',
+              'Unverified Legacy Paid Commitments',
+              '${state.unverifiedLegacyPaidCount}',
               valueColor: semantic.warning,
             ),
+          ],
         ],
       ),
     );

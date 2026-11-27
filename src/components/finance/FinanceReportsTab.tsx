@@ -752,16 +752,9 @@ export function FinanceReportsTab({
         <DaywellCard padding="lg" radius="lg" className="space-y-3 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <h3 className="text-sm font-semibold text-[var(--dw-text-primary)]">
-              Account Balances (Verified ETB)
+              Account Balances (ETB)
             </h3>
             <div className="flex flex-wrap items-center gap-1.5">
-              {accountBalancesReport.nonEtbReviewAccounts.length > 0 && (
-                <DaywellStatusBadge
-                  tone="warning"
-                  showIcon={false}
-                  label={`${accountBalancesReport.nonEtbReviewAccounts.length} Non-ETB / Review`}
-                />
-              )}
               {accountBalancesReport.archivedCount > 0 && (
                 <DaywellStatusBadge
                   tone="neutral"
@@ -776,7 +769,7 @@ export function FinanceReportsTab({
           accountBalancesReport.vaultAccounts.length === 0 &&
           accountBalancesReport.creditCardAccounts.length === 0 ? (
             <p className="text-[var(--dw-text-muted)]">
-              No active Verified ETB accounts configured.
+              No active ETB accounts configured.
             </p>
           ) : (
             <div className="space-y-3">
@@ -849,8 +842,8 @@ export function FinanceReportsTab({
 
               {accountBalancesReport.nonEtbReviewAccounts.length > 0 && (
                 <div className="pt-2 border-t border-[var(--dw-divider)] space-y-1">
-                  <div className="text-[11px] font-semibold text-[var(--dw-on-warning-container)]">
-                    Read-Only Non-ETB / Currency Review Accounts (Excluded)
+                  <div className="text-[11px] font-semibold text-[var(--dw-text-muted)]">
+                    Legacy Non-ETB Accounts (Preserved Read-Only)
                   </div>
                   {accountBalancesReport.nonEtbReviewAccounts.map((acc) => (
                     <div
@@ -858,7 +851,7 @@ export function FinanceReportsTab({
                       className="flex justify-between text-[var(--dw-text-muted)]"
                     >
                       <span>
-                        {acc.name} ({acc.currencyCode})
+                        {acc.name} ({acc.currencyCode || 'Unclassified'})
                       </span>
                       <span className="font-mono tabular-nums">
                         {formatCurrencyCents(acc.balanceCents, acc.currencyCode)}
@@ -910,7 +903,7 @@ export function FinanceReportsTab({
                         showIcon={false}
                         label={
                           goal.isExcludedNonEtbVault
-                            ? 'Excluded'
+                            ? 'Legacy · Excluded'
                             : goal.status
                         }
                       />
@@ -1078,33 +1071,14 @@ export function FinanceReportsTab({
           </span>
         </div>
 
-        <div className="p-3 rounded-[var(--dw-radius-md)] bg-[var(--dw-canvas)] border border-[var(--dw-border)] space-y-1">
-          <div className="font-semibold text-[var(--dw-text-primary)]">
-            ETB Currency Isolation Summary
-          </div>
+        {breakdown.unverifiedLegacyPaidCount > 0 && (
           <div className="text-[var(--dw-text-secondary)]">
-            Non-ETB accounts excluded:{' '}
-            <span className="font-mono tabular-nums font-semibold">
-              {breakdown.nonEtbAccountCount}
-            </span>{' '}
-            · Unverified accounts:{' '}
-            <span className="font-mono tabular-nums font-semibold">
-              {breakdown.unverifiedAccountCount || 0}
-            </span>{' '}
-            · Foreign entries excluded:{' '}
-            <span className="font-mono tabular-nums font-semibold">
-              {breakdown.excludedNonEtbEntryCount}
-            </span>{' '}
-            · Currency Review entries:{' '}
-            <span className="font-mono tabular-nums font-semibold">
-              {breakdown.currencyReviewEntryCount}
-            </span>{' '}
-            · Legacy paid unverified:{' '}
+            Legacy paid unverified commitments:{' '}
             <span className="font-mono tabular-nums font-semibold">
               {breakdown.unverifiedLegacyPaidCount}
             </span>
           </div>
-        </div>
+        )}
 
         {integrityReport.warnings.map((w, i) => (
           <div key={i} className="text-[var(--dw-on-warning-container)]">

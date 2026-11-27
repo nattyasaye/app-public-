@@ -23,7 +23,6 @@ import {
   getCommitmentRemainingCents,
   isActiveVerifiedEtbAccount,
   isDebtEligibleEtb,
-  isEtbCurrency,
   JournalEntry,
   normalizeCurrencyCode,
   Party,
@@ -190,10 +189,6 @@ export function FinancePlanTab({
       accounts.filter(
         (a) => isActiveVerifiedEtbAccount(a) && a.subType === 'savings_vault'
       ),
-    [accounts]
-  );
-  const hasNonEtbAccounts = useMemo(
-    () => accounts.some((a) => !a.isSystem && !isEtbCurrency(a.currencyCode)),
     [accounts]
   );
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
@@ -490,11 +485,11 @@ export function FinancePlanTab({
       : undefined;
 
     if (recType !== 'commitment' && !resolvedAccId) {
-      setBanner('Select an active Verified ETB account first.');
+      setBanner('Select an active ETB account first.');
       return;
     }
     if (recType === 'transfer' && (!resolvedDestId || resolvedDestId === resolvedAccId)) {
-      setBanner('Select distinct source and destination Verified ETB accounts for a recurring transfer.');
+      setBanner('Select distinct source and destination ETB accounts for a recurring transfer.');
       return;
     }
 
@@ -601,11 +596,11 @@ export function FinancePlanTab({
                           <DaywellStatusBadge
                             tone="warning"
                             showIcon={false}
-                            label={`Excluded (${cmCurrency})`}
+                            label={`Legacy (${cmCurrency || 'Non-ETB'}) · Read-only`}
                           />
                         )}
                         {cmRes.status === 'needs_review' && (
-                          <DaywellStatusBadge tone="error" showIcon={false} label="Currency Review" />
+                          <DaywellStatusBadge tone="warning" showIcon={false} label="Account Needed" />
                         )}
                       </div>
                       <div className="text-[var(--dw-text-muted)]">
@@ -799,11 +794,11 @@ export function FinancePlanTab({
                         <DaywellStatusBadge
                           tone="warning"
                           showIcon={false}
-                          label={`Excluded (${debtCurrency || 'Non-ETB'})`}
+                          label={`Legacy (${debtCurrency || 'Non-ETB'}) · Read-only`}
                         />
                       )}
                       {!eligible && !isForeign && (
-                        <DaywellStatusBadge tone="error" showIcon={false} label="Currency Review" />
+                        <DaywellStatusBadge tone="warning" showIcon={false} label="Legacy · Read-only" />
                       )}
                     </div>
                     <div className="text-[var(--dw-text-muted)]">
@@ -943,11 +938,11 @@ export function FinancePlanTab({
                           <DaywellStatusBadge
                             tone="warning"
                             showIcon={false}
-                            label={`Excluded (${normalizeCurrencyCode(linkedVault.currencyCode)})`}
+                            label={`Legacy (${normalizeCurrencyCode(linkedVault.currencyCode)}) · Read-only`}
                           />
                         )}
                         {(vaultMissing || vaultTier === 'unverified' || (vaultTier === 'verified_etb' && vaultInvalidType)) && (
-                          <DaywellStatusBadge tone="error" showIcon={false} label="Currency Review" />
+                          <DaywellStatusBadge tone="warning" showIcon={false} label="Vault Unavailable · Read-only" />
                         )}
                       </div>
                       <div className="text-[var(--dw-text-muted)]">
@@ -1158,16 +1153,21 @@ export function FinancePlanTab({
                     <div>
                       <div className="font-semibold text-[var(--dw-text-primary)] flex flex-wrap items-center gap-1.5">
                         <span>{r.title}</span>
-                        {srcTier === 'verified_non_etb' && srcAcc && (
+                        {srcTier === 'verified_non_etb' && srcAcc ? (
                           <DaywellStatusBadge
                             tone="warning"
                             showIcon={false}
-                            label={`Excluded (${normalizeCurrencyCode(srcAcc.currencyCode)})`}
+                            label={`Legacy (${normalizeCurrencyCode(srcAcc.currencyCode)}) · Read-only`}
                           />
-                        )}
-                        {(missingAcc || srcTier === 'unverified' || dstTier === 'unverified' || (!nonEtbBlocked ? false : dstTier === 'verified_non_etb')) && (
-                          <DaywellStatusBadge tone="error" showIcon={false} label="Currency Review" />
-                        )}
+                        ) : dstTier === 'verified_non_etb' && dstAcc ? (
+                          <DaywellStatusBadge
+                            tone="warning"
+                            showIcon={false}
+                            label={`Legacy (${normalizeCurrencyCode(dstAcc.currencyCode)}) · Read-only`}
+                          />
+                        ) : (missingAcc || srcTier === 'unverified' || dstTier === 'unverified') ? (
+                          <DaywellStatusBadge tone="warning" showIcon={false} label="Legacy Account · Read-only" />
+                        ) : null}
                       </div>
                       <div className="text-[var(--dw-text-muted)]">
                         {r.ruleType} · {r.frequency} · Next: {r.nextOccurrenceDate} ·{' '}

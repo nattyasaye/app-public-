@@ -1202,7 +1202,7 @@ class DatabasePersistenceCoordinator {
               code: 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
               message:
                   'Snapshot provided empty currencyCode on account "$name" '
-                  '($id); preserved as Unverified for Currency Review.',
+                  '($id); preserved as unclassified legacy currency.',
               table: 'accounts',
               recordId: id,
               field: 'currencyCode',
@@ -1230,7 +1230,7 @@ class DatabasePersistenceCoordinator {
           SnapshotImportDiagnostic(
             code: 'CURRENCY_UNVERIFIED_ON_LEGACY_IMPORT',
             message: 'Snapshot omitted currencyCode on account "$name" ($id); '
-                'preserved as Unverified for Currency Review.',
+                'preserved as unclassified legacy currency.',
             table: 'accounts',
             recordId: id,
             field: 'currencyCode',
@@ -1239,7 +1239,9 @@ class DatabasePersistenceCoordinator {
         );
       }
 
-      final isArchived = _optBool(a, 'isArchived', ctx) ?? false;
+      final isArchivedFlag = _optBool(a, 'isArchived', ctx) ?? false;
+      final legacyIsActive = _optBool(a, 'isActive', ctx);
+      final isArchived = isArchivedFlag || legacyIsActive == false;
       final openingCents = _optInt(a, 'openingBalanceCents', ctx) ?? 0;
       final openingDate = _optCanonicalDate(a, 'openingBalanceDate', ctx);
       final createdAt = _optInstantUtc(a, 'createdAt', ctx) ?? now;

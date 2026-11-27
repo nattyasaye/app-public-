@@ -333,6 +333,12 @@ abstract class IFinanceRepository
   /// Updates setup-completed status flag in SQLite settings.
   Future<void> setFinanceSetupCompleted(bool completed);
 
+  /// Reads whether the one-time notice about preserved historical non-ETB records was dismissed.
+  Future<bool> getLegacyNonEtbNoticeDismissed();
+
+  /// Persists dismissal of the historical non-ETB preservation notice.
+  Future<void> dismissLegacyNonEtbNotice();
+
   /// Reads the latest v7 ledger migration diagnostic report, if any.
   Future<MigrationDiagnosticReport?> getLatestMigrationReport();
 

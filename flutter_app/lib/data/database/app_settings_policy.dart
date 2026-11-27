@@ -44,6 +44,7 @@ class AppSettingsBackupPolicy {
     'default_currency',
     'calendar_preference',
     'daywell_finance_planning_horizon',
+    'daywell_finance_legacy_non_etb_notice_dismissed_v1',
     'daywell_user_profile',
     'notes_custom_folders',
   };

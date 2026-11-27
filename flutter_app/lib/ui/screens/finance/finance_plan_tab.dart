@@ -472,14 +472,15 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                           if (cmRes.isExcludedNonEtb)
                             DaywellStatusBadge(
                               label:
-                                  'Excluded (${cmRes.currencyCode ?? 'Non-ETB'})',
+                                  'Legacy (${cmRes.currencyCode ?? 'Non-ETB'}) · Read-only',
                               tone: DaywellStatusTone.warning,
                               showIcon: false,
                             )
                           else if (cmRes.needsReview)
                             const DaywellStatusBadge(
-                              label: 'Currency Review',
+                              label: 'Account Needed',
                               tone: DaywellStatusTone.warning,
+                              showIcon: false,
                             ),
                         ],
                       ),
@@ -515,7 +516,7 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                                 etbAccounts,
                               ),
                             ),
-                          if (!item.isPaid)
+                          if (!item.isPaid && !cmRes.isExcludedNonEtb)
                             DaywellButton(
                               label: 'Edit',
                               variant: DaywellButtonVariant.outlined,
@@ -726,10 +727,10 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                           if (!ruleEligibleEtb)
                             DaywellStatusBadge(
                               label: isExcludedForeign
-                                  ? 'Excluded ($displayCurrency)'
-                                  : 'Currency Review',
+                                  ? 'Legacy ($displayCurrency) · Read-only'
+                                  : 'Legacy Account · Read-only',
                               tone: DaywellStatusTone.warning,
-                              showIcon: !isExcludedForeign,
+                              showIcon: false,
                             ),
                           Text(
                             'Next: ${rule.nextOccurrenceDate.toIsoString()}',
@@ -898,11 +899,10 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                             DaywellStatusBadge(
                               label: vaultTier ==
                                       CurrencyValidationTier.verifiedNonEtb
-                                  ? 'Excluded ($goalCurrency)'
-                                  : 'Currency Review',
+                                  ? 'Legacy ($goalCurrency) · Read-only'
+                                  : 'Vault Unavailable · Read-only',
                               tone: DaywellStatusTone.warning,
-                              showIcon: vaultTier !=
-                                  CurrencyValidationTier.verifiedNonEtb,
+                              showIcon: false,
                             ),
                         ],
                       ),
@@ -1106,10 +1106,10 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                           if (!debtEligible)
                             DaywellStatusBadge(
                               label: debtCls != null && debtCls.isExcludedNonEtb
-                                  ? 'Excluded (${nativeCurrency ?? 'Foreign'})'
-                                  : 'Currency Review',
+                                  ? 'Legacy (${nativeCurrency ?? 'Non-ETB'}) · Read-only'
+                                  : 'Legacy · Read-only',
                               tone: DaywellStatusTone.warning,
-                              showIcon: !(debtCls?.isExcludedNonEtb ?? false),
+                              showIcon: false,
                             ),
                           Text(
                             'Principal: ${FinanceUiFormatters.formatCurrencyCents(debt.principalCents, currencyCode: nativeCurrency)}',
@@ -1590,7 +1590,7 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                'Assign an active ETB account to "${item.title}" to clear Currency Review.',
+                'Assign an active ETB account to "${item.title}" to include it in ETB Safe Harbor.',
               ),
               if (error != null) ...[
                 const SizedBox(height: SharedDesignTokens.spacingSm),
@@ -1672,7 +1672,6 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
         ) ??
         (catItems.isNotEmpty ? catItems.first.value : null);
     var paidDate = CalendarDate.today();
-    final noteCtrl = TextEditingController();
     var isSaving = false;
     String? error;
 
@@ -1743,11 +1742,6 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                       onChanged: (v) => setModalState(() => catId = v),
                     ),
                   ],
-                  const SizedBox(height: SharedDesignTokens.spacingCompact),
-                  DaywellTextField(
-                    controller: noteCtrl,
-                    label: 'Payment Note (optional)',
-                  ),
                   const SizedBox(height: SharedDesignTokens.spacingSm),
                   Wrap(
                     spacing: SharedDesignTokens.spacingSm,
@@ -1794,9 +1788,6 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
                                   : item.amountCents,
                               categoryId: catId,
                               settledDate: paidDate,
-                              note: noteCtrl.text.trim().isEmpty
-                                  ? null
-                                  : noteCtrl.text.trim(),
                             );
                             final err = widget.controller.state.errorMessage;
                             if (settled == null || err != null) {
@@ -1818,7 +1809,6 @@ class _FinancePlanTabState extends State<FinancePlanTab> {
         ),
       ),
     );
-    noteCtrl.dispose();
   }
 
   Future<void> _openRecurringRuleSheet(

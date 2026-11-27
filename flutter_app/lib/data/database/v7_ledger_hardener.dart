@@ -106,6 +106,9 @@ class V7LedgerHardener {
       );
     }
 
+    // 7b. Backfill blank JournalEntry descriptions from unambiguous historical notes.
+    await backfillBlankDescriptionsFromHistoricalNotesInTx(db);
+
     // 8. Verify strict post-hardening invariants (aborts cleanly on failure).
     await verifyInvariantsOnly(db);
 
@@ -1087,5 +1090,87 @@ class V7LedgerHardener {
     if (!tagOk) failed.add('C7_TAG_MISMATCH');
 
     return failed;
+  }
+
+  /// Safely copies unambiguous historical posting/legacy transaction notes into
+  /// blank `journal_entries_table.description` fields while preserving the original
+  /// `postings_table.note` and `financial_transactions.note` values intact and
+  /// never overwriting any non-empty description.
+  static Future<int> backfillBlankDescriptionsFromHistoricalNotesInTx(
+    AppDatabase db,
+  ) async {
+    final entries = await db.select(db.journalEntriesTable).get();
+    final blankEntries =
+        entries.where((e) => e.description.trim().isEmpty).toList();
+    if (blankEntries.isEmpty) return 0;
+
+    final postings = await db.select(db.postingsTable).get();
+    final postingsByEntry = <String, List<PostingModel>>{};
+    for (final p in postings) {
+      postingsByEntry.putIfAbsent(p.entryId, () => []).add(
+            PostingModel(
+              id: p.id,
+              entryId: p.entryId,
+              accountId: p.accountId,
+              amountCents: p.amountCents,
+              direction: p.direction == 'debit'
+                  ? PostingDirection.debit
+                  : PostingDirection.credit,
+              accountMovementDate: p.accountMovementDate,
+              categoryId: p.categoryId,
+              note: p.note,
+            ),
+          );
+    }
+
+    final legacyTxs = await db.select(db.financialTransactions).get();
+    final txById = {for (final t in legacyTxs) t.id: t};
+
+    var updatedCount = 0;
+    for (final entry in blankEntries) {
+      final legacyTx = entry.legacySourceTxId != null
+          ? txById[entry.legacySourceTxId!]
+          : txById['tx-${entry.id}'];
+      final payeeText = legacyTx?.payee?.trim() ?? '';
+      if (payeeText.isNotEmpty) {
+        final txNoteText = legacyTx?.note?.trim() ?? '';
+        final candidate = (txNoteText.isNotEmpty &&
+                txNoteText.toLowerCase() != payeeText.toLowerCase())
+            ? '$payeeText — $txNoteText'
+            : payeeText;
+        await (db.update(db.journalEntriesTable)
+              ..where((tbl) => tbl.id.equals(entry.id)))
+            .write(JournalEntriesTableCompanion(description: Value(candidate)));
+        updatedCount++;
+        continue;
+      }
+
+      final postingNote =
+          DoubleEntryEngine.resolveUnambiguousHistoricalPostingNote(
+        postingsByEntry[entry.id] ?? const [],
+      );
+      final txNote = legacyTx?.note?.trim();
+      final String? unambiguousNote;
+      if (postingNote != null &&
+          txNote != null &&
+          txNote.isNotEmpty) {
+        unambiguousNote = postingNote == txNote ? postingNote : null;
+      } else {
+        unambiguousNote =
+            postingNote ?? ((txNote != null && txNote.isNotEmpty) ? txNote : null);
+      }
+
+      final resolved = DoubleEntryEngine.resolveDescriptionPreservingLegacyNote(
+        description: entry.description,
+        legacyNote: unambiguousNote,
+      );
+      if (resolved.isNotEmpty) {
+        await (db.update(db.journalEntriesTable)
+              ..where((tbl) => tbl.id.equals(entry.id)))
+            .write(JournalEntriesTableCompanion(description: Value(resolved)));
+        updatedCount++;
+      }
+    }
+    return updatedCount;
   }
 }

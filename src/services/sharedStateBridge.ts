@@ -44,6 +44,7 @@ import {
   Account,
   CANONICAL_DEBT_STATUSES,
   CANONICAL_ENTRY_TYPES,
+  collectUnambiguousHistoricalPostingNote,
   DEBT_STATUS_LEGACY_ALIASES,
   Debt,
   DebtStatus,
@@ -57,6 +58,7 @@ import {
   normalizeEntryType,
   Party,
   Posting,
+  resolveDescriptionWithHistoricalNote,
   SettlementAllocation,
   tryNormalizeDebtStatus,
   tryNormalizeEntryType,
@@ -152,6 +154,8 @@ export class SharedStateBridge {
   public static readonly LEGACY_INBOX_STORAGE_KEY = 'daywell_inbox';
   public static readonly REMINDERS_STORAGE_KEY = 'daywell_reminders';
   public static readonly APP_SETTINGS_STORAGE_KEY = 'daywell_app_settings';
+  public static readonly LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY =
+    'daywell_finance_legacy_non_etb_notice_dismissed_v1';
 
   private static readonly VALID_PROJECT_BLOCK_TYPES =
     new Set<SharedProjectBlockType>([
@@ -1444,16 +1448,20 @@ export class SharedStateBridge {
         'daywell_journal_entries',
         canonicalStored?.journalEntries
       );
-      const journalEntries = rawJournalEntries.map((entry) => {
-        if (!entry || typeof entry !== 'object') return entry;
-        const normalized = tryNormalizeEntryType(
-          typeof entry.entryType === 'string' ? entry.entryType : undefined
-        );
-        return normalized ? { ...entry, entryType: normalized } : entry;
-      });
       const postings = readCollectionWithCanonicalFallback<Posting>(
         'daywell_postings',
         canonicalStored?.postings
+      );
+      const journalEntries = this.backfillBlankJournalEntryDescriptions(
+        rawJournalEntries.map((entry) => {
+          if (!entry || typeof entry !== 'object') return entry;
+          const normalized = tryNormalizeEntryType(
+            typeof entry.entryType === 'string' ? entry.entryType : undefined
+          );
+          return normalized ? { ...entry, entryType: normalized } : entry;
+        }),
+        postings,
+        transactions
       );
       const rawDebts = readCollectionWithCanonicalFallback<Debt>(
         'daywell_debts',
@@ -1535,14 +1543,43 @@ export class SharedStateBridge {
       const explicitAppSettings = this.readExplicitJsonArray(
         this.APP_SETTINGS_STORAGE_KEY
       );
+      const rawLegacyNoticeDismissed = localStorage.getItem(
+        this.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY
+      );
       const hasAppSettings =
-        explicitAppSettings.exists || Array.isArray(canonicalStored?.appSettings);
+        explicitAppSettings.exists ||
+        Array.isArray(canonicalStored?.appSettings) ||
+        rawLegacyNoticeDismissed !== null;
+      const baseAppSettings =
+        explicitAppSettings.exists || Array.isArray(canonicalStored?.appSettings)
+          ? this.normalizeAssembledAppSettings(
+              explicitAppSettings.exists
+                ? explicitAppSettings.items
+                : (canonicalStored?.appSettings as unknown[])
+            )
+          : [];
       const appSettings = hasAppSettings
-        ? this.normalizeAssembledAppSettings(
-            explicitAppSettings.exists
-              ? explicitAppSettings.items
-              : (canonicalStored?.appSettings as unknown[])
-          )
+        ? (() => {
+            if (rawLegacyNoticeDismissed === null) {
+              return baseAppSettings;
+            }
+            const existingNotice = baseAppSettings.find(
+              (s) => s.key === this.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY
+            );
+            const filtered = baseAppSettings.filter(
+              (s) => s.key !== this.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY
+            );
+            filtered.push({
+              key: this.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY,
+              value: rawLegacyNoticeDismissed,
+              ...(existingNotice &&
+              existingNotice.value === rawLegacyNoticeDismissed &&
+              existingNotice.updatedAt !== undefined
+                ? { updatedAt: existingNotice.updatedAt }
+                : {}),
+            });
+            return this.normalizeAssembledAppSettings(filtered);
+          })()
         : undefined;
 
       // 11. Setup flag & opening balance (ETB-isolated)
@@ -1838,6 +1875,17 @@ export class SharedStateBridge {
       }
       if (appSettings !== undefined) {
         localStorage.setItem(this.APP_SETTINGS_STORAGE_KEY, JSON.stringify(appSettings));
+        const legacyNoticeSetting = appSettings.find(
+          (s) => s.key === this.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY
+        );
+        if (legacyNoticeSetting !== undefined) {
+          localStorage.setItem(
+            this.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY,
+            legacyNoticeSetting.value
+          );
+        } else {
+          localStorage.removeItem(this.LEGACY_NON_ETB_NOTICE_DISMISSED_SETTING_KEY);
+        }
       } else {
         localStorage.removeItem(this.APP_SETTINGS_STORAGE_KEY);
       }
@@ -3914,6 +3962,17 @@ export class SharedStateBridge {
         }
       }
 
+      const backfilledJournalEntries = this.backfillBlankJournalEntryDescriptions(
+        validatedJournalEntries,
+        validatedPostings,
+        validatedTransactions
+      );
+      validatedJournalEntries.splice(
+        0,
+        validatedJournalEntries.length,
+        ...backfilledJournalEntries
+      );
+
       // 14. Debts (Tier-1 FKs: originEntryId, partyId)
       const debtSeenIds = new Set<string>();
       const validatedDebts = ((parsed.debts || []) as Record<string, any>[]).map((d, idx) => {
@@ -4913,6 +4972,17 @@ export class SharedStateBridge {
         }
       }
 
+      const backfilledJournalEntries = this.backfillBlankJournalEntryDescriptions(
+        validatedJournalEntries,
+        validatedPostings,
+        validatedTransactions
+      );
+      validatedJournalEntries.splice(
+        0,
+        validatedJournalEntries.length,
+        ...backfilledJournalEntries
+      );
+
       // 7. Debts
       const debtSeenIds = new Set<string>();
       const validatedDebts = ((record.debts || []) as Record<string, any>[]).map((d, idx) => {
@@ -5748,5 +5818,87 @@ export class SharedStateBridge {
       console.warn('[SharedStateBridge] Error purging seed data:', e);
       return { purgedCount: 0, remainingCount: 0 };
     }
+  }
+
+  /**
+   * Copies unambiguous non-empty historical posting/transaction `note` values
+   * into blank `JournalEntry.description` fields without overwriting any existing
+   * non-empty description or stripping historical `note` values.
+   */
+  private static backfillBlankJournalEntryDescriptions(
+    entries: JournalEntry[],
+    postings: Posting[],
+    transactions: ReadonlyArray<
+      SharedTransaction & {
+        journalEntryId?: string;
+        description?: string;
+        note?: string;
+      }
+    >
+  ): JournalEntry[] {
+    const postingsByEntry = new Map<string, Posting[]>();
+    for (const p of postings) {
+      if (!p || typeof p.entryId !== 'string') continue;
+      const list = postingsByEntry.get(p.entryId) ?? [];
+      list.push(p);
+      postingsByEntry.set(p.entryId, list);
+    }
+
+    type TxWithLegacyFields = SharedTransaction & {
+      journalEntryId?: string;
+      description?: string;
+      note?: string;
+    };
+    const txById = new Map<string, TxWithLegacyFields>();
+    const txByEntryId = new Map<string, TxWithLegacyFields>();
+    for (const tx of transactions) {
+      if (!tx || typeof tx.id !== 'string') continue;
+      txById.set(tx.id, tx);
+      if (typeof tx.journalEntryId === 'string' && tx.journalEntryId.trim()) {
+        txByEntryId.set(tx.journalEntryId, tx);
+      }
+    }
+
+    return entries.map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      if (typeof entry.description === 'string' && entry.description.trim().length > 0) {
+        return entry;
+      }
+
+      const linkedTx =
+        (typeof entry.legacySourceTxId === 'string'
+          ? txById.get(entry.legacySourceTxId)
+          : undefined) ?? txByEntryId.get(entry.id);
+      const txDesc =
+        linkedTx && typeof linkedTx.description === 'string'
+          ? linkedTx.description.trim()
+          : '';
+      if (txDesc.length > 0) {
+        return { ...entry, description: txDesc };
+      }
+
+      const entryPostings = postingsByEntry.get(entry.id) ?? [];
+      const postingNote = collectUnambiguousHistoricalPostingNote(entryPostings);
+      const txNote =
+        linkedTx && typeof linkedTx.note === 'string'
+          ? linkedTx.note
+          : undefined;
+
+      // Require unambiguously aligned note across posting and linked tx if both exist
+      const trimmedTxNote = typeof txNote === 'string' ? txNote.trim() : '';
+      let resolvedNote: string | undefined;
+      if (postingNote && trimmedTxNote) {
+        resolvedNote = postingNote === trimmedTxNote ? postingNote : undefined;
+      } else {
+        resolvedNote = postingNote || (trimmedTxNote || undefined);
+      }
+
+      const nextDesc = resolveDescriptionWithHistoricalNote({
+        description: entry.description,
+        legacyNote: resolvedNote,
+      });
+      if (!nextDesc) return entry;
+      return { ...entry, description: nextDesc };
+    });
   }
 }

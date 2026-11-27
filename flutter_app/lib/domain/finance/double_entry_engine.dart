@@ -1495,8 +1495,7 @@ class DoubleEntryEngine {
     final originClass = classifications[debt.originEntryId];
     if (originClass == null || !originClass.isEligibleEtb) {
       throw DoubleEntryValidationError(
-        'Cannot settle or write off a non-ETB or currency-review debt '
-        'in first-release ETB mode.',
+        'Legacy non-ETB debts are read-only and cannot be settled or written off in ETB Finance.',
       );
     }
   }
@@ -3875,6 +3874,51 @@ class DoubleEntryEngine {
         posting.id.endsWith('-post-dr-fee');
   }
 
+  static const Set<String> _systemPostingNoteMarkers = {
+    'Bank / transaction fee',
+    'Transfer service fee',
+    'Opening balance',
+    'Opening equity offset',
+  };
+
+  /// Returns a single unambiguous non-empty historical user note from [postings],
+  /// ignoring fee postings and system marker strings. Returns null when zero or
+  /// conflicting distinct notes exist.
+  static String? resolveUnambiguousHistoricalPostingNote(
+    List<PostingModel> postings,
+  ) {
+    final distinct = <String>{};
+    for (final p in postings) {
+      if (isExpenseFeePosting(p)) continue;
+      final trimmed = p.note?.trim() ?? '';
+      if (trimmed.isEmpty || _systemPostingNoteMarkers.contains(trimmed)) {
+        continue;
+      }
+      distinct.add(trimmed);
+      if (distinct.length > 1) return null;
+    }
+    return distinct.length == 1 ? distinct.first : null;
+  }
+
+  /// Resolves the single user-facing description while preserving historical note safety:
+  /// - Never overwrites an existing non-empty [description].
+  /// - Never duplicates text when both [description] and [legacyNote] contain data.
+  /// - Copies non-empty [legacyNote] into blank [description] when available.
+  static String resolveDescriptionPreservingLegacyNote({
+    String? description,
+    String? legacyNote,
+    String fallback = '',
+  }) {
+    final trimmedDesc = description?.trim() ?? '';
+    if (trimmedDesc.isNotEmpty) return trimmedDesc;
+    final trimmedNote = legacyNote?.trim() ?? '';
+    if (trimmedNote.isNotEmpty &&
+        !_systemPostingNoteMarkers.contains(trimmedNote)) {
+      return trimmedNote;
+    }
+    return fallback;
+  }
+
   /// Resolves transfer display endpoints strictly from posting directions:
   /// - Source account: non-system account with a credit posting.
   /// - Destination account: non-system account with a debit posting.
@@ -4423,8 +4467,7 @@ class DoubleEntryEngine {
     if (!(classifications[original.id]?.isEligibleEtb ?? false)) {
       return const ExpenseRefundSummary(
         eligible: false,
-        reason:
-            'Only active Verified ETB expenses can be refunded in first-release mode.',
+        reason: 'Only active ETB expenses can be refunded.',
         originalAmountCents: 0,
         refundedCents: 0,
         remainingRefundableCents: 0,
@@ -4576,8 +4619,7 @@ class DoubleEntryEngine {
     if (!cls.isEligibleEtb) {
       return (
         ok: false,
-        error:
-            'Excluded non-ETB or currency-review entries cannot be replaced in first-release ETB mode.',
+        error: 'Legacy non-ETB entries are read-only and cannot be replaced.',
       );
     }
     if (!isCorrectableEntryType(entry.entryType)) {
@@ -4726,7 +4768,7 @@ class DoubleEntryEngine {
         amountCents: refundCents,
         direction: PostingDirection.debit,
         accountMovementDate: refundDateIso,
-        note: cleanNote ?? 'Refund for ${original.description}',
+        note: cleanNote,
       ),
       PostingModel(
         id: '$refundEntryId-post-cr',
@@ -4736,7 +4778,7 @@ class DoubleEntryEngine {
         direction: PostingDirection.credit,
         accountMovementDate: refundDateIso,
         categoryId: summary.categoryId,
-        note: cleanNote ?? 'Refund for ${original.description}',
+        note: cleanNote,
       ),
     ];
     validateBalancedEntry(refundPostings);

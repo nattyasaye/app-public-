@@ -122,12 +122,12 @@ class FinanceExportService {
   static String exportPostingsCsv(List<PostingModel> postings) {
     final buffer = StringBuffer('\uFEFF');
     buffer.writeln(
-      '"Posting ID","Entry ID","Account ID","Amount Cents","Amount Decimal","Direction","Movement Date","Category ID","Note"',
+      '"Posting ID","Entry ID","Account ID","Amount Cents","Amount Decimal","Direction","Movement Date","Category ID"',
     );
 
     for (final p in postings) {
       buffer.writeln(
-        '${_csvCell(p.id)},${_csvCell(p.entryId)},${_csvCell(p.accountId)},${p.amountCents},"${(p.amountCents / 100).toStringAsFixed(2)}",${_csvCell(p.direction.name)},${_csvCell(p.accountMovementDate)},${_csvCell(p.categoryId)},${_csvCell(p.note)}',
+        '${_csvCell(p.id)},${_csvCell(p.entryId)},${_csvCell(p.accountId)},${p.amountCents},"${(p.amountCents / 100).toStringAsFixed(2)}",${_csvCell(p.direction.name)},${_csvCell(p.accountMovementDate)},${_csvCell(p.categoryId)}',
       );
     }
     return buffer.toString();

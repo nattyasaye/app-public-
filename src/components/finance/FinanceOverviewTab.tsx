@@ -14,6 +14,8 @@ import {
   X,
   AlertTriangle,
   Info,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import {
   Account,
@@ -32,7 +34,12 @@ import {
   TransactionCategory,
 } from '../../domain/financeV7Engine';
 import { formatBirr } from '../../domain/financialEngine';
-import { canDeleteSimpleAccount, canDeleteSimpleCategory, SimpleTransaction } from '../../domain/doubleEntryFinance';
+import {
+  canDeleteSimpleAccount,
+  canDeleteSimpleCategory,
+  classifyAllJournalEntries,
+  SimpleTransaction,
+} from '../../domain/doubleEntryFinance';
 import { SHARED_DESIGN_TOKENS } from '../../domain/sharedFoundation';
 import { centsToInputText, ComposerKind, formatDualDateLabel, tryParseStrictDecimalToCents } from './financeV7Types';
 import {
@@ -81,6 +88,8 @@ interface FinanceOverviewTabProps {
     onConfirm: () => void
   ) => void;
   hasIntegrityNotices: boolean;
+  legacyNoticeDismissed?: boolean;
+  onDismissLegacyNotice?: () => void;
 }
 
 const SUBTYPE_LABELS: Record<string, string> = {
@@ -110,8 +119,18 @@ export function FinanceOverviewTab({
   onNavigateTab,
   onRequestConfirm,
   hasIntegrityNotices,
+  legacyNoticeDismissed,
+  onDismissLegacyNotice,
 }: FinanceOverviewTabProps) {
   const [showArchivedAccounts, setShowArchivedAccounts] = useState(false);
+  const [showLegacyArchive, setShowLegacyArchive] = useState(false);
+  const [localLegacyNoticeDismissed, setLocalLegacyNoticeDismissed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('daywell_finance_legacy_non_etb_notice_dismissed_v1') === 'true';
+    } catch {
+      return false;
+    }
+  });
   const [showBreakdownModal, setShowBreakdownModal] = useState(false);
   const [categoryTabType, setCategoryTabType] = useState<'expense' | 'income'>('expense');
   const [showArchivedCategories, setShowArchivedCategories] = useState(false);
@@ -141,8 +160,45 @@ export function FinanceOverviewTab({
   const [catError, setCatError] = useState<string | null>(null);
 
   const userAccounts = accounts.filter((a) => !a.isSystem);
-  const activeAccounts = userAccounts.filter((a) => !a.isArchived);
-  const archivedAccounts = userAccounts.filter((a) => a.isArchived);
+  const etbUserAccounts = userAccounts.filter((a) => isEtbCurrency(a.currencyCode));
+  const legacyNonEtbAccounts = userAccounts.filter((a) => !isEtbCurrency(a.currencyCode));
+  const activeAccounts = etbUserAccounts.filter((a) => !a.isArchived);
+  const archivedAccounts = etbUserAccounts.filter((a) => a.isArchived);
+
+  const entryClassifications = React.useMemo(
+    () =>
+      classifyAllJournalEntries({
+        accounts,
+        entries,
+        postings,
+      }),
+    [accounts, entries, postings]
+  );
+  const legacyNonEtbEntriesCount = React.useMemo(
+    () =>
+      entries.filter((e) => {
+        const cls = entryClassifications.get(e.id);
+        return cls && (cls.status === 'excluded_non_etb' || cls.status === 'mixed_or_ambiguous');
+      }).length,
+    [entries, entryClassifications]
+  );
+  const hasLegacyNonEtbRecords =
+    legacyNonEtbAccounts.length > 0 ||
+    legacyNonEtbEntriesCount > 0 ||
+    breakdown.nonEtbAccountCount > 0 ||
+    (breakdown.unverifiedAccountCount || 0) > 0 ||
+    breakdown.excludedNonEtbEntryCount > 0 ||
+    breakdown.currencyReviewEntryCount > 0;
+  const isLegacyNoticeDismissed = legacyNoticeDismissed ?? localLegacyNoticeDismissed;
+  const handleDismissLegacyNotice = () => {
+    setLocalLegacyNoticeDismissed(true);
+    try {
+      localStorage.setItem('daywell_finance_legacy_non_etb_notice_dismissed_v1', 'true');
+    } catch {
+      // ignore storage failure
+    }
+    onDismissLegacyNotice?.();
+  };
 
   const visibleCategories = categories.filter(
     (c) => c.type === categoryTabType && (showArchivedCategories || !c.isArchived)
@@ -412,26 +468,13 @@ export function FinanceOverviewTab({
         />
       )}
 
-      {(breakdown.nonEtbAccountCount > 0 ||
-        (breakdown.unverifiedAccountCount || 0) > 0 ||
-        breakdown.currencyReviewEntryCount > 0) && (
+      {hasLegacyNonEtbRecords && !isLegacyNoticeDismissed && (
         <DaywellStatusBanner
-          tone="warning"
+          tone="info"
           icon={<Info className="w-4 h-4 shrink-0" />}
-          title="Currency Isolation Active (ETB First-Release)"
-          message={`${
-            breakdown.nonEtbAccountCount > 0
-              ? `${breakdown.nonEtbAccountCount} non-ETB account(s) excluded from ETB totals. `
-              : ''
-          }${
-            (breakdown.unverifiedAccountCount || 0) > 0
-              ? `${breakdown.unverifiedAccountCount} account(s) flagged for missing/invalid currency metadata. `
-              : ''
-          }${
-            breakdown.currencyReviewEntryCount > 0
-              ? `${breakdown.currencyReviewEntryCount} entry/entries require currency review.`
-              : ''
-          }`}
+          title="Historical Non-ETB Records Preserved"
+          message="Legacy foreign-currency or unclassified records remain safely preserved with their original amounts in the read-only Legacy Archive below and are excluded from ETB balances, budgets, and reports."
+          onDismiss={handleDismissLegacyNotice}
         />
       )}
 
@@ -521,13 +564,10 @@ export function FinanceOverviewTab({
         </div>
 
         <div className="divide-y divide-[var(--dw-divider)]">
-          {(showArchivedAccounts ? userAccounts : activeAccounts).map((acc) => {
+          {(showArchivedAccounts ? etbUserAccounts : activeAccounts).map((acc) => {
             const sub = getAccountSubType(acc);
             const bal = calculateV7AccountBalance(acc, postings, entries);
-            const curTier = classifyCurrencyCode(acc.currencyCode);
-            const normCode = normalizeCurrencyCode(acc.currencyCode);
-            const isEtb = curTier === 'verified_etb';
-            const isPrepaidCard = isEtb && sub === 'credit_card' && bal < 0;
+            const isPrepaidCard = sub === 'credit_card' && bal < 0;
             const deleteGuard = canDeleteSimpleAccount(acc.id, simpleTransactions);
             const hasPostings = postings.some((p) => p.accountId === acc.id);
             const canDelete = deleteGuard.canDelete && !hasPostings;
@@ -540,14 +580,6 @@ export function FinanceOverviewTab({
                   </div>
                   <div className="text-xs text-[var(--dw-text-muted)] flex flex-wrap items-center gap-1.5">
                     <span>{SUBTYPE_LABELS[sub] || sub}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{normCode || 'MISSING'}</span>
-                    {curTier === 'verified_non_etb' && (
-                      <DaywellStatusBadge tone="warning" showIcon={false} label={`Excluded (${normCode})`} />
-                    )}
-                    {curTier === 'unverified' && (
-                      <DaywellStatusBadge tone="error" showIcon={false} label="Currency Review" />
-                    )}
                     {isPrepaidCard && (
                       <span className="text-[var(--dw-on-income-container)] font-medium">
                         · Prepaid Credit ({formatBirr(-bal)})
@@ -562,10 +594,10 @@ export function FinanceOverviewTab({
                 <div className="flex items-center gap-3 shrink-0">
                   <div className="text-right">
                     <div className="text-sm font-bold font-mono tabular-nums text-[var(--dw-text-primary)]">
-                      {formatCurrencyCents(bal, acc.currencyCode)}
+                      {formatBirr(bal)}
                     </div>
                     <div className="text-[11px] font-mono tabular-nums text-[var(--dw-text-muted)]">
-                      Open: {formatCurrencyCents(acc.openingBalanceCents || 0, acc.currencyCode)}
+                      Open: {formatBirr(acc.openingBalanceCents || 0)}
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
@@ -626,11 +658,145 @@ export function FinanceOverviewTab({
           })}
           {activeAccounts.length === 0 && (
             <div className="py-6 text-center text-xs text-[var(--dw-text-muted)]">
-              No active accounts yet. Add an account to begin tracking Safe Harbor.
+              No active ETB accounts yet. Add an account to begin tracking Safe Harbor.
             </div>
           )}
         </div>
       </DaywellCard>
+
+      {(legacyNonEtbAccounts.length > 0 || legacyNonEtbEntriesCount > 0) && (
+        <DaywellCard padding="lg" radius="lg" className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setShowLegacyArchive((v) => !v)}
+            aria-expanded={showLegacyArchive}
+            className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
+          >
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--dw-text-primary)]">
+                Legacy Non-ETB Archive (Read-Only)
+              </h3>
+              <p className="text-xs text-[var(--dw-text-muted)]">
+                {legacyNonEtbAccounts.length} account(s) · {legacyNonEtbEntriesCount} ledger entry(ies) preserved separately from ETB totals
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 text-[var(--dw-text-muted)]">
+              <DaywellStatusBadge tone="neutral" showIcon={false} label="Excluded from ETB" />
+              {showLegacyArchive ? (
+                <ChevronDown className="w-4 h-4" />
+              ) : (
+                <ChevronRight className="w-4 h-4" />
+              )}
+            </div>
+          </button>
+
+          {showLegacyArchive && (
+            <div className="pt-2 border-t border-[var(--dw-divider)] space-y-3">
+              {legacyNonEtbAccounts.length > 0 && (
+                <div className="divide-y divide-[var(--dw-divider)]">
+                  {legacyNonEtbAccounts.map((acc) => {
+                    const sub = getAccountSubType(acc);
+                    const bal = calculateV7AccountBalance(acc, postings, entries);
+                    const curTier = classifyCurrencyCode(acc.currencyCode);
+                    const normCode = normalizeCurrencyCode(acc.currencyCode);
+                    const deleteGuard = canDeleteSimpleAccount(acc.id, simpleTransactions);
+                    const hasPostings = postings.some((p) => p.accountId === acc.id);
+                    const canDelete = deleteGuard.canDelete && !hasPostings;
+
+                    return (
+                      <div key={acc.id} className="py-2.5 flex flex-wrap items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-[var(--dw-text-primary)] truncate">
+                            {acc.name}
+                          </div>
+                          <div className="text-xs text-[var(--dw-text-muted)] flex flex-wrap items-center gap-1.5">
+                            <span>{SUBTYPE_LABELS[sub] || sub}</span>
+                            <DaywellStatusBadge
+                              tone="warning"
+                              showIcon={false}
+                              label={
+                                curTier === 'verified_non_etb'
+                                  ? `Legacy (${normCode})`
+                                  : 'Unclassified'
+                              }
+                            />
+                            {acc.isArchived && (
+                              <span className="text-[var(--dw-text-disabled)]">· Archived</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-3 shrink-0">
+                          <div className="text-right">
+                            <div className="text-sm font-bold font-mono tabular-nums text-[var(--dw-text-secondary)]">
+                              {formatCurrencyCents(bal, acc.currencyCode)}
+                            </div>
+                            <div className="text-[11px] font-mono tabular-nums text-[var(--dw-text-muted)]">
+                              Open: {formatCurrencyCents(acc.openingBalanceCents || 0, acc.currencyCode)}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <DaywellIconButton
+                              label={acc.isArchived ? 'Restore legacy account' : 'Archive legacy account'}
+                              size="compact"
+                              tone="muted"
+                              onClick={() => {
+                                const res = onToggleArchiveAccount(acc.id);
+                                if (res && !res.ok && res.error) {
+                                  setNoticeBanner(res.error);
+                                }
+                              }}
+                              icon={acc.isArchived ? <RotateCcw className="w-3.5 h-3.5" /> : <Archive className="w-3.5 h-3.5" />}
+                            />
+                            <DaywellIconButton
+                              label="Delete unused legacy account"
+                              size="compact"
+                              tone={canDelete ? 'danger' : 'muted'}
+                              onClick={() => {
+                                if (!canDelete) {
+                                  setNoticeBanner(
+                                    `Cannot delete "${acc.name}" because ledger postings exist. Archive it instead.`
+                                  );
+                                  return;
+                                }
+                                onRequestConfirm(
+                                  'Delete Legacy Account?',
+                                  `Delete unused legacy account "${acc.name}" permanently?`,
+                                  'Delete',
+                                  'danger',
+                                  () => {
+                                    const res = onDeleteAccount(acc.id);
+                                    if (!res.ok && res.error) setNoticeBanner(res.error);
+                                  }
+                                );
+                              }}
+                              icon={<Trash2 className="w-3.5 h-3.5" />}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {legacyNonEtbEntriesCount > 0 && (
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs text-[var(--dw-text-muted)]">
+                  <span>
+                    {legacyNonEtbEntriesCount} historical non-ETB or unclassified journal entry(ies) preserved separately.
+                  </span>
+                  <DaywellButton
+                    label="Inspect in Transactions"
+                    variant="text"
+                    size="compact"
+                    onClick={() => onNavigateTab('transactions')}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+        </DaywellCard>
+      )}
 
       {/* 4. Hierarchical Categories Manager */}
       <DaywellCard padding="lg" radius="lg" className="space-y-4">
@@ -858,41 +1024,27 @@ export function FinanceOverviewTab({
                   placeholder="e.g. CBE Savings"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
-                    Account Type
-                  </label>
-                  <select
-                    value={accSubType}
-                    onChange={(e) => setAccSubType(e.target.value as AccountSubType)}
-                    disabled={Boolean(editingAccount)}
-                    className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
-                  >
-                    <option value="bank">Bank</option>
-                    <option value="cash">Cash</option>
-                    <option value="mobile_money">Mobile Money</option>
-                    <option value="savings_vault">Savings Vault</option>
-                    <option value="credit_card">Credit Card</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
-                    Currency (First-Release ETB)
-                  </label>
-                  <input
-                    type="text"
-                    value={editingAccount ? accCurrency || 'UNVERIFIED' : 'ETB'}
-                    disabled
-                    className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-surface-subtle)] text-[var(--dw-text-muted)] font-mono"
-                    maxLength={12}
-                  />
-                </div>
+              <div>
+                <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+                  Account Type
+                </label>
+                <select
+                  value={accSubType}
+                  onChange={(e) => setAccSubType(e.target.value as AccountSubType)}
+                  disabled={Boolean(editingAccount)}
+                  className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
+                >
+                  <option value="bank">Bank</option>
+                  <option value="cash">Cash</option>
+                  <option value="mobile_money">Mobile Money</option>
+                  <option value="savings_vault">Savings Vault</option>
+                  <option value="credit_card">Credit Card</option>
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
-                    Opening Balance
+                    Opening Balance (ETB)
                   </label>
                   <input
                     type="number"

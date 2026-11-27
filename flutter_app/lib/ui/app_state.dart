@@ -716,7 +716,6 @@ class AppStateManager extends ChangeNotifier {
       amountCents: parsed.amountCents,
       date: CalendarDate.fromUtcInstantInEthiopia(captured.createdAt),
       description: parsed.description,
-      note: 'Triaged from Quick Capture',
     );
     if (entry != null) {
       await inboxController.markProcessed(captured.id);

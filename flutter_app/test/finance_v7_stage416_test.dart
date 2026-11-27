@@ -297,7 +297,11 @@ void main() {
         await settle();
         expect(find.textContaining('Prepaid Card Credit'), findsWidgets);
         expect(
-          find.textContaining('Non-ETB Accounts Excluded'),
+          find.textContaining('Historical Non-ETB Records Preserved'),
+          findsOneWidget,
+        );
+        expect(
+          find.textContaining('Legacy Non-ETB Archive (Read-Only)'),
           findsOneWidget,
         );
         expect(find.text('Breakdown'), findsOneWidget);

@@ -17,6 +17,7 @@ import {
   isEtbCurrency,
   normalizeCurrencyCode,
   resolveCanonicalCategoryId,
+  resolveDescriptionWithHistoricalNote,
   SimpleTransaction,
 } from '../domain/doubleEntryFinance';
 import {
@@ -337,7 +338,6 @@ export class DataPortabilityService {
         header: 'categoryId',
         transform: (val) => (val ? resolveCanonicalCategoryId(String(val)) : ''),
       },
-      'note',
     ]);
   }
 
@@ -563,7 +563,17 @@ export class DataPortabilityService {
       'accountId',
       'destinationAccountId',
       'categoryId',
-      'description',
+      {
+        key: 'description',
+        header: 'description',
+        transform: (val, row) =>
+          resolveDescriptionWithHistoricalNote({
+            description: typeof val === 'string' ? val : '',
+            legacyNote: typeof (row as { note?: string }).note === 'string'
+              ? (row as { note?: string }).note
+              : undefined,
+          }),
+      },
       'transactionDate',
       'journalEntryId',
       {

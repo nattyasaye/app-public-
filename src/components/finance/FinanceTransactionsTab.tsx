@@ -1,5 +1,15 @@
 import React, { useMemo, useState } from 'react';
-import { Plus, X, RotateCcw, Edit3, Ban, ReceiptText, CornerDownLeft } from 'lucide-react';
+import {
+  Plus,
+  X,
+  RotateCcw,
+  Edit3,
+  Ban,
+  ReceiptText,
+  CornerDownLeft,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
 import {
   Account,
   canCorrectJournalEntryV7,
@@ -12,13 +22,20 @@ import {
   isActiveVerifiedEtbAccount,
   isRefundEntry,
   JournalEntry,
+  normalizeCurrencyCode,
   Posting,
   resolveCategoryDisplayName,
+  resolveTransferDisplayEndpoints,
   SettlementAllocation,
   SharedCommitmentSettlement,
   SimpleTransaction,
+  summarizeDirectExpense,
   TransactionCategory,
 } from '../../domain/financeV7Engine';
+import {
+  collectUnambiguousHistoricalPostingNote,
+  resolveDescriptionWithHistoricalNote,
+} from '../../domain/doubleEntryFinance';
 import { CalendarDate } from '../../domain/date';
 import {
   createEmptyDailyRhythmDay,
@@ -65,7 +82,6 @@ interface FinanceTransactionsTabProps {
     refundAccountId: string;
     refundCents: number;
     refundDateIso: string;
-    note?: string;
   }) => { ok: boolean; error?: string };
   onRequestConfirm: (
     title: string,
@@ -97,12 +113,12 @@ export function FinanceTransactionsTab({
 }: FinanceTransactionsTabProps) {
   const [query, setQuery] = useState('');
   const [typeFilter, setTypeFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [accountFilter, setAccountFilter] = useState<string>('all');
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'week' | 'month' | 'custom'>('all');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
   const [showVoided, setShowVoided] = useState(false);
+  const [showLegacyEntries, setShowLegacyEntries] = useState(false);
   const [inspectEntry, setInspectEntry] = useState<JournalEntry | null>(null);
   const [inspectError, setInspectError] = useState<string | null>(null);
 
@@ -111,7 +127,6 @@ export function FinanceTransactionsTab({
   const [refundAccId, setRefundAccId] = useState('');
   const [refundAmtStr, setRefundAmtStr] = useState('');
   const [refundDate, setRefundDate] = useState(CalendarDate.today().toIsoString());
-  const [refundNote, setRefundNote] = useState('');
   const [refundError, setRefundError] = useState<string | null>(null);
 
   const refundableEtbAccounts = useMemo(
@@ -133,7 +148,10 @@ export function FinanceTransactionsTab({
   );
 
   const accountById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts]);
-  const userAccounts = useMemo(() => accounts.filter((a) => !a.isSystem), [accounts]);
+  const userEtbAccounts = useMemo(
+    () => accounts.filter((a) => !a.isSystem && normalizeCurrencyCode(a.currencyCode) === 'ETB'),
+    [accounts]
+  );
 
   const postingsByEntry = useMemo(() => {
     const map = new Map<string, Posting[]>();
@@ -176,10 +194,6 @@ export function FinanceTransactionsTab({
       .filter((entry) => {
         if (!showVoided && entry.isVoided) return false;
         if (typeFilter !== 'all' && entry.entryType !== typeFilter) return false;
-        if (statusFilter !== 'all') {
-          const clsStatus = classificationsByEntryId.get(entry.id)?.status;
-          if (clsStatus !== statusFilter) return false;
-        }
 
         if (datePreset === 'today' && entry.occurrenceDate !== todayIso) return false;
         if (
@@ -205,14 +219,24 @@ export function FinanceTransactionsTab({
         }
 
         if (q) {
-          const matchDesc = entry.description.toLowerCase().includes(q);
-          const matchAcc = entryPostings.some((p) =>
-            (accountById.get(p.accountId)?.name || '').toLowerCase().includes(q)
-          );
+          const resolvedDesc = resolveDescriptionWithHistoricalNote({
+            description: entry.description,
+            legacyNote: collectUnambiguousHistoricalPostingNote(entryPostings),
+          });
+          const matchDesc = resolvedDesc.toLowerCase().includes(q);
+          const matchAcc = entryPostings.some((p) => {
+            const acc = accountById.get(p.accountId);
+            return acc && !acc.isSystem && acc.name.toLowerCase().includes(q);
+          });
+          const matchTransferLabel =
+            entry.entryType === 'transfer' &&
+            resolveTransferDisplayEndpoints(entryPostings, accountById)
+              .displayLabel.toLowerCase()
+              .includes(q);
           const matchCat = entryPostings.some((p) =>
             (p.categoryId ? resolveCategoryDisplayName(categories, p.categoryId) : '').toLowerCase().includes(q)
           );
-          if (!matchDesc && !matchAcc && !matchCat) return false;
+          if (!matchDesc && !matchAcc && !matchTransferLabel && !matchCat) return false;
         }
         return true;
       });
@@ -220,8 +244,6 @@ export function FinanceTransactionsTab({
     entries,
     showVoided,
     typeFilter,
-    statusFilter,
-    classificationsByEntryId,
     datePreset,
     customStart,
     customEnd,
@@ -232,13 +254,40 @@ export function FinanceTransactionsTab({
     categories,
   ]);
 
+  const etbFilteredEntries = useMemo(
+    () =>
+      filteredEntries.filter(
+        (entry) => classificationsByEntryId.get(entry.id)?.status === 'eligible_etb'
+      ),
+    [filteredEntries, classificationsByEntryId]
+  );
+
+  const legacyFilteredEntries = useMemo(
+    () =>
+      filteredEntries.filter(
+        (entry) => classificationsByEntryId.get(entry.id)?.status !== 'eligible_etb'
+      ),
+    [filteredEntries, classificationsByEntryId]
+  );
+
   const summarizeEntry = (entry: JournalEntry) => {
     const list = postingsByEntry.get(entry.id) || [];
+    const transferEndpoints =
+      entry.entryType === 'transfer'
+        ? resolveTransferDisplayEndpoints(list, accountById)
+        : undefined;
+    const expenseSummary = summarizeDirectExpense({
+      entry,
+      postings: list,
+      accountById,
+    });
     const destTransferPosting =
       entry.entryType === 'transfer'
         ? list.find((p) => p.direction === 'debit' && !accountById.get(p.accountId)?.isSystem)
         : undefined;
-    const maxAmount = destTransferPosting
+    const maxAmount = expenseSummary.isDirectExpense
+      ? expenseSummary.totalOutflowCents
+      : destTransferPosting
       ? destTransferPosting.amountCents
       : list.reduce((m, p) => Math.max(m, p.amountCents), 0);
     const hasExpenseDebit = list.some(
@@ -260,16 +309,24 @@ export function FinanceTransactionsTab({
     );
     const isRefund = isRefundEntry(entry);
     const catPosting = list.find((p) => p.categoryId);
-    const catName = catPosting?.categoryId
-      ? resolveCategoryDisplayName(categories, catPosting.categoryId)
+    const primaryCatId = expenseSummary.isDirectExpense
+      ? expenseSummary.primaryCategoryId
+      : catPosting?.categoryId;
+    const catName = primaryCatId
+      ? resolveCategoryDisplayName(categories, primaryCatId)
       : undefined;
     const primaryUserPosting = list.find((p) => {
       const a = accountById.get(p.accountId);
       return a && !a.isSystem;
     });
-    const accName = primaryUserPosting
-      ? accountById.get(primaryUserPosting.accountId)?.name
-      : undefined;
+    const accName =
+      entry.entryType === 'transfer'
+        ? transferEndpoints?.displayLabel || undefined
+        : expenseSummary.isDirectExpense && expenseSummary.paidAccountId
+        ? accountById.get(expenseSummary.paidAccountId)?.name
+        : primaryUserPosting
+        ? accountById.get(primaryUserPosting.accountId)?.name
+        : undefined;
 
     let polarity: 'expense' | 'income' | 'neutral' = 'neutral';
     if (isRefund) {
@@ -289,6 +346,15 @@ export function FinanceTransactionsTab({
         : 'MIXED';
     const nonSystemPostings = list.filter((p) => !accountById.get(p.accountId)?.isSystem);
     const isMixed = displayCurrency === 'MIXED';
+    const effectiveCurrency =
+      displayCurrency === 'UNVERIFIED'
+        ? ''
+        : displayCurrency ||
+          (primaryUserPosting
+            ? accountById.get(primaryUserPosting.accountId)?.currencyCode
+            : classification?.status === 'eligible_etb'
+            ? 'ETB'
+            : '');
     const formattedAmount = isMixed
       ? nonSystemPostings.length > 0
         ? nonSystemPostings
@@ -297,20 +363,24 @@ export function FinanceTransactionsTab({
             )
             .join(' / ')
         : `${centsToInputText(maxAmount)} (${classification!.touchedCurrencies.join('/')})`
-      : formatCurrencyCents(
-          maxAmount,
-          displayCurrency === 'UNVERIFIED'
-            ? ''
-            : displayCurrency ||
-                (primaryUserPosting
-                  ? accountById.get(primaryUserPosting.accountId)?.currencyCode
-                  : classification?.status === 'eligible_etb'
-                  ? 'ETB'
-                  : '')
-        );
+      : formatCurrencyCents(maxAmount, effectiveCurrency);
+    const feeCents = expenseSummary.isDirectExpense ? expenseSummary.feeCents : 0;
+    const principalCents = expenseSummary.isDirectExpense
+      ? expenseSummary.principalCents
+      : maxAmount;
+    const formattedFee =
+      feeCents > 0 && !isMixed ? formatCurrencyCents(feeCents, effectiveCurrency) : undefined;
+    const formattedPrincipal =
+      feeCents > 0 && !isMixed ? formatCurrencyCents(principalCents, effectiveCurrency) : undefined;
     return {
       amountCents: maxAmount,
+      principalCents,
+      feeCents,
       formattedAmount,
+      formattedFee,
+      formattedPrincipal,
+      expenseSummary,
+      transferEndpoints,
       isMixed,
       isRefund,
       classification,
@@ -355,7 +425,13 @@ export function FinanceTransactionsTab({
           (p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
             accountById.get(p.accountId)?.type === 'expense')
       );
-      const cleanedDescription = entry.description.replace(/\s*\(Fee:\s*[^)]*\)\s*$/, '').trim();
+      const baseDesc = resolveDescriptionWithHistoricalNote({
+        description: entry.description,
+        legacyNote:
+          collectUnambiguousHistoricalPostingNote(info.postings) ??
+          (matchedTx as { note?: string } | undefined)?.note,
+      });
+      const cleanedDescription = baseDesc.replace(/\s*\(Fee:\s*[^)]*\)\s*$/, '').trim();
       onOpenComposer('transfer', entry.id, {
         amountText: centsToInputText(destDr?.amountCents ?? info.amountCents),
         description: cleanedDescription,
@@ -366,7 +442,6 @@ export function FinanceTransactionsTab({
           destDr?.accountMovementDate || sourceCr?.accountMovementDate || entry.occurrenceDate,
         feeText: feeDr ? centsToInputText(feeDr.amountCents) : '0',
         feeCategoryId: feeDr?.categoryId,
-        note: destDr?.note || sourceCr?.note,
       });
       setInspectEntry(null);
       return;
@@ -378,7 +453,12 @@ export function FinanceTransactionsTab({
     const kind: ComposerKind = info.polarity === 'income' ? 'income' : 'expense';
     const payeeSep = ' — ';
     let prefillPayee = matchedTx?.payee?.trim() || undefined;
-    let prefillDesc = entry.description;
+    let prefillDesc = resolveDescriptionWithHistoricalNote({
+      description: entry.description,
+      legacyNote:
+        collectUnambiguousHistoricalPostingNote(info.postings) ??
+        (matchedTx as { note?: string } | undefined)?.note,
+    });
     if (prefillPayee && prefillDesc.startsWith(`${prefillPayee}${payeeSep}`)) {
       prefillDesc = prefillDesc.slice(prefillPayee.length + payeeSep.length).trim();
     } else if (!prefillPayee && prefillDesc.includes(payeeSep)) {
@@ -389,19 +469,41 @@ export function FinanceTransactionsTab({
       }
     }
 
-    const rawCatId = nominalPosting?.categoryId || catPosting?.categoryId;
+    const rawCatId =
+      info.expenseSummary.isDirectExpense
+        ? info.expenseSummary.primaryCategoryId
+        : nominalPosting?.categoryId || catPosting?.categoryId;
     const matchedCatId = rawCatId
       ? findCategoryByIdOrAlias(categories, rawCatId)?.id || rawCatId
       : undefined;
 
+    const matchedFeeCatId =
+      kind === 'expense' && info.expenseSummary.isDirectExpense && info.expenseSummary.feeCategoryId
+        ? findCategoryByIdOrAlias(categories, info.expenseSummary.feeCategoryId)?.id ||
+          info.expenseSummary.feeCategoryId
+        : undefined;
+
     onOpenComposer(kind, entry.id, {
-      amountText: centsToInputText(info.amountCents),
+      amountText: centsToInputText(
+        kind === 'expense' && info.expenseSummary.isDirectExpense
+          ? info.expenseSummary.principalCents
+          : info.amountCents
+      ),
       description: prefillDesc,
-      accountId: primaryUserPosting?.accountId,
+      accountId:
+        (kind === 'expense' && info.expenseSummary.isDirectExpense
+          ? info.expenseSummary.paidAccountId
+          : undefined) || primaryUserPosting?.accountId,
       categoryId: matchedCatId,
+      feeText:
+        kind === 'expense' && info.expenseSummary.isDirectExpense
+          ? info.expenseSummary.feeCents > 0
+            ? centsToInputText(info.expenseSummary.feeCents)
+            : '0'
+          : undefined,
+      feeCategoryId: matchedFeeCatId,
       occurrenceDate: entry.occurrenceDate,
       movementDate: primaryUserPosting?.accountMovementDate || entry.occurrenceDate,
-      note: primaryUserPosting?.note || nominalPosting?.note,
       payee: prefillPayee,
     });
     setInspectEntry(null);
@@ -432,7 +534,6 @@ export function FinanceTransactionsTab({
     setRefundAccId(defaultAccId);
     setRefundAmtStr(centsToInputText(summary.remainingRefundableCents));
     setRefundDate(defaultDate);
-    setRefundNote('');
     setRefundError(null);
     setInspectEntry(null);
   };
@@ -446,7 +547,7 @@ export function FinanceTransactionsTab({
       return;
     }
     if (!refundAccId) {
-      setRefundError('Select a valid active Verified ETB refund account.');
+      setRefundError('Select a valid active ETB refund account.');
       return;
     }
     const res = onRefundExpense({
@@ -454,7 +555,6 @@ export function FinanceTransactionsTab({
       refundAccountId: refundAccId,
       refundCents: cents,
       refundDateIso: refundDate,
-      note: refundNote.trim() || undefined,
     });
     if (!res.ok) {
       setRefundError(res.error || 'Could not record expense refund.');
@@ -514,24 +614,12 @@ export function FinanceTransactionsTab({
           </select>
 
           <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-2.5 py-1.5 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
-            aria-label="Filter by currency status"
-          >
-            <option value="all">All Currency Statuses</option>
-            <option value="eligible_etb">ETB Eligible</option>
-            <option value="excluded_non_etb">Excluded (Foreign)</option>
-            <option value="mixed_or_ambiguous">Currency Review</option>
-          </select>
-
-          <select
             value={accountFilter}
             onChange={(e) => setAccountFilter(e.target.value)}
             className="px-2.5 py-1.5 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
           >
             <option value="all">All Accounts</option>
-            {userAccounts.map((a) => (
+            {userEtbAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.name}
               </option>
@@ -580,16 +668,16 @@ export function FinanceTransactionsTab({
         )}
       </DaywellCard>
 
-      {/* Entries List */}
+      {/* Entries List (ETB) */}
       <DaywellCard padding="none" radius="lg" className="divide-y divide-[var(--dw-divider)] overflow-hidden">
-        {filteredEntries.length === 0 ? (
+        {etbFilteredEntries.length === 0 ? (
           <DaywellEmptyState
             icon={<ReceiptText className="w-8 h-8" />}
             message="No matching journal entries"
             subtitle="Record an expense, income, transfer, or split to see balanced ledger entries here."
           />
         ) : (
-          filteredEntries.map((entry) => {
+          etbFilteredEntries.map((entry) => {
             const info = summarizeEntry(entry);
             return (
               <div
@@ -613,7 +701,10 @@ export function FinanceTransactionsTab({
               >
                 <div className="min-w-0">
                   <div className={`text-sm font-semibold text-[var(--dw-text-primary)] truncate ${entry.isVoided ? 'line-through' : ''}`}>
-                    {entry.description}
+                    {resolveDescriptionWithHistoricalNote({
+                      description: entry.description,
+                      legacyNote: collectUnambiguousHistoricalPostingNote(info.postings),
+                    })}
                   </div>
                   <div className="text-xs text-[var(--dw-text-muted)] flex flex-wrap items-center gap-1.5 mt-0.5">
                     <span>{formatDualDateLabel(entry.occurrenceDate)}</span>
@@ -629,21 +720,19 @@ export function FinanceTransactionsTab({
                         <span>{info.catName}</span>
                       </>
                     )}
+                    {info.formattedFee && info.formattedPrincipal && (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        <span>
+                          Includes {info.formattedFee} fee (Principal {info.formattedPrincipal})
+                        </span>
+                      </>
+                    )}
                     {info.isRefund && (
                       <DaywellStatusBadge tone="income" showIcon={false} label="Refund" />
                     )}
                     {entry.isVoided && (
                       <DaywellStatusBadge tone="error" showIcon={false} label="Voided" />
-                    )}
-                    {!entry.isVoided && info.classification?.status === 'excluded_non_etb' && (
-                      <DaywellStatusBadge
-                        tone="warning"
-                        showIcon={false}
-                        label={`Excluded (${info.classification.nativeCurrencyCode || info.classification.touchedCurrencies[0] || 'Non-ETB'})`}
-                      />
-                    )}
-                    {!entry.isVoided && info.classification?.status === 'mixed_or_ambiguous' && (
-                      <DaywellStatusBadge tone="error" showIcon={false} label="Currency Review" />
                     )}
                     {entry.correctedFromEntryId && (
                       <>
@@ -653,30 +742,121 @@ export function FinanceTransactionsTab({
                     )}
                   </div>
                 </div>
-                <div
-                  className={`text-sm font-bold font-mono tabular-nums shrink-0 ${
-                    entry.isVoided
-                      ? 'text-[var(--dw-text-disabled)] line-through'
+                <div className="shrink-0 text-right">
+                  <div
+                    className={`text-sm font-bold font-mono tabular-nums ${
+                      entry.isVoided
+                        ? 'text-[var(--dw-text-disabled)] line-through'
+                        : info.polarity === 'income'
+                        ? 'text-[var(--dw-on-income-container)]'
+                        : info.polarity === 'expense'
+                        ? 'text-[var(--dw-on-expense-container)]'
+                        : 'text-[var(--dw-on-transfer-container)]'
+                    }`}
+                  >
+                    {info.isMixed
+                      ? info.formattedAmount
                       : info.polarity === 'income'
-                      ? 'text-[var(--dw-on-income-container)]'
+                      ? `+${info.formattedAmount}`
                       : info.polarity === 'expense'
-                      ? 'text-[var(--dw-on-expense-container)]'
-                      : 'text-[var(--dw-on-transfer-container)]'
-                  }`}
-                >
-                  {info.isMixed
-                    ? info.formattedAmount
-                    : info.polarity === 'income'
-                    ? `+${info.formattedAmount}`
-                    : info.polarity === 'expense'
-                    ? `-${info.formattedAmount}`
-                    : info.formattedAmount}
+                      ? `-${info.formattedAmount}`
+                      : info.formattedAmount}
+                  </div>
+                  {info.formattedFee && (
+                    <div className="text-[11px] text-[var(--dw-text-muted)] font-mono tabular-nums">
+                      Includes {info.formattedFee} fee
+                    </div>
+                  )}
                 </div>
               </div>
             );
           })
         )}
       </DaywellCard>
+
+      {legacyFilteredEntries.length > 0 && (
+        <DaywellCard padding="lg" radius="lg" className="space-y-3">
+          <button
+            type="button"
+            onClick={() => setShowLegacyEntries((v) => !v)}
+            aria-expanded={showLegacyEntries}
+            className="w-full flex items-center justify-between gap-2 text-left cursor-pointer"
+          >
+            <div>
+              <h3 className="text-sm font-semibold text-[var(--dw-text-primary)]">
+                Legacy Non-ETB Entries ({legacyFilteredEntries.length}) · Read-Only
+              </h3>
+              <p className="text-xs text-[var(--dw-text-muted)]">
+                Historical non-ETB or unclassified entries preserved separately and excluded from ETB totals
+              </p>
+            </div>
+            <div className="flex items-center gap-2 shrink-0 text-[var(--dw-text-muted)]">
+              {showLegacyEntries ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            </div>
+          </button>
+
+          {showLegacyEntries && (
+            <div className="divide-y divide-[var(--dw-divider)] border-t border-[var(--dw-divider)]">
+              {legacyFilteredEntries.map((entry) => {
+                const info = summarizeEntry(entry);
+                const legacyCode =
+                  info.classification?.nativeCurrencyCode ||
+                  (info.classification?.touchedCurrencies.find((c) => c !== 'UNVERIFIED') ?? '');
+                return (
+                  <div
+                    key={entry.id}
+                    onClick={() => {
+                      setInspectError(null);
+                      setInspectEntry(entry);
+                    }}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setInspectError(null);
+                        setInspectEntry(entry);
+                      }
+                    }}
+                    className={`py-3 flex items-center justify-between gap-3 cursor-pointer hover:bg-[var(--dw-surface-subtle)] px-2 rounded-[var(--dw-radius-sm)] transition-colors ${
+                      entry.isVoided ? 'opacity-55' : ''
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className={`text-sm font-semibold text-[var(--dw-text-primary)] truncate ${entry.isVoided ? 'line-through' : ''}`}>
+                        {resolveDescriptionWithHistoricalNote({
+                          description: entry.description,
+                          legacyNote: collectUnambiguousHistoricalPostingNote(info.postings),
+                        })}
+                      </div>
+                      <div className="text-xs text-[var(--dw-text-muted)] flex flex-wrap items-center gap-1.5 mt-0.5">
+                        <span>{formatDualDateLabel(entry.occurrenceDate)}</span>
+                        {info.accName && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{info.accName}</span>
+                          </>
+                        )}
+                        <DaywellStatusBadge
+                          tone="warning"
+                          showIcon={false}
+                          label={legacyCode ? `Legacy (${legacyCode})` : 'Unclassified'}
+                        />
+                        {entry.isVoided && (
+                          <DaywellStatusBadge tone="error" showIcon={false} label="Voided" />
+                        )}
+                      </div>
+                    </div>
+                    <div className="shrink-0 text-right font-mono tabular-nums text-sm font-semibold text-[var(--dw-text-secondary)]">
+                      {info.formattedAmount}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </DaywellCard>
+      )}
 
       {/* Inspect Postings Drawer / Modal */}
       {inspectEntry && (
@@ -690,7 +870,12 @@ export function FinanceTransactionsTab({
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h3 className="dw-type-title text-[var(--dw-text-primary)]">
-                  {inspectEntry.description}
+                  {resolveDescriptionWithHistoricalNote({
+                    description: inspectEntry.description,
+                    legacyNote: collectUnambiguousHistoricalPostingNote(
+                      postingsByEntry.get(inspectEntry.id) || []
+                    ),
+                  })}
                 </h3>
                 <p className="text-xs text-[var(--dw-text-muted)] mt-0.5">
                   {formatDualDateLabel(inspectEntry.occurrenceDate)} · Type: {inspectEntry.entryType}
@@ -760,7 +945,7 @@ export function FinanceTransactionsTab({
                 return (
                   <DaywellStatusBanner
                     tone="warning"
-                    message={`This entry is excluded from ETB totals (${cls?.reason || 'Non-ETB / Currency Review'}). Correct & Replace is disabled; you may inspect or void it.`}
+                    message="Legacy non-ETB record preserved read-only with original amounts and excluded from ETB totals. Editing is disabled."
                   />
                 );
               }
@@ -780,6 +965,11 @@ export function FinanceTransactionsTab({
             })()}
 
             {(() => {
+              const inspectExpenseSummary = summarizeDirectExpense({
+                entry: inspectEntry,
+                postings: postingsByEntry.get(inspectEntry.id) || [],
+                accountById,
+              });
               const refundSum = getExpenseRefundSummaryV7({
                 originalEntryId: inspectEntry.id,
                 entries,
@@ -788,12 +978,21 @@ export function FinanceTransactionsTab({
                 debts,
                 allocations,
               });
-              if (!refundSum.eligible || refundSum.refundedCents <= 0) return null;
               return (
-                <DaywellStatusBanner
-                  tone="info"
-                  message={`Refunded so far: ${formatCurrencyCents(refundSum.refundedCents, 'ETB')} of ${formatCurrencyCents(refundSum.originalAmountCents, 'ETB')} (${formatCurrencyCents(refundSum.remainingRefundableCents, 'ETB')} remaining refundable).`}
-                />
+                <>
+                  {inspectExpenseSummary.isDirectExpense && inspectExpenseSummary.feeCents > 0 && (
+                    <DaywellStatusBanner
+                      tone="info"
+                      message={`Principal ${formatCurrencyCents(inspectExpenseSummary.principalCents, 'ETB')} + Fee ${formatCurrencyCents(inspectExpenseSummary.feeCents, 'ETB')} = Total deduction ${formatCurrencyCents(inspectExpenseSummary.totalOutflowCents, 'ETB')}.`}
+                    />
+                  )}
+                  {refundSum.eligible && refundSum.refundedCents > 0 && (
+                    <DaywellStatusBanner
+                      tone="info"
+                      message={`Refunded so far: ${formatCurrencyCents(refundSum.refundedCents, 'ETB')} of ${formatCurrencyCents(refundSum.originalAmountCents, 'ETB')} principal (${formatCurrencyCents(refundSum.remainingRefundableCents, 'ETB')} remaining refundable${(refundSum.originalFeeCents || 0) > 0 ? `; excludes ${formatCurrencyCents(refundSum.originalFeeCents || 0, 'ETB')} fee` : ''}).`}
+                    />
+                  )}
+                </>
               );
             })()}
 
@@ -877,7 +1076,7 @@ export function FinanceTransactionsTab({
                 />
               ) : (
                 <span className="text-xs text-[var(--dw-text-muted)]">
-                  Non-ETB / unverified entries cannot be restored in ETB mode.
+                  Legacy non-ETB entries cannot be restored.
                 </span>
               )}
             </div>
@@ -913,11 +1112,33 @@ export function FinanceTransactionsTab({
               />
             </div>
 
+            {(() => {
+              const modalRefundSum = getExpenseRefundSummaryV7({
+                originalEntryId: refundTargetEntry.id,
+                entries,
+                postings,
+                accounts,
+                debts,
+                allocations,
+              });
+              if (!modalRefundSum.eligible) return null;
+              return (
+                <DaywellStatusBanner
+                  tone="info"
+                  message={
+                    (modalRefundSum.originalFeeCents || 0) > 0
+                      ? `Maximum normal refund is principal only: ${formatCurrencyCents(modalRefundSum.remainingRefundableCents, 'ETB')} remaining (original principal ${formatCurrencyCents(modalRefundSum.originalAmountCents, 'ETB')}; ${formatCurrencyCents(modalRefundSum.originalFeeCents || 0, 'ETB')} bank fee excluded).`
+                      : `Remaining refundable principal: ${formatCurrencyCents(modalRefundSum.remainingRefundableCents, 'ETB')} of ${formatCurrencyCents(modalRefundSum.originalAmountCents, 'ETB')}.`
+                  }
+                />
+              );
+            })()}
+
             {refundError && <DaywellStatusBanner tone="error" message={refundError} />}
 
             <div>
               <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
-                Refund To Account (Verified ETB)
+                Refund To Account
               </label>
               <select
                 value={refundAccId}
@@ -926,7 +1147,7 @@ export function FinanceTransactionsTab({
               >
                 {refundableEtbAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.name} ({a.currencyCode})
+                    {a.name}
                   </option>
                 ))}
               </select>
@@ -957,19 +1178,6 @@ export function FinanceTransactionsTab({
                   className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)] font-mono"
                 />
               </div>
-            </div>
-
-            <div>
-              <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
-                Note (Optional)
-              </label>
-              <input
-                type="text"
-                value={refundNote}
-                onChange={(e) => setRefundNote(e.target.value)}
-                placeholder="Merchant credit or returned item"
-                className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
-              />
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-[var(--dw-divider)]">

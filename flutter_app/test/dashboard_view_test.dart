@@ -69,6 +69,7 @@ class _FakeFinanceRepository implements IFinanceRepository {
   bool shouldThrow = false;
   Completer<void>? loadGate;
   bool isSetupCompleted = true;
+  bool legacyNonEtbNoticeDismissed = false;
   int openingBalanceCents = 0;
 
   List<AccountModel> accounts = <AccountModel>[];
@@ -105,6 +106,15 @@ class _FakeFinanceRepository implements IFinanceRepository {
       isSetupCompleted: isSetupCompleted,
       openingBalanceCents: openingBalanceCents,
     );
+  }
+
+  @override
+  Future<bool> getLegacyNonEtbNoticeDismissed() async =>
+      legacyNonEtbNoticeDismissed;
+
+  @override
+  Future<void> dismissLegacyNonEtbNotice() async {
+    legacyNonEtbNoticeDismissed = true;
   }
 
   @override
@@ -461,6 +471,8 @@ class _FakeFinanceRepository implements IFinanceRepository {
     required String accountId,
     required String categoryId,
     required int amountCents,
+    int feeCents = 0,
+    String? feeCategoryId,
     required CalendarDate date,
     CalendarDate? movementDate,
     required String description,

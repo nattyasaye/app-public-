@@ -83,6 +83,9 @@ export const DEBT_STATUS_LEGACY_ALIASES: Readonly<Record<string, DebtStatus>> = 
 
 const CANONICAL_ENTRY_TYPE_SET = new Set<string>(CANONICAL_ENTRY_TYPES);
 const CANONICAL_DEBT_STATUS_SET = new Set<string>(CANONICAL_DEBT_STATUSES);
+const SYSTEM_CONTROL_ACCOUNT_ID_SET = new Set<string>(
+  Object.values(SYSTEM_CONTROL_ACCOUNT_IDS)
+);
 
 export function tryNormalizeEntryType(raw: string | null | undefined): EntryType | null {
   if (raw == null) return null;
@@ -295,6 +298,8 @@ export function resolveCategoryDisplayName(
   const canonicalDefaults = [
     ...FOUNDATION_DEFAULT_EXPENSE_CATEGORIES,
     ...FOUNDATION_DEFAULT_INCOME_CATEGORIES,
+    ...DEFAULT_EXPENSE_CATEGORIES,
+    ...DEFAULT_INCOME_CATEGORIES,
   ];
   const fallback = findCategoryByIdOrAlias(canonicalDefaults, categoryId);
   return fallback?.name || categoryId;
@@ -419,7 +424,7 @@ export function assertVerifiedEtbAccount(
         ? normalizeCurrencyCode(account.currencyCode)
         : 'Unverified';
     throw new DoubleEntryValidationError(
-      `First-release reporting supports ETB writes only; ${roleLabel.toLowerCase()} "${account.name}" (${codeLabel}) cannot receive new postings.`
+      `Daywell Finance supports ETB only; ${roleLabel.toLowerCase()} "${account.name}" (${codeLabel}) cannot receive new postings.`
     );
   }
 }
@@ -460,7 +465,7 @@ export function assertEtbDebtEligible(params: {
   const originClass = classifications.get(params.debt.originEntryId);
   if (!originClass || !originClass.isEligibleEtb) {
     throw new DoubleEntryValidationError(
-      'Cannot settle or write off a non-ETB or currency-review debt in first-release ETB mode.'
+      'Legacy non-ETB debts are preserved read-only and cannot be settled or written off.'
     );
   }
 }
@@ -983,7 +988,7 @@ function classifyJournalEntryCurrencyInternal(params: {
       'mixed_or_ambiguous',
       [],
       undefined,
-      'Unsettled third-party entry requires Currency Review.'
+      'Unsettled third-party entry requires an ETB settlement account.'
     );
     if (!params.ignoreVoidFlag) params.cache?.set(entry.id, res);
     return res;
@@ -1923,6 +1928,56 @@ export interface DirectExpenseSummary {
 
 export function isExpenseFeePosting(posting: Pick<Posting, 'id'>): boolean {
   return posting.id.endsWith('-post-dr-fee') || posting.id.endsWith('-dr-fee');
+}
+
+const SYSTEM_POSTING_NOTE_MARKERS = new Set<string>([
+  'Bank / transaction fee',
+  'Transfer service fee',
+  'Opening balance',
+  'Opening equity offset',
+]);
+
+/**
+ * Extracts a single unambiguous non-empty historical user note from an entry's postings,
+ * ignoring fee postings and internal system marker strings.
+ * Returns `undefined` when zero or multiple distinct conflicting notes exist.
+ */
+export function collectUnambiguousHistoricalPostingNote(
+  postings: readonly Pick<Posting, 'id' | 'note'>[]
+): string | undefined {
+  const distinct = new Set<string>();
+  for (const p of postings) {
+    if (isExpenseFeePosting(p)) continue;
+    const trimmed = typeof p.note === 'string' ? p.note.trim() : '';
+    if (!trimmed || SYSTEM_POSTING_NOTE_MARKERS.has(trimmed)) continue;
+    distinct.add(trimmed);
+    if (distinct.size > 1) return undefined;
+  }
+  if (distinct.size !== 1) return undefined;
+  const [single] = Array.from(distinct);
+  return single;
+}
+
+/**
+ * Resolves the single user-facing `description` while preserving historical `note` safety:
+ * - Never overwrites an existing non-empty `description`.
+ * - Never duplicates text when both `description` and `legacyNote` are present.
+ * - Copies non-empty `legacyNote` into an empty `description` when available.
+ */
+export function resolveDescriptionWithHistoricalNote(params: {
+  description?: string | null;
+  legacyNote?: string | null;
+  fallback?: string;
+}): string {
+  const trimmedDesc =
+    typeof params.description === 'string' ? params.description.trim() : '';
+  if (trimmedDesc.length > 0) return trimmedDesc;
+  const trimmedNote =
+    typeof params.legacyNote === 'string' ? params.legacyNote.trim() : '';
+  if (trimmedNote.length > 0 && !SYSTEM_POSTING_NOTE_MARKERS.has(trimmedNote)) {
+    return trimmedNote;
+  }
+  return params.fallback ?? '';
 }
 
 /**
@@ -2924,7 +2979,7 @@ export function parseQuickCaptureExpense(
       categoryId: fallbackCategory.id,
       categoryName: fallbackCategory.name,
       rejectedCurrency,
-      error: `Only ETB amounts are supported in Quick Capture (detected ${rejectedCurrency}).`,
+      error: `Daywell Finance supports ETB only. Please enter this amount in ETB (detected ${rejectedCurrency}).`,
     };
   }
 
@@ -3122,14 +3177,11 @@ export function filterJournalEntries(
   }
 
   return entries.filter((entry) => {
-    // Text search query
+    // Text search query (Description only; transaction Note search removed in Stage 2)
     if (params.query) {
       const q = params.query.toLowerCase();
       const matchDesc = entry.description.toLowerCase().includes(q);
-      const postMatch = (entryPostingsMap.get(entry.id) || []).some(
-        (p) => p.note?.toLowerCase().includes(q)
-      );
-      if (!matchDesc && !postMatch) return false;
+      if (!matchDesc) return false;
     }
 
     // Date range
@@ -3685,7 +3737,7 @@ export function validateSimpleTransaction(
     if (!src || src.isArchived || src.isSystem) {
       errors.account = 'Please select a valid active account.';
     } else if (!isEtbCurrency(src.currencyCode)) {
-      errors.account = `First-release ETB mode only supports posting to ETB accounts (${src.name} is ${classifyCurrencyCode(src.currencyCode) === 'verified_non_etb' ? normalizeCurrencyCode(src.currencyCode) : 'Unverified'}).`;
+      errors.account = `Daywell Finance supports ETB accounts only ("${src.name}" is ${classifyCurrencyCode(src.currencyCode) === 'verified_non_etb' ? normalizeCurrencyCode(src.currencyCode) : 'unclassified'}).`;
     }
   }
 

@@ -343,7 +343,7 @@ class _FinanceSetupWizardState extends State<FinanceSetupWizard> {
               DaywellTextField(
                 controller: _customNameController,
                 label: 'Account Name',
-                hintText: 'e.g. Nib Bank or Dollar Cash',
+                hintText: 'e.g. Nib Bank or Household Cash',
               ),
               const SizedBox(height: SharedDesignTokens.spacingCompact),
               DaywellDropdownField<AccountSubType>(

@@ -16,7 +16,6 @@ export interface FinanceComposerPrefill {
   movementDate?: string;
   feeText?: string;
   feeCategoryId?: string;
-  note?: string;
   payee?: string;
   correctedFromEntryId?: string;
 }

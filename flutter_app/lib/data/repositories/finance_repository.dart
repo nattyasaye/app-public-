@@ -65,7 +65,7 @@ class DriftFinanceRepository implements IFinanceRepository {
             SystemControlAccounts.isSystemControlId(acc.id) || acc.isSystem;
         if (!isProtectedSystem && !DoubleEntryEngine.isEtb(acc.currencyCode)) {
           throw DoubleEntryValidationError(
-            'First-release reporting supports ETB accounts only; account '
+            'Daywell Finance supports ETB accounts only; account '
             '"${acc.name}" (${acc.currencyCode}) cannot be created.',
           );
         }
@@ -110,6 +110,28 @@ class DriftFinanceRepository implements IFinanceRepository {
           AppSettingsCompanion.insert(
             key: AppDatabase.financeSetupKey,
             value: completed ? 'true' : 'false',
+            updatedAt: EthiopiaClock.nowUtc(),
+          ),
+        );
+  }
+
+  static const String legacyNonEtbNoticeDismissedKey =
+      'daywell_finance_legacy_non_etb_notice_dismissed_v1';
+
+  @override
+  Future<bool> getLegacyNonEtbNoticeDismissed() async {
+    final row = await (_db.select(_db.appSettings)
+          ..where((tbl) => tbl.key.equals(legacyNonEtbNoticeDismissedKey)))
+        .getSingleOrNull();
+    return row?.value == 'true';
+  }
+
+  @override
+  Future<void> dismissLegacyNonEtbNotice() async {
+    await _db.into(_db.appSettings).insertOnConflictUpdate(
+          AppSettingsCompanion.insert(
+            key: legacyNonEtbNoticeDismissedKey,
+            value: 'true',
             updatedAt: EthiopiaClock.nowUtc(),
           ),
         );
@@ -186,7 +208,7 @@ class DriftFinanceRepository implements IFinanceRepository {
       if (!isProtectedSystem &&
           !DoubleEntryEngine.isEtb(account.currencyCode)) {
         throw DoubleEntryValidationError(
-          'First-release reporting supports ETB accounts only; account '
+          'Daywell Finance supports ETB accounts only; account '
           '"${account.name}" (${account.currencyCode}) cannot be created.',
         );
       }
@@ -246,8 +268,7 @@ class DriftFinanceRepository implements IFinanceRepository {
               account.openingBalanceCents != existing.openingBalanceCents ||
               account.openingBalanceDate != existing.openingBalanceDate) {
             throw DoubleEntryValidationError(
-              'First-release reporting supports ETB writes only; historical '
-              'non-ETB or unverified account opening balances and currencies '
+              'Legacy non-ETB or unclassified account opening balances and currencies '
               'cannot be modified.',
             );
           }
@@ -275,8 +296,8 @@ class DriftFinanceRepository implements IFinanceRepository {
 
         if (!DoubleEntryEngine.isEtb(account.currencyCode)) {
           throw DoubleEntryValidationError(
-            'Cannot change an ETB account currency to '
-            '"${account.currencyCode}" in first-release ETB mode.',
+            'Daywell Finance supports ETB accounts only; cannot change currency to '
+            '"${account.currencyCode}".',
           );
         }
         if (!existing.isArchived && account.isArchived) {
@@ -285,7 +306,7 @@ class DriftFinanceRepository implements IFinanceRepository {
       } else if (!isProtectedSystem &&
           !DoubleEntryEngine.isEtb(account.currencyCode)) {
         throw DoubleEntryValidationError(
-          'First-release reporting supports ETB accounts only.',
+          'Daywell Finance supports ETB accounts only.',
         );
       }
 
@@ -701,6 +722,8 @@ class DriftFinanceRepository implements IFinanceRepository {
     required String accountId,
     required String categoryId,
     required int amountCents,
+    int feeCents = 0,
+    String? feeCategoryId,
     required CalendarDate date,
     CalendarDate? movementDate,
     required String description,
@@ -710,6 +733,9 @@ class DriftFinanceRepository implements IFinanceRepository {
     if (amountCents <= 0) {
       throw ArgumentError('Expense amount must be strictly greater than 0.');
     }
+    if (feeCents < 0) {
+      throw ArgumentError('Expense fee must be non-negative.');
+    }
     final cleanDesc = _formatDescription(description, payee: payee);
     final entryId = 'entry-${_uuid.v4()}';
     final txId = 'tx-$entryId';
@@ -717,11 +743,18 @@ class DriftFinanceRepository implements IFinanceRepository {
         (note != null && note.trim().isNotEmpty) ? note.trim() : null;
     final cleanPayee =
         (payee != null && payee.trim().isNotEmpty) ? payee.trim() : null;
+    final effectiveFeeCategoryId = feeCents > 0
+        ? ((feeCategoryId != null && feeCategoryId.trim().isNotEmpty)
+            ? feeCategoryId.trim()
+            : SystemControlAccounts.feeCategoryId)
+        : null;
     final built = DoubleEntryEngine.buildDirectExpense(
       entryId: entryId,
       paidAccountId: accountId,
       categoryId: categoryId,
       amountCents: amountCents,
+      feeCents: feeCents,
+      feeCategoryId: effectiveFeeCategoryId,
       date: date.toIsoString(),
       movementDate: movementDate?.toIsoString(),
       description: cleanDesc,
@@ -743,6 +776,15 @@ class DriftFinanceRepository implements IFinanceRepository {
         DoubleEntryEngine.canonicalCategoryNameForSeed(categoryId),
         'expense',
       );
+      if (effectiveFeeCategoryId != null) {
+        await _ensureCategoryExists(
+          effectiveFeeCategoryId,
+          DoubleEntryEngine.canonicalCategoryNameForSeed(
+            effectiveFeeCategoryId,
+          ),
+          'expense',
+        );
+      }
       await _insertEntryAndPostingsInTx(entry, postings);
       await _db.into(_db.financialTransactions).insertOnConflictUpdate(
             FinancialTransactionsCompanion.insert(
@@ -1218,7 +1260,8 @@ class DriftFinanceRepository implements IFinanceRepository {
           PostingModel? accCr;
           for (final p in replacementPostings) {
             if (p.accountId == SystemControlAccounts.expense &&
-                p.direction == PostingDirection.debit) {
+                p.direction == PostingDirection.debit &&
+                !DoubleEntryEngine.isExpenseFeePosting(p)) {
               expDr ??= p;
             } else if (p.direction == PostingDirection.credit &&
                 !SystemControlAccounts.isSystemControlId(p.accountId)) {
@@ -1761,8 +1804,14 @@ class DriftFinanceRepository implements IFinanceRepository {
           );
         } else {
           PostingModel? crAcc;
+          int origFeeCents = 0;
+          String? origFeeCategoryId;
           for (final p in origEntryPostings) {
-            if (p.direction == PostingDirection.credit &&
+            if (p.direction == PostingDirection.debit &&
+                DoubleEntryEngine.isExpenseFeePosting(p)) {
+              origFeeCents += p.amountCents;
+              origFeeCategoryId ??= p.categoryId;
+            } else if (p.direction == PostingDirection.credit &&
                 !SystemControlAccounts.isSystemControlId(p.accountId)) {
               crAcc ??= p;
             }
@@ -1770,11 +1819,26 @@ class DriftFinanceRepository implements IFinanceRepository {
           final preservedMovementDate = sameOccurrenceDate
               ? (crAcc?.accountMovementDate ?? original.transactionDate)
               : original.transactionDate;
+          if (origFeeCents > 0) {
+            final effectiveFeeCat = (origFeeCategoryId != null &&
+                    origFeeCategoryId.trim().isNotEmpty)
+                ? origFeeCategoryId.trim()
+                : SystemControlAccounts.feeCategoryId;
+            await _ensureCategoryExists(
+              effectiveFeeCat,
+              DoubleEntryEngine.canonicalCategoryNameForSeed(effectiveFeeCat),
+              'expense',
+            );
+          }
           built = DoubleEntryEngine.buildDirectExpense(
             entryId: replacementId,
             paidAccountId: effectiveAccountId,
             categoryId: newCategoryId,
             amountCents: newAmountCents.abs(),
+            feeCents: origFeeCents,
+            feeCategoryId: origFeeCents > 0
+                ? (origFeeCategoryId ?? SystemControlAccounts.feeCategoryId)
+                : null,
             date: original.transactionDate,
             movementDate: preservedMovementDate,
             description: desc,
@@ -2365,7 +2429,7 @@ class DriftFinanceRepository implements IFinanceRepository {
       final trimmedAccId = accountId.trim();
       if (trimmedAccId.isEmpty) {
         throw DoubleEntryValidationError(
-          'Select an active Verified ETB account to link.',
+          'Select an active ETB account to link.',
         );
       }
       await _assertEtbAccountsInTx([trimmedAccId]);
@@ -3006,7 +3070,7 @@ class DriftFinanceRepository implements IFinanceRepository {
         if (liquidAcc.type != AccountType.asset ||
             !liquidAcc.subType.isLiquid) {
           throw DoubleEntryValidationError(
-            'Vault transfers must use an active Verified ETB liquid asset '
+            'Vault transfers must use an active ETB liquid asset '
             'account (Cash, Bank, or Mobile Money).',
           );
         }
@@ -3213,7 +3277,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     if (rule.ruleType != RecurringRuleType.commitment &&
         (accId == null || accId.isEmpty)) {
       throw DoubleEntryValidationError(
-        'Recurring ${rule.ruleType.name} rule must specify an active Verified ETB account.',
+        'Recurring ${rule.ruleType.name} rule must specify an active ETB account.',
       );
     }
     if (rule.ruleType == RecurringRuleType.transfer) {
@@ -3455,7 +3519,6 @@ class DriftFinanceRepository implements IFinanceRepository {
                   amountCents: rule.amountCents,
                   date: occIso,
                   description: rule.title,
-                  note: 'Recurring ${rule.frequency.name}',
                 );
                 entry = (built['entry'] as JournalEntryModel)
                     .copyWith(legacySourceTxId: recSourceKey);
@@ -3468,7 +3531,6 @@ class DriftFinanceRepository implements IFinanceRepository {
                   amountCents: rule.amountCents,
                   date: occIso,
                   description: rule.title,
-                  note: 'Recurring ${rule.frequency.name}',
                 );
                 entry = (built['entry'] as JournalEntryModel)
                     .copyWith(legacySourceTxId: recSourceKey);
@@ -3481,7 +3543,6 @@ class DriftFinanceRepository implements IFinanceRepository {
                   amountCents: rule.amountCents,
                   date: occIso,
                   description: rule.title,
-                  note: 'Recurring ${rule.frequency.name}',
                 );
                 entry = (built['entry'] as JournalEntryModel)
                     .copyWith(legacySourceTxId: recSourceKey);
@@ -3702,8 +3763,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     final originClass = classifications[debt.originEntryId];
     if (originClass == null || !originClass.isEligibleEtb) {
       throw DoubleEntryValidationError(
-        'Cannot settle, link, or write off a non-ETB or currency-review '
-        'debt in first-release ETB mode.',
+        'Legacy non-ETB debts are read-only and cannot be settled, linked, or written off.',
       );
     }
   }
@@ -3755,8 +3815,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     if (res.status != CommitmentCurrencyStatus.eligibleEtb) {
       throw DoubleEntryValidationError(
         res.reason ??
-            'Cannot settle a non-ETB or currency-review commitment in '
-                'first-release ETB mode.',
+            'Legacy non-ETB or unlinked commitments cannot be settled until linked to an active ETB account.',
       );
     }
   }
@@ -3790,8 +3849,8 @@ class DriftFinanceRepository implements IFinanceRepository {
             ? DoubleEntryEngine.normalizeCurrencyCode(r.currencyCode)
             : 'Unverified';
         throw DoubleEntryValidationError(
-          'First-release reporting supports ETB writes only; account '
-          '"${r.name}" ($codeLabel) cannot receive new ledger postings.',
+          'Daywell Finance supports ETB postings only; legacy account '
+          '"${r.name}" ($codeLabel) is read-only and cannot receive new postings.',
         );
       }
     }
@@ -3820,7 +3879,7 @@ class DriftFinanceRepository implements IFinanceRepository {
                   r.subType == AccountSubType.creditCard.dbValue));
       if (!isSpendable) {
         throw DoubleEntryValidationError(
-          '$roleLabel "${r.name}" cannot be used for this transaction; select an active Verified ETB liquid or credit card account (Savings Vaults are allowed in Transfers only).',
+          '$roleLabel "${r.name}" cannot be used for this transaction; select an active ETB liquid or credit card account (Savings Vaults are allowed in Transfers only).',
         );
       }
     }
@@ -3863,7 +3922,7 @@ class DriftFinanceRepository implements IFinanceRepository {
         row.isArchived ||
         row.subType != AccountSubType.savingsVault.dbValue) {
       throw DoubleEntryValidationError(
-        'Vault-linked savings goals must link to an active Verified ETB '
+        'Vault-linked savings goals must link to an active ETB '
         'Savings Vault account.',
       );
     }
@@ -4132,7 +4191,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     if (entryPostings
         .any((p) => p.accountId == SystemControlAccounts.legacyOffset)) {
       throw DoubleEntryValidationError(
-        'Legacy clearing offset entries cannot be restored in first-release ETB mode.',
+        'Legacy clearing offset entries are read-only and cannot be restored.',
       );
     }
     await _assertEtbAccountsInTx(entryPostings.map((p) => p.accountId));
@@ -4293,7 +4352,7 @@ class DriftFinanceRepository implements IFinanceRepository {
     if (cls == null || !cls.isEligibleEtb) {
       throw DoubleEntryValidationError(
         cls?.reason ??
-            'Restored journal entry must be verified ETB in first-release mode.',
+            'Legacy non-ETB journal entries cannot be restored.',
       );
     }
 
@@ -4391,7 +4450,8 @@ class DriftFinanceRepository implements IFinanceRepository {
           PostingModel? crAcc;
           for (final p in entryPostings) {
             if (p.accountId == SystemControlAccounts.expense &&
-                p.direction == PostingDirection.debit) {
+                p.direction == PostingDirection.debit &&
+                !DoubleEntryEngine.isExpenseFeePosting(p)) {
               drExp ??= p;
             } else if (p.direction == PostingDirection.credit &&
                 !SystemControlAccounts.isSystemControlId(p.accountId)) {

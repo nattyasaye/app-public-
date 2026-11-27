@@ -35,6 +35,7 @@ class FinanceModuleState {
   final bool isLoading;
   final String? errorMessage;
   final bool isSetupCompleted;
+  final bool legacyNonEtbNoticeDismissed;
 
   const FinanceModuleState({
     this.accounts = const [],
@@ -64,6 +65,7 @@ class FinanceModuleState {
     this.isLoading = false,
     this.errorMessage,
     this.isSetupCompleted = true,
+    this.legacyNonEtbNoticeDismissed = false,
   });
 
   FinanceModuleState copyWith({
@@ -100,6 +102,7 @@ class FinanceModuleState {
     String? errorMessage,
     bool clearError = false,
     bool? isSetupCompleted,
+    bool? legacyNonEtbNoticeDismissed,
   }) {
     return FinanceModuleState(
       accounts: accounts ?? this.accounts,
@@ -140,6 +143,8 @@ class FinanceModuleState {
       isLoading: isLoading ?? this.isLoading,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       isSetupCompleted: isSetupCompleted ?? this.isSetupCompleted,
+      legacyNonEtbNoticeDismissed:
+          legacyNonEtbNoticeDismissed ?? this.legacyNonEtbNoticeDismissed,
     );
   }
 
@@ -453,12 +458,44 @@ class FinanceModuleState {
           a.subType.isSavingsVault)
       .toList(growable: false);
 
+  List<AccountModel> get etbUserAccounts => accounts
+      .where((a) => !a.isSystem && DoubleEntryEngine.isEtb(a.currencyCode))
+      .toList(growable: false);
+
+  List<AccountModel> get archivedEtbAccounts => accounts
+      .where(
+        (a) =>
+            a.isArchived &&
+            !a.isSystem &&
+            DoubleEntryEngine.isEtb(a.currencyCode),
+      )
+      .toList(growable: false);
+
   List<AccountModel> get nonEtbAccounts => accounts
       .where((a) =>
           !a.isArchived &&
           !a.isSystem &&
           !DoubleEntryEngine.isEtb(a.currencyCode))
       .toList(growable: false);
+
+  List<AccountModel> get legacyNonEtbAccounts => accounts
+      .where((a) => !a.isSystem && !DoubleEntryEngine.isEtb(a.currencyCode))
+      .toList(growable: false);
+
+  int get legacyNonEtbEntryCount {
+    final map = classificationsByEntryId;
+    return journalEntries
+        .where((e) => map[e.id]?.isEligibleEtb != true)
+        .length;
+  }
+
+  bool get hasLegacyNonEtbRecords =>
+      legacyNonEtbAccounts.isNotEmpty ||
+      legacyNonEtbEntryCount > 0 ||
+      nonEtbAccountCount > 0 ||
+      unverifiedAccountCount > 0 ||
+      excludedNonEtbEntryCount > 0 ||
+      currencyReviewEntryCount > 0;
 
   List<AccountModel> get liquidAssetAccounts => accounts
       .where((a) =>

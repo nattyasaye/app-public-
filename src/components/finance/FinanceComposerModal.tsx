@@ -3,12 +3,19 @@ import { X } from 'lucide-react';
 import {
   Account,
   findCategoryByIdOrAlias,
+  formatCurrencyCents,
   isActiveVerifiedEtbAccount,
   Party,
   TransactionCategory,
 } from '../../domain/financeV7Engine';
+import { DEFAULT_EXPENSE_CATEGORIES } from '../../domain/doubleEntryFinance';
+import { SHARED_DESIGN_TOKENS } from '../../domain/sharedFoundation';
 import { CalendarDate } from '../../domain/date';
-import { ComposerKind, FinanceComposerPrefill, tryParseStrictDecimalToCents } from './financeV7Types';
+import {
+  ComposerKind,
+  FinanceComposerPrefill,
+  tryParseStrictDecimalToCents,
+} from './financeV7Types';
 import { DaywellButton, DaywellIconButton, DaywellStatusBanner } from '../ui';
 
 interface FinanceComposerModalProps {
@@ -34,7 +41,6 @@ interface FinanceComposerModalProps {
     dueDate?: string;
     description: string;
     payee?: string;
-    note?: string;
     correctedFromEntryId?: string;
   }) => { ok: boolean; error?: string };
 }
@@ -60,10 +66,11 @@ export function FinanceComposerModal({
   const expenseCategories = categories.filter((c) => c.type === 'expense' && !c.isArchived);
   const incomeCategories = categories.filter((c) => c.type === 'income' && !c.isArchived);
 
-  const [kind, setKind] = useState<ComposerKind>('expense');
-  const [amountStr, setAmountStr] = useState('');
+  const [kind, setKind] = useState<ComposerKind>(() => prefill?.kind || 'expense');
+  const [amountStr, setAmountStr] = useState(() => prefill?.amountText || '');
   const [theirShareStr, setTheirShareStr] = useState('');
-  const [feeStr, setFeeStr] = useState('0');
+  const [feeStr, setFeeStr] = useState(() => prefill?.feeText || '0');
+  const [feeCategoryId, setFeeCategoryId] = useState(() => prefill?.feeCategoryId || 'cat-fees');
   const [accountId, setAccountId] = useState('');
   const [destAccountId, setDestAccountId] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -74,9 +81,25 @@ export function FinanceComposerModal({
   const [dueDate, setDueDate] = useState('');
   const [description, setDescription] = useState('');
   const [payee, setPayee] = useState('');
-  const [note, setNote] = useState('');
   const [correctedFromEntryId, setCorrectedFromEntryId] = useState<string | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+
+  const feeCategoryOptions: TransactionCategory[] = expenseCategories.some(
+    (c) => c.id === 'cat-fees'
+  )
+    ? expenseCategories
+    : [
+        {
+          id: 'cat-fees',
+          name: 'Financial Fees',
+          type: 'expense',
+          colorHex:
+            DEFAULT_EXPENSE_CATEGORIES.find((c) => c.id === 'cat-fees')?.colorHex ??
+            SHARED_DESIGN_TOKENS.colors.text.mutedLight,
+          isArchived: false,
+        },
+        ...expenseCategories,
+      ];
 
   useEffect(() => {
     if (!isOpen) return;
@@ -85,6 +108,11 @@ export function FinanceComposerModal({
     setAmountStr(prefill?.amountText || '');
     setTheirShareStr('');
     setFeeStr(prefill?.feeText || '0');
+    const matchedFeeCat = findCategoryByIdOrAlias(
+      feeCategoryOptions,
+      prefill?.feeCategoryId
+    );
+    setFeeCategoryId(matchedFeeCat?.id || 'cat-fees');
     const prefillValidId =
       prefill?.accountId && activeAccounts.some((a) => a.id === prefill.accountId)
         ? prefill.accountId
@@ -120,7 +148,6 @@ export function FinanceComposerModal({
     setDueDate('');
     setDescription(prefill?.description || '');
     setPayee(prefill?.payee || '');
-    setNote(prefill?.note || '');
     setCorrectedFromEntryId(prefill?.correctedFromEntryId);
     setError(null);
   }, [isOpen, prefill?.nonce]);
@@ -134,18 +161,16 @@ export function FinanceComposerModal({
     e.preventDefault();
     if (kind === 'third_party') {
       setError(
-        'Unbacked third-party entries without an active Verified ETB account leg are disabled in ETB first-release mode.'
+        'Third-party entries must link to an active ETB account. Use Split Expense or Borrow instead.'
       );
       return;
     }
     if (activeAccounts.length === 0 || !activeAccounts.some((a) => a.id === accountId)) {
-      setError(
-        'Select an active Verified ETB account. Non-ETB and unverified accounts cannot accept new entries in first-release ETB mode.'
-      );
+      setError('Select an active ETB account.');
       return;
     }
     if (kind === 'transfer' && !activeAccounts.some((a) => a.id === destAccountId)) {
-      setError('Select a valid active Verified ETB destination account.');
+      setError('Select a valid active ETB destination account.');
       return;
     }
 
@@ -173,11 +198,16 @@ export function FinanceComposerModal({
       return;
     }
 
+    const supportsFee = kind === 'expense' || kind === 'transfer';
     let feeCents = 0;
-    if (kind === 'transfer' && feeStr.trim() !== '') {
+    if (supportsFee && feeStr.trim() !== '') {
       const parsedFee = tryParseStrictDecimalToCents(feeStr);
       if (parsedFee === null || parsedFee < 0) {
-        setError('Enter a valid non-negative transfer fee (up to 2 decimal places).');
+        setError(
+          kind === 'transfer'
+            ? 'Enter a valid non-negative transfer fee (up to 2 decimal places).'
+            : 'Enter a valid non-negative bank/service fee (up to 2 decimal places).'
+        );
         return;
       }
       feeCents = parsedFee;
@@ -188,7 +218,8 @@ export function FinanceComposerModal({
       amountCents,
       theirShareCents: theirShareCents ?? undefined,
       feeCents,
-      feeCategoryId: kind === 'transfer' ? prefill?.feeCategoryId : undefined,
+      feeCategoryId:
+        supportsFee && feeCents > 0 ? feeCategoryId || 'cat-fees' : undefined,
       accountId,
       destinationAccountId: kind === 'transfer' ? destAccountId : undefined,
       categoryId,
@@ -198,7 +229,6 @@ export function FinanceComposerModal({
       dueDate: dueDate || undefined,
       description: description.trim() || `${kind} entry`,
       payee: payee.trim() || undefined,
-      note: note.trim() || undefined,
       correctedFromEntryId,
     });
 
@@ -278,16 +308,10 @@ export function FinanceComposerModal({
         </div>
 
         {error && <DaywellStatusBanner tone="error" message={error} />}
-        {hasNonEtbActiveAccounts && (
-          <DaywellStatusBanner
-            tone="warning"
-            message="First-release ETB mode: only active Verified ETB accounts accept new postings. Non-ETB and unverified legacy accounts are preserved as read-only."
-          />
-        )}
         {activeAccounts.length === 0 && (
           <DaywellStatusBanner
             tone="error"
-            message="No active Verified ETB accounts available. Add or restore an ETB account first."
+            message="No active ETB accounts available. Add or restore an ETB account first."
           />
         )}
 
@@ -323,20 +347,44 @@ export function FinanceComposerModal({
             </div>
           )}
 
-          {kind === 'transfer' && (
+          {(kind === 'expense' || kind === 'transfer') && (
             <div>
               <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
-                Bank / Transfer Fee (ETB)
+                {kind === 'transfer'
+                  ? 'Bank / Transfer Fee (ETB)'
+                  : 'Bank / Service Fee (ETB, optional)'}
               </label>
               <input
                 type="number"
                 step="0.01"
+                min="0"
                 value={feeStr}
                 onChange={(e) => setFeeStr(e.target.value)}
+                placeholder="0.00"
                 className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)] font-mono tabular-nums focus:outline-none focus:border-[var(--dw-primary)]"
               />
             </div>
           )}
+
+          {(kind === 'expense' || kind === 'transfer') &&
+            (tryParseStrictDecimalToCents(feeStr) ?? 0) > 0 && (
+              <div>
+                <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
+                  Fee Category
+                </label>
+                <select
+                  value={feeCategoryId}
+                  onChange={(e) => setFeeCategoryId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)] focus:outline-none focus:border-[var(--dw-primary)]"
+                >
+                  {feeCategoryOptions.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
           <div>
             <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">
@@ -349,7 +397,7 @@ export function FinanceComposerModal({
             >
               {activeAccounts.map((a) => (
                 <option key={a.id} value={a.id}>
-                  {a.name} ({a.currencyCode})
+                  {a.name}
                 </option>
               ))}
             </select>
@@ -365,7 +413,7 @@ export function FinanceComposerModal({
               >
                 {activeAccounts.map((a) => (
                   <option key={a.id} value={a.id}>
-                    {a.name} ({a.currencyCode})
+                    {a.name}
                   </option>
                 ))}
               </select>
@@ -389,6 +437,25 @@ export function FinanceComposerModal({
             </div>
           )}
         </div>
+
+        {kind === 'expense' &&
+          (() => {
+            const principalCents = tryParseStrictDecimalToCents(amountStr) ?? 0;
+            const parsedFeeCents = tryParseStrictDecimalToCents(feeStr) ?? 0;
+            if (principalCents <= 0 || parsedFeeCents <= 0) return null;
+            return (
+              <div className="px-3 py-2 rounded-[var(--dw-radius-sm)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)] text-xs text-[var(--dw-text-secondary)] flex flex-wrap items-center justify-between gap-2">
+                <span>
+                  Principal {formatCurrencyCents(principalCents, 'ETB')} + Fee{' '}
+                  {formatCurrencyCents(parsedFeeCents, 'ETB')}
+                </span>
+                <span className="font-semibold font-mono tabular-nums text-[var(--dw-text-primary)]">
+                  Total deduction:{' '}
+                  {formatCurrencyCents(principalCents + parsedFeeCents, 'ETB')}
+                </span>
+              </div>
+            );
+          })()}
 
         {needsParty && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-[var(--dw-radius-md)] bg-[var(--dw-surface-subtle)] border border-[var(--dw-border)]">
@@ -489,16 +556,6 @@ export function FinanceComposerModal({
             />
           </div>
         )}
-
-        <div>
-          <label className="block font-medium text-[var(--dw-text-secondary)] mb-1">Notes (Optional)</label>
-          <input
-            type="text"
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            className="w-full px-3 py-2 rounded-[var(--dw-radius-sm)] border border-[var(--dw-border)] bg-[var(--dw-canvas)] text-[var(--dw-text-primary)]"
-          />
-        </div>
 
         <div className="flex justify-end gap-2 pt-3 border-t border-[var(--dw-divider)]">
           <DaywellButton label="Cancel" variant="text" size="compact" onClick={onClose} />
