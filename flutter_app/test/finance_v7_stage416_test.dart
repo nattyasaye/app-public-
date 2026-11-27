@@ -300,11 +300,16 @@ void main() {
           find.textContaining('Historical Non-ETB Records Preserved'),
           findsOneWidget,
         );
-        expect(
-          find.textContaining('Legacy Non-ETB Archive (Read-Only)'),
-          findsOneWidget,
-        );
         expect(find.text('Breakdown'), findsOneWidget);
+        final overviewScrollable = find.byType(Scrollable).first;
+        final legacyArchiveTitle =
+            find.textContaining('Legacy Non-ETB Archive (Read-Only)');
+        await tester.scrollUntilVisible(
+          legacyArchiveTitle,
+          200,
+          scrollable: overviewScrollable,
+        );
+        expect(legacyArchiveTitle, findsOneWidget);
 
         await tester.pumpWidget(
           MaterialApp(

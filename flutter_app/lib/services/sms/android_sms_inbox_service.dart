@@ -14,14 +14,28 @@ class AndroidSmsInboxService implements ISmsInboxService {
   static const String channelName = 'com.example.personalmanagement/sms_inbox';
 
   final MethodChannel _channel;
+  final bool _hasCustomChannel;
   Future<bool> Function()? _backgroundScanHandler;
   Future<bool> Function(IncomingDeviceSmsEvent event)? _incomingSmsHandler;
 
   AndroidSmsInboxService({MethodChannel? channel})
-      : _channel = channel ?? const MethodChannel(channelName);
+      : _channel = channel ?? const MethodChannel(channelName),
+        _hasCustomChannel = channel != null;
+
+  bool get _hasPlatformChannelBinding {
+    if (_hasCustomChannel) return true;
+    var hasBinding = true;
+    assert(() {
+      hasBinding = BindingBase.debugBindingType() != null;
+      return true;
+    }());
+    return hasBinding;
+  }
 
   bool get _isAndroidSupported =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      !kIsWeb &&
+      defaultTargetPlatform == TargetPlatform.android &&
+      _hasPlatformChannelBinding;
 
   IncomingDeviceSmsEvent? _parseIncomingEvent(dynamic rawArgs) {
     if (rawArgs is! Map) return null;
