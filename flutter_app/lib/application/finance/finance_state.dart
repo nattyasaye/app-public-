@@ -40,6 +40,7 @@ class FinanceModuleState {
   final bool isSetupCompleted;
   final bool legacyNonEtbNoticeDismissed;
   final DeviceSmsPermissionStatus smsPermissionStatus;
+  final DeviceSmsPermissionStatus smsReceivePermissionStatus;
   final SmsScanCheckpointState smsScanCheckpoint;
   final bool isSmsScanning;
   final SmsInboxScanResult? lastSmsScanResult;
@@ -75,6 +76,7 @@ class FinanceModuleState {
     this.isSetupCompleted = true,
     this.legacyNonEtbNoticeDismissed = false,
     this.smsPermissionStatus = DeviceSmsPermissionStatus.unavailable,
+    this.smsReceivePermissionStatus = DeviceSmsPermissionStatus.unavailable,
     this.smsScanCheckpoint = const SmsScanCheckpointState(),
     this.isSmsScanning = false,
     this.lastSmsScanResult,
@@ -117,6 +119,7 @@ class FinanceModuleState {
     bool? isSetupCompleted,
     bool? legacyNonEtbNoticeDismissed,
     DeviceSmsPermissionStatus? smsPermissionStatus,
+    DeviceSmsPermissionStatus? smsReceivePermissionStatus,
     SmsScanCheckpointState? smsScanCheckpoint,
     bool? isSmsScanning,
     SmsInboxScanResult? lastSmsScanResult,
@@ -165,6 +168,8 @@ class FinanceModuleState {
       legacyNonEtbNoticeDismissed:
           legacyNonEtbNoticeDismissed ?? this.legacyNonEtbNoticeDismissed,
       smsPermissionStatus: smsPermissionStatus ?? this.smsPermissionStatus,
+      smsReceivePermissionStatus:
+          smsReceivePermissionStatus ?? this.smsReceivePermissionStatus,
       smsScanCheckpoint: smsScanCheckpoint ?? this.smsScanCheckpoint,
       isSmsScanning: isSmsScanning ?? this.isSmsScanning,
       lastSmsScanResult: clearLastSmsScanResult

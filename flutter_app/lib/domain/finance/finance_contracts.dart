@@ -376,6 +376,8 @@ abstract class ISmsDraftRepositoryContract {
   })> importInboxSmsBatchWithCheckpoint({
     required List<SmsInboxMessage> messages,
     DateTime? completedAtUtc,
+    bool advanceCheckpoint = true,
+    bool recordCompletionSuccess = true,
   });
 }
 

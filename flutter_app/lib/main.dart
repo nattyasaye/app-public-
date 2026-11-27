@@ -39,6 +39,12 @@ Future<void> smsBackgroundScanMain() async {
   await AppStateManager.runHeadlessBackgroundSmsScan();
 }
 
+@pragma('vm:entry-point')
+Future<void> smsBackgroundImmediateProcessMain() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await AppStateManager.runHeadlessIncomingSmsProcess();
+}
+
 class DaywellApp extends StatefulWidget {
   final ThemeMode themeMode;
   final DaywellThemeController? themeController;

@@ -5255,6 +5255,8 @@ class DriftFinanceRepository implements IFinanceRepository {
   })> importInboxSmsBatchWithCheckpoint({
     required List<SmsInboxMessage> messages,
     DateTime? completedAtUtc,
+    bool advanceCheckpoint = true,
+    bool recordCompletionSuccess = true,
   }) async {
     final effectiveCompletedAt =
         (completedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
@@ -5348,15 +5350,17 @@ class DriftFinanceRepository implements IFinanceRepository {
           await onBeforeCommitInboxMessageForTesting!(msg, i);
         }
 
-        final candidateCheckpoint = msg.receivedAtUtc.toUtc();
-        if (lastCommittedCheckpoint == null ||
-            candidateCheckpoint.isAfter(lastCommittedCheckpoint!)) {
-          await _writeDeviceSmsSetting(
-            deviceSmsLastCheckpointKey,
-            EthiopiaClock.toUtcIsoString(candidateCheckpoint),
-            now: effectiveCompletedAt,
-          );
-          lastCommittedCheckpoint = candidateCheckpoint;
+        if (advanceCheckpoint) {
+          final candidateCheckpoint = msg.receivedAtUtc.toUtc();
+          if (lastCommittedCheckpoint == null ||
+              candidateCheckpoint.isAfter(lastCommittedCheckpoint!)) {
+            await _writeDeviceSmsSetting(
+              deviceSmsLastCheckpointKey,
+              EthiopiaClock.toUtcIsoString(candidateCheckpoint),
+              now: effectiveCompletedAt,
+            );
+            lastCommittedCheckpoint = candidateCheckpoint;
+          }
         }
 
         if (insertedNow && candidate != null) {
@@ -5371,11 +5375,13 @@ class DriftFinanceRepository implements IFinanceRepository {
       });
     }
 
-    await _writeDeviceSmsSetting(
-      deviceSmsLastSuccessKey,
-      EthiopiaClock.toUtcIsoString(effectiveCompletedAt),
-      now: effectiveCompletedAt,
-    );
+    if (recordCompletionSuccess) {
+      await _writeDeviceSmsSetting(
+        deviceSmsLastSuccessKey,
+        EthiopiaClock.toUtcIsoString(effectiveCompletedAt),
+        now: effectiveCompletedAt,
+      );
+    }
 
     return (
       batch: SmsImportBatchResult(

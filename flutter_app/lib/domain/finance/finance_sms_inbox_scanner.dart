@@ -36,6 +36,24 @@ class FinanceSmsInboxScanner {
     return checkpointUtc.toUtc().subtract(overlap);
   }
 
+  /// Computes a bounded inbox query window for an incoming `SMS_RECEIVED` event
+  /// fallback scan so the newly received message is always included even if its
+  /// timestamp is close to (or slightly earlier than) [checkpointUtc].
+  static DateTime computeIncomingEventFallbackWindowStartUtc({
+    required DateTime eventReceivedAtUtc,
+    DateTime? checkpointUtc,
+    Duration overlap = defaultCheckpointOverlap,
+  }) {
+    final eventWindowStart = eventReceivedAtUtc.toUtc().subtract(overlap);
+    if (checkpointUtc == null) {
+      return eventWindowStart;
+    }
+    final checkpointWindowStart = checkpointUtc.toUtc().subtract(overlap);
+    return eventWindowStart.isBefore(checkpointWindowStart)
+        ? eventWindowStart
+        : checkpointWindowStart;
+  }
+
   /// Determines whether opening or resuming Daywell should run a foreground
   /// catch-up inbox scan.
   ///

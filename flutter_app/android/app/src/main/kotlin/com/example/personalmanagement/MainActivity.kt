@@ -21,6 +21,7 @@ class MainActivity : FlutterActivity() {
     private var smsInboxChannel: MethodChannel? = null
     private var pendingPackagePickResult: MethodChannel.Result? = null
     private var pendingSmsPermissionResult: MethodChannel.Result? = null
+    private var pendingReceiveSmsPermissionResult: MethodChannel.Result? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -134,6 +135,27 @@ class MainActivity : FlutterActivity() {
                             arrayOf(android.Manifest.permission.READ_SMS),
                             SmsInboxBridge.REQUEST_READ_SMS
                         )
+                    },
+                    onRequestReceivePermission = {
+                        if (SmsInboxBridge.hasReceiveSmsPermission(this)) {
+                            result.success("granted")
+                            return@handleCommonMethodCall
+                        }
+                        if (pendingReceiveSmsPermissionResult != null) {
+                            result.error(
+                                "PERMISSION_IN_PROGRESS",
+                                "A RECEIVE_SMS permission request is already active.",
+                                null
+                            )
+                            return@handleCommonMethodCall
+                        }
+                        pendingReceiveSmsPermissionResult = result
+                        SmsInboxBridge.markReceivePermissionRequested(this)
+                        ActivityCompat.requestPermissions(
+                            this,
+                            arrayOf(android.Manifest.permission.RECEIVE_SMS),
+                            SmsInboxBridge.REQUEST_RECEIVE_SMS
+                        )
                     }
                 )
             }
@@ -153,6 +175,7 @@ class MainActivity : FlutterActivity() {
         smsInboxChannel?.setMethodCallHandler(null)
         smsInboxChannel = null
         pendingSmsPermissionResult = null
+        pendingReceiveSmsPermissionResult = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
@@ -165,6 +188,12 @@ class MainActivity : FlutterActivity() {
             val pending = pendingSmsPermissionResult
             pendingSmsPermissionResult = null
             pending?.success(SmsInboxBridge.getPermissionStatus(this, this))
+            return
+        }
+        if (requestCode == SmsInboxBridge.REQUEST_RECEIVE_SMS) {
+            val pending = pendingReceiveSmsPermissionResult
+            pendingReceiveSmsPermissionResult = null
+            pending?.success(SmsInboxBridge.getReceivePermissionStatus(this, this))
             return
         }
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)

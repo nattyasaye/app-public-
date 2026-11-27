@@ -15,6 +15,7 @@ class AndroidSmsInboxService implements ISmsInboxService {
 
   final MethodChannel _channel;
   Future<bool> Function()? _backgroundScanHandler;
+  Future<bool> Function(IncomingDeviceSmsEvent event)? _incomingSmsHandler;
 
   AndroidSmsInboxService({MethodChannel? channel})
       : _channel = channel ?? const MethodChannel(channelName);
@@ -22,8 +23,37 @@ class AndroidSmsInboxService implements ISmsInboxService {
   bool get _isAndroidSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  void registerBackgroundScanHandler(Future<bool> Function() handler) {
-    _backgroundScanHandler = handler;
+  IncomingDeviceSmsEvent? _parseIncomingEvent(dynamic rawArgs) {
+    if (rawArgs is! Map) return null;
+    final sender = rawArgs['sender']?.toString() ?? '';
+    final body = rawArgs['body']?.toString() ?? '';
+    final millisRaw = rawArgs['receivedAtUtcMillis'];
+    final millis = millisRaw is int
+        ? millisRaw
+        : (millisRaw is num ? millisRaw.toInt() : 0);
+    final eventReceivedAtUtc = millis > 0
+        ? DateTime.fromMillisecondsSinceEpoch(millis, isUtc: true)
+        : null;
+    final fallbackToInbox =
+        rawArgs['fallbackToInbox'] == true || body.trim().isEmpty;
+    final message = (!fallbackToInbox &&
+            body.trim().isNotEmpty &&
+            eventReceivedAtUtc != null)
+        ? RawDeviceSmsMessage(
+            deviceMessageId: 'broadcast-$millis',
+            senderAddress: sender,
+            body: body,
+            receivedAtUtc: eventReceivedAtUtc,
+          )
+        : null;
+    return IncomingDeviceSmsEvent(
+      message: message,
+      eventReceivedAtUtc: eventReceivedAtUtc,
+      fallbackToInbox: fallbackToInbox || message == null,
+    );
+  }
+
+  void _ensureChannelHandlerRegistered() {
     if (!_isAndroidSupported) return;
     _channel.setMethodCallHandler((MethodCall call) async {
       if (call.method == 'onBackgroundScanRequested') {
@@ -31,14 +61,46 @@ class AndroidSmsInboxService implements ISmsInboxService {
         if (activeHandler == null) return false;
         return await activeHandler();
       }
+      if (call.method == 'onIncomingSmsReceived') {
+        final activeHandler = _incomingSmsHandler;
+        if (activeHandler == null) return false;
+        final event = _parseIncomingEvent(call.arguments) ??
+            const IncomingDeviceSmsEvent(fallbackToInbox: true);
+        return await activeHandler(event);
+      }
       return null;
     });
   }
 
+  void registerBackgroundScanHandler(Future<bool> Function() handler) {
+    _backgroundScanHandler = handler;
+    _ensureChannelHandlerRegistered();
+  }
+
+  void registerIncomingSmsHandler(
+    Future<bool> Function(IncomingDeviceSmsEvent event) handler,
+  ) {
+    _incomingSmsHandler = handler;
+    _ensureChannelHandlerRegistered();
+  }
+
   void dispose() {
     _backgroundScanHandler = null;
+    _incomingSmsHandler = null;
     if (_isAndroidSupported) {
       _channel.setMethodCallHandler(null);
+    }
+  }
+
+  Future<IncomingDeviceSmsEvent?> consumePendingIncomingSms() async {
+    if (!_isAndroidSupported) return null;
+    try {
+      final raw = await _channel.invokeMethod<dynamic>(
+        'consumePendingIncomingSms',
+      );
+      return _parseIncomingEvent(raw);
+    } catch (_) {
+      return null;
     }
   }
 
@@ -47,6 +109,18 @@ class AndroidSmsInboxService implements ISmsInboxService {
     try {
       await _channel.invokeMethod<bool>(
         'completeBackgroundScan',
+        <String, dynamic>{'success': success},
+      );
+    } catch (_) {
+      // Safe no-op when channel is absent during teardown.
+    }
+  }
+
+  Future<void> completeBackgroundIncomingSms(bool success) async {
+    if (!_isAndroidSupported) return;
+    try {
+      await _channel.invokeMethod<bool>(
+        'completeBackgroundIncomingSms',
         <String, dynamic>{'success': success},
       );
     } catch (_) {
@@ -87,6 +161,34 @@ class AndroidSmsInboxService implements ISmsInboxService {
     if (!_isAndroidSupported) return DeviceSmsPermissionStatus.unavailable;
     try {
       final status = await _channel.invokeMethod<String>('requestPermission');
+      return _parsePermissionStatus(status);
+    } on MissingPluginException {
+      return DeviceSmsPermissionStatus.unavailable;
+    } on PlatformException {
+      return DeviceSmsPermissionStatus.denied;
+    }
+  }
+
+  @override
+  Future<DeviceSmsPermissionStatus> getReceivePermissionStatus() async {
+    if (!_isAndroidSupported) return DeviceSmsPermissionStatus.unavailable;
+    try {
+      final status =
+          await _channel.invokeMethod<String>('getReceivePermissionStatus');
+      return _parsePermissionStatus(status);
+    } on MissingPluginException {
+      return DeviceSmsPermissionStatus.unavailable;
+    } on PlatformException {
+      return DeviceSmsPermissionStatus.unavailable;
+    }
+  }
+
+  @override
+  Future<DeviceSmsPermissionStatus> requestReceivePermission() async {
+    if (!_isAndroidSupported) return DeviceSmsPermissionStatus.unavailable;
+    try {
+      final status =
+          await _channel.invokeMethod<String>('requestReceivePermission');
       return _parsePermissionStatus(status);
     } on MissingPluginException {
       return DeviceSmsPermissionStatus.unavailable;

@@ -326,6 +326,27 @@ class AppStateManager extends ChangeNotifier {
         if (_isDisposed || !_isInitialized) return false;
         return financeController.runBackgroundWorkerSmsScan();
       });
+      smsService.registerIncomingSmsHandler((event) async {
+        if (_isDisposed) return false;
+        if (!_isInitialized) {
+          final activeInit = _initFuture;
+          if (activeInit != null) {
+            try {
+              await activeInit.timeout(const Duration(seconds: 20));
+            } catch (_) {
+              return false;
+            }
+          }
+        }
+        if (_isDisposed || !_isInitialized) return false;
+        final result = await financeController.processIncomingSmsEvent(
+          message: event.message,
+          fallbackEventReceivedAtUtc: event.eventReceivedAtUtc,
+          fallbackToInbox: event.fallbackToInbox,
+          acquireNativeLock: false,
+        );
+        return result.errorMessage == null && !result.skippedBecauseLocked;
+      });
     }
     dailyRhythmController = DailyRhythmController(
       repository: DriftDailyRhythmRepository(db),
@@ -971,6 +992,142 @@ class AppStateManager extends ChangeNotifier {
       } catch (_) {}
       if (service is AndroidSmsInboxService) {
         await service.completeBackgroundScan(success);
+        if (ownsService) {
+          service.dispose();
+        }
+      }
+    }
+  }
+
+  /// Headless entrypoint handler invoked by Android's `SmsImmediateScanWorker`
+  /// when `SMS_RECEIVED` fires while Daywell's UI engine is not running.
+  ///
+  /// Preserves the full-scan inbox checkpoint (`advanceCheckpoint: false`,
+  /// `recordCompletionSuccess: false`), never schedules periodic WorkManager
+  /// tasks, and returns `false` when fallback inbox lookup does not yet see the
+  /// incoming SMS or on storage errors so WorkManager retries safely.
+  static Future<bool> runHeadlessIncomingSmsProcess({
+    AppDatabase Function()? databaseBuilder,
+    ISmsInboxService? smsInboxService,
+    DateTime Function()? nowUtcProvider,
+    RawDeviceSmsMessage? incomingMessage,
+    DateTime? fallbackEventReceivedAtUtc,
+    bool fallbackToInbox = false,
+  }) async {
+    final ownsService = smsInboxService == null;
+    final service = smsInboxService ?? AndroidSmsInboxService();
+    final nowUtc = (nowUtcProvider ?? EthiopiaClock.nowUtc)().toUtc();
+    AppDatabase? db;
+    var success = false;
+    try {
+      final receivePermission = await service.getReceivePermissionStatus();
+      if (receivePermission != DeviceSmsPermissionStatus.granted) {
+        success = true;
+        return true;
+      }
+
+      RawDeviceSmsMessage? effectiveMessage = incomingMessage;
+      var effectiveFallbackToInbox = fallbackToInbox;
+      var effectiveEventUtc = (fallbackEventReceivedAtUtc ??
+              incomingMessage?.receivedAtUtc ??
+              nowUtc)
+          .toUtc();
+
+      if (effectiveMessage == null &&
+          !effectiveFallbackToInbox &&
+          service is AndroidSmsInboxService) {
+        final pending = await service.consumePendingIncomingSms();
+        if (pending != null) {
+          effectiveMessage = pending.message;
+          effectiveFallbackToInbox = pending.fallbackToInbox;
+          if (pending.eventReceivedAtUtc != null) {
+            effectiveEventUtc = pending.eventReceivedAtUtc!.toUtc();
+          }
+        } else {
+          effectiveFallbackToInbox = true;
+        }
+      }
+
+      if (!effectiveFallbackToInbox &&
+          effectiveMessage != null &&
+          effectiveMessage.body.trim().isNotEmpty) {
+        db = (databaseBuilder ?? AppDatabase.new)();
+        await db.ensureInitialized();
+        final repo = DriftFinanceRepository(db);
+        await repo.importInboxSmsBatchWithCheckpoint(
+          messages: <SmsInboxMessage>[
+            SmsInboxMessage(
+              deviceMessageId: effectiveMessage.deviceMessageId,
+              senderAddress: effectiveMessage.senderAddress,
+              body: effectiveMessage.body,
+              receivedAtUtc: effectiveMessage.receivedAtUtc,
+            ),
+          ],
+          completedAtUtc: nowUtc,
+          advanceCheckpoint: false,
+          recordCompletionSuccess: false,
+        );
+        success = true;
+        return true;
+      }
+
+      final readPermission = await service.getPermissionStatus();
+      if (readPermission != DeviceSmsPermissionStatus.granted) {
+        success = true;
+        return true;
+      }
+
+      db = (databaseBuilder ?? AppDatabase.new)();
+      await db.ensureInitialized();
+      final repo = DriftFinanceRepository(db);
+      final checkpoint = await repo.getSmsScanCheckpointState();
+      final windowStart =
+          FinanceSmsInboxScanner.computeIncomingEventFallbackWindowStartUtc(
+        eventReceivedAtUtc: effectiveEventUtc,
+        checkpointUtc: checkpoint.lastProcessedReceivedAtUtc,
+      );
+      final rawMessages = await service.readInboxMessages(
+        sinceUtc: windowStart,
+      );
+      final hasCandidateNearEvent = rawMessages.any(
+        (m) => !m.receivedAtUtc.isBefore(
+          effectiveEventUtc.subtract(const Duration(minutes: 2)),
+        ),
+      );
+      if (!hasCandidateNearEvent) {
+        success = false;
+        return false;
+      }
+
+      final inboxMessages = rawMessages
+          .map(
+            (m) => SmsInboxMessage(
+              deviceMessageId: m.deviceMessageId,
+              senderAddress: m.senderAddress,
+              body: m.body,
+              receivedAtUtc: m.receivedAtUtc,
+            ),
+          )
+          .toList(growable: false);
+      await repo.importInboxSmsBatchWithCheckpoint(
+        messages: inboxMessages,
+        completedAtUtc: nowUtc,
+        advanceCheckpoint: false,
+        recordCompletionSuccess: false,
+      );
+      success = true;
+      return true;
+    } catch (_) {
+      success = false;
+      return false;
+    } finally {
+      if (db != null) {
+        try {
+          await db.close();
+        } catch (_) {}
+      }
+      if (service is AndroidSmsInboxService) {
+        await service.completeBackgroundIncomingSms(success);
         if (ownsService) {
           service.dispose();
         }

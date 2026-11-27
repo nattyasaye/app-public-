@@ -21,10 +21,13 @@ import 'support/sqlite_test_helper.dart';
 class _FakeSmsInboxService implements ISmsInboxService {
   DeviceSmsPermissionStatus status;
   DeviceSmsPermissionStatus permissionAfterRequest;
+  DeviceSmsPermissionStatus receiveStatus;
+  DeviceSmsPermissionStatus receivePermissionAfterRequest;
   List<RawDeviceSmsMessage> inboxMessages;
   bool lockAcquiredResult = true;
   bool dailyScanScheduled = false;
   int requestPermissionCalls = 0;
+  int requestReceivePermissionCalls = 0;
   int openAppSettingsCalls = 0;
   int scheduleDailyScanCalls = 0;
   int cancelDailyScanCalls = 0;
@@ -35,6 +38,8 @@ class _FakeSmsInboxService implements ISmsInboxService {
   _FakeSmsInboxService({
     this.status = DeviceSmsPermissionStatus.notRequested,
     this.permissionAfterRequest = DeviceSmsPermissionStatus.granted,
+    this.receiveStatus = DeviceSmsPermissionStatus.notRequested,
+    this.receivePermissionAfterRequest = DeviceSmsPermissionStatus.granted,
     List<RawDeviceSmsMessage>? inboxMessages,
   }) : inboxMessages = inboxMessages ?? <RawDeviceSmsMessage>[];
 
@@ -46,6 +51,17 @@ class _FakeSmsInboxService implements ISmsInboxService {
     requestPermissionCalls++;
     status = permissionAfterRequest;
     return status;
+  }
+
+  @override
+  Future<DeviceSmsPermissionStatus> getReceivePermissionStatus() async =>
+      receiveStatus;
+
+  @override
+  Future<DeviceSmsPermissionStatus> requestReceivePermission() async {
+    requestReceivePermissionCalls++;
+    receiveStatus = receivePermissionAfterRequest;
+    return receiveStatus;
   }
 
   @override
@@ -786,6 +802,688 @@ void main() {
         expect(find.text('Scan Inbox Now'), findsOneWidget);
         expect(find.text('Daily background scan (~24h)'), findsOneWidget);
         expect(controller.state.smsDrafts.length, 1);
+
+        // Request RECEIVE_SMS independently without re-triggering READ_SMS scan.
+        expect(find.text('Allow Immediate Incoming SMS'), findsOneWidget);
+        await tester.tap(find.text('Allow Immediate Incoming SMS'));
+        await tester.pumpAndSettle();
+
+        expect(fakeService.requestReceivePermissionCalls, 1);
+        expect(find.text('Active'), findsOneWidget);
+        expect(
+          controller.state.smsReceivePermissionStatus,
+          DeviceSmsPermissionStatus.granted,
+        );
+        expect(find.text('Import as Drafts'), findsOneWidget);
+      },
+    );
+  });
+
+  group('Stage 6 — Immediate Incoming SMS Detection (SMS_RECEIVED)', () {
+    test(
+      '5. Immediate incoming SMS processes CBE, Telebirr, and BOA while rejecting unknown/unrelated alerts without ledger or periodic schedule mutations',
+      () async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        final repo = DriftFinanceRepository(db);
+        final now = DateTime.utc(2026, 11, 27, 10, 0, 0);
+
+        final fakeService = _FakeSmsInboxService(
+          status: DeviceSmsPermissionStatus.denied,
+          receiveStatus: DeviceSmsPermissionStatus.granted,
+        );
+        final controller = FinanceController(
+          repository: repo,
+          smsInboxService: fakeService,
+          nowUtcProvider: () => now,
+        );
+        addTearDown(() async {
+          controller.dispose();
+          await db.close();
+        });
+
+        await controller.completeSetup([
+          AccountModel(
+            id: 'acc-cbe',
+            name: 'CBE Checking 5678',
+            type: AccountType.asset,
+            subType: AccountSubType.bank,
+            openingBalanceCents: 2000000,
+            openingBalanceDate: '2026-11-01',
+          ),
+          AccountModel(
+            id: 'acc-tb',
+            name: 'Telebirr Wallet',
+            type: AccountType.asset,
+            subType: AccountSubType.mobileMoney,
+            openingBalanceCents: 100000,
+            openingBalanceDate: '2026-11-01',
+          ),
+        ]);
+
+        // READ_SMS is denied, yet RECEIVE_SMS direct broadcast payloads succeed without touching inbox or daily schedule.
+        final cbeRes = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-cbe',
+            senderAddress: 'CBE',
+            body:
+                'Your account 1****5678 was debited with ETB 300.00 for Groceries. Current balance is ETB 19,700.00. https://apps.cbe.com.et:100/?id=FT26331IMM_CBE',
+            receivedAtUtc: now,
+          ),
+        );
+        expect(cbeRes.trigger, SmsScanTrigger.incomingBroadcast);
+        expect(cbeRes.executed, isTrue);
+        expect(cbeRes.importedCount, 1);
+
+        final tbRes = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-tb',
+            senderAddress: 'Telebirr',
+            body:
+                'You have paid ETB 150.00 to Cafe (251911223344) on 27/11/2026 13:00:00. Your transaction number is TB26331IMM_TB. Your current E-Money Account balance is ETB 850.00.',
+            receivedAtUtc: now.add(const Duration(minutes: 1)),
+          ),
+        );
+        expect(tbRes.executed, isTrue);
+        expect(tbRes.importedCount, 1);
+
+        final boaRes = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-boa',
+            senderAddress: 'BOA',
+            body:
+                'Your account 1****4321 was credited with ETB 900.00 by Yohannes. Available Balance: ETB 15,000.00. https://cs.bankofabyssinia.com/slip/?trx=FT26331IMM_BOA',
+            receivedAtUtc: now.add(const Duration(minutes: 2)),
+          ),
+        );
+        expect(boaRes.executed, isTrue);
+        expect(boaRes.importedCount, 1);
+
+        // Unknown sender, personal number, and OTP alerts are rejected cleanly.
+        final unknownBankRes = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-unk',
+            senderAddress: 'DashenBank',
+            body: 'Your account 1****1111 was debited with ETB 500.00.',
+            receivedAtUtc: now.add(const Duration(minutes: 3)),
+          ),
+        );
+        expect(unknownBankRes.executed, isTrue);
+        expect(unknownBankRes.importedCount, 0);
+        expect(unknownBankRes.ignoredCount, 1);
+
+        final personalRes = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-pers',
+            senderAddress: '+251911223344',
+            body: 'Sent ETB 400.00 to your CBE account.',
+            receivedAtUtc: now.add(const Duration(minutes: 4)),
+          ),
+        );
+        expect(personalRes.importedCount, 0);
+        expect(personalRes.ignoredCount, 1);
+
+        final otpRes = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-otp',
+            senderAddress: 'Telebirr',
+            body:
+                'Telebirr: Your One Time Password OTP is 123456. Do not share.',
+            receivedAtUtc: now.add(const Duration(minutes: 5)),
+          ),
+        );
+        expect(otpRes.importedCount, 0);
+        expect(otpRes.ignoredCount, 1);
+
+        expect(controller.state.smsDrafts.length, 3);
+        expect(fakeService.readInboxCalls, 0);
+        expect(fakeService.scheduleDailyScanCalls, 0);
+        expect(fakeService.dailyScanScheduled, isFalse);
+
+        // Immediate events never advance the inbox full-scan checkpoint or post ledger entries.
+        final cp = await repo.getSmsScanCheckpointState();
+        expect(cp.lastProcessedReceivedAtUtc, isNull);
+        expect(cp.lastSuccessUtc, isNull);
+        expect(controller.state.liquidCashCents, 2100000);
+        expect(
+          controller.state.journalEntries
+              .where((e) => e.entryType == EntryType.standard),
+          isEmpty,
+        );
+      },
+    );
+
+    test(
+      '6. Coexistence & deduplication: immediate event at 10:00 AM + earlier missed 09:00 AM SMS discovered by daily scan & foreground catch-up without duplicates',
+      () async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        final repo = DriftFinanceRepository(db);
+        var nowUtc = DateTime.utc(2026, 11, 27, 10, 0, 0);
+
+        final missedNineAm = RawDeviceSmsMessage(
+          deviceMessageId: 'inbox-9am',
+          senderAddress: 'Telebirr',
+          body:
+              'You have paid ETB 80.00 to Tea Shop (251911000001) on 27/11/2026 09:00:00. Your transaction number is TB26331MISSED9. Your current E-Money Account balance is ETB 920.00.',
+          receivedAtUtc: DateTime.utc(2026, 11, 27, 6, 0, 0),
+        );
+        final tenAmBroadcast = RawDeviceSmsMessage(
+          deviceMessageId: 'broadcast-10am',
+          senderAddress: 'CBE',
+          body:
+              'Your account 1****5678 was debited with ETB 250.00 for Market. Current balance is ETB 19,750.00. https://apps.cbe.com.et:100/?id=FT26331COEX10',
+          receivedAtUtc: DateTime.utc(2026, 11, 27, 7, 0, 0),
+        );
+        final tenAmInboxRow = RawDeviceSmsMessage(
+          deviceMessageId: 'inbox-10am',
+          senderAddress: 'CBE',
+          body: tenAmBroadcast.body,
+          receivedAtUtc: tenAmBroadcast.receivedAtUtc,
+        );
+
+        final fakeService = _FakeSmsInboxService(
+          status: DeviceSmsPermissionStatus.granted,
+          receiveStatus: DeviceSmsPermissionStatus.granted,
+          inboxMessages: <RawDeviceSmsMessage>[missedNineAm, tenAmInboxRow],
+        );
+
+        final controller = FinanceController(
+          repository: repo,
+          smsInboxService: fakeService,
+          nowUtcProvider: () => nowUtc,
+        );
+        addTearDown(() async {
+          controller.dispose();
+          await db.close();
+        });
+
+        await controller.completeSetup([
+          AccountModel(
+            id: 'acc-cbe',
+            name: 'CBE Checking 5678',
+            type: AccountType.asset,
+            subType: AccountSubType.bank,
+            openingBalanceCents: 2000000,
+            openingBalanceDate: '2026-11-01',
+          ),
+        ]);
+
+        // 10:00 AM immediate event arrives before any daily scan has run.
+        final immRes = await controller.processIncomingSmsEvent(
+          message: tenAmBroadcast,
+        );
+        expect(immRes.executed, isTrue);
+        expect(immRes.importedCount, 1);
+        expect(controller.state.smsDrafts.length, 1);
+
+        // Daily WorkManager backup scan runs later at 10:30 AM.
+        // Because immediate event left checkpoint untouched, 7-day lookback discovers missed 09:00 AM SMS
+        // and deduplicates the 10:00 AM CBE SMS without creating a duplicate draft.
+        nowUtc = DateTime.utc(2026, 11, 27, 7, 30, 0);
+        final dailyOk = await controller.runBackgroundWorkerSmsScan();
+        expect(dailyOk, isTrue);
+        expect(controller.state.smsDrafts.length, 2);
+        expect(
+          controller.state.smsDrafts
+              .where((d) => d.transactionReference == 'FT26331COEX10')
+              .length,
+          1,
+        );
+        expect(
+          controller.state.smsDrafts
+              .where((d) => d.transactionReference == 'TB26331MISSED9')
+              .length,
+          1,
+        );
+
+        // Now another immediate BOA SMS arrives, followed 26 hours later by foreground catch-up.
+        final elevenAmBoa = RawDeviceSmsMessage(
+          deviceMessageId: 'broadcast-11am',
+          senderAddress: 'BOA',
+          body:
+              'Your account 1****4321 was debited with ETB 175.00 for Pharmacy. Available Balance: ETB 12,000.00. https://cs.bankofabyssinia.com/slip/?trx=FT26331CATCH11',
+          receivedAtUtc: DateTime.utc(2026, 11, 27, 8, 0, 0),
+        );
+        fakeService.inboxMessages.add(
+          RawDeviceSmsMessage(
+            deviceMessageId: 'inbox-11am',
+            senderAddress: 'BOA',
+            body: elevenAmBoa.body,
+            receivedAtUtc: elevenAmBoa.receivedAtUtc,
+          ),
+        );
+        final immBoaRes = await controller.processIncomingSmsEvent(
+          message: elevenAmBoa,
+        );
+        expect(immBoaRes.executed, isTrue);
+        expect(immBoaRes.importedCount, 1);
+        expect(controller.state.smsDrafts.length, 3);
+
+        nowUtc = nowUtc.add(const Duration(hours: 26));
+        final catchUpRes =
+            await controller.runForegroundCatchUpSmsScanIfNeeded();
+        expect(catchUpRes.executed, isTrue);
+        expect(catchUpRes.importedCount, 0);
+        expect(catchUpRes.duplicateCount, greaterThanOrEqualTo(1));
+        expect(controller.state.smsDrafts.length, 3);
+      },
+    );
+
+    test(
+      '7. Late inbox materialization, fallback window closeness to checkpoint, and repository failure retry',
+      () async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        final repo = DriftFinanceRepository(db);
+        var nowUtc = DateTime.utc(2026, 11, 27, 10, 0, 0);
+
+        final priorCheckpointTime = DateTime.utc(2026, 11, 27, 9, 55, 0);
+        final priorInboxSms = RawDeviceSmsMessage(
+          deviceMessageId: 'm-prior',
+          senderAddress: 'CBE',
+          body:
+              'Your account 1****5678 was debited with ETB 100.00. Current balance is ETB 19,900.00. https://apps.cbe.com.et:100/?id=FT26331PRIOR',
+          receivedAtUtc: priorCheckpointTime,
+        );
+        final fakeService = _FakeSmsInboxService(
+          status: DeviceSmsPermissionStatus.granted,
+          receiveStatus: DeviceSmsPermissionStatus.granted,
+          inboxMessages: <RawDeviceSmsMessage>[priorInboxSms],
+        );
+        final controller = FinanceController(
+          repository: repo,
+          smsInboxService: fakeService,
+          nowUtcProvider: () => nowUtc,
+        );
+        addTearDown(() async {
+          controller.dispose();
+          await db.close();
+        });
+
+        await controller.completeSetup([
+          AccountModel(
+            id: 'acc-cbe',
+            name: 'CBE Checking 5678',
+            type: AccountType.asset,
+            subType: AccountSubType.bank,
+            openingBalanceCents: 2000000,
+            openingBalanceDate: '2026-11-01',
+          ),
+        ]);
+
+        // Establish a recent inbox checkpoint at 09:55 AM.
+        await controller.scanSmsInboxNow();
+        expect(controller.state.smsDrafts.length, 1);
+
+        // Domain fallback window helper covers event timestamp close to checkpoint.
+        final eventArrival = DateTime.utc(2026, 11, 27, 10, 0, 0);
+        final fallbackWindow =
+            FinanceSmsInboxScanner.computeIncomingEventFallbackWindowStartUtc(
+          eventReceivedAtUtc: eventArrival,
+          checkpointUtc: priorCheckpointTime,
+        );
+        expect(fallbackWindow.isBefore(priorCheckpointTime), isTrue);
+        expect(fallbackWindow.isBefore(eventArrival), isTrue);
+
+        // Case A: fallbackToInbox=true when Android inbox provider hasn't inserted the 10:00 AM SMS yet.
+        // Note: inbox still contains the 09:55 AM SMS inside the overlap window, so we check recency near eventArrival!
+        final missingAttempt = await controller.processIncomingSmsEvent(
+          fallbackEventReceivedAtUtc: eventArrival,
+          fallbackToInbox: true,
+        );
+        expect(missingAttempt.executed, isFalse);
+        expect(missingAttempt.errorMessage, isNotNull);
+        expect(controller.state.smsDrafts.length, 1);
+
+        // Headless fallback retry also returns false (WorkManager Result.retry()) until SMS appears.
+        final headlessMissing =
+            await AppStateManager.runHeadlessIncomingSmsProcess(
+          databaseBuilder: () => db,
+          smsInboxService: fakeService,
+          nowUtcProvider: () => nowUtc,
+          fallbackEventReceivedAtUtc: eventArrival,
+          fallbackToInbox: true,
+        );
+        expect(headlessMissing, isFalse);
+
+        // SMS finishes inserting into Android Telephony.Sms.Inbox -> retry succeeds!
+        fakeService.inboxMessages.add(
+          RawDeviceSmsMessage(
+            deviceMessageId: 'm-new-10am',
+            senderAddress: 'Telebirr',
+            body:
+                'You have paid ETB 220.00 to Bookshop (251911223344) on 27/11/2026 13:00:00. Your transaction number is TB26331LATE10. Your current E-Money Account balance is ETB 780.00.',
+            receivedAtUtc: eventArrival,
+          ),
+        );
+        final retrySuccess = await controller.processIncomingSmsEvent(
+          fallbackEventReceivedAtUtc: eventArrival,
+          fallbackToInbox: true,
+        );
+        expect(retrySuccess.executed, isTrue);
+        expect(retrySuccess.errorMessage, isNull);
+        expect(retrySuccess.importedCount, 1);
+        expect(controller.state.smsDrafts.length, 2);
+
+        // Case B: Event-triggered repository failure triggers safe retry recovery without duplicates.
+        repo.onBeforeCommitInboxMessageForTesting = (msg, idx) async {
+          throw StateError('Simulated SQLite transient write error');
+        };
+        final failingBroadcast = RawDeviceSmsMessage(
+          deviceMessageId: 'b-fail-retry',
+          senderAddress: 'CBE',
+          body:
+              'Your account 1****5678 was debited with ETB 450.00. Current balance is ETB 19,450.00. https://apps.cbe.com.et:100/?id=FT26331RETRY_FAIL',
+          receivedAtUtc: DateTime.utc(2026, 11, 27, 10, 15, 0),
+        );
+        final failRes = await controller.processIncomingSmsEvent(
+          message: failingBroadcast,
+        );
+        expect(failRes.executed, isFalse);
+        expect(failRes.errorMessage, isNotNull);
+        expect(controller.state.smsDrafts.length, 2);
+
+        repo.onBeforeCommitInboxMessageForTesting = null;
+        final recoveredRes = await controller.processIncomingSmsEvent(
+          message: failingBroadcast,
+        );
+        expect(recoveredRes.executed, isTrue);
+        expect(recoveredRes.errorMessage, isNull);
+        expect(recoveredRes.importedCount, 1);
+        expect(controller.state.smsDrafts.length, 3);
+      },
+    );
+
+    test(
+      '8. Independent permission grant/denial/revocation & headless RECEIVE_SMS isolation',
+      () async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        final repo = DriftFinanceRepository(db);
+        final nowUtc = DateTime.utc(2026, 11, 27, 12, 0, 0);
+
+        final fakeService = _FakeSmsInboxService(
+          status: DeviceSmsPermissionStatus.granted,
+          receiveStatus: DeviceSmsPermissionStatus.denied,
+          inboxMessages: <RawDeviceSmsMessage>[
+            RawDeviceSmsMessage(
+              deviceMessageId: 'm-read-only',
+              senderAddress: 'CBE',
+              body:
+                  'Your account 1****5678 was debited with ETB 120.00. Current balance is ETB 19,880.00. https://apps.cbe.com.et:100/?id=FT26331READONLY',
+              receivedAtUtc: nowUtc.subtract(const Duration(minutes: 10)),
+            ),
+          ],
+        );
+
+        final controller = FinanceController(
+          repository: repo,
+          smsInboxService: fakeService,
+          nowUtcProvider: () => nowUtc,
+        );
+        addTearDown(() async {
+          controller.dispose();
+          await db.close();
+        });
+
+        await controller.completeSetup([
+          AccountModel(
+            id: 'acc-cbe',
+            name: 'CBE Checking 5678',
+            type: AccountType.asset,
+            subType: AccountSubType.bank,
+            openingBalanceCents: 2000000,
+            openingBalanceDate: '2026-11-01',
+          ),
+        ]);
+        await controller.setSmsDailyScanEnabled(true);
+        expect(fakeService.dailyScanScheduled, isTrue);
+
+        // When RECEIVE_SMS is denied, incoming broadcast processing skips cleanly without cancelling READ_SMS daily scan.
+        final incomingSkipped = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-denied',
+            senderAddress: 'Telebirr',
+            body:
+                'You have paid ETB 50.00 to Cafe (251911223344) on 27/11/2026 12:00:00. Your transaction number is TB26331DENIED. Your current E-Money Account balance is ETB 950.00.',
+            receivedAtUtc: nowUtc,
+          ),
+        );
+        expect(incomingSkipped.skippedBecausePermission, isTrue);
+        expect(controller.state.smsDrafts, isEmpty);
+        expect(fakeService.dailyScanScheduled, isTrue);
+
+        // READ_SMS daily/manual scan continues working even while RECEIVE_SMS is denied.
+        final manualRes = await controller.scanSmsInboxNow();
+        expect(manualRes.executed, isTrue);
+        expect(manualRes.importedCount, 1);
+
+        // Grant RECEIVE_SMS -> immediate processing succeeds and leaves dailyScan untouched.
+        fakeService.receiveStatus = DeviceSmsPermissionStatus.granted;
+        final scheduleBefore = fakeService.scheduleDailyScanCalls;
+        final headlessBroadcastOk =
+            await AppStateManager.runHeadlessIncomingSmsProcess(
+          databaseBuilder: () => db,
+          smsInboxService: fakeService,
+          nowUtcProvider: () => nowUtc,
+          incomingMessage: RawDeviceSmsMessage(
+            deviceMessageId: 'b-headless-1',
+            senderAddress: 'BOA',
+            body:
+                'Your account 1****4321 was credited with ETB 700.00. Available Balance: ETB 12,700.00. https://cs.bankofabyssinia.com/slip/?trx=FT26331HEADLESS_IMM',
+            receivedAtUtc: nowUtc.add(const Duration(minutes: 1)),
+          ),
+        );
+        expect(headlessBroadcastOk, isTrue);
+        expect(fakeService.scheduleDailyScanCalls, scheduleBefore);
+
+        // Revoke READ_SMS later while RECEIVE_SMS stays granted -> daily scan is cancelled, but immediate incoming broadcast STILL works!
+        fakeService.status = DeviceSmsPermissionStatus.denied;
+        await controller.refreshSmsInboxStatus();
+        expect(fakeService.dailyScanScheduled, isFalse);
+
+        final immAfterReadRevoke = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-after-read-revoke',
+            senderAddress: 'CBE',
+            body:
+                'Your account 1****5678 was debited with ETB 90.00. Current balance is ETB 19,790.00. https://apps.cbe.com.et:100/?id=FT26331IMM_ONLY',
+            receivedAtUtc: nowUtc.add(const Duration(minutes: 2)),
+          ),
+        );
+        expect(immAfterReadRevoke.executed, isTrue);
+        expect(immAfterReadRevoke.importedCount, 1);
+
+        // Revoke RECEIVE_SMS later -> stops immediately & silently without error or retry loop.
+        fakeService.receiveStatus = DeviceSmsPermissionStatus.denied;
+        final afterReceiveRevoke = await controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'b-after-rec-revoke',
+            senderAddress: 'CBE',
+            body:
+                'Your account 1****5678 was debited with ETB 45.00. Current balance is ETB 19,745.00. https://apps.cbe.com.et:100/?id=FT26331SHOULD_SKIP',
+            receivedAtUtc: nowUtc.add(const Duration(minutes: 3)),
+          ),
+        );
+        expect(afterReceiveRevoke.skippedBecausePermission, isTrue);
+        expect(afterReceiveRevoke.errorMessage, isNull);
+        expect(
+          await AppStateManager.runHeadlessIncomingSmsProcess(
+            databaseBuilder: () => db,
+            smsInboxService: fakeService,
+            nowUtcProvider: () => nowUtc,
+            incomingMessage: RawDeviceSmsMessage(
+              deviceMessageId: 'b-hl-revoked',
+              senderAddress: 'CBE',
+              body:
+                  'Your account 1****5678 was debited with ETB 45.00. Current balance is ETB 19,745.00. https://apps.cbe.com.et:100/?id=FT26331SHOULD_SKIP',
+              receivedAtUtc: nowUtc.add(const Duration(minutes: 3)),
+            ),
+          ),
+          isTrue,
+        );
+
+        // If permanently denied, requestReceiveSmsPermission never prompts again.
+        fakeService.receiveStatus = DeviceSmsPermissionStatus.permanentlyDenied;
+        final reqAfterPermDeny = await controller.requestReceiveSmsPermission();
+        expect(reqAfterPermDeny, DeviceSmsPermissionStatus.permanentlyDenied);
+        expect(fakeService.requestReceivePermissionCalls, 0);
+      },
+    );
+
+    test(
+      '9. Android manifest, BroadcastReceiver, one-time WorkManager, ProGuard, and permission-safety structural contract',
+      () {
+        final manifestFile = File('android/app/src/main/AndroidManifest.xml');
+        final receiverFile = File(
+          'android/app/src/main/kotlin/com/example/personalmanagement/SmsReceivedBroadcastReceiver.kt',
+        );
+        final immediateWorkerFile = File(
+          'android/app/src/main/kotlin/com/example/personalmanagement/SmsImmediateScanWorker.kt',
+        );
+        final bridgeFile = File(
+          'android/app/src/main/kotlin/com/example/personalmanagement/SmsInboxBridge.kt',
+        );
+        final proguardFile = File('android/app/proguard-rules.pro');
+
+        expect(manifestFile.existsSync(), isTrue);
+        expect(receiverFile.existsSync(), isTrue);
+        expect(immediateWorkerFile.existsSync(), isTrue);
+        expect(bridgeFile.existsSync(), isTrue);
+        expect(proguardFile.existsSync(), isTrue);
+
+        final manifest = manifestFile.readAsStringSync();
+        expect(manifest, contains('android.permission.READ_SMS'));
+        expect(manifest, contains('android.permission.RECEIVE_SMS'));
+        expect(manifest, contains('.SmsReceivedBroadcastReceiver'));
+        expect(manifest, contains('android.permission.BROADCAST_SMS'));
+        expect(manifest, contains('android.provider.Telephony.SMS_RECEIVED'));
+        expect(manifest, isNot(contains('BIND_NOTIFICATION_LISTENER_SERVICE')));
+        expect(manifest, isNot(contains('android.permission.SEND_SMS')));
+        expect(manifest, isNot(contains('android.permission.WRITE_SMS')));
+
+        final receiverSrc = receiverFile.readAsStringSync();
+        expect(receiverSrc, contains('BroadcastReceiver'));
+        expect(receiverSrc, contains('SMS_RECEIVED_ACTION'));
+        expect(receiverSrc, contains('enqueueImmediateSmsProcessing'));
+        expect(receiverSrc, isNot(contains('scheduleDailyScan')));
+        expect(receiverSrc, isNot(contains('AppDatabase')));
+
+        final workerSrc = immediateWorkerFile.readAsStringSync();
+        expect(workerSrc, contains('Worker('));
+        expect(workerSrc, contains('Result.retry()'));
+        expect(workerSrc, contains('MAX_IMMEDIATE_RETRY_ATTEMPTS'));
+        expect(workerSrc, contains('tryAcquireScanLock()'));
+        expect(workerSrc, contains('smsBackgroundImmediateProcessMain'));
+        expect(workerSrc, isNot(contains('scheduleDailyScan')));
+
+        final bridgeSrc = bridgeFile.readAsStringSync();
+        expect(
+          bridgeSrc,
+          contains('OneTimeWorkRequestBuilder<SmsImmediateScanWorker>'),
+        );
+        expect(bridgeSrc, contains('ExistingWorkPolicy.APPEND_OR_REPLACE'));
+        expect(bridgeSrc, contains('UNIQUE_IMMEDIATE_WORK_NAME'));
+
+        final proguard = proguardFile.readAsStringSync();
+        expect(proguard, contains('SmsReceivedBroadcastReceiver'));
+        expect(proguard, contains('SmsImmediateScanWorker'));
+      },
+    );
+
+    test(
+      '10. Multiple incoming SMS arriving concurrently or during an active inbox scan are serialized without drops or duplicate drafts',
+      () async {
+        final db = AppDatabase(NativeDatabase.memory());
+        await db.ensureInitialized();
+        final repo = DriftFinanceRepository(db);
+        final nowUtc = DateTime.utc(2026, 11, 27, 14, 0, 0);
+
+        final readGate = Completer<void>();
+        final fakeService = _FakeSmsInboxService(
+          status: DeviceSmsPermissionStatus.granted,
+          receiveStatus: DeviceSmsPermissionStatus.granted,
+          inboxMessages: <RawDeviceSmsMessage>[
+            RawDeviceSmsMessage(
+              deviceMessageId: 'inbox-existing',
+              senderAddress: 'CBE',
+              body:
+                  'Your account 1****5678 was debited with ETB 50.00. Current balance is ETB 19,950.00. https://apps.cbe.com.et:100/?id=FT26331BURST0',
+              receivedAtUtc: nowUtc.subtract(const Duration(minutes: 10)),
+            ),
+          ],
+        )..readGate = readGate;
+
+        final controller = FinanceController(
+          repository: repo,
+          smsInboxService: fakeService,
+          nowUtcProvider: () => nowUtc,
+        );
+        addTearDown(() async {
+          if (!readGate.isCompleted) {
+            readGate.complete();
+          }
+          controller.dispose();
+          await db.close();
+        });
+
+        await controller.completeSetup([
+          AccountModel(
+            id: 'acc-cbe',
+            name: 'CBE Checking 5678',
+            type: AccountType.asset,
+            subType: AccountSubType.bank,
+            openingBalanceCents: 2000000,
+            openingBalanceDate: '2026-11-01',
+          ),
+        ]);
+
+        // Start a manual inbox scan that pauses on readGate, then fire 3 close incoming SMS bursts.
+        final activeInboxScan = controller.scanSmsInboxNow();
+        await Future<void>.delayed(Duration.zero);
+
+        final burst1 = controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'burst-1',
+            senderAddress: 'CBE',
+            body:
+                'Your account 1****5678 was debited with ETB 110.00. Current balance is ETB 19,840.00. https://apps.cbe.com.et:100/?id=FT26331BURST1',
+            receivedAtUtc: nowUtc,
+          ),
+        );
+        final burst2 = controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'burst-2',
+            senderAddress: 'Telebirr',
+            body:
+                'You have paid ETB 75.00 to Store (251911223344) on 27/11/2026 17:00:00. Your transaction number is TB26331BURST2. Your current E-Money Account balance is ETB 925.00.',
+            receivedAtUtc: nowUtc,
+          ),
+        );
+        final burst3 = controller.processIncomingSmsEvent(
+          message: RawDeviceSmsMessage(
+            deviceMessageId: 'burst-3',
+            senderAddress: 'BOA',
+            body:
+                'Your account 1****4321 was credited with ETB 600.00. Available Balance: ETB 13,000.00. https://cs.bankofabyssinia.com/slip/?trx=FT26331BURST3',
+            receivedAtUtc: nowUtc.add(const Duration(seconds: 1)),
+          ),
+        );
+
+        readGate.complete();
+        final results = await Future.wait<SmsInboxScanResult>([
+          activeInboxScan,
+          burst1,
+          burst2,
+          burst3,
+        ]);
+
+        for (final res in results) {
+          expect(res.executed, isTrue);
+          expect(res.errorMessage, isNull);
+        }
+        expect(controller.state.smsDrafts.length, 4);
       },
     );
   });

@@ -21,7 +21,9 @@
 # Android App Widget for Quick Capture
 -keep class com.example.personalmanagement.QuickCaptureWidgetProvider { *; }
 
-# Android WorkManager Daily Finance SMS Scanner
+# Android WorkManager Daily & Immediate Finance SMS Scanners
+-keep class com.example.personalmanagement.SmsReceivedBroadcastReceiver { *; }
+-keep class com.example.personalmanagement.SmsImmediateScanWorker { *; }
 -keep class com.example.personalmanagement.SmsInboxScanWorker { *; }
 -keep class com.example.personalmanagement.SmsInboxBridge { *; }
 

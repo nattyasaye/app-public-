@@ -214,11 +214,27 @@ class RawDeviceSmsMessage {
   });
 }
 
-/// Abstract contract for read-only local SMS inbox access and daily background
-/// scanning (Android WorkManager).
+/// Event payload delivered when Android's `SMS_RECEIVED` broadcast triggers
+/// immediate one-time Finance SMS detection.
+class IncomingDeviceSmsEvent {
+  final RawDeviceSmsMessage? message;
+  final DateTime? eventReceivedAtUtc;
+  final bool fallbackToInbox;
+
+  const IncomingDeviceSmsEvent({
+    this.message,
+    this.eventReceivedAtUtc,
+    this.fallbackToInbox = false,
+  });
+}
+
+/// Abstract contract for read-only local SMS inbox access, incoming `SMS_RECEIVED`
+/// permission management, and daily background scanning (Android WorkManager).
 abstract class ISmsInboxService {
   Future<DeviceSmsPermissionStatus> getPermissionStatus();
   Future<DeviceSmsPermissionStatus> requestPermission();
+  Future<DeviceSmsPermissionStatus> getReceivePermissionStatus();
+  Future<DeviceSmsPermissionStatus> requestReceivePermission();
   Future<bool> openAppSettings();
   Future<List<RawDeviceSmsMessage>> readInboxMessages({
     DateTime? sinceUtc,

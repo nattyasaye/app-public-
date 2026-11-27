@@ -8,8 +8,10 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Local-only read-only SMS permission for Finance transaction draft scanning -->
+    <!-- Local-only read-only SMS permission for Finance transaction draft inbox scanning -->
     <uses-permission android:name="android.permission.READ_SMS" />
+    <!-- Local-only incoming SMS broadcast permission for prompt CBE/Telebirr/BOA draft detection -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
     <application
         android:label="Personal Management"
@@ -42,6 +44,17 @@
                 <data android:mimeType="text/plain" />
             </intent-filter>
         </activity>
+
+        <!-- Prompt local-only Finance SMS detection receiver (CBE / Telebirr / BOA review drafts) -->
+        <receiver
+            android:name=".SmsReceivedBroadcastReceiver"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Home-Screen Quick Capture Widget Receiver -->
         <receiver

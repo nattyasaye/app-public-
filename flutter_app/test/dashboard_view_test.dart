@@ -846,6 +846,8 @@ class _FakeFinanceRepository implements IFinanceRepository {
   })> importInboxSmsBatchWithCheckpoint({
     required List<SmsInboxMessage> messages,
     DateTime? completedAtUtc,
+    bool advanceCheckpoint = true,
+    bool recordCompletionSuccess = true,
   }) async {
     final effectiveCompletedAt =
         (completedAtUtc ?? EthiopiaClock.nowUtc()).toUtc();
@@ -886,15 +888,18 @@ class _FakeFinanceRepository implements IFinanceRepository {
           }
         }
       }
-      if (checkpoint == null || msg.receivedAtUtc.isAfter(checkpoint)) {
+      if (advanceCheckpoint &&
+          (checkpoint == null || msg.receivedAtUtc.isAfter(checkpoint))) {
         checkpoint = msg.receivedAtUtc.toUtc();
       }
     }
 
-    _smsCheckpoint = _smsCheckpoint.copyWith(
-      lastProcessedReceivedAtUtc: checkpoint,
-      lastSuccessUtc: effectiveCompletedAt,
-    );
+    if (recordCompletionSuccess) {
+      _smsCheckpoint = _smsCheckpoint.copyWith(
+        lastProcessedReceivedAtUtc: checkpoint,
+        lastSuccessUtc: effectiveCompletedAt,
+      );
+    }
 
     return (
       batch: SmsImportBatchResult(

@@ -74,6 +74,9 @@ class FinanceController extends ChangeNotifier {
     final smsPermission = _smsInboxService != null
         ? await _smsInboxService!.getPermissionStatus()
         : DeviceSmsPermissionStatus.unavailable;
+    final smsReceivePermission = _smsInboxService != null
+        ? await _smsInboxService!.getReceivePermissionStatus()
+        : DeviceSmsPermissionStatus.unavailable;
 
     _state = _state.copyWith(
       accounts: List<AccountModel>.unmodifiable(accounts),
@@ -96,6 +99,7 @@ class FinanceController extends ChangeNotifier {
       isSetupCompleted: settings.isSetupCompleted,
       legacyNonEtbNoticeDismissed: legacyNoticeDismissed,
       smsPermissionStatus: smsPermission,
+      smsReceivePermissionStatus: smsReceivePermission,
       smsScanCheckpoint: smsCheckpoint,
       migrationReport: migrationReport,
       clearMigrationReport: migrationReport == null,
@@ -1845,9 +1849,13 @@ class FinanceController extends ChangeNotifier {
       final permission = _smsInboxService != null
           ? await _smsInboxService!.getPermissionStatus()
           : DeviceSmsPermissionStatus.unavailable;
+      final receivePermission = _smsInboxService != null
+          ? await _smsInboxService!.getReceivePermissionStatus()
+          : DeviceSmsPermissionStatus.unavailable;
       if (_isDisposed) return;
       _state = _state.copyWith(
         smsPermissionStatus: permission,
+        smsReceivePermissionStatus: receivePermission,
         smsScanCheckpoint: checkpoint,
       );
       notifyListeners();
@@ -1873,9 +1881,13 @@ class FinanceController extends ChangeNotifier {
     }
 
     final currentStatus = await service.getPermissionStatus();
+    final currentReceiveStatus = await service.getReceivePermissionStatus();
     if (currentStatus == DeviceSmsPermissionStatus.unavailable) {
       if (!_isDisposed) {
-        _state = _state.copyWith(smsPermissionStatus: currentStatus);
+        _state = _state.copyWith(
+          smsPermissionStatus: currentStatus,
+          smsReceivePermissionStatus: currentReceiveStatus,
+        );
         notifyListeners();
       }
       return const SmsInboxScanResult(
@@ -1887,7 +1899,10 @@ class FinanceController extends ChangeNotifier {
 
     if (currentStatus == DeviceSmsPermissionStatus.permanentlyDenied) {
       if (!_isDisposed) {
-        _state = _state.copyWith(smsPermissionStatus: currentStatus);
+        _state = _state.copyWith(
+          smsPermissionStatus: currentStatus,
+          smsReceivePermissionStatus: currentReceiveStatus,
+        );
         notifyListeners();
       }
       await _reconcileDailySchedule(
@@ -1904,6 +1919,7 @@ class FinanceController extends ChangeNotifier {
     final nextStatus = currentStatus == DeviceSmsPermissionStatus.granted
         ? DeviceSmsPermissionStatus.granted
         : await service.requestPermission();
+    final nextReceiveStatus = await service.getReceivePermissionStatus();
     await _repository.setSmsPermissionAsked(true);
     final checkpoint = await _repository.getSmsScanCheckpointState();
     if (_isDisposed) {
@@ -1916,6 +1932,7 @@ class FinanceController extends ChangeNotifier {
 
     _state = _state.copyWith(
       smsPermissionStatus: nextStatus,
+      smsReceivePermissionStatus: nextReceiveStatus,
       smsScanCheckpoint: checkpoint,
       clearError: true,
     );
@@ -1940,6 +1957,46 @@ class FinanceController extends ChangeNotifier {
     );
   }
 
+  /// Requests Android `RECEIVE_SMS` independently of `READ_SMS` so immediate
+  /// `SMS_RECEIVED` broadcast detection can operate even if inbox scanning is
+  /// declined or handled separately. Never triggers periodic WorkManager or
+  /// prompts again if already permanently denied.
+  Future<DeviceSmsPermissionStatus> requestReceiveSmsPermission() async {
+    final service = _smsInboxService;
+    if (service == null) {
+      return DeviceSmsPermissionStatus.unavailable;
+    }
+
+    final currentReceiveStatus = await service.getReceivePermissionStatus();
+    final readStatus = await service.getPermissionStatus();
+    if (currentReceiveStatus == DeviceSmsPermissionStatus.unavailable ||
+        currentReceiveStatus == DeviceSmsPermissionStatus.permanentlyDenied) {
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          smsPermissionStatus: readStatus,
+          smsReceivePermissionStatus: currentReceiveStatus,
+        );
+        notifyListeners();
+      }
+      return currentReceiveStatus;
+    }
+
+    final nextReceiveStatus =
+        currentReceiveStatus == DeviceSmsPermissionStatus.granted
+            ? DeviceSmsPermissionStatus.granted
+            : await service.requestReceivePermission();
+    final latestReadStatus = await service.getPermissionStatus();
+    if (!_isDisposed) {
+      _state = _state.copyWith(
+        smsPermissionStatus: latestReadStatus,
+        smsReceivePermissionStatus: nextReceiveStatus,
+        clearError: true,
+      );
+      notifyListeners();
+    }
+    return nextReceiveStatus;
+  }
+
   Future<bool> openSmsPermissionSettings() async {
     final service = _smsInboxService;
     if (service == null) return false;
@@ -1954,9 +2011,13 @@ class FinanceController extends ChangeNotifier {
       final permission = _smsInboxService != null
           ? await _smsInboxService!.getPermissionStatus()
           : DeviceSmsPermissionStatus.unavailable;
+      final receivePermission = _smsInboxService != null
+          ? await _smsInboxService!.getReceivePermissionStatus()
+          : DeviceSmsPermissionStatus.unavailable;
       if (_isDisposed) return;
       _state = _state.copyWith(
         smsPermissionStatus: permission,
+        smsReceivePermissionStatus: receivePermission,
         smsScanCheckpoint: checkpoint,
       );
       notifyListeners();
@@ -2016,6 +2077,7 @@ class FinanceController extends ChangeNotifier {
 
     try {
       final status = await service.getPermissionStatus();
+      final receiveStatus = await service.getReceivePermissionStatus();
       final checkpoint = await _repository.getSmsScanCheckpointState();
       if (_isDisposed) {
         return const SmsInboxScanResult(
@@ -2026,6 +2088,7 @@ class FinanceController extends ChangeNotifier {
       }
 
       if (status != _state.smsPermissionStatus ||
+          receiveStatus != _state.smsReceivePermissionStatus ||
           checkpoint.lastProcessedReceivedAtUtc !=
               _state.smsScanCheckpoint.lastProcessedReceivedAtUtc ||
           checkpoint.lastSuccessUtc !=
@@ -2034,6 +2097,7 @@ class FinanceController extends ChangeNotifier {
               _state.smsScanCheckpoint.dailyScanEnabled) {
         _state = _state.copyWith(
           smsPermissionStatus: status,
+          smsReceivePermissionStatus: receiveStatus,
           smsScanCheckpoint: checkpoint,
         );
         notifyListeners();
@@ -2090,6 +2154,254 @@ class FinanceController extends ChangeNotifier {
     return res.errorMessage == null;
   }
 
+  /// Processes a single incoming Android `SMS_RECEIVED` broadcast event using
+  /// the existing Stage 5 parser, draft storage, and deduplication rules.
+  ///
+  /// Serializes behind any active inbox scan and intentionally preserves the
+  /// full-scan inbox checkpoint (`advanceCheckpoint: false`,
+  /// `recordCompletionSuccess: false`) so earlier missed messages remain
+  /// discoverable by daily WorkManager and foreground catch-up scans. Never
+  /// schedules periodic WorkManager jobs.
+  Future<SmsInboxScanResult> processIncomingSmsEvent({
+    RawDeviceSmsMessage? message,
+    DateTime? fallbackEventReceivedAtUtc,
+    bool fallbackToInbox = false,
+    bool acquireNativeLock = true,
+  }) async {
+    while (_inFlightSmsScanFuture != null) {
+      final active = _inFlightSmsScanFuture;
+      if (active != null) {
+        try {
+          await active;
+        } catch (_) {}
+      }
+      if (_isDisposed) {
+        return const SmsInboxScanResult(
+          trigger: SmsScanTrigger.incomingBroadcast,
+          executed: false,
+          skippedBecauseLocked: true,
+        );
+      }
+    }
+
+    final future = _executeIncomingSmsEvent(
+      message: message,
+      fallbackEventReceivedAtUtc: fallbackEventReceivedAtUtc,
+      fallbackToInbox: fallbackToInbox,
+      acquireNativeLock: acquireNativeLock,
+    );
+    _inFlightSmsScanFuture = future;
+    return future.whenComplete(() {
+      if (identical(_inFlightSmsScanFuture, future)) {
+        _inFlightSmsScanFuture = null;
+      }
+    });
+  }
+
+  Future<SmsInboxScanResult> _executeIncomingSmsEvent({
+    RawDeviceSmsMessage? message,
+    DateTime? fallbackEventReceivedAtUtc,
+    required bool fallbackToInbox,
+    required bool acquireNativeLock,
+  }) async {
+    final service = _smsInboxService;
+    if (service == null || _isDisposed) {
+      return const SmsInboxScanResult(
+        trigger: SmsScanTrigger.incomingBroadcast,
+        executed: false,
+        skippedBecausePermission: true,
+      );
+    }
+
+    final receiveStatus = await service.getReceivePermissionStatus();
+    final readStatus = await service.getPermissionStatus();
+    final checkpointBefore = await _repository.getSmsScanCheckpointState();
+    if (receiveStatus != DeviceSmsPermissionStatus.granted) {
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          smsPermissionStatus: readStatus,
+          smsReceivePermissionStatus: receiveStatus,
+          smsScanCheckpoint: checkpointBefore,
+        );
+        notifyListeners();
+      }
+      return SmsInboxScanResult(
+        trigger: SmsScanTrigger.incomingBroadcast,
+        executed: false,
+        skippedBecausePermission: true,
+        checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        checkpointAfterUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+      );
+    }
+
+    if (acquireNativeLock) {
+      final acquired = await service.tryAcquireScanLock();
+      if (!acquired) {
+        return SmsInboxScanResult(
+          trigger: SmsScanTrigger.incomingBroadcast,
+          executed: false,
+          skippedBecauseLocked: true,
+          checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+          checkpointAfterUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        );
+      }
+    }
+
+    DateTime? windowStartUtc;
+    try {
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          isSmsScanning: true,
+          smsPermissionStatus: readStatus,
+          smsReceivePermissionStatus: receiveStatus,
+          smsScanCheckpoint: checkpointBefore,
+          clearError: true,
+        );
+        notifyListeners();
+      }
+
+      final nowUtc = _nowUtcProvider().toUtc();
+      final List<SmsInboxMessage> inboxMessages;
+      if (!fallbackToInbox &&
+          message != null &&
+          message.body.trim().isNotEmpty) {
+        inboxMessages = <SmsInboxMessage>[
+          SmsInboxMessage(
+            deviceMessageId: message.deviceMessageId,
+            senderAddress: message.senderAddress,
+            body: message.body,
+            receivedAtUtc: message.receivedAtUtc,
+          ),
+        ];
+      } else {
+        if (readStatus != DeviceSmsPermissionStatus.granted) {
+          if (!_isDisposed) {
+            _state = _state.copyWith(
+              isSmsScanning: false,
+              smsPermissionStatus: readStatus,
+              smsReceivePermissionStatus: receiveStatus,
+            );
+            notifyListeners();
+          }
+          return SmsInboxScanResult(
+            trigger: SmsScanTrigger.incomingBroadcast,
+            executed: false,
+            skippedBecausePermission: true,
+            checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+            checkpointAfterUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+          );
+        }
+
+        final eventUtc =
+            (fallbackEventReceivedAtUtc ?? message?.receivedAtUtc ?? nowUtc)
+                .toUtc();
+        windowStartUtc =
+            FinanceSmsInboxScanner.computeIncomingEventFallbackWindowStartUtc(
+          eventReceivedAtUtc: eventUtc,
+          checkpointUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        );
+        final rawMessages = await service.readInboxMessages(
+          sinceUtc: windowStartUtc,
+        );
+        final hasCandidateNearEvent = rawMessages.any(
+          (m) => !m.receivedAtUtc.isBefore(
+            eventUtc.subtract(const Duration(minutes: 2)),
+          ),
+        );
+        if (!hasCandidateNearEvent) {
+          final retryResult = SmsInboxScanResult(
+            trigger: SmsScanTrigger.incomingBroadcast,
+            executed: false,
+            windowStartUtc: windowStartUtc,
+            checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+            checkpointAfterUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+            errorMessage:
+                'Incoming SMS not yet visible in device inbox; retry pending.',
+          );
+          if (!_isDisposed) {
+            _state = _state.copyWith(
+              isSmsScanning: false,
+              lastSmsScanResult: retryResult,
+            );
+            notifyListeners();
+          }
+          return retryResult;
+        }
+        inboxMessages = rawMessages
+            .map(
+              (m) => SmsInboxMessage(
+                deviceMessageId: m.deviceMessageId,
+                senderAddress: m.senderAddress,
+                body: m.body,
+                receivedAtUtc: m.receivedAtUtc,
+              ),
+            )
+            .toList(growable: false);
+      }
+
+      final committed = await _repository.importInboxSmsBatchWithCheckpoint(
+        messages: inboxMessages,
+        completedAtUtc: nowUtc,
+        advanceCheckpoint: false,
+        recordCompletionSuccess: false,
+      );
+
+      if (!_isDisposed) {
+        await _hydrateState();
+      }
+
+      final result = SmsInboxScanResult(
+        trigger: SmsScanTrigger.incomingBroadcast,
+        executed: true,
+        scannedMessageCount: inboxMessages.length,
+        importedCount: committed.batch.importedCount,
+        unrecognizedCount: committed.batch.unrecognizedCount,
+        duplicateCount: committed.batch.duplicateCount,
+        ignoredCount: committed.batch.ignoredCount,
+        windowStartUtc: windowStartUtc,
+        checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        checkpointAfterUtc: committed.updatedCheckpointUtc ??
+            checkpointBefore.lastProcessedReceivedAtUtc,
+      );
+
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          isSmsScanning: false,
+          smsPermissionStatus: readStatus,
+          smsReceivePermissionStatus: receiveStatus,
+          lastSmsScanResult: result,
+          clearError: true,
+        );
+        notifyListeners();
+      }
+      return result;
+    } catch (_) {
+      final failResult = SmsInboxScanResult(
+        trigger: SmsScanTrigger.incomingBroadcast,
+        executed: false,
+        windowStartUtc: windowStartUtc,
+        checkpointBeforeUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        checkpointAfterUtc: checkpointBefore.lastProcessedReceivedAtUtc,
+        errorMessage: 'Unable to process incoming SMS alert.',
+      );
+      if (!_isDisposed) {
+        _state = _state.copyWith(
+          isSmsScanning: false,
+          lastSmsScanResult: failResult,
+          errorMessage: failResult.errorMessage,
+        );
+        notifyListeners();
+      }
+      return failResult;
+    } finally {
+      if (acquireNativeLock) {
+        try {
+          await service.releaseScanLock();
+        } catch (_) {}
+      }
+    }
+  }
+
   Future<SmsInboxScanResult> _runLockedInboxScan({
     required SmsScanTrigger trigger,
     required bool acquireNativeLock,
@@ -2135,10 +2447,12 @@ class FinanceController extends ChangeNotifier {
 
     final permissionStatus = await service.getPermissionStatus();
     if (permissionStatus != DeviceSmsPermissionStatus.granted) {
+      final receiveStatus = await service.getReceivePermissionStatus();
       final checkpoint = await _repository.getSmsScanCheckpointState();
       if (!_isDisposed) {
         _state = _state.copyWith(
           smsPermissionStatus: permissionStatus,
+          smsReceivePermissionStatus: receiveStatus,
           smsScanCheckpoint: checkpoint,
         );
         notifyListeners();

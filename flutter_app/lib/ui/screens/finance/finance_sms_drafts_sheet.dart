@@ -1066,21 +1066,13 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
     return '${SharedDateFormatter.formatDual(date, useAmharic: false)} · $hh:$mm EAT';
   }
 
-  Widget _buildAndroidInboxScanCard(
-    BuildContext context,
-    FinanceModuleState state,
-  ) {
-    final semantic = context.daywellColors;
-    final textTheme = Theme.of(context).textTheme;
-    final permission = state.smsPermissionStatus;
-    final checkpoint = state.smsScanCheckpoint;
-    final lastScan = state.lastSmsScanResult;
-    final aliases = checkpoint.senderAliases;
-    final busy = _isBusy || state.isSmsScanning;
-
-    final (badgeLabel, badgeTone) = switch (permission) {
+  (String, DaywellStatusTone) _permissionBadgeFor(
+    DeviceSmsPermissionStatus status, {
+    required String grantedLabel,
+  }) {
+    return switch (status) {
       DeviceSmsPermissionStatus.granted => (
-          'Connected',
+          grantedLabel,
           DaywellStatusTone.success,
         ),
       DeviceSmsPermissionStatus.notRequested => (
@@ -1100,6 +1092,47 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
           DaywellStatusTone.info,
         ),
     };
+  }
+
+  Widget _buildAndroidInboxScanCard(
+    BuildContext context,
+    FinanceModuleState state,
+  ) {
+    final semantic = context.daywellColors;
+    final textTheme = Theme.of(context).textTheme;
+    final permission = state.smsPermissionStatus;
+    final receivePermission = state.smsReceivePermissionStatus;
+    final checkpoint = state.smsScanCheckpoint;
+    final lastScan = state.lastSmsScanResult;
+    final aliases = checkpoint.senderAliases;
+    final busy = _isBusy || state.isSmsScanning;
+
+    final bothUnavailable =
+        permission == DeviceSmsPermissionStatus.unavailable &&
+            receivePermission == DeviceSmsPermissionStatus.unavailable;
+
+    final (readBadgeLabel, readBadgeTone) = _permissionBadgeFor(
+      permission,
+      grantedLabel: 'Connected',
+    );
+    final (receiveBadgeLabel, receiveBadgeTone) = _permissionBadgeFor(
+      receivePermission,
+      grantedLabel: 'Active',
+    );
+    final (headerBadgeLabel, headerBadgeTone) =
+        permission == DeviceSmsPermissionStatus.granted ||
+                receivePermission == DeviceSmsPermissionStatus.granted
+            ? ('Connected', DaywellStatusTone.success)
+            : (permission == DeviceSmsPermissionStatus.permanentlyDenied ||
+                    receivePermission ==
+                        DeviceSmsPermissionStatus.permanentlyDenied)
+                ? ('Settings Required', DaywellStatusTone.warning)
+                : (permission == DeviceSmsPermissionStatus.denied ||
+                        receivePermission == DeviceSmsPermissionStatus.denied)
+                    ? ('Partial / Denied', DaywellStatusTone.warning)
+                    : bothUnavailable
+                        ? ('Manual Paste Only', DaywellStatusTone.info)
+                        : ('Not Enabled', DaywellStatusTone.neutral);
 
     return DaywellCard(
       color: semantic.surfaceSubtle,
@@ -1118,90 +1151,194 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                 ),
               ),
               DaywellStatusBadge(
-                label: badgeLabel,
-                tone: badgeTone,
+                label: headerBadgeLabel,
+                tone: headerBadgeTone,
               ),
             ],
           ),
           const SizedBox(height: SharedDesignTokens.spacingXs),
           Text(
-            'Optional local permission reads received SMS messages on this device only to identify CBE, Telebirr, and BOA transaction alerts and create Finance review drafts. Daywell never sends, modifies, deletes, or changes read/unread status of any SMS.',
+            'Optional on-device permissions detect CBE, Telebirr, and BOA alerts locally to create Finance review drafts. Daywell never requests notification access or SMS sending/writing permissions, and never modifies, deletes, or changes SMS read/unread status.',
             style: textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
           ),
           const SizedBox(height: SharedDesignTokens.spacingSm),
-          if (permission == DeviceSmsPermissionStatus.notRequested) ...[
-            DaywellButton(
-              label: 'Allow SMS Inbox Reading',
-              leadingIcon: Icons.shield_outlined,
-              fullWidth: true,
-              isLoading: busy,
-              onPressed: busy
-                  ? null
-                  : () async {
-                      setState(() => _globalError = null);
-                      await widget.controller.requestSmsPermissionAndScan();
-                    },
-            ),
-          ] else if (permission == DeviceSmsPermissionStatus.denied ||
-              permission == DeviceSmsPermissionStatus.permanentlyDenied) ...[
-            const DaywellStatusBanner(
-              tone: DaywellStatusTone.warning,
-              message:
-                  'SMS inbox permission is not granted. Finance and manual SMS paste continue working normally. You can enable Read SMS anytime in Android App Settings.',
-            ),
-            const SizedBox(height: SharedDesignTokens.spacingSm),
-            DaywellButton(
-              label: 'Open App Settings',
-              variant: DaywellButtonVariant.outlined,
-              leadingIcon: Icons.settings_outlined,
-              fullWidth: true,
-              onPressed: busy
-                  ? null
-                  : () async {
-                      await widget.controller.openSmsPermissionSettings();
-                    },
-            ),
-          ] else if (permission == DeviceSmsPermissionStatus.unavailable) ...[
+          if (bothUnavailable) ...[
             Text(
-              'Automatic device SMS inbox scanning is only available on Android builds. Use the manual SMS paste box below on this platform.',
+              'Automatic device SMS detection is only available on Android builds. Manual SMS paste below works in all environments.',
               style:
                   textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
             ),
           ] else ...[
-            DaywellButton(
-              label: state.isSmsScanning
-                  ? 'Scanning SMS Inbox...'
-                  : 'Scan Inbox Now',
-              leadingIcon: Icons.sync,
-              fullWidth: true,
-              isLoading: busy,
-              onPressed: busy
-                  ? null
-                  : () async {
-                      setState(() => _globalError = null);
-                      await widget.controller.scanSmsInboxNow();
-                    },
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '1. Inbox Reading (READ_SMS)',
+                    style: textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                DaywellStatusBadge(
+                  label: readBadgeLabel,
+                  tone: readBadgeTone,
+                ),
+              ],
             ),
             const SizedBox(height: SharedDesignTokens.spacingXs),
-            DaywellSwitchTile(
-              title: 'Daily background scan (~24h)',
-              subtitle:
-                  'Schedules one approximate daily WorkManager check on-device. Disabling leaves manual scans and foreground catch-up active.',
-              value: checkpoint.dailyScanEnabled,
-              enabled: !busy,
-              onChanged: (enabled) =>
-                  widget.controller.setSmsDailyScanEnabled(enabled),
-            ),
             Text(
-              'Last completed scan: ${_formatUtcAddisLabel(checkpoint.lastSuccessUtc)}',
+              'Required for manual scans, daily WorkManager backup scans, and overdue foreground catch-up.',
               style:
                   textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
             ),
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            if (permission == DeviceSmsPermissionStatus.notRequested) ...[
+              DaywellButton(
+                label: 'Allow SMS Inbox Reading',
+                leadingIcon: Icons.shield_outlined,
+                fullWidth: true,
+                isLoading: busy,
+                onPressed: busy
+                    ? null
+                    : () async {
+                        setState(() => _globalError = null);
+                        await widget.controller.requestSmsPermissionAndScan();
+                      },
+              ),
+            ] else if (permission == DeviceSmsPermissionStatus.denied ||
+                permission == DeviceSmsPermissionStatus.permanentlyDenied) ...[
+              const DaywellStatusBanner(
+                tone: DaywellStatusTone.warning,
+                message:
+                    'Inbox reading is not granted. Immediate broadcast detection (if enabled) and manual SMS paste continue working normally.',
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingXs),
+              DaywellButton(
+                label: 'Open App Settings',
+                variant: DaywellButtonVariant.outlined,
+                leadingIcon: Icons.settings_outlined,
+                fullWidth: true,
+                onPressed: busy
+                    ? null
+                    : () async {
+                        await widget.controller.openSmsPermissionSettings();
+                      },
+              ),
+            ] else if (permission == DeviceSmsPermissionStatus.granted) ...[
+              DaywellButton(
+                label: state.isSmsScanning
+                    ? 'Scanning SMS Inbox...'
+                    : 'Scan Inbox Now',
+                leadingIcon: Icons.sync,
+                fullWidth: true,
+                isLoading: busy,
+                onPressed: busy
+                    ? null
+                    : () async {
+                        setState(() => _globalError = null);
+                        await widget.controller.scanSmsInboxNow();
+                      },
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingXs),
+              DaywellSwitchTile(
+                title: 'Daily background scan (~24h)',
+                subtitle:
+                    'Schedules one approximate daily WorkManager check on-device. Disabling leaves manual scans and foreground catch-up active.',
+                value: checkpoint.dailyScanEnabled,
+                enabled: !busy,
+                onChanged: (enabled) =>
+                    widget.controller.setSmsDailyScanEnabled(enabled),
+              ),
+              Text(
+                'Last completed scan: ${_formatUtcAddisLabel(checkpoint.lastSuccessUtc)}',
+                style:
+                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+              ),
+              Text(
+                'Last SMS checkpoint: ${_formatUtcAddisLabel(checkpoint.lastProcessedReceivedAtUtc)}',
+                style:
+                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+              ),
+            ] else ...[
+              Text(
+                'Inbox reading is unavailable on this device.',
+                style:
+                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+              ),
+            ],
+            const SizedBox(height: SharedDesignTokens.spacingCompact),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '2. Immediate Incoming SMS (RECEIVE_SMS)',
+                    style: textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                DaywellStatusBadge(
+                  label: receiveBadgeLabel,
+                  tone: receiveBadgeTone,
+                ),
+              ],
+            ),
+            const SizedBox(height: SharedDesignTokens.spacingXs),
             Text(
-              'Last SMS checkpoint: ${_formatUtcAddisLabel(checkpoint.lastProcessedReceivedAtUtc)}',
+              'Required to detect newly arriving CBE, Telebirr, and BOA alerts promptly via Android SMS broadcast without continuous background polling.',
               style:
                   textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
             ),
+            const SizedBox(height: SharedDesignTokens.spacingXs),
+            if (receivePermission ==
+                DeviceSmsPermissionStatus.notRequested) ...[
+              DaywellButton(
+                label: 'Allow Immediate Incoming SMS',
+                variant: DaywellButtonVariant.outlined,
+                leadingIcon: Icons.notifications_none,
+                fullWidth: true,
+                isLoading: busy,
+                onPressed: busy
+                    ? null
+                    : () async {
+                        setState(() => _globalError = null);
+                        await widget.controller.requestReceiveSmsPermission();
+                      },
+              ),
+            ] else if (receivePermission == DeviceSmsPermissionStatus.denied ||
+                receivePermission ==
+                    DeviceSmsPermissionStatus.permanentlyDenied) ...[
+              const DaywellStatusBanner(
+                tone: DaywellStatusTone.warning,
+                message:
+                    'Immediate incoming SMS detection is not granted. Daily scan, foreground catch-up, and manual SMS paste remain available.',
+              ),
+              const SizedBox(height: SharedDesignTokens.spacingXs),
+              DaywellButton(
+                label: 'Open App Settings',
+                variant: DaywellButtonVariant.outlined,
+                leadingIcon: Icons.settings_outlined,
+                fullWidth: true,
+                onPressed: busy
+                    ? null
+                    : () async {
+                        await widget.controller.openSmsPermissionSettings();
+                      },
+              ),
+            ] else if (receivePermission ==
+                DeviceSmsPermissionStatus.granted) ...[
+              const DaywellStatusBanner(
+                tone: DaywellStatusTone.info,
+                message:
+                    'Immediate incoming SMS detection is active. New CBE, Telebirr, and BOA alerts queue a one-time on-device draft check automatically.',
+              ),
+            ] else ...[
+              Text(
+                'Immediate incoming SMS broadcast detection is unavailable on this device.',
+                style:
+                    textTheme.bodySmall?.copyWith(color: semantic.textSecondary),
+              ),
+            ],
           ],
           if (lastScan != null) ...[
             const SizedBox(height: SharedDesignTokens.spacingSm),
@@ -1215,8 +1352,9 @@ class _FinanceSmsDraftsSheetState extends State<FinanceSmsDraftsSheet> {
                 tone: lastScan.importedCount > 0
                     ? DaywellStatusTone.success
                     : DaywellStatusTone.info,
-                message:
-                    'Inbox scan read ${lastScan.scannedMessageCount} SMS · ${lastScan.importedCount} drafts ready · ${lastScan.unrecognizedCount} notices · ${lastScan.duplicateCount} duplicates · ${lastScan.ignoredCount} ignored.',
+                message: lastScan.trigger == SmsScanTrigger.incomingBroadcast
+                    ? 'Incoming SMS check: ${lastScan.importedCount} drafts ready · ${lastScan.unrecognizedCount} notices · ${lastScan.duplicateCount} duplicates · ${lastScan.ignoredCount} ignored.'
+                    : 'Inbox scan read ${lastScan.scannedMessageCount} SMS · ${lastScan.importedCount} drafts ready · ${lastScan.unrecognizedCount} notices · ${lastScan.duplicateCount} duplicates · ${lastScan.ignoredCount} ignored.',
               )
             else if (lastScan.skippedBecauseLocked)
               const DaywellStatusBanner(

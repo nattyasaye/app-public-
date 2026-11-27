@@ -302,7 +302,8 @@ enum SmsScanTrigger {
   manual('manual'),
   foregroundCatchUp('foreground_catch_up'),
   backgroundWorker('background_worker'),
-  permissionGrant('permission_grant');
+  permissionGrant('permission_grant'),
+  incomingBroadcast('incoming_broadcast');
 
   final String dbValue;
   const SmsScanTrigger(this.dbValue);
