@@ -164,7 +164,7 @@ void main() {
         final exported = await coordinator.exportSnapshot();
         expect(exported['schemaVersion'], 5);
         expect(exported['snapshotFormatVersion'], 2);
-        expect(exported['databaseSchemaVersion'], 12);
+        expect(exported['databaseSchemaVersion'], 13);
         expect((exported['dailyRhythmDays'] as List).length, 17);
 
         final backupService = EncryptionBackupService();
@@ -303,7 +303,7 @@ void main() {
             snap: {
               'schemaVersion': 5,
               'snapshotFormatVersion': 2,
-              'databaseSchemaVersion': 13,
+              'databaseSchemaVersion': 14,
               'accounts': const [],
               'transactions': const [],
             },
@@ -385,7 +385,7 @@ void main() {
         final coordinator = DatabasePersistenceCoordinator(db);
         final finExport = await coordinator.exportFinanceOnlySnapshot();
         expect(finExport['financeOnly'], isTrue);
-        expect(finExport['databaseSchemaVersion'], 12);
+        expect(finExport['databaseSchemaVersion'], 13);
         expect(finExport.containsKey('dailyRhythmDays'), isFalse);
 
         // Finance-only import must reject payloads carrying dailyRhythmDays

@@ -101,7 +101,7 @@ void main() {
     );
 
     test(
-      '3. Full v12 snapshot + .daywell encrypted backup export declares databaseSchemaVersion 12 and restores all v10 Task fields & DailyPlanningEntries losslessly',
+      '3. Full v13 snapshot + .daywell encrypted backup export declares databaseSchemaVersion 13 and restores all v10 Task fields & DailyPlanningEntries losslessly',
       () async {
         final sourceDb = AppDatabase(NativeDatabase.memory());
         await sourceDb.ensureInitialized();
@@ -157,7 +157,7 @@ void main() {
         final exported = await coordinator.exportSnapshot();
         expect(exported['schemaVersion'], 5);
         expect(exported['snapshotFormatVersion'], 2);
-        expect(exported['databaseSchemaVersion'], 12);
+        expect(exported['databaseSchemaVersion'], 13);
 
         // Encrypt & decrypt through EncryptionBackupService (.daywell)
         final backupService = EncryptionBackupService();
@@ -313,7 +313,7 @@ void main() {
         final coordinator = DatabasePersistenceCoordinator(db);
         final finExport = await coordinator.exportFinanceOnlySnapshot();
         expect(finExport['financeOnly'], isTrue);
-        expect(finExport['databaseSchemaVersion'], 12);
+        expect(finExport['databaseSchemaVersion'], 13);
         expect(finExport.containsKey('tasks'), isFalse);
         expect(finExport.containsKey('dailyPlanningEntries'), isFalse);
 
@@ -367,12 +367,12 @@ void main() {
 
         final coordinator = DatabasePersistenceCoordinator(db);
 
-        // Future databaseSchemaVersion 13 fails closed
+        // Future databaseSchemaVersion 14 fails closed
         expect(
           () => DatabasePersistenceCoordinator.validateAndPrepareSnapshot({
             'schemaVersion': 5,
             'snapshotFormatVersion': 2,
-            'databaseSchemaVersion': 13,
+            'databaseSchemaVersion': 14,
             'accounts': const [],
             'transactions': const [],
           }),

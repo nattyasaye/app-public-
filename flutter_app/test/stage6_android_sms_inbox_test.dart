@@ -421,13 +421,13 @@ void main() {
           throwsStateError,
         );
 
-        // Message 1 committed cleanly; Message 2 rolled back; checkpoint stayed at t1; lastSuccess is null
+        // Message 1 committed cleanly; Message 2 rolled back; checkpoint stayed at t1; lastSuccess remains emptySuccessUtc
         final afterPartialFailDrafts = await repo.getSmsDrafts();
         expect(afterPartialFailDrafts.length, 1);
         expect(afterPartialFailDrafts.single.transactionReference, 'FT26331C1');
         final cpAfterFail = await repo.getSmsScanCheckpointState();
         expect(cpAfterFail.lastProcessedReceivedAtUtc, t1);
-        expect(cpAfterFail.lastSuccessUtc, isNull);
+        expect(cpAfterFail.lastSuccessUtc, emptySuccessUtc);
 
         // Clear fault and retry full overlap window -> Stage 5 dedup skips t1, commits t2 & t3, sets t3 & lastSuccessUtc
         repo.onBeforeCommitInboxMessageForTesting = null;

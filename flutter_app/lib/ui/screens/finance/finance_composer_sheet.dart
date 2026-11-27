@@ -86,6 +86,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   bool _isSaving = false;
   bool _didSubmit = false;
   bool _isPromptingDiscard = false;
+  bool _isApplyingWidgetConfig = false;
   String? _validationError;
 
   late FinanceComposerMode _initialMode;
@@ -176,7 +177,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   }
 
   void _onControllerTextChanged() {
-    if (!mounted) return;
+    if (!mounted || _isApplyingWidgetConfig) return;
     final nextHasUnsaved = _hasUnsavedChanges;
     if (_mode == FinanceComposerMode.expense ||
         _mode == FinanceComposerMode.transfer ||
@@ -188,7 +189,7 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   }
 
   void _onSecondaryTextChanged() {
-    if (!mounted) return;
+    if (!mounted || _isApplyingWidgetConfig) return;
     final nextHasUnsaved = _hasUnsavedChanges;
     if (nextHasUnsaved != _lastHasUnsavedChanges) {
       _lastHasUnsavedChanges = nextHasUnsaved;
@@ -199,17 +200,10 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
   @override
   void initState() {
     super.initState();
-    final state = widget.controller.state;
-    _mode = widget.initialMode;
-    _selectedDate = CalendarDate.today();
-    _movementDate = _selectedDate;
-    _feeCategoryId = SystemControlAccounts.feeCategoryId;
-
-    _amountCtrl = TextEditingController(text: widget.initialAmountText ?? '');
-    _feeCtrl = TextEditingController(text: '0');
+    _amountCtrl = TextEditingController();
+    _feeCtrl = TextEditingController();
     _theirShareCtrl = TextEditingController();
-    _descriptionCtrl =
-        TextEditingController(text: widget.initialDescription ?? '');
+    _descriptionCtrl = TextEditingController();
     _payeeCtrl = TextEditingController();
     _correctionReasonCtrl = TextEditingController();
     _newPartyCtrl = TextEditingController();
@@ -222,38 +216,82 @@ class _FinanceComposerSheetState extends State<FinanceComposerSheet> {
     _correctionReasonCtrl.addListener(_onSecondaryTextChanged);
     _newPartyCtrl.addListener(_onSecondaryTextChanged);
 
-    final activeParties =
-        state.parties.where((p) => !p.isArchived).toList(growable: false);
-    if (activeParties.isNotEmpty) {
-      _partyId = activeParties.first.id;
-    } else {
-      _showNewPartyField = true;
-    }
+    _applyWidgetConfiguration();
+  }
 
-    if (_isEditing) {
-      _prefillFromEditingEntry(widget.editingEntry!);
-    } else {
-      _syncAccountsForMode();
-      _syncDefaultCategory();
+  @override
+  void didUpdateWidget(covariant FinanceComposerSheet oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.editingEntry?.id != oldWidget.editingEntry?.id ||
+        widget.initialMode != oldWidget.initialMode ||
+        widget.initialDescription != oldWidget.initialDescription ||
+        widget.initialAmountText != oldWidget.initialAmountText) {
+      _applyWidgetConfiguration();
     }
+  }
 
-    _initialMode = _mode;
-    _initialAmount = _amountCtrl.text.trim();
-    _initialFee = _feeCtrl.text.trim();
-    _initialTheirShare = _theirShareCtrl.text.trim();
-    _initialDescription = _descriptionCtrl.text.trim();
-    _initialPayee = _payeeCtrl.text.trim();
-    _initialCorrectionReason = _correctionReasonCtrl.text.trim();
-    _initialNewParty = _newPartyCtrl.text.trim();
-    _initialSelectedDate = _selectedDate;
-    _initialMovementDate = _movementDate;
-    _initialIsMovementDateSynced = _isMovementDateSynced;
-    _initialDueDate = _dueDate;
-    _initialAccountId = _accountId;
-    _initialDestinationAccountId = _destinationAccountId;
-    _initialCategoryId = _categoryId;
-    _initialFeeCategoryId = _feeCategoryId;
-    _initialPartyId = _partyId;
+  void _applyWidgetConfiguration() {
+    _isApplyingWidgetConfig = true;
+    try {
+      final state = widget.controller.state;
+      _mode = widget.initialMode;
+      _selectedDate = CalendarDate.today();
+      _movementDate = _selectedDate;
+      _isMovementDateSynced = true;
+      _dueDate = null;
+      _accountId = null;
+      _destinationAccountId = null;
+      _categoryId = null;
+      _feeCategoryId = SystemControlAccounts.feeCategoryId;
+      _partyId = null;
+      _showNewPartyField = false;
+      _didSubmit = false;
+      _validationError = null;
+      _lastHasUnsavedChanges = false;
+
+      _amountCtrl.text = widget.initialAmountText ?? '';
+      _feeCtrl.text = '0';
+      _theirShareCtrl.text = '';
+      _descriptionCtrl.text = widget.initialDescription ?? '';
+      _payeeCtrl.text = '';
+      _correctionReasonCtrl.text = '';
+      _newPartyCtrl.text = '';
+
+      final activeParties =
+          state.parties.where((p) => !p.isArchived).toList(growable: false);
+      if (activeParties.isNotEmpty) {
+        _partyId = activeParties.first.id;
+      } else {
+        _showNewPartyField = true;
+      }
+
+      if (_isEditing) {
+        _prefillFromEditingEntry(widget.editingEntry!);
+      } else {
+        _syncAccountsForMode();
+        _syncDefaultCategory();
+      }
+
+      _initialMode = _mode;
+      _initialAmount = _amountCtrl.text.trim();
+      _initialFee = _feeCtrl.text.trim();
+      _initialTheirShare = _theirShareCtrl.text.trim();
+      _initialDescription = _descriptionCtrl.text.trim();
+      _initialPayee = _payeeCtrl.text.trim();
+      _initialCorrectionReason = _correctionReasonCtrl.text.trim();
+      _initialNewParty = _newPartyCtrl.text.trim();
+      _initialSelectedDate = _selectedDate;
+      _initialMovementDate = _movementDate;
+      _initialIsMovementDateSynced = _isMovementDateSynced;
+      _initialDueDate = _dueDate;
+      _initialAccountId = _accountId;
+      _initialDestinationAccountId = _destinationAccountId;
+      _initialCategoryId = _categoryId;
+      _initialFeeCategoryId = _feeCategoryId;
+      _initialPartyId = _partyId;
+    } finally {
+      _isApplyingWidgetConfig = false;
+    }
   }
 
   void _syncAccountsForMode() {

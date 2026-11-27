@@ -198,7 +198,9 @@ void main() {
       final created = await createState(tester);
       final state = created.state;
       await tester.runAsync(() async {
-        await state.tasksController.createProject(title: 'Back Test Project');
+        await state.projectsController
+            .createProject(title: 'Back Test Project');
+        await state.tasksController.loadAll();
         await state.notesController.createNote(
           title: 'Archived Sample Note',
           content: 'Archived body',
@@ -432,6 +434,8 @@ void main() {
       expect(find.text('Step 1 of 3'), findsOneWidget);
 
       // Advance wizard Step 1 -> Step 2, then press system back -> returns to Step 1
+      await tester.ensureVisible(find.text('Continue'));
+      await settle(tester);
       await tester.tap(find.text('Continue'));
       await settle(tester);
       expect(find.text('Step 2 of 3'), findsOneWidget);
@@ -735,6 +739,8 @@ void main() {
       expect(shell.currentTab, DaywellTabId.notes);
 
       // Switch section filter to Archive, back restores All Notes before leaving tab
+      await tester.ensureVisible(find.text('Archive'));
+      await settle(tester);
       await tester.tap(find.text('Archive'));
       await settle(tester);
       expect(notesController.state.sectionFilter, 'archive');

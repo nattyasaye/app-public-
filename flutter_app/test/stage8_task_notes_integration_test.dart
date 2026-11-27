@@ -216,7 +216,7 @@ void main() {
 
         final coordinator = DatabasePersistenceCoordinator(sourceDb);
         final exported = await coordinator.exportSnapshot();
-        expect(exported['databaseSchemaVersion'], 12);
+        expect(exported['databaseSchemaVersion'], 13);
         final exportedNote =
             (exported['notes'] as List).single as Map<String, dynamic>;
         expect(exportedNote['linkedModule'], 'tasks');
@@ -288,12 +288,12 @@ void main() {
         expect(v10Note?.linkedModule, isNull);
         expect(v10Note?.linkedId, isNull);
 
-        // Future v13 snapshot fails closed
+        // Future v14 snapshot fails closed
         expect(
           () => DatabasePersistenceCoordinator.validateAndPrepareSnapshot({
             'schemaVersion': 5,
             'snapshotFormatVersion': 2,
-            'databaseSchemaVersion': 13,
+            'databaseSchemaVersion': 14,
             'accounts': const [],
             'transactions': const [],
           }),

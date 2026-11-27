@@ -273,33 +273,44 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(
-          find.textContaining('Historical Non-ETB Records Preserved'),
-          findsOneWidget,
-        );
-        expect(
-          find.textContaining('Legacy Non-ETB Archive (Read-Only)'),
-          findsOneWidget,
-        );
+        final noticeFinder =
+            find.textContaining('Historical Non-ETB Records Preserved');
+        final legacyArchiveFinder =
+            find.textContaining('Legacy Non-ETB Archive (Read-Only)');
+        expect(noticeFinder, findsOneWidget);
 
-        // Tap Dismiss inside DaywellStatusBanner
+        await tester.scrollUntilVisible(
+          legacyArchiveFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(legacyArchiveFinder, findsOneWidget);
+
+        // Scroll back to top and tap Dismiss inside DaywellStatusBanner
+        await tester.scrollUntilVisible(
+          noticeFinder,
+          -200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
         final dismissBtn = find.widgetWithText(TextButton, 'Dismiss');
         expect(dismissBtn, findsOneWidget);
         await tester.tap(dismissBtn);
         await tester.pumpAndSettle();
 
-        expect(
-          find.textContaining('Historical Non-ETB Records Preserved'),
-          findsNothing,
-        );
+        expect(noticeFinder, findsNothing);
         expect(
           mixedFixture.controller.state.legacyNonEtbNoticeDismissed,
           isTrue,
         );
-        expect(
-          find.textContaining('Legacy Non-ETB Archive (Read-Only)'),
-          findsOneWidget,
+        await tester.scrollUntilVisible(
+          legacyArchiveFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
         );
+        await tester.pumpAndSettle();
+        expect(legacyArchiveFinder, findsOneWidget);
       },
     );
 
@@ -354,7 +365,14 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('Account Balances (ETB)'), findsOneWidget);
+        final accountBalancesFinder = find.text('Account Balances (ETB)');
+        await tester.scrollUntilVisible(
+          accountBalancesFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(accountBalancesFinder, findsOneWidget);
         expect(
           find.textContaining('ETB Currency Isolation Summary'),
           findsNothing,

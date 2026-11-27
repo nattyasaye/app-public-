@@ -185,7 +185,16 @@ void main() {
             .toList();
         expect(refundPostings.every((p) => p.note == null), isTrue);
 
-        // Edit/replace preserves new Description
+        // Edit/replace on an unrefunded expense preserves new Description
+        final editableExpense = await controller.recordDirectExpense(
+          accountId: 'acc-cbe',
+          categoryId: 'cat-food',
+          amountCents: 80000,
+          date: CalendarDate(year: 2026, month: 11, day: 12),
+          description: 'Groceries before edit',
+        );
+        expect(editableExpense, isNotNull);
+
         final replacementBuilt = DoubleEntryEngine.buildDirectExpense(
           entryId: 'exp-repl-stage2',
           paidAccountId: 'acc-cbe',
@@ -193,10 +202,10 @@ void main() {
           amountCents: 95000,
           date: '2026-11-12',
           description: 'Groceries updated',
-          correctedFromEntryId: created.id,
+          correctedFromEntryId: editableExpense!.id,
         );
         final replacement = await controller.correctJournalEntry(
-          originalEntryId: created.id,
+          originalEntryId: editableExpense.id,
           replacementEntry: replacementBuilt['entry'] as JournalEntryModel,
           replacementPostings:
               replacementBuilt['postings'] as List<PostingModel>,
@@ -204,6 +213,10 @@ void main() {
         );
         expect(replacement, isNotNull);
         expect(replacement!.description, 'Groceries updated');
+        final replacementPostings = controller.state.postings
+            .where((p) => p.entryId == replacement.id)
+            .toList();
+        expect(replacementPostings.every((p) => p.note == null), isTrue);
       },
     );
 

@@ -49,7 +49,7 @@ void main() {
         await db.ensureInitialized();
 
         final versionRows = await db.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 12);
+        expect(versionRows.single.read<int>('user_version'), 13);
 
         final dailyRhythmCols = await db
             .customSelect("PRAGMA table_info('daily_rhythm_days')")
@@ -571,7 +571,7 @@ void main() {
         // 1. Upgraded schema version & FK integrity
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 12);
+        expect(versionRows.single.read<int>('user_version'), 13);
 
         final fkCheckRows =
             await migratedDb.customSelect('PRAGMA foreign_key_check').get();
@@ -710,7 +710,7 @@ void main() {
 
         final reopenedVersion =
             await reopenedDb.customSelect('PRAGMA user_version').get();
-        expect(reopenedVersion.single.read<int>('user_version'), 12);
+        expect(reopenedVersion.single.read<int>('user_version'), 13);
 
         final reopenedEvents =
             await DriftCalendarRepository(reopenedDb).getEvents();
@@ -1031,7 +1031,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 12);
+        expect(versionRows.single.read<int>('user_version'), 13);
 
         final fkCheck =
             await migratedDb.customSelect('PRAGMA foreign_key_check').get();
@@ -1346,7 +1346,7 @@ void main() {
 
         final versionRows =
             await reopened.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 12);
+        expect(versionRows.single.read<int>('user_version'), 13);
 
         final fkRows = await reopened.customSelect('PRAGMA foreign_keys').get();
         expect(fkRows.single.read<int>('foreign_keys'), 1);
@@ -1393,16 +1393,16 @@ void main() {
       '2. Simulated v12 -> v13 upgrade preserves v12 data, applies defaults, '
       'enforces FKs, and reopens idempotently',
       () async {
-        final dbFile = File(p.join(tempDir.path, 'forward_v13.sqlite'));
+        final dbFile = File(p.join(tempDir.path, 'forward_v14.sqlite'));
         await _seedRealisticV12Database(dbFile);
 
-        final upgradedDb = _TestForwardV13Database(NativeDatabase(dbFile));
+        final upgradedDb = _TestForwardV14Database(NativeDatabase(dbFile));
         await upgradedDb.ensureInitialized();
 
-        expect(upgradedDb.v13UpgradeCalls, 1);
+        expect(upgradedDb.v14UpgradeCalls, 1);
         final versionRows =
             await upgradedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 13);
+        expect(versionRows.single.read<int>('user_version'), 14);
 
         final fkEnabledRows =
             await upgradedDb.customSelect('PRAGMA foreign_keys').get();
@@ -1483,20 +1483,20 @@ void main() {
 
         await upgradedDb.close();
 
-        // Reopen existing v13 database: onUpgrade must NOT re-run
-        final reopenedV13 = _TestForwardV13Database(NativeDatabase(dbFile));
-        await reopenedV13.ensureInitialized();
-        expect(reopenedV13.v13UpgradeCalls, 0);
+        // Reopen existing v14 database: onUpgrade must NOT re-run
+        final reopenedV14 = _TestForwardV14Database(NativeDatabase(dbFile));
+        await reopenedV14.ensureInitialized();
+        expect(reopenedV14.v14UpgradeCalls, 0);
         final reopenedVersion =
-            await reopenedV13.customSelect('PRAGMA user_version').get();
-        expect(reopenedVersion.single.read<int>('user_version'), 13);
-        expect((await DriftTasksRepository(reopenedV13).getTasks()).length, 1);
-        expect((await DriftNotesRepository(reopenedV13).getNotes()).length, 1);
-        final reopenedChecklists = await reopenedV13
+            await reopenedV14.customSelect('PRAGMA user_version').get();
+        expect(reopenedVersion.single.read<int>('user_version'), 14);
+        expect((await DriftTasksRepository(reopenedV14).getTasks()).length, 1);
+        expect((await DriftNotesRepository(reopenedV14).getNotes()).length, 1);
+        final reopenedChecklists = await reopenedV14
             .customSelect('SELECT id FROM task_checklists_v12')
             .get();
         expect(reopenedChecklists.length, 1);
-        await reopenedV13.close();
+        await reopenedV14.close();
       },
     );
 
@@ -1511,10 +1511,10 @@ void main() {
           final dbFile = File(p.join(tempDir.path, '${mode.name}.sqlite'));
           await _seedRealisticV12Database(dbFile);
 
-          final failingUpgrade = _TestForwardV13Database(
+          final failingUpgrade = _TestForwardV14Database(
             NativeDatabase(dbFile),
-            failMidV13Migration: mode.failMid,
-            failForeignKeyCheckInV13: mode.failFk,
+            failMidV14Migration: mode.failMid,
+            failForeignKeyCheckInV14: mode.failFk,
           );
 
           await expectLater(
@@ -1527,7 +1527,7 @@ void main() {
           try {
             expect(
               rawDb.select('PRAGMA user_version;').single['user_version'],
-              12,
+              13,
             );
             final v13Table = rawDb.select(
               "SELECT name FROM sqlite_master "
@@ -1585,23 +1585,23 @@ void main() {
         final dbFile = File(p.join(docsDir.path, 'personal_management.sqlite'));
 
         await _seedRealisticV12Database(dbFile);
-        final v13Prep = _TestForwardV13Database(NativeDatabase(dbFile));
-        await v13Prep.ensureInitialized();
-        await v13Prep.close();
+        final v14Prep = _TestForwardV14Database(NativeDatabase(dbFile));
+        await v14Prep.ensureInitialized();
+        await v14Prep.close();
 
-        final v13BytesBeforeOpen = dbFile.readAsBytesSync();
+        final v14BytesBeforeOpen = dbFile.readAsBytesSync();
 
         final prodDb = AppDatabase(NativeDatabase(dbFile));
         await expectLater(
           prodDb.ensureInitialized(),
           throwsA(
             isA<UnsupportedDatabaseVersionException>()
-                .having((e) => e.fromVersion, 'fromVersion', 13)
-                .having((e) => e.toVersion, 'toVersion', 12),
+                .having((e) => e.fromVersion, 'fromVersion', 14)
+                .having((e) => e.toVersion, 'toVersion', 13),
           ),
         );
         await prodDb.close();
-        expect(dbFile.readAsBytesSync(), equals(v13BytesBeforeOpen));
+        expect(dbFile.readAsBytesSync(), equals(v14BytesBeforeOpen));
 
         final exporter = RawDatabaseRecoveryExporter(
           documentsDirProvider: () async => docsDir,
@@ -1653,13 +1653,13 @@ void main() {
         await manager.disposeAsync();
 
         expect(dbFile.existsSync(), isTrue);
-        expect(dbFile.readAsBytesSync(), equals(v13BytesBeforeOpen));
+        expect(dbFile.readAsBytesSync(), equals(v14BytesBeforeOpen));
 
         final rawCheck = sqlite3.open(dbFile.path);
         try {
           expect(
             rawCheck.select('PRAGMA user_version;').single['user_version'],
-            13,
+            14,
           );
           expect(
             rawCheck.select('SELECT id FROM task_checklists_v12;').length,
@@ -1699,7 +1699,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 12);
+        expect(versionRows.single.read<int>('user_version'), 13);
         expect(
           (await migratedDb.customSelect('PRAGMA foreign_keys').get())
               .single
@@ -1746,7 +1746,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await reopened.customSelect('PRAGMA foreign_key_check').get(),
@@ -1793,7 +1793,7 @@ void main() {
             await DatabasePersistenceCoordinator(reopened).exportSnapshot();
         expect(exported['schemaVersion'], 5);
         expect(exported['snapshotFormatVersion'], 2);
-        expect(exported['databaseSchemaVersion'], 12);
+        expect(exported['databaseSchemaVersion'], 13);
         final exportedRems = (exported['reminders'] as List).cast<Map>();
         expect(exportedRems.single['title'], 'Water Plants');
         expect(exportedRems.single['channelId'], 'daily_habits');
@@ -1826,7 +1826,7 @@ void main() {
           (await migratedFromV6.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await migratedFromV6.customSelect('PRAGMA foreign_key_check').get(),
@@ -1848,7 +1848,7 @@ void main() {
           (await migratedFromV4.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await migratedFromV4.customSelect('PRAGMA foreign_key_check').get(),
@@ -1933,7 +1933,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 12);
+        expect(versionRows.single.read<int>('user_version'), 13);
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
           isEmpty,
@@ -1980,7 +1980,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await reopened.customSelect('PRAGMA foreign_key_check').get(),
@@ -2034,7 +2034,7 @@ void main() {
           (await prodDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         await prodDb.close();
       },
@@ -2135,7 +2135,7 @@ void main() {
             await DatabasePersistenceCoordinator(sourceDb).exportSnapshot();
         expect(exported['schemaVersion'], 5);
         expect(exported['snapshotFormatVersion'], 2);
-        expect(exported['databaseSchemaVersion'], 12);
+        expect(exported['databaseSchemaVersion'], 13);
         expect(
           (exported['projectTrackingBlocks'] as List).length,
           1,
@@ -2251,7 +2251,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           (await migratedDb.customSelect('PRAGMA foreign_keys').get())
@@ -2305,7 +2305,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await DriftProjectsRepository(reopened).getProjectById('proj-v1'),
@@ -2338,7 +2338,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2383,7 +2383,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await DriftProjectsRepository(reopened).getProjectById('proj-v2'),
@@ -2412,7 +2412,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2454,7 +2454,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await DriftProjectsRepository(reopened).getProjectById('proj-v5'),
@@ -2484,7 +2484,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2535,7 +2535,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await reopened.customSelect('PRAGMA foreign_key_check').get(),
@@ -2632,7 +2632,7 @@ void main() {
           (await recoveredDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await recoveredDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2673,7 +2673,7 @@ void main() {
 
         final versionRows =
             await migratedDb.customSelect('PRAGMA user_version').get();
-        expect(versionRows.single.read<int>('user_version'), 12);
+        expect(versionRows.single.read<int>('user_version'), 13);
         expect(
           (await migratedDb.customSelect('PRAGMA foreign_keys').get())
               .single
@@ -2788,7 +2788,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await reopened.customSelect('PRAGMA foreign_key_check').get(),
@@ -2856,7 +2856,7 @@ void main() {
           (await prodDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect((await DriftTasksRepository(prodDb).getTasks()).length, 1);
         await prodDb.close();
@@ -2891,7 +2891,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -2945,7 +2945,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         final reopenedLinked =
             await DriftNotesRepository(reopened).getNotesByLink(
@@ -2985,7 +2985,7 @@ void main() {
           (await migratedDb.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         expect(
           await migratedDb.customSelect('PRAGMA foreign_key_check').get(),
@@ -3052,7 +3052,7 @@ void main() {
           (await reopened.customSelect('PRAGMA user_version').get())
               .single
               .read<int>('user_version'),
-          12,
+          13,
         );
         final persisted =
             await DriftDailyRhythmRepository(reopened).getByDate('2026-11-22');
@@ -4456,19 +4456,19 @@ void _seedRawV11Database(File dbFile) {
   }
 }
 
-class _TestForwardV13Database extends AppDatabase {
-  final bool failMidV13Migration;
-  final bool failForeignKeyCheckInV13;
-  int v13UpgradeCalls = 0;
+class _TestForwardV14Database extends AppDatabase {
+  final bool failMidV14Migration;
+  final bool failForeignKeyCheckInV14;
+  int v14UpgradeCalls = 0;
 
-  _TestForwardV13Database(
+  _TestForwardV14Database(
     super.e, {
-    this.failMidV13Migration = false,
-    this.failForeignKeyCheckInV13 = false,
+    this.failMidV14Migration = false,
+    this.failForeignKeyCheckInV14 = false,
   });
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration {
@@ -4483,11 +4483,11 @@ class _TestForwardV13Database extends AppDatabase {
           );
         }
         await transaction(() async {
-          if (from < 12) {
-            await baseStrategy.onUpgrade(m, from, 12);
-          }
           if (from < 13) {
-            v13UpgradeCalls += 1;
+            await baseStrategy.onUpgrade(m, from, 13);
+          }
+          if (from < 14) {
+            v14UpgradeCalls += 1;
             await customStatement(
               "ALTER TABLE notes ADD COLUMN review_status TEXT NOT NULL "
               "DEFAULT 'active';",
@@ -4508,17 +4508,17 @@ class _TestForwardV13Database extends AppDatabase {
               'ON task_checklists_v12(task_id);',
             );
 
-            if (failMidV13Migration) {
+            if (failMidV14Migration) {
               await customStatement(
                 "UPDATE notes SET category = 'mutated_mid_upgrade' "
                 "WHERE id = 'note-v7-1';",
               );
               throw StateError(
-                'Simulated v12->v13 failure after partial DDL and DML',
+                'Simulated v13->v14 failure after partial DDL and DML',
               );
             }
 
-            if (failForeignKeyCheckInV13) {
+            if (failForeignKeyCheckInV14) {
               await customStatement(
                 'INSERT INTO task_checklists_v12 (id, task_id, label, is_done) '
                 "VALUES ('chk-orphan', 'missing-task-id', 'Orphan item', 0);",
@@ -4535,7 +4535,7 @@ class _TestForwardV13Database extends AppDatabase {
                 await customSelect('PRAGMA foreign_key_check').get();
             if (fkViolations.isNotEmpty) {
               throw StateError(
-                'Schema v12->v13 migration aborted due to foreign key integrity '
+                'Schema v13->v14 migration aborted due to foreign key integrity '
                 'violations (${fkViolations.length} row(s)).',
               );
             }
