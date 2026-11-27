@@ -1596,6 +1596,32 @@ export function voidJournalEntryGuardedV7(params: {
     };
   }
 
+  const accountById = new Map(params.accounts.map((a) => [a.id, a]));
+  const entryPostings = params.postings.filter((p) => p.entryId === target.id);
+  if (
+    entryPostings.some(
+      (p) => accountById.get(p.accountId)?.subType === 'legacy_clearing'
+    )
+  ) {
+    throw new DoubleEntryValidationError(
+      'Legacy clearing entries are read-only and cannot be voided.'
+    );
+  }
+  const cls = classifyJournalEntryCurrency({
+    entry: target,
+    entryPostings,
+    accountById,
+    debts: params.debts,
+    allocations: params.allocations,
+    allEntries: params.entries,
+    allPostings: params.postings,
+  });
+  if (cls.status !== 'eligible_etb') {
+    throw new DoubleEntryValidationError(
+      'Legacy non-ETB entries are read-only and cannot be voided.'
+    );
+  }
+
   const voidedIds = new Set(params.entries.filter((e) => e.isVoided).map((e) => e.id));
 
   // Guard 1: Debt origin cannot be voided while active settlements or active write-off exist.
@@ -2337,6 +2363,15 @@ export function hydrateLedgerFromSimpleTransactions(params: {
     }
   }
 
+  const validAccountIds = new Set(accountsWithControls.map((a) => a.id));
+  const resolveHydratedAccountId = (rawAccountId?: string | null): string => {
+    const trimmed = typeof rawAccountId === 'string' ? rawAccountId.trim() : '';
+    if (trimmed && validAccountIds.has(trimmed)) {
+      return trimmed;
+    }
+    return SYSTEM_CONTROL_ACCOUNT_IDS.legacyOffset;
+  };
+
   for (const tx of params.transactions) {
     if (tx.journalEntryId && existingEntryIds.has(tx.journalEntryId)) continue;
     if (existingLegacyTxIds.has(tx.id)) continue;
@@ -2350,61 +2385,92 @@ export function hydrateLedgerFromSimpleTransactions(params: {
         typeof (tx as { note?: string }).note === 'string'
           ? (tx as { note?: string }).note
           : undefined;
+      const trimmedDesc =
+        typeof tx.description === 'string' ? tx.description.trim() : '';
+      const trimmedPayee =
+        typeof tx.payee === 'string' ? tx.payee.trim() : '';
+      const trimmedNote =
+        typeof legacyNote === 'string' ? legacyNote.trim() : '';
+      const combinedLegacyDesc = trimmedDesc
+        ? trimmedDesc
+        : trimmedPayee && trimmedNote
+          ? `${trimmedPayee} — ${trimmedNote}`
+          : trimmedPayee || trimmedNote || '';
+      const effectiveDate =
+        typeof tx.transactionDate === 'string' && tx.transactionDate.trim()
+          ? tx.transactionDate.trim()
+          : CalendarDate.today().toIsoString();
+
       let built: { entry: JournalEntry; postings: Posting[] } | null = null;
       if (tx.type === 'expense') {
         built = buildDirectExpense({
           id: entryId,
-          assetAccountId: tx.accountId,
+          assetAccountId: resolveHydratedAccountId(tx.accountId),
           expenseAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
           categoryId: tx.categoryId || 'cat-other-exp',
           amountCents: tx.amountCents,
-          occurrenceDate: tx.transactionDate,
-          movementDate: tx.transactionDate,
+          occurrenceDate: effectiveDate,
+          movementDate: effectiveDate,
           description: resolveDescriptionWithHistoricalNote({
-            description: tx.description,
+            description: combinedLegacyDesc,
             legacyNote,
             fallback: 'Expense',
           }),
-          note: legacyNote?.trim() || undefined,
+          note: trimmedNote || undefined,
         });
       } else if (tx.type === 'income') {
         built = buildDirectIncome({
           id: entryId,
-          assetAccountId: tx.accountId,
+          assetAccountId: resolveHydratedAccountId(tx.accountId),
           incomeAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.income,
           categoryId: tx.categoryId || 'cat-other-inc',
           amountCents: tx.amountCents,
-          occurrenceDate: tx.transactionDate,
-          movementDate: tx.transactionDate,
+          occurrenceDate: effectiveDate,
+          movementDate: effectiveDate,
           description: resolveDescriptionWithHistoricalNote({
-            description: tx.description,
+            description: combinedLegacyDesc,
             legacyNote,
             fallback: 'Income',
           }),
-          note: legacyNote?.trim() || undefined,
+          note: trimmedNote || undefined,
         });
-      } else if (
-        tx.type === 'transfer' &&
-        tx.destinationAccountId &&
-        tx.destinationAccountId !== tx.accountId
-      ) {
-        built = buildTransfer({
-          id: entryId,
-          fromAssetAccountId: tx.accountId,
-          toAssetAccountId: tx.destinationAccountId,
-          amountCents: tx.amountCents,
-          date: tx.transactionDate,
-          description: resolveDescriptionWithHistoricalNote({
-            description: tx.description,
-            legacyNote,
-            fallback: 'Transfer',
-          }),
-          note: legacyNote?.trim() || undefined,
-        });
+      } else if (tx.type === 'transfer') {
+        const fromAccountId = resolveHydratedAccountId(tx.accountId);
+        const toAccountId = resolveHydratedAccountId(tx.destinationAccountId);
+        if (
+          fromAccountId !== toAccountId ||
+          fromAccountId === SYSTEM_CONTROL_ACCOUNT_IDS.legacyOffset
+        ) {
+          built = buildTransfer({
+            id: entryId,
+            fromAssetAccountId: fromAccountId,
+            toAssetAccountId: toAccountId,
+            amountCents: tx.amountCents,
+            date: effectiveDate,
+            description: resolveDescriptionWithHistoricalNote({
+              description: combinedLegacyDesc,
+              legacyNote,
+              fallback: 'Transfer',
+            }),
+            note: trimmedNote || undefined,
+          });
+        }
       }
       if (built) {
         built.entry.legacySourceTxId = tx.id;
         built.entry.isVoided = Boolean(tx.isSuperseded);
+        if (built.entry.isVoided && !built.entry.voidReason) {
+          const rawCorrectionReason = (tx as { correctionReason?: string }).correctionReason;
+          const correctionReason =
+            typeof rawCorrectionReason === 'string'
+              ? rawCorrectionReason.trim()
+              : '';
+          built.entry.voidReason =
+            correctionReason || `Superseded legacy transaction ${tx.id}`;
+        }
+        if (typeof tx.createdAt === 'string' && tx.createdAt.trim()) {
+          built.entry.createdAt = tx.createdAt.trim();
+        }
         nextEntries.unshift(built.entry);
         nextPostings.unshift(...built.postings);
         existingEntryIds.add(entryId);

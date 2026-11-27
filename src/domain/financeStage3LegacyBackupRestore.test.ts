@@ -4,6 +4,7 @@ import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   Account,
+  classifyAllJournalEntries,
   Debt,
   DEFAULT_EXPENSE_CATEGORIES,
   generateCashFlowReport,
@@ -13,6 +14,7 @@ import {
   Posting,
   SettlementAllocation,
   SimpleTransaction,
+  TransactionCategory,
 } from './doubleEntryFinance';
 import {
   buildAccountBalancesReportV7,
@@ -29,6 +31,7 @@ import {
   fundSavingsGoalV7,
   getExpenseRefundSummaryV7,
   hydrateLedgerFromSimpleTransactions,
+  processDueRecurringRulesV7,
   recordCommitmentSettlementV7,
   SharedBudget,
   SharedCommitment,
@@ -37,6 +40,7 @@ import {
   SharedSavingsGoal,
   unvoidJournalEntryGuardedV7,
   verifyFinanceV7Integrity,
+  voidJournalEntryGuardedV7,
 } from './financeV7Engine';
 import { SYSTEM_CONTROL_ACCOUNT_IDS } from './sharedFoundation';
 import { SharedStateBridge } from '../services/sharedStateBridge';
@@ -705,6 +709,27 @@ function seedMixedDatasetIntoBrowserStorage(
   }
 }
 
+function normalizeRestoredFinanceState(
+  raw: ReturnType<typeof SharedStateBridge.assembleLiveDatabaseState>
+) {
+  return {
+    ...raw,
+    accounts: (raw.accounts || []) as unknown as Account[],
+    categories: (raw.categories || []) as unknown as TransactionCategory[],
+    parties: (raw.parties || []) as Party[],
+    journalEntries: (raw.journalEntries || []) as JournalEntry[],
+    postings: (raw.postings || []) as Posting[],
+    debts: (raw.debts || []) as Debt[],
+    settlementAllocations: (raw.settlementAllocations || []) as SettlementAllocation[],
+    commitments: (raw.commitments || []) as SharedCommitment[],
+    commitmentSettlements: (raw.commitmentSettlements || []) as SharedCommitmentSettlement[],
+    savingsGoals: (raw.savingsGoals || []) as SharedSavingsGoal[],
+    budgets: (raw.budgets || []) as SharedBudget[],
+    recurringRules: (raw.recurringRules || []) as SharedRecurringRule[],
+    transactions: (raw.transactions || []) as unknown as SimpleTransaction[],
+  };
+}
+
 describe('Finance Stage 3 Follow-Up — Legacy Currency Backup & Restore Verification (Web)', () => {
   it('Points 1-5: Full & encrypted backup export/restore preserves historical USD, EUR, and unclassified records read-only without perturbing ETB balances', async () => {
     await withMockBrowserStorage(async (store) => {
@@ -831,7 +856,9 @@ describe('Finance Stage 3 Follow-Up — Legacy Currency Backup & Restore Verific
         'true'
       );
 
-      const restored = SharedStateBridge.assembleLiveDatabaseState();
+      const restored = normalizeRestoredFinanceState(
+        SharedStateBridge.assembleLiveDatabaseState()
+      );
       assert.equal(restored.accounts.length, dataset.accounts.length);
       assert.equal(restored.journalEntries.length, dataset.entries.length);
       assert.equal(restored.postings.length, dataset.postings.length);
@@ -1058,14 +1085,95 @@ describe('Finance Stage 3 Follow-Up — Legacy Currency Backup & Restore Verific
           simpleTransactions: restored.transactions,
         })
       );
+      for (const legacyEntryId of [
+        'je-usd-exp',
+        'je-eur-com-settle',
+        'je-unclassified-exp',
+      ]) {
+        assert.throws(
+          () =>
+            voidJournalEntryGuardedV7({
+              entryId: legacyEntryId,
+              reason: 'Should fail on read-only legacy record',
+              accounts: restored.accounts,
+              entries: restored.journalEntries,
+              postings: restored.postings,
+              debts: restored.debts,
+              allocations: restored.settlementAllocations,
+              commitments: restored.commitments,
+              commitmentSettlements: restored.commitmentSettlements,
+              savingsGoals: restored.savingsGoals,
+              simpleTransactions: restored.transactions,
+            }),
+          (err: Error) => err.message.includes('read-only')
+        );
+      }
+      // Ordinary ETB entry remains cleanly voidable & restorable
+      const voidEtbInc = voidJournalEntryGuardedV7({
+        entryId: 'je-etb-inc',
+        reason: 'Regression check void',
+        accounts: restored.accounts,
+        entries: restored.journalEntries,
+        postings: restored.postings,
+        debts: restored.debts,
+        allocations: restored.settlementAllocations,
+        commitments: restored.commitments,
+        commitmentSettlements: restored.commitmentSettlements,
+        savingsGoals: restored.savingsGoals,
+        simpleTransactions: restored.transactions,
+      });
+      assert.equal(
+        voidEtbInc.updatedEntries.find((e) => e.id === 'je-etb-inc')?.isVoided,
+        true
+      );
+      const restoreEtbInc = unvoidJournalEntryGuardedV7({
+        entryId: 'je-etb-inc',
+        accounts: restored.accounts,
+        entries: voidEtbInc.updatedEntries,
+        postings: restored.postings,
+        debts: voidEtbInc.updatedDebts,
+        allocations: restored.settlementAllocations,
+        commitments: voidEtbInc.updatedCommitments,
+        commitmentSettlements: restored.commitmentSettlements,
+        savingsGoals: voidEtbInc.updatedSavingsGoals,
+        simpleTransactions: voidEtbInc.updatedSimpleTransactions,
+      });
+      assert.equal(
+        restoreEtbInc.updatedEntries.find((e) => e.id === 'je-etb-inc')?.isVoided,
+        false
+      );
+
+      // Restored due legacy recurring rule pauses autoPost without generating entries/commitments or advancing nextOccurrenceDate
+      const recProcessRes = processDueRecurringRulesV7({
+        rules: restored.recurringRules,
+        todayIso: '2026-12-05',
+        accounts: restored.accounts,
+        debts: restored.debts,
+        entries: restored.journalEntries,
+        postings: restored.postings,
+        allocations: restored.settlementAllocations,
+      });
+      assert.equal(recProcessRes.createdEntries.length, 0);
+      assert.equal(recProcessRes.createdCommitments.length, 0);
+      const pausedUsdRule = recProcessRes.updatedRules.find(
+        (r) => r.id === 'rule-usd-legacy'
+      );
+      assert.equal(pausedUsdRule?.autoPost, false);
+      assert.equal(pausedUsdRule?.isActive, true);
+      assert.equal(pausedUsdRule?.nextOccurrenceDate, '2026-12-01');
       assert.throws(() =>
         recordCommitmentSettlementV7({
           commitment: restored.commitments.find((c) => c.id === 'com-eur-due')!,
           accountId: 'acc-eur-cash',
           amountCents: 8500,
           settledDateIso: '2026-11-15',
+          existingSettlements: restored.commitmentSettlements,
+          entries: restored.journalEntries,
           accounts: restored.accounts,
-          expenseControlAccountId: SYSTEM_CONTROL_ACCOUNT_IDS.expense,
+          postings: restored.postings,
+          debts: restored.debts,
+          allocations: restored.settlementAllocations,
+          recurringRules: restored.recurringRules,
         })
       );
       assert.throws(() =>
@@ -1299,7 +1407,9 @@ describe('Finance Stage 3 Follow-Up — Legacy Currency Backup & Restore Verific
         'Older backup without appSettings must not erase existing notice dismissal'
       );
 
-      const v4Restored = SharedStateBridge.assembleLiveDatabaseState();
+      const v4Restored = normalizeRestoredFinanceState(
+        SharedStateBridge.assembleLiveDatabaseState()
+      );
       assert.equal(
         v4Restored.accounts.find((a) => a.id === 'acc-old-usd')?.isArchived,
         true,
@@ -1411,7 +1521,9 @@ describe('Finance Stage 3 Follow-Up — Legacy Currency Backup & Restore Verific
         null,
         'Explicit empty appSettings from clean older backup resets notice dismissal cleanly'
       );
-      const v6Restored = SharedStateBridge.assembleLiveDatabaseState();
+      const v6Restored = normalizeRestoredFinanceState(
+        SharedStateBridge.assembleLiveDatabaseState()
+      );
       assert.equal(
         v6Restored.journalEntries.find((e) => e.id === 'je-v6-usd')?.description,
         'Historical V6 USD Diner'
@@ -1434,6 +1546,398 @@ describe('Finance Stage 3 Follow-Up — Legacy Currency Backup & Restore Verific
         v6Restored.accounts.find((a) => a.id === 'acc-usd-v6')?.currencyCode,
         'USD'
       );
+    });
+  });
+
+  it('Pre-v6 unlinked SimpleTransaction records (no accountId / unknown accountId) hydrate into acc-sys-legacy-offset, stay visible read-only in Legacy Archive without ETB interpretation, and never affect ETB calculations', () => {
+    withMockBrowserStorage((store) => {
+      const legacyV4UnlinkedSnapshot = {
+        schemaVersion: 4,
+        isFinanceSetupCompleted: true,
+        openingBalanceCents: 150000,
+        accounts: [
+          {
+            id: 'acc-etb-main',
+            name: 'Main ETB Bank',
+            type: 'asset',
+            subType: 'bank',
+            currencyCode: 'ETB',
+            openingBalanceCents: 150000,
+            createdAt: '2026-08-01T00:00:00.000Z',
+          },
+        ],
+        categories: [
+          ...DEFAULT_EXPENSE_CATEGORIES,
+          ...FOUNDATION_DEFAULT_INCOME_CATEGORIES,
+        ],
+        transactions: [
+          {
+            id: 'tx-etb-valid',
+            type: 'expense',
+            amountCents: 25000,
+            accountId: 'acc-etb-main',
+            categoryId: 'cat-food',
+            description: 'ETB Lunch',
+            transactionDate: '2026-08-10',
+            createdAt: '2026-08-10T12:00:00.000Z',
+          },
+          {
+            id: 'tx-v4-no-account-exp',
+            type: 'expense',
+            amountCents: 18500,
+            categoryId: 'cat-food',
+            description: 'Unlinked Old Diner',
+            transactionDate: '2026-08-12',
+            createdAt: '2026-08-12T18:30:00.000Z',
+          },
+          {
+            id: 'tx-v4-no-account-inc',
+            type: 'income',
+            amountCents: 42000,
+            categoryId: 'cat-salary',
+            payee: 'Former Client',
+            note: 'Historical cash retainer',
+            transactionDate: '2026-08-14',
+            createdAt: '2026-08-14T09:15:00.000Z',
+          },
+          {
+            id: 'tx-v4-no-account-xfer',
+            type: 'transfer',
+            amountCents: 9000,
+            description: 'Unlinked Old Transfer',
+            transactionDate: '2026-08-15',
+            createdAt: '2026-08-15T11:00:00.000Z',
+          },
+          {
+            id: 'tx-v4-missing-acc-exp',
+            type: 'expense',
+            amountCents: 6500,
+            accountId: 'acc-deleted-pre-v6',
+            categoryId: 'cat-transport',
+            description: 'Deleted Account Cab',
+            transactionDate: '2026-08-16',
+            createdAt: '2026-08-16T07:45:00.000Z',
+          },
+        ],
+        tasks: [],
+        projects: [],
+        milestones: [],
+        goals: [],
+        notes: [],
+        inboxItems: [],
+        calendarEvents: [],
+        commitments: [],
+        savingsGoals: [],
+      };
+
+      const importRes = SharedStateBridge.importFromAndroidJson(
+        JSON.stringify(legacyV4UnlinkedSnapshot)
+      );
+      assert.equal(importRes.success, true, importRes.error);
+
+      const restored = normalizeRestoredFinanceState(
+        SharedStateBridge.assembleLiveDatabaseState()
+      );
+      // Raw unlinked transactions stay preserved in transactions array without inventing an accountId
+      assert.equal(restored.transactions.length, 5);
+      const rawNoAccExp = restored.transactions.find((t) => t.id === 'tx-v4-no-account-exp');
+      assert.ok(rawNoAccExp);
+      assert.equal(rawNoAccExp.accountId, undefined);
+      assert.equal(rawNoAccExp.amountCents, 18500);
+      assert.equal(rawNoAccExp.transactionDate, '2026-08-12');
+
+      // Hydrate into double-entry ledger (as DaywellFinanceModule / App.tsx do on restore)
+      const hydrated = hydrateLedgerFromSimpleTransactions({
+        accounts: restored.accounts,
+        transactions: restored.transactions,
+        entries: restored.journalEntries,
+        postings: restored.postings,
+      });
+      assert.equal(hydrated.migratedCount, 5);
+      assert.ok(
+        hydrated.accounts.some(
+          (a) =>
+            a.id === SYSTEM_CONTROL_ACCOUNT_IDS.legacyOffset &&
+            a.subType === 'legacy_clearing'
+        )
+      );
+
+      // Re-hydrating is strictly idempotent
+      const secondPass = hydrateLedgerFromSimpleTransactions({
+        accounts: hydrated.accounts,
+        transactions: restored.transactions,
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+      });
+      assert.equal(secondPass.migratedCount, 0);
+      assert.equal(secondPass.entries.length, hydrated.entries.length);
+
+      // Verify preserved identifiers, amounts, descriptions, dates, and legacy_clearing postings
+      const expEntry = hydrated.entries.find(
+        (e) => e.legacySourceTxId === 'tx-v4-no-account-exp'
+      );
+      assert.ok(expEntry);
+      assert.equal(expEntry.description, 'Unlinked Old Diner');
+      assert.equal(expEntry.occurrenceDate, '2026-08-12');
+      assert.equal(expEntry.createdAt, '2026-08-12T18:30:00.000Z');
+      const expPostings = hydrated.postings.filter((p) => p.entryId === expEntry.id);
+      assert.equal(expPostings.length, 2);
+      assert.ok(
+        expPostings.some(
+          (p) =>
+            p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.legacyOffset &&
+            p.direction === 'credit' &&
+            p.amountCents === 18500
+        )
+      );
+      assert.ok(
+        expPostings.some(
+          (p) =>
+            p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.expense &&
+            p.direction === 'debit' &&
+            p.categoryId === 'cat-food' &&
+            p.amountCents === 18500
+        )
+      );
+
+      const incEntry = hydrated.entries.find(
+        (e) => e.legacySourceTxId === 'tx-v4-no-account-inc'
+      );
+      assert.ok(incEntry);
+      assert.equal(incEntry.description, 'Former Client — Historical cash retainer');
+      assert.equal(incEntry.occurrenceDate, '2026-08-14');
+      assert.ok(
+        hydrated.postings.some(
+          (p) =>
+            p.entryId === incEntry.id &&
+            p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.legacyOffset &&
+            p.amountCents === 42000
+        )
+      );
+
+      const xferEntry = hydrated.entries.find(
+        (e) => e.legacySourceTxId === 'tx-v4-no-account-xfer'
+      );
+      assert.ok(xferEntry);
+      assert.equal(xferEntry.entryType, 'transfer');
+      assert.equal(xferEntry.description, 'Unlinked Old Transfer');
+      assert.equal(
+        hydrated.postings.filter(
+          (p) =>
+            p.entryId === xferEntry.id &&
+            p.accountId === SYSTEM_CONTROL_ACCOUNT_IDS.legacyOffset
+        ).length,
+        2
+      );
+
+      const deletedAccEntry = hydrated.entries.find(
+        (e) => e.legacySourceTxId === 'tx-v4-missing-acc-exp'
+      );
+      assert.ok(deletedAccEntry);
+      assert.equal(deletedAccEntry.description, 'Deleted Account Cab');
+
+      // Classifications exclude all 4 unlinked records from ETB
+      const classifications = classifyAllJournalEntries({
+        accounts: hydrated.accounts,
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+      });
+      for (const unlinkedEntry of [expEntry, incEntry, xferEntry, deletedAccEntry]) {
+        const cls = classifications.get(unlinkedEntry.id);
+        assert.equal(cls?.status, 'mixed_or_ambiguous');
+        assert.equal(cls?.isEligibleEtb, false);
+        assert.equal(cls?.nativeCurrencyCode, undefined);
+      }
+
+      // ETB balances, Safe Harbor, P&L, Cash Flow, Category Spend, Budgets, and Integrity exclude all 4 unlinked entries
+      const breakdown = calculateAvailableToSpendBreakdownV7({
+        accounts: hydrated.accounts,
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+        debts: [],
+        commitments: [],
+        commitmentSettlements: [],
+        savingsGoals: [],
+        planningPeriodEndIso: '2026-08-31',
+      });
+      assert.equal(breakdown.liquidCashCents, 125000); // 150,000 - 25,000 ETB only
+      assert.equal(breakdown.availableToSpendCents, 125000);
+      assert.equal(breakdown.netFinancialPositionCents, 125000);
+      assert.equal(breakdown.currencyReviewEntryCount, 4);
+
+      const balances = buildAccountBalancesReportV7({
+        accounts: hydrated.accounts,
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+      });
+      assert.deepEqual(
+        balances.liquidAccounts.map((a) => [a.accountId, a.balanceCents]),
+        [['acc-etb-main', 125000]]
+      );
+      assert.equal(balances.nonEtbReviewAccounts.length, 0);
+
+      const occ = generateOccurrenceReport({
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+        accounts: hydrated.accounts,
+        categories: restored.categories,
+        startDate: '2026-08-01',
+        endDate: '2026-08-31',
+      });
+      assert.equal(occ.totalIncomeCents, 0);
+      assert.equal(occ.totalExpenseCents, 25000);
+
+      const cf = generateCashFlowReport({
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+        accounts: hydrated.accounts,
+        startDate: '2026-08-01',
+        endDate: '2026-08-31',
+      });
+      assert.equal(cf.totalCashInflowCents, 0);
+      assert.equal(cf.totalCashOutflowCents, 25000);
+
+      const catSpend = calculateCanonicalCategorySpendV7({
+        accounts: hydrated.accounts,
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+        categories: restored.categories,
+        startDate: '2026-08-01',
+        endDate: '2026-08-31',
+      });
+      assert.equal(catSpend.rollupSpendByCategoryId['cat-food'], 25000);
+      assert.equal(catSpend.rollupSpendByCategoryId['cat-transport'] ?? 0, 0);
+
+      const budgetProgress = buildMonthlyBudgetProgressReportV7({
+        budgets: [
+          {
+            id: 'bud-aug-food',
+            categoryId: 'cat-food',
+            monthIso: '2026-08',
+            limitCents: 50000,
+            rolloverEnabled: false,
+            createdAt: '2026-08-01T00:00:00.000Z',
+            updatedAt: '2026-08-01T00:00:00.000Z',
+          },
+        ],
+        categories: restored.categories,
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+        accounts: hydrated.accounts,
+        debts: [],
+        allocations: [],
+        monthIso: '2026-08',
+      });
+      assert.equal(budgetProgress.totalSpentCents, 25000);
+
+      const integrity = verifyFinanceV7Integrity({
+        accounts: hydrated.accounts,
+        entries: hydrated.entries,
+        postings: hydrated.postings,
+        debts: [],
+        commitments: [],
+      });
+      assert.equal(integrity.isHealthy, true);
+      assert.equal(integrity.currencyReviewEntryCount, 4);
+
+      // Mutating guards remain fail-closed on legacy_clearing entries
+      assert.equal(
+        canCorrectJournalEntryV7({
+          entry: expEntry,
+          entries: hydrated.entries,
+          postings: hydrated.postings,
+          accounts: hydrated.accounts,
+        }).ok,
+        false
+      );
+      assert.equal(
+        getExpenseRefundSummaryV7({
+          originalEntryId: expEntry.id,
+          entries: hydrated.entries,
+          postings: hydrated.postings,
+          accounts: hydrated.accounts,
+        }).eligible,
+        false
+      );
+      assert.throws(
+        () =>
+          voidJournalEntryGuardedV7({
+            entryId: expEntry.id,
+            reason: 'Cannot void legacy clearing',
+            accounts: hydrated.accounts,
+            entries: hydrated.entries,
+            postings: hydrated.postings,
+            debts: [],
+            allocations: [],
+            commitments: [],
+            commitmentSettlements: [],
+            savingsGoals: [],
+            simpleTransactions: restored.transactions,
+          }),
+        (err: Error) => err.message.includes('read-only')
+      );
+
+      // Persist hydrated ledger & verify full SharedStateBridge export/restore round-trip succeeds cleanly
+      const rawCanonical = SharedStateBridge.assembleLiveDatabaseState();
+      SharedStateBridge.saveCanonicalState({
+        ...rawCanonical,
+        accounts: hydrated.accounts as unknown as typeof rawCanonical.accounts,
+        journalEntries: hydrated.entries,
+        postings: hydrated.postings,
+      });
+      const reExportJson = SharedStateBridge.exportToAndroidJson();
+      store.clear();
+      const reImportRes = SharedStateBridge.importFromAndroidJson(reExportJson);
+      assert.equal(reImportRes.success, true, reImportRes.error);
+      const afterRoundTrip = normalizeRestoredFinanceState(
+        SharedStateBridge.assembleLiveDatabaseState()
+      );
+      // 1 opening balance adjustment (open:acc-etb-main) + 1 ETB expense + 4 unlinked legacy clearing entries = 6
+      assert.equal(afterRoundTrip.journalEntries.length, 6);
+      assert.equal(afterRoundTrip.transactions.length, 5);
+
+      // UI visibility: Overview exposes Legacy Archive; Transactions places unlinked records in Read-Only Legacy section without ETB label
+      const overviewHtml = renderToStaticMarkup(
+        React.createElement(FinanceOverviewTab, {
+          accounts: afterRoundTrip.accounts,
+          categories: afterRoundTrip.categories,
+          entries: afterRoundTrip.journalEntries,
+          postings: afterRoundTrip.postings,
+          simpleTransactions: afterRoundTrip.transactions,
+          breakdown,
+          planningPeriodEnd: '2026-08-31',
+          onChangePlanningPeriodEnd: () => {},
+          onOpenComposer: () => {},
+          onSaveAccount: () => ({ ok: true }),
+          onToggleArchiveAccount: () => ({ ok: true }),
+          onDeleteAccount: () => ({ ok: true }),
+          onSaveCategory: () => ({ ok: true }),
+          onToggleArchiveCategory: () => {},
+          onDeleteCategory: () => ({ ok: true }),
+          onNavigateTab: () => {},
+          onRequestConfirm: () => {},
+          hasIntegrityNotices: false,
+          legacyNoticeDismissed: false,
+          onDismissLegacyNotice: () => {},
+        })
+      );
+      assert.ok(overviewHtml.includes('Legacy Non-ETB Archive (Read-Only)'));
+      assert.ok(overviewHtml.includes('4 ledger entry(ies) preserved separately from ETB totals'));
+
+      const txHtml = renderToStaticMarkup(
+        React.createElement(FinanceTransactionsTab, {
+          entries: afterRoundTrip.journalEntries,
+          postings: afterRoundTrip.postings,
+          accounts: afterRoundTrip.accounts,
+          categories: afterRoundTrip.categories,
+          onOpenComposer: () => {},
+          onVoidEntry: () => ({ ok: true }),
+          onRestoreEntry: () => ({ ok: true }),
+          onRequestConfirm: () => {},
+        })
+      );
+      assert.ok(txHtml.includes('ETB Lunch'));
+      assert.ok(txHtml.includes('Legacy Non-ETB Entries (4) · Read-Only'));
     });
   });
 });

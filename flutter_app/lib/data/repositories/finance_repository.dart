@@ -3463,11 +3463,44 @@ class DriftFinanceRepository implements IFinanceRepository {
           continue;
         }
 
+        final idsToCheck = <String>[
+          if (rule.accountId != null && rule.accountId!.trim().isNotEmpty)
+            rule.accountId!.trim(),
+          if (rule.destinationAccountId != null &&
+              rule.destinationAccountId!.trim().isNotEmpty)
+            rule.destinationAccountId!.trim(),
+        ];
+        final linkedDebtId = rule.linkedDebtId?.trim();
+        var ruleEtbEligible = true;
+        if (idsToCheck.isNotEmpty ||
+            (linkedDebtId != null && linkedDebtId.isNotEmpty)) {
+          try {
+            if (idsToCheck.isNotEmpty) {
+              await _assertEtbAccountsInTx(idsToCheck);
+            }
+            if (linkedDebtId != null && linkedDebtId.isNotEmpty) {
+              await _assertEtbDebtInTx(linkedDebtId);
+            }
+          } catch (_) {
+            ruleEtbEligible = false;
+          }
+        }
+        if (!ruleEtbEligible) {
+          if (rule.autoPost) {
+            await (_db.update(_db.recurringRulesTable)
+                  ..where((tbl) => tbl.id.equals(rule.id)))
+                .write(const RecurringRulesTableCompanion(
+              autoPost: Value(false),
+            ));
+          }
+          continue;
+        }
+
         for (final occDate in dueDates) {
           final occIso = occDate.toIsoString();
           final recSourceKey = 'rec:${rule.id}:$occIso';
 
-          var canAutoPost = rule.autoPost &&
+          final canAutoPost = rule.autoPost &&
               rule.ruleType != RecurringRuleType.commitment &&
               ((rule.ruleType == RecurringRuleType.transfer &&
                       rule.accountId != null &&
@@ -3478,30 +3511,6 @@ class DriftFinanceRepository implements IFinanceRepository {
                       rule.categoryId != null));
 
           if (canAutoPost) {
-            var etbValidForAutoPost = true;
-            try {
-              final idsToCheck = <String>[
-                if (rule.accountId != null) rule.accountId!,
-                if (rule.destinationAccountId != null)
-                  rule.destinationAccountId!,
-              ];
-              await _assertEtbAccountsInTx(idsToCheck);
-              if (rule.linkedDebtId != null &&
-                  rule.linkedDebtId!.trim().isNotEmpty) {
-                await _assertEtbDebtInTx(rule.linkedDebtId!.trim());
-              }
-            } catch (_) {
-              etbValidForAutoPost = false;
-            }
-            if (!etbValidForAutoPost) {
-              await (_db.update(_db.recurringRulesTable)
-                    ..where((tbl) => tbl.id.equals(rule.id)))
-                  .write(const RecurringRulesTableCompanion(
-                autoPost: Value(false),
-              ));
-              canAutoPost = false;
-              continue;
-            }
             final existingEntry = await (_db.select(_db.journalEntriesTable)
                   ..where((tbl) => tbl.legacySourceTxId.equals(recSourceKey))
                   ..limit(1))
@@ -4080,6 +4089,21 @@ class DriftFinanceRepository implements IFinanceRepository {
     }
     if (targetRow.isVoided) {
       return _mapJournalEntryRow(targetRow);
+    }
+
+    final entryPostings = await getPostings(entryId: entryId);
+    if (entryPostings
+        .any((p) => p.accountId == SystemControlAccounts.legacyOffset)) {
+      throw DoubleEntryValidationError(
+        'Legacy clearing offset entries are read-only and cannot be voided.',
+      );
+    }
+    final classifications = await _classifyAllEntriesInTx();
+    final cls = classifications[entryId];
+    if (cls == null || !cls.isEligibleEtb) {
+      throw DoubleEntryValidationError(
+        'Legacy non-ETB entries are read-only and cannot be voided.',
+      );
     }
 
     final allEntries = await _db.select(_db.journalEntriesTable).get();

@@ -336,12 +336,20 @@ export function FinanceTransactionsTab({
       else if ((hasIncome || hasExpenseCredit) && !hasExpenseDebit) polarity = 'income';
     }
     const classification = classificationsByEntryId.get(entry.id);
-    const displayCurrency =
-      classification?.nativeCurrencyCode
-        ? classification.nativeCurrencyCode
-        : classification?.touchedCurrencies.length === 1
+    const singleNonEtbTouched =
+      classification?.touchedCurrencies.length === 1 &&
+      classification.touchedCurrencies[0] !== 'ETB' &&
+      classification.touchedCurrencies[0] !== 'UNVERIFIED'
         ? classification.touchedCurrencies[0]
-        : !classification || classification.touchedCurrencies.length === 0
+        : undefined;
+    const displayCurrency =
+      classification?.status === 'eligible_etb'
+        ? 'ETB'
+        : classification?.nativeCurrencyCode
+        ? classification.nativeCurrencyCode
+        : singleNonEtbTouched
+        ? singleNonEtbTouched
+        : !classification || classification.touchedCurrencies.length <= 1
         ? ''
         : 'MIXED';
     const nonSystemPostings = list.filter((p) => !accountById.get(p.accountId)?.isSystem);
@@ -350,10 +358,11 @@ export function FinanceTransactionsTab({
       displayCurrency === 'UNVERIFIED'
         ? ''
         : displayCurrency ||
-          (primaryUserPosting
+          (classification?.status === 'mixed_or_ambiguous' ||
+          classification?.status === 'inactive_or_voided'
+            ? ''
+            : primaryUserPosting
             ? accountById.get(primaryUserPosting.accountId)?.currencyCode
-            : classification?.status === 'eligible_etb'
-            ? 'ETB'
             : '');
     const formattedAmount = isMixed
       ? nonSystemPostings.length > 0
@@ -800,8 +809,14 @@ export function FinanceTransactionsTab({
               {legacyFilteredEntries.map((entry) => {
                 const info = summarizeEntry(entry);
                 const legacyCode =
-                  info.classification?.nativeCurrencyCode ||
-                  (info.classification?.touchedCurrencies.find((c) => c !== 'UNVERIFIED') ?? '');
+                  info.classification?.nativeCurrencyCode &&
+                  info.classification.nativeCurrencyCode !== 'ETB'
+                    ? info.classification.nativeCurrencyCode
+                    : info.classification?.touchedCurrencies.find(
+                        (c) => c !== 'UNVERIFIED' && c !== 'ETB'
+                      ) ?? '';
+                const hideLegacyBadgeOnVoidedEtb =
+                  entry.isVoided && info.classification?.nativeCurrencyCode === 'ETB';
                 return (
                   <div
                     key={entry.id}
@@ -837,11 +852,13 @@ export function FinanceTransactionsTab({
                             <span>{info.accName}</span>
                           </>
                         )}
-                        <DaywellStatusBadge
-                          tone="warning"
-                          showIcon={false}
-                          label={legacyCode ? `Legacy (${legacyCode})` : 'Unclassified'}
-                        />
+                        {!hideLegacyBadgeOnVoidedEtb && (
+                          <DaywellStatusBadge
+                            tone="warning"
+                            showIcon={false}
+                            label={legacyCode ? `Legacy (${legacyCode})` : 'Unclassified'}
+                          />
+                        )}
                         {entry.isVoided && (
                           <DaywellStatusBadge tone="error" showIcon={false} label="Voided" />
                         )}
@@ -907,13 +924,18 @@ export function FinanceTransactionsTab({
                   const inspectCls = classificationsByEntryId.get(inspectEntry.id);
                   const postingCur =
                     !pAcc || pAcc.isSystem
-                      ? inspectCls?.nativeCurrencyCode
-                        ? inspectCls.nativeCurrencyCode
-                        : inspectCls && inspectCls.touchedCurrencies.length === 1 && inspectCls.touchedCurrencies[0] !== 'UNVERIFIED'
-                        ? inspectCls.touchedCurrencies[0]
-                        : inspectCls?.status === 'eligible_etb'
+                      ? inspectCls?.status === 'eligible_etb'
                         ? 'ETB'
-                        : pAcc?.currencyCode || ''
+                        : inspectCls?.nativeCurrencyCode && inspectCls.nativeCurrencyCode !== 'ETB'
+                        ? inspectCls.nativeCurrencyCode
+                        : inspectCls &&
+                          inspectCls.touchedCurrencies.length === 1 &&
+                          inspectCls.touchedCurrencies[0] !== 'UNVERIFIED' &&
+                          inspectCls.touchedCurrencies[0] !== 'ETB'
+                        ? inspectCls.touchedCurrencies[0]
+                        : inspectEntry.isVoided && inspectCls?.nativeCurrencyCode === 'ETB'
+                        ? 'ETB'
+                        : ''
                       : pAcc.currencyCode;
                   return (
                     <div key={p.id} className="p-2.5 flex items-center justify-between gap-2">
@@ -1015,6 +1037,8 @@ export function FinanceTransactionsTab({
                   debts,
                   allocations,
                 });
+                const isEligibleEtb =
+                  classificationsByEntryId.get(inspectEntry.id)?.status === 'eligible_etb';
                 return (
                   <>
                     {refundSum.eligible && refundSum.remainingRefundableCents > 0 && onRefundExpense && (
@@ -1035,28 +1059,30 @@ export function FinanceTransactionsTab({
                         onClick={() => handleCorrectAndReplace(inspectEntry)}
                       />
                     )}
-                    <DaywellButton
-                      label="Void Entry"
-                      variant="destructive"
-                      size="compact"
-                      leadingIcon={<Ban className="w-3.5 h-3.5" />}
-                      onClick={() =>
-                        onRequestConfirm(
-                          'Void Journal Entry?',
-                          `Void "${inspectEntry.description}"? This reverses its cash and report impact without deleting audit history.`,
-                          'Void Entry',
-                          'danger',
-                          () => {
-                            const res = onVoidEntry(inspectEntry.id, 'Voided by user');
-                            if (res && !res.ok) {
-                              setInspectError(res.error || 'Could not void journal entry.');
-                            } else {
-                              setInspectEntry(null);
+                    {isEligibleEtb && (
+                      <DaywellButton
+                        label="Void Entry"
+                        variant="destructive"
+                        size="compact"
+                        leadingIcon={<Ban className="w-3.5 h-3.5" />}
+                        onClick={() =>
+                          onRequestConfirm(
+                            'Void Journal Entry?',
+                            `Void "${inspectEntry.description}"? This reverses its cash and report impact without deleting audit history.`,
+                            'Void Entry',
+                            'danger',
+                            () => {
+                              const res = onVoidEntry(inspectEntry.id, 'Voided by user');
+                              if (res && !res.ok) {
+                                setInspectError(res.error || 'Could not void journal entry.');
+                              } else {
+                                setInspectEntry(null);
+                              }
                             }
-                          }
-                        )
-                      }
-                    />
+                          )
+                        }
+                      />
+                    )}
                   </>
                 );
               })() : classificationsByEntryId.get(inspectEntry.id)?.status === 'eligible_etb' ? (

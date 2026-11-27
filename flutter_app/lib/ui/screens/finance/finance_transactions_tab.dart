@@ -1120,7 +1120,7 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                           );
                         },
                       ),
-                    if (!entry.isVoided)
+                    if (!entry.isVoided && classification.isEligibleEtb)
                       DaywellButton(
                         label: 'Void Entry',
                         leadingIcon: Icons.block,
@@ -1130,7 +1130,8 @@ class _FinanceTransactionsTabState extends State<FinanceTransactionsTab> {
                           await _promptVoidReason(context, entry);
                         },
                       )
-                    else if (classification.nativeCurrencyCode == 'ETB' &&
+                    else if (entry.isVoided &&
+                        classification.nativeCurrencyCode == 'ETB' &&
                         classification.touchedCurrencies.length == 1)
                       DaywellButton(
                         label: 'Restore Entry',
