@@ -57,6 +57,7 @@ import {
   CurrencyIsolationAudit,
   CurrencyValidationTier,
   Debt,
+  DirectExpenseSummary,
   DoubleEntryValidationError,
   EntryCurrencyClassification,
   EntryCurrencyStatus,
@@ -69,6 +70,7 @@ import {
   isActiveVerifiedEtbAccount,
   isDebtEligibleEtb,
   isEtbCurrency,
+  isExpenseFeePosting,
   isValidCurrencyCode,
   JournalEntry,
   LEGACY_CATEGORY_ID_ALIASES,
@@ -81,9 +83,12 @@ import {
   resolveCanonicalCategoryId,
   resolveCategoryDisplayName,
   resolveCommitmentCurrencyStatus,
+  resolveTransferDisplayEndpoints,
   SettlementAllocation,
   SimpleTransaction,
+  summarizeDirectExpense,
   TransactionCategory,
+  TransferDisplayEndpoints,
   validateBalancedEntry,
 } from './doubleEntryFinance';
 
@@ -1203,6 +1208,7 @@ export interface ExpenseRefundSummaryV7 {
   eligible: boolean;
   reason?: string;
   originalAmountCents: number;
+  originalFeeCents?: number;
   refundedCents: number;
   remainingRefundableCents: number;
   categoryId?: string;
@@ -1305,13 +1311,17 @@ export function getExpenseRefundSummaryV7(params: {
   const expenseDebits = origPostings.filter(
     (p) => p.direction === 'debit' && isExpenseAcc(p.accountId)
   );
+  const principalExpenseDebits = expenseDebits.filter((p) => !isExpenseFeePosting(p));
+  const originalFeeCents = expenseDebits
+    .filter((p) => isExpenseFeePosting(p))
+    .reduce((sum, p) => sum + p.amountCents, 0);
   const expenseCredits = origPostings.filter(
     (p) => p.direction === 'credit' && isExpenseAcc(p.accountId)
   );
   const paidCreditPosting = origPostings.find(
     (p) => p.direction === 'credit' && !accountById.get(p.accountId)?.isSystem
   );
-  if (expenseDebits.length === 0 || expenseCredits.length > 0 || !paidCreditPosting) {
+  if (principalExpenseDebits.length === 0 || expenseCredits.length > 0 || !paidCreditPosting) {
     return {
       eligible: false,
       reason: 'Entry is not a standard direct expense.',
@@ -1321,7 +1331,7 @@ export function getExpenseRefundSummaryV7(params: {
     };
   }
 
-  const originalAmountCents = expenseDebits.reduce((sum, p) => sum + p.amountCents, 0);
+  const originalAmountCents = principalExpenseDebits.reduce((sum, p) => sum + p.amountCents, 0);
   const activeRefundEntries = params.entries.filter(
     (e) => !e.isVoided && extractRefundOriginEntryId(e) === original.id
   );
@@ -1335,11 +1345,12 @@ export function getExpenseRefundSummaryV7(params: {
   }
 
   const remainingRefundableCents = Math.max(0, originalAmountCents - refundedCents);
-  const categoryId = expenseDebits.find((p) => p.categoryId)?.categoryId;
+  const categoryId = principalExpenseDebits.find((p) => p.categoryId)?.categoryId;
 
   return {
     eligible: true,
     originalAmountCents,
+    originalFeeCents,
     refundedCents,
     remainingRefundableCents,
     categoryId,
@@ -3590,6 +3601,7 @@ export {
   isActiveVerifiedEtbAccount,
   isDebtEligibleEtb,
   isEtbCurrency,
+  isExpenseFeePosting,
   isValidCurrencyCode,
   LEGACY_CATEGORY_ID_ALIASES,
   normalizeCurrencyCode,
@@ -3597,6 +3609,8 @@ export {
   resolveCanonicalCategoryId,
   resolveCategoryDisplayName,
   resolveCommitmentCurrencyStatus,
+  resolveTransferDisplayEndpoints,
+  summarizeDirectExpense,
 };
 export type {
   Account,
@@ -3605,6 +3619,7 @@ export type {
   CurrencyIsolationAudit,
   CurrencyValidationTier,
   Debt,
+  DirectExpenseSummary,
   EntryCurrencyClassification,
   EntryCurrencyStatus,
   JournalEntry,
@@ -3615,6 +3630,7 @@ export type {
   SettlementAllocation,
   SimpleTransaction,
   TransactionCategory,
+  TransferDisplayEndpoints,
   SharedBudget,
   SharedCategory,
   SharedCommitment,

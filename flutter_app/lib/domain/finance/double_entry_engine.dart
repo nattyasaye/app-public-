@@ -334,6 +334,7 @@ class ExpenseRefundSummary {
   final bool eligible;
   final String? reason;
   final int originalAmountCents;
+  final int originalFeeCents;
   final int refundedCents;
   final int remainingRefundableCents;
   final String? categoryId;
@@ -344,11 +345,57 @@ class ExpenseRefundSummary {
     required this.eligible,
     this.reason,
     required this.originalAmountCents,
+    this.originalFeeCents = 0,
     required this.refundedCents,
     required this.remainingRefundableCents,
     this.categoryId,
     this.originalAccountId,
     this.originalOccurrenceDate,
+  });
+}
+
+class TransferDisplayEndpoints {
+  final String? sourceAccountId;
+  final String? destinationAccountId;
+  final String? sourceName;
+  final String? destinationName;
+  final List<String> fallbackAccountNames;
+  final bool isUnambiguous;
+
+  const TransferDisplayEndpoints({
+    this.sourceAccountId,
+    this.destinationAccountId,
+    this.sourceName,
+    this.destinationName,
+    this.fallbackAccountNames = const [],
+    required this.isUnambiguous,
+  });
+
+  String get displayLabel {
+    if (isUnambiguous && sourceName != null && destinationName != null) {
+      return '$sourceName → $destinationName';
+    }
+    return fallbackAccountNames.join(' · ');
+  }
+}
+
+class DirectExpenseSummary {
+  final bool isDirectExpense;
+  final int principalCents;
+  final int feeCents;
+  final int totalOutflowCents;
+  final String? primaryCategoryId;
+  final String? feeCategoryId;
+  final String? paidAccountId;
+
+  const DirectExpenseSummary({
+    required this.isDirectExpense,
+    required this.principalCents,
+    required this.feeCents,
+    required this.totalOutflowCents,
+    this.primaryCategoryId,
+    this.feeCategoryId,
+    this.paidAccountId,
   });
 }
 
@@ -3823,19 +3870,206 @@ class DoubleEntryEngine {
     };
   }
 
-  /// Direct Expense: Dr Expense Control (categoryId), Cr Cash/Bank/Card.
+  static bool isExpenseFeePosting(PostingModel posting) {
+    return posting.id.endsWith('-dr-fee') ||
+        posting.id.endsWith('-post-dr-fee');
+  }
+
+  /// Resolves transfer display endpoints strictly from posting directions:
+  /// - Source account: non-system account with a credit posting.
+  /// - Destination account: non-system account with a debit posting.
+  /// Returns [isUnambiguous] == true only when there is exactly one unique
+  /// non-system source and one unique, distinct non-system destination.
+  static TransferDisplayEndpoints resolveTransferDisplayEndpoints({
+    required List<PostingModel> postings,
+    required Iterable<AccountModel> accounts,
+  }) {
+    final accountById = {for (final a in accounts) a.id: a};
+    bool isSystemAccountId(String id) =>
+        SystemControlAccounts.isSystemControlId(id) ||
+        (accountById[id]?.isSystem ?? false);
+
+    final creditAccountIds = <String>[];
+    final debitAccountIds = <String>[];
+    final fallbackNames = <String>[];
+
+    for (final p in postings) {
+      if (isSystemAccountId(p.accountId)) continue;
+      final displayName = accountById[p.accountId]?.name ?? p.accountId;
+      if (!fallbackNames.contains(displayName)) {
+        fallbackNames.add(displayName);
+      }
+      if (p.direction == PostingDirection.credit &&
+          !creditAccountIds.contains(p.accountId)) {
+        creditAccountIds.add(p.accountId);
+      } else if (p.direction == PostingDirection.debit &&
+          !debitAccountIds.contains(p.accountId)) {
+        debitAccountIds.add(p.accountId);
+      }
+    }
+
+    if (creditAccountIds.length == 1 &&
+        debitAccountIds.length == 1 &&
+        creditAccountIds.first != debitAccountIds.first) {
+      final srcId = creditAccountIds.first;
+      final dstId = debitAccountIds.first;
+      return TransferDisplayEndpoints(
+        sourceAccountId: srcId,
+        destinationAccountId: dstId,
+        sourceName: accountById[srcId]?.name ?? srcId,
+        destinationName: accountById[dstId]?.name ?? dstId,
+        fallbackAccountNames: fallbackNames,
+        isUnambiguous: true,
+      );
+    }
+
+    return TransferDisplayEndpoints(
+      sourceAccountId: creditAccountIds.length == 1 ? creditAccountIds.first : null,
+      destinationAccountId:
+          debitAccountIds.length == 1 ? debitAccountIds.first : null,
+      sourceName: creditAccountIds.length == 1
+          ? (accountById[creditAccountIds.first]?.name ?? creditAccountIds.first)
+          : null,
+      destinationName: debitAccountIds.length == 1
+          ? (accountById[debitAccountIds.first]?.name ?? debitAccountIds.first)
+          : null,
+      fallbackAccountNames: fallbackNames,
+      isUnambiguous: false,
+    );
+  }
+
+  /// Summarizes a direct expense entry, separating merchant principal from
+  /// optional bank/transaction fee postings (`-dr-fee` / `-post-dr-fee`).
+  /// Historical expenses without fee postings always yield `feeCents == 0`.
+  static DirectExpenseSummary summarizeDirectExpense({
+    required JournalEntryModel entry,
+    required List<PostingModel> postings,
+    required Iterable<AccountModel> accounts,
+  }) {
+    if (entry.entryType != EntryType.standard || isRefundEntry(entry)) {
+      return const DirectExpenseSummary(
+        isDirectExpense: false,
+        principalCents: 0,
+        feeCents: 0,
+        totalOutflowCents: 0,
+      );
+    }
+
+    final accountById = {for (final a in accounts) a.id: a};
+    bool isExpenseAcc(String id) =>
+        id == SystemControlAccounts.expense ||
+        accountById[id]?.type == AccountType.expense;
+    bool isIncomeOrDebtAcc(String id) {
+      final acc = accountById[id];
+      return id == SystemControlAccounts.income ||
+          id == SystemControlAccounts.receivable ||
+          id == SystemControlAccounts.payable ||
+          acc?.type == AccountType.income ||
+          acc?.subType == AccountSubType.receivable ||
+          acc?.subType == AccountSubType.payable;
+    }
+
+    if (postings.any((p) => isIncomeOrDebtAcc(p.accountId))) {
+      return const DirectExpenseSummary(
+        isDirectExpense: false,
+        principalCents: 0,
+        feeCents: 0,
+        totalOutflowCents: 0,
+      );
+    }
+
+    final expenseDebits = postings
+        .where(
+          (p) =>
+              p.direction == PostingDirection.debit &&
+              isExpenseAcc(p.accountId),
+        )
+        .toList(growable: false);
+    final expenseCredits = postings
+        .where(
+          (p) =>
+              p.direction == PostingDirection.credit &&
+              isExpenseAcc(p.accountId),
+        )
+        .toList(growable: false);
+
+    PostingModel? paidCreditPosting;
+    for (final p in postings) {
+      final isSys = SystemControlAccounts.isSystemControlId(p.accountId) ||
+          (accountById[p.accountId]?.isSystem ?? false);
+      if (p.direction == PostingDirection.credit && !isSys) {
+        paidCreditPosting = p;
+        break;
+      }
+    }
+
+    final principalDebits =
+        expenseDebits.where((p) => !isExpenseFeePosting(p)).toList(growable: false);
+    if (principalDebits.isEmpty ||
+        expenseCredits.isNotEmpty ||
+        paidCreditPosting == null) {
+      return const DirectExpenseSummary(
+        isDirectExpense: false,
+        principalCents: 0,
+        feeCents: 0,
+        totalOutflowCents: 0,
+      );
+    }
+
+    final feeDebits =
+        expenseDebits.where(isExpenseFeePosting).toList(growable: false);
+    final principalCents =
+        principalDebits.fold<int>(0, (sum, p) => sum + p.amountCents);
+    final feeCents = feeDebits.fold<int>(0, (sum, p) => sum + p.amountCents);
+    final totalOutflowCents = principalCents + feeCents;
+
+    String? primaryCategoryId;
+    for (final p in principalDebits) {
+      if (p.categoryId != null && p.categoryId!.trim().isNotEmpty) {
+        primaryCategoryId = p.categoryId;
+        break;
+      }
+    }
+    String? feeCategoryId;
+    for (final p in feeDebits) {
+      if (p.categoryId != null && p.categoryId!.trim().isNotEmpty) {
+        feeCategoryId = p.categoryId;
+        break;
+      }
+    }
+
+    return DirectExpenseSummary(
+      isDirectExpense: true,
+      principalCents: principalCents,
+      feeCents: feeCents,
+      totalOutflowCents: totalOutflowCents,
+      primaryCategoryId: primaryCategoryId,
+      feeCategoryId: feeCategoryId,
+      paidAccountId: paidCreditPosting.accountId,
+    );
+  }
+
+  /// Direct Expense: Dr Expense Control (categoryId), optional Dr Fee
+  /// Category (`cat-fees`) when [feeCents] > 0, Cr Cash/Bank/Card.
   static Map<String, dynamic> buildDirectExpense({
     required String entryId,
     required String paidAccountId,
     String expenseAccountId = SystemControlAccounts.expense,
     required String categoryId,
     required int amountCents,
+    int feeCents = 0,
+    String? feeCategoryId,
     required String date,
     String? movementDate,
     required String description,
     String? note,
     String? correctedFromEntryId,
   }) {
+    if (feeCents < 0) {
+      throw DoubleEntryValidationError(
+        'Expense fee must be non-negative, got $feeCents.',
+      );
+    }
     final effectiveMovementDate = movementDate ?? date;
     final entry = JournalEntryModel(
       id: entryId,
@@ -3844,7 +4078,7 @@ class DoubleEntryEngine {
       occurrenceDate: date,
       correctedFromEntryId: correctedFromEntryId,
     );
-    final postings = [
+    final postings = <PostingModel>[
       PostingModel(
         id: '$entryId-dr-exp',
         entryId: entryId,
@@ -3855,16 +4089,36 @@ class DoubleEntryEngine {
         categoryId: categoryId,
         note: note,
       ),
+    ];
+    if (feeCents > 0) {
+      final effectiveFeeCat =
+          (feeCategoryId != null && feeCategoryId.trim().isNotEmpty)
+              ? feeCategoryId.trim()
+              : SystemControlAccounts.feeCategoryId;
+      postings.add(
+        PostingModel(
+          id: '$entryId-dr-fee',
+          entryId: entryId,
+          accountId: expenseAccountId,
+          amountCents: feeCents,
+          direction: PostingDirection.debit,
+          accountMovementDate: date,
+          categoryId: effectiveFeeCat,
+          note: 'Bank / transaction fee',
+        ),
+      );
+    }
+    postings.add(
       PostingModel(
         id: '$entryId-cr-acc',
         entryId: entryId,
         accountId: paidAccountId,
-        amountCents: amountCents,
+        amountCents: amountCents + feeCents,
         direction: PostingDirection.credit,
         accountMovementDate: effectiveMovementDate,
         note: note,
       ),
-    ];
+    );
     validateBalancedEntry(postings);
     return {'entry': entry, 'postings': postings};
   }
@@ -4228,7 +4482,14 @@ class DoubleEntryEngine {
       }
     }
 
-    if (expenseDebits.isEmpty ||
+    final principalExpenseDebits = expenseDebits
+        .where((p) => !isExpenseFeePosting(p))
+        .toList(growable: false);
+    final feeCents = expenseDebits
+        .where(isExpenseFeePosting)
+        .fold<int>(0, (sum, p) => sum + p.amountCents);
+
+    if (principalExpenseDebits.isEmpty ||
         expenseCredits.isNotEmpty ||
         paidCreditPosting == null) {
       return const ExpenseRefundSummary(
@@ -4241,7 +4502,7 @@ class DoubleEntryEngine {
     }
 
     final originalAmountCents =
-        expenseDebits.fold<int>(0, (sum, p) => sum + p.amountCents);
+        principalExpenseDebits.fold<int>(0, (sum, p) => sum + p.amountCents);
     var refundedCents = 0;
     for (final e in entries) {
       if (e.isVoided || extractRefundOriginEntryId(e) != original.id) {
@@ -4259,7 +4520,7 @@ class DoubleEntryEngine {
     final remainingRefundableCents =
         max(0, originalAmountCents - refundedCents);
     String? categoryId;
-    for (final p in expenseDebits) {
+    for (final p in principalExpenseDebits) {
       if (p.categoryId != null && p.categoryId!.isNotEmpty) {
         categoryId = p.categoryId;
         break;
@@ -4269,6 +4530,7 @@ class DoubleEntryEngine {
     return ExpenseRefundSummary(
       eligible: true,
       originalAmountCents: originalAmountCents,
+      originalFeeCents: feeCents,
       refundedCents: refundedCents,
       remainingRefundableCents: remainingRefundableCents,
       categoryId: categoryId,

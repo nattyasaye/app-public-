@@ -82,6 +82,8 @@ abstract class ITransactionRepositoryContract {
     required String accountId,
     required String categoryId,
     required int amountCents,
+    int feeCents = 0,
+    String? feeCategoryId,
     required CalendarDate date,
     CalendarDate? movementDate,
     required String description,

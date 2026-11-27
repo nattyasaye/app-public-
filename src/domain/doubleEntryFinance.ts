@@ -1901,23 +1901,209 @@ export function generateCashFlowReport(params: {
 // Transaction Builders (Natural UX -> Balanced Postings)
 // -------------------------------------------------------------
 
+export interface TransferDisplayEndpoints {
+  sourceAccountId?: string;
+  destinationAccountId?: string;
+  sourceName?: string;
+  destinationName?: string;
+  fallbackAccountNames: string[];
+  isUnambiguous: boolean;
+  displayLabel: string;
+}
+
+export interface DirectExpenseSummary {
+  isDirectExpense: boolean;
+  principalCents: number;
+  feeCents: number;
+  totalOutflowCents: number;
+  primaryCategoryId?: string;
+  feeCategoryId?: string;
+  paidAccountId?: string;
+}
+
+export function isExpenseFeePosting(posting: Pick<Posting, 'id'>): boolean {
+  return posting.id.endsWith('-post-dr-fee') || posting.id.endsWith('-dr-fee');
+}
+
+/**
+ * Resolves transfer Source -> Destination strictly from posting directions:
+ * - Source account: non-system account with a credit posting.
+ * - Destination account: non-system account with a debit posting.
+ * Excludes system accounts and avoids inventing a direction on missing/ambiguous legs.
+ */
+export function resolveTransferDisplayEndpoints(
+  postings: Posting[],
+  accountById: Map<string, Account>
+): TransferDisplayEndpoints {
+  const isSystemAccountId = (id: string) =>
+    SYSTEM_CONTROL_ACCOUNT_ID_SET.has(id) || Boolean(accountById.get(id)?.isSystem);
+
+  const creditAccountIds: string[] = [];
+  const debitAccountIds: string[] = [];
+  const fallbackAccountNames: string[] = [];
+
+  for (const p of postings) {
+    if (isSystemAccountId(p.accountId)) continue;
+    const displayName = accountById.get(p.accountId)?.name || p.accountId;
+    if (!fallbackAccountNames.includes(displayName)) {
+      fallbackAccountNames.push(displayName);
+    }
+    if (p.direction === 'credit' && !creditAccountIds.includes(p.accountId)) {
+      creditAccountIds.push(p.accountId);
+    } else if (p.direction === 'debit' && !debitAccountIds.includes(p.accountId)) {
+      debitAccountIds.push(p.accountId);
+    }
+  }
+
+  if (
+    creditAccountIds.length === 1 &&
+    debitAccountIds.length === 1 &&
+    creditAccountIds[0] !== debitAccountIds[0]
+  ) {
+    const sourceAccountId = creditAccountIds[0];
+    const destinationAccountId = debitAccountIds[0];
+    const sourceName = accountById.get(sourceAccountId)?.name || sourceAccountId;
+    const destinationName = accountById.get(destinationAccountId)?.name || destinationAccountId;
+    return {
+      sourceAccountId,
+      destinationAccountId,
+      sourceName,
+      destinationName,
+      fallbackAccountNames,
+      isUnambiguous: true,
+      displayLabel: `${sourceName} → ${destinationName}`,
+    };
+  }
+
+  return {
+    sourceAccountId: creditAccountIds.length === 1 ? creditAccountIds[0] : undefined,
+    destinationAccountId: debitAccountIds.length === 1 ? debitAccountIds[0] : undefined,
+    sourceName:
+      creditAccountIds.length === 1
+        ? accountById.get(creditAccountIds[0])?.name || creditAccountIds[0]
+        : undefined,
+    destinationName:
+      debitAccountIds.length === 1
+        ? accountById.get(debitAccountIds[0])?.name || debitAccountIds[0]
+        : undefined,
+    fallbackAccountNames,
+    isUnambiguous: false,
+    displayLabel: fallbackAccountNames.join(' · '),
+  };
+}
+
+/**
+ * Summarizes a direct expense entry into merchant principal, optional fee (`cat-fees` fee posting),
+ * and total account deduction. Historical entries without fee postings yield `feeCents: 0`.
+ */
+export function summarizeDirectExpense(params: {
+  entry: JournalEntry;
+  postings: Posting[];
+  accountById: Map<string, Account>;
+}): DirectExpenseSummary {
+  const { entry, postings, accountById } = params;
+  if (
+    entry.entryType !== 'standard' ||
+    Boolean(entry.legacySourceTxId && entry.legacySourceTxId.startsWith('refund:'))
+  ) {
+    return {
+      isDirectExpense: false,
+      principalCents: 0,
+      feeCents: 0,
+      totalOutflowCents: 0,
+    };
+  }
+
+  const isExpenseAcc = (accId: string) =>
+    accId === SYSTEM_CONTROL_ACCOUNT_IDS.expense ||
+    accountById.get(accId)?.type === 'expense';
+  const isIncomeOrDebtAcc = (accId: string) => {
+    const acc = accountById.get(accId);
+    return (
+      accId === SYSTEM_CONTROL_ACCOUNT_IDS.income ||
+      accId === SYSTEM_CONTROL_ACCOUNT_IDS.receivable ||
+      accId === SYSTEM_CONTROL_ACCOUNT_IDS.payable ||
+      acc?.type === 'income' ||
+      acc?.subType === 'receivable' ||
+      acc?.subType === 'payable'
+    );
+  };
+
+  if (postings.some((p) => isIncomeOrDebtAcc(p.accountId))) {
+    return {
+      isDirectExpense: false,
+      principalCents: 0,
+      feeCents: 0,
+      totalOutflowCents: 0,
+    };
+  }
+
+  const expenseDebits = postings.filter(
+    (p) => p.direction === 'debit' && isExpenseAcc(p.accountId)
+  );
+  const expenseCredits = postings.filter(
+    (p) => p.direction === 'credit' && isExpenseAcc(p.accountId)
+  );
+  const paidCreditPosting = postings.find(
+    (p) =>
+      p.direction === 'credit' &&
+      !SYSTEM_CONTROL_ACCOUNT_ID_SET.has(p.accountId) &&
+      !accountById.get(p.accountId)?.isSystem
+  );
+  const principalDebits = expenseDebits.filter((p) => !isExpenseFeePosting(p));
+  if (principalDebits.length === 0 || expenseCredits.length > 0 || !paidCreditPosting) {
+    return {
+      isDirectExpense: false,
+      principalCents: 0,
+      feeCents: 0,
+      totalOutflowCents: 0,
+    };
+  }
+
+  const feeDebits = expenseDebits.filter((p) => isExpenseFeePosting(p));
+  const principalCents = principalDebits.reduce((sum, p) => sum + p.amountCents, 0);
+  const feeCents = feeDebits.reduce((sum, p) => sum + p.amountCents, 0);
+
+  return {
+    isDirectExpense: true,
+    principalCents,
+    feeCents,
+    totalOutflowCents: principalCents + feeCents,
+    primaryCategoryId: principalDebits.find((p) => p.categoryId)?.categoryId,
+    feeCategoryId: feeDebits.find((p) => p.categoryId)?.categoryId,
+    paidAccountId: paidCreditPosting.accountId,
+  };
+}
+
 export function buildDirectExpense(params: {
   id: string;
   assetAccountId: string;
   expenseAccountId: string;
   categoryId?: string;
   amountCents: number;
+  feeCents?: number;
+  feeExpenseAccountId?: string;
+  feeCategoryId?: string;
   occurrenceDate: string;
   movementDate: string;
   description: string;
   note?: string;
+  correctedFromEntryId?: string;
 }): { entry: JournalEntry; postings: Posting[] } {
+  const feeCents = params.feeCents ?? 0;
+  if (!Number.isInteger(feeCents) || feeCents < 0) {
+    throw new DoubleEntryValidationError(
+      'Expense fee must be a non-negative integer in minor units.'
+    );
+  }
+
   const entry: JournalEntry = {
     id: params.id,
     entryType: 'standard',
     description: params.description,
     occurrenceDate: params.occurrenceDate,
     isVoided: false,
+    correctedFromEntryId: params.correctedFromEntryId,
     createdAt: EthiopiaClock.nowUtc().toISOString(),
   };
 
@@ -1932,16 +2118,34 @@ export function buildDirectExpense(params: {
       categoryId: params.categoryId,
       note: params.note,
     },
-    {
-      id: `${params.id}-post-cr`,
-      entryId: params.id,
-      accountId: params.assetAccountId,
-      amountCents: params.amountCents,
-      direction: 'credit',
-      accountMovementDate: params.movementDate,
-      note: params.note,
-    },
   ];
+
+  if (feeCents > 0) {
+    const effectiveFeeCategoryId =
+      params.feeCategoryId && params.feeCategoryId.trim()
+        ? params.feeCategoryId.trim()
+        : 'cat-fees';
+    postings.push({
+      id: `${params.id}-post-dr-fee`,
+      entryId: params.id,
+      accountId: params.feeExpenseAccountId || params.expenseAccountId,
+      amountCents: feeCents,
+      direction: 'debit',
+      accountMovementDate: params.occurrenceDate,
+      categoryId: effectiveFeeCategoryId,
+      note: 'Bank / transaction fee',
+    });
+  }
+
+  postings.push({
+    id: `${params.id}-post-cr`,
+    entryId: params.id,
+    accountId: params.assetAccountId,
+    amountCents: params.amountCents + feeCents,
+    direction: 'credit',
+    accountMovementDate: params.movementDate,
+    note: params.note,
+  });
 
   validateBalancedEntry(postings);
   return { entry, postings };
