@@ -15,6 +15,7 @@ import 'package:personal_management_app/ui/screens/finance/finance_composer_shee
 import 'package:personal_management_app/ui/screens/finance/finance_overview_tab.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_reports_tab.dart';
 import 'package:personal_management_app/ui/screens/finance/finance_transactions_tab.dart';
+import 'package:personal_management_app/ui/widgets/shared_ui_widgets.dart';
 
 import 'support/sqlite_test_helper.dart';
 
