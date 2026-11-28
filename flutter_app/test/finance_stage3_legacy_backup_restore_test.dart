@@ -721,7 +721,9 @@ void main() {
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
           controller.dispose();
-          await db.close();
+          await tester.runAsync(
+            () => db.close().timeout(const Duration(seconds: 10)),
+          );
         });
 
         await tester.runAsync(

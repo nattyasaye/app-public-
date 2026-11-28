@@ -233,7 +233,10 @@ void main() {
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
           etbFixture!.controller.dispose();
-          await etbFixture.db.close();
+          final closeFuture = etbFixture.db.close();
+          await tester.runAsync(
+            () => closeFuture.timeout(const Duration(seconds: 10)),
+          );
         });
 
         await tester.pumpWidget(
@@ -262,7 +265,10 @@ void main() {
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
           mixedFixture!.controller.dispose();
-          await mixedFixture.db.close();
+          final closeFuture = mixedFixture.db.close();
+          await tester.runAsync(
+            () => closeFuture.timeout(const Duration(seconds: 10)),
+          );
         });
 
         await tester.pumpWidget(
@@ -304,6 +310,10 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(dismissBtn);
         await tester.pumpAndSettle();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 50)),
+        );
+        await tester.pumpAndSettle();
 
         expect(noticeFinder, findsNothing);
         expect(
@@ -330,7 +340,10 @@ void main() {
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
           fixture!.controller.dispose();
-          await fixture.db.close();
+          final closeFuture = fixture.db.close();
+          await tester.runAsync(
+            () => closeFuture.timeout(const Duration(seconds: 10)),
+          );
         });
 
         await tester.runAsync(() async {

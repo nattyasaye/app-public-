@@ -42,6 +42,13 @@ class _FinanceOverviewTabState extends State<FinanceOverviewTab> {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.controller,
+      builder: (context, _) => _buildContent(context),
+    );
+  }
+
+  Widget _buildContent(BuildContext context) {
     final state = widget.controller.state;
     final breakdown = state.availableToSpendBreakdown;
     final semantic = context.daywellColors;
