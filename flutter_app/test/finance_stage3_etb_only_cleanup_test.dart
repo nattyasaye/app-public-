@@ -294,8 +294,13 @@ void main() {
           scrollable: find.byType(Scrollable).first,
         );
         await tester.pumpAndSettle();
-        final dismissBtn = find.widgetWithText(TextButton, 'Dismiss');
+        final dismissBtn = find.descendant(
+          of: find.byType(DaywellStatusBanner),
+          matching: find.byTooltip('Dismiss'),
+        );
         expect(dismissBtn, findsOneWidget);
+        await tester.ensureVisible(dismissBtn);
+        await tester.pumpAndSettle();
         await tester.tap(dismissBtn);
         await tester.pumpAndSettle();
 

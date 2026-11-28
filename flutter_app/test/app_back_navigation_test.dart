@@ -343,6 +343,8 @@ void main() {
         200.0,
         scrollable: moreScrollable,
       );
+      await tester.drag(moreScrollable, const Offset(0, -160));
+      await settle(tester);
       await tester.tap(find.text('Appearance'));
       await settle(tester);
       expect(find.byType(DaywellRadioTile<ThemeMode>), findsNWidgets(3));
@@ -357,6 +359,8 @@ void main() {
         200.0,
         scrollable: moreScrollable,
       );
+      await tester.drag(moreScrollable, const Offset(0, -160));
+      await settle(tester);
       await tester.tap(find.text('Sync & backup'));
       await settle(tester);
       expect(find.byType(BackupView), findsOneWidget);
@@ -446,6 +450,8 @@ void main() {
       expect(shell.currentTab, DaywellTabId.finance);
 
       // Complete wizard to unlock internal tabs Overview / Transactions / Plan / Reports
+      await tester.ensureVisible(find.text('Skip Setup'));
+      await settle(tester);
       await tester.tap(find.text('Skip Setup'));
       await settle(tester);
       expect(
@@ -563,6 +569,14 @@ void main() {
           matching: find.text('Capture'),
         ),
       );
+      final saveWatch = Stopwatch()..start();
+      while (find.byType(QuickCaptureDialog).evaluate().isNotEmpty &&
+          saveWatch.elapsed < const Duration(seconds: 10)) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
       await settle(tester);
       expect(find.byType(QuickCaptureDialog), findsNothing);
       expect(

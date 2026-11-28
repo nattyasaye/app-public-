@@ -40,7 +40,7 @@ void main() {
     });
 
     test(
-      '1. Fresh installation creates all 26 v12 tables, indices, '
+      '1. Fresh installation creates all 27 v13 tables, indices, '
       'FK enforcement, system control accounts, and 11 starter categories',
       () async {
         final dbFile = File(p.join(tempDir.path, 'fresh_v12.sqlite'));
@@ -187,9 +187,10 @@ void main() {
             'project_tracking_records',
             'daily_planning_entries',
             'daily_rhythm_days',
+            'sms_drafts_table',
           ]),
         );
-        expect(tableNames.length, 26);
+        expect(tableNames.length, 27);
 
         final indexRows = await db
             .customSelect(
