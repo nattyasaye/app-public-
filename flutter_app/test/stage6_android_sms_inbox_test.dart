@@ -796,6 +796,23 @@ void main() {
           );
         });
 
+        Future<void> pumpUntil(
+          bool Function() condition, {
+          required String reason,
+        }) async {
+          final watch = Stopwatch()..start();
+          while (!condition()) {
+            if (watch.elapsed > const Duration(seconds: 10)) {
+              fail(reason);
+            }
+            await tester.pump(const Duration(milliseconds: 20));
+            await tester.runAsync(
+              () => Future<void>.delayed(const Duration(milliseconds: 5)),
+            );
+          }
+          await tester.pumpAndSettle();
+        }
+
         await tester.pumpWidget(
           MaterialApp(
             theme: DaywellTheme.light,
@@ -803,6 +820,10 @@ void main() {
               body: FinanceSmsDraftsSheet(controller: controller),
             ),
           ),
+        );
+        await tester.pumpAndSettle();
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 20)),
         );
         await tester.pumpAndSettle();
 
@@ -827,7 +848,14 @@ void main() {
         await tester.ensureVisible(allowReadFinder);
         await tester.pumpAndSettle();
         await tester.tap(allowReadFinder);
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              controller.state.smsPermissionStatus ==
+                  DeviceSmsPermissionStatus.granted &&
+              controller.state.smsDrafts.length == 1 &&
+              !controller.state.isSmsScanning,
+          reason: 'Permission grant and initial SMS scan did not complete.',
+        );
 
         expect(fakeService.requestPermissionCalls, 1);
         final scanNowFinder = find.text('Scan Inbox Now');
@@ -860,7 +888,13 @@ void main() {
         await tester.pumpAndSettle();
         expect(allowReceiveFinder, findsOneWidget);
         await tester.tap(allowReceiveFinder);
-        await tester.pumpAndSettle();
+        await pumpUntil(
+          () =>
+              controller.state.smsReceivePermissionStatus ==
+                  DeviceSmsPermissionStatus.granted &&
+              fakeService.requestReceivePermissionCalls == 1,
+          reason: 'Receive SMS permission update did not settle.',
+        );
 
         expect(fakeService.requestReceivePermissionCalls, 1);
         final activeBadgeFinder = find.text('Active');

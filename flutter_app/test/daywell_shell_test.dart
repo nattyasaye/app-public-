@@ -1211,12 +1211,15 @@ void main() {
       // First back at Today root shows unobtrusive prompt without exiting
       await tester.binding.handlePopRoute();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(find.text('Press back again to exit'), findsOneWidget);
       expect(exitCalls, 0);
 
       // After > 2 seconds, resets instead of exiting
       now = now.add(const Duration(milliseconds: 2500));
       await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.pump();
       expect(exitCalls, 0);
       expect(find.text('Press back again to exit'), findsOneWidget);
@@ -1225,6 +1228,7 @@ void main() {
       now = now.add(const Duration(milliseconds: 900));
       await tester.binding.handlePopRoute();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(exitCalls, 1);
     });
   });

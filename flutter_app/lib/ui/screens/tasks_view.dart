@@ -1293,17 +1293,21 @@ class _TasksViewState extends State<TasksView>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Text(
-                                'Tags / Labels',
-                                style: Theme.of(modalContext)
-                                    .textTheme
-                                    .titleSmall
-                                    ?.copyWith(
-                                      fontWeight: FontWeight.w700,
-                                      color: semantic.textPrimary,
-                                    ),
+                              Expanded(
+                                child: Text(
+                                  'Tags / Labels',
+                                  style: Theme.of(modalContext)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                        color: semantic.textPrimary,
+                                      ),
+                                ),
+                              ),
+                              const SizedBox(
+                                width: SharedDesignTokens.spacingSm,
                               ),
                               TextButton(
                                 onPressed: () =>
@@ -4094,21 +4098,26 @@ class _SubtasksChecklistSection extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Subtasks',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: semantic.textPrimary,
-                    ),
+              Expanded(
+                child: Text(
+                  'Subtasks',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: semantic.textPrimary,
+                      ),
+                ),
               ),
-              Text(
-                subtasks.isNotEmpty
-                    ? '$completedCount of ${subtasks.length} done ($pct%)'
-                    : '0 subtasks',
-                style: DaywellTypography.label(
-                  color: semantic.textSecondary,
+              const SizedBox(width: SharedDesignTokens.spacingSm),
+              Flexible(
+                child: Text(
+                  subtasks.isNotEmpty
+                      ? '$completedCount of ${subtasks.length} done ($pct%)'
+                      : '0 subtasks',
+                  textAlign: TextAlign.end,
+                  style: DaywellTypography.label(
+                    color: semantic.textSecondary,
+                  ),
                 ),
               ),
             ],
@@ -4354,15 +4363,17 @@ class _TaskDetailsTagsPanelState extends State<_TaskDetailsTagsPanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                'Tags',
-                style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: semantic.textPrimary,
-                    ),
+              Expanded(
+                child: Text(
+                  'Tags',
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: semantic.textPrimary,
+                      ),
+                ),
               ),
+              const SizedBox(width: SharedDesignTokens.spacingSm),
               TextButton(
                 onPressed: widget.onOpenManageTags,
                 child: const Text('Manage tags'),

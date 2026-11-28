@@ -742,10 +742,16 @@ void main() {
           find.textContaining('Historical Non-ETB Records Preserved'),
           findsNothing,
         );
-        expect(
-          find.textContaining('Legacy Non-ETB Archive (Read-Only)'),
-          findsOneWidget,
+        final legacyArchiveFinder = find.textContaining(
+          'Legacy Non-ETB Archive (Read-Only)',
         );
+        await tester.scrollUntilVisible(
+          legacyArchiveFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(legacyArchiveFinder, findsOneWidget);
 
         // Transactions tab: expand Legacy Non-ETB Entries, inspect USD entry, verify Void Entry is hidden
         await tester.pumpWidget(
@@ -758,12 +764,25 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        final txListScrollable = find.byWidgetPredicate(
+          (w) => w is Scrollable && w.axisDirection == AxisDirection.down,
+        );
         final legacySection = find.textContaining('Legacy Non-ETB Entries (');
+        await tester.scrollUntilVisible(
+          legacySection,
+          200,
+          scrollable: txListScrollable,
+        );
         await tester.ensureVisible(legacySection);
         await tester.tap(legacySection);
         await tester.pumpAndSettle();
 
         final usdEntryTile = find.text('Airport Hotel USD');
+        await tester.scrollUntilVisible(
+          usdEntryTile,
+          200,
+          scrollable: txListScrollable,
+        );
         expect(usdEntryTile, findsOneWidget);
         await tester.ensureVisible(usdEntryTile);
         await tester.tap(usdEntryTile);
