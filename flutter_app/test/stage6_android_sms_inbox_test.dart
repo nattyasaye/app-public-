@@ -756,8 +756,6 @@ void main() {
       '4. FinanceSmsDraftsSheet displays Android permission flow, daily toggle, and preserves manual paste',
       (WidgetTester tester) async {
         final db = AppDatabase(NativeDatabase.memory());
-        await db.ensureInitialized();
-        final repo = DriftFinanceRepository(db);
         final fakeService = _FakeSmsInboxService(
           status: DeviceSmsPermissionStatus.notRequested,
           permissionAfterRequest: DeviceSmsPermissionStatus.granted,
@@ -772,23 +770,30 @@ void main() {
           ],
         );
         final controller = FinanceController(
-          repository: repo,
+          repository: DriftFinanceRepository(db),
           smsInboxService: fakeService,
           nowUtcProvider: () => DateTime.utc(2026, 11, 27, 7, 0, 0),
         );
-        await controller.completeSetup([
-          AccountModel(
-            id: 'acc-tb',
-            name: 'Telebirr Wallet',
-            type: AccountType.asset,
-            subType: AccountSubType.mobileMoney,
-            openingBalanceCents: 100000,
-            openingBalanceDate: '2026-11-01',
-          ),
-        ]);
+        await tester.runAsync(() async {
+          await db.ensureInitialized();
+          await controller.completeSetup([
+            AccountModel(
+              id: 'acc-tb',
+              name: 'Telebirr Wallet',
+              type: AccountType.asset,
+              subType: AccountSubType.mobileMoney,
+              openingBalanceCents: 100000,
+              openingBalanceDate: '2026-11-01',
+            ),
+          ]);
+        });
         addTearDown(() async {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await tester.pump(const Duration(milliseconds: 20));
           controller.dispose();
-          await db.close();
+          await tester.runAsync(
+            () => db.close().timeout(const Duration(seconds: 10)),
+          );
         });
 
         await tester.pumpWidget(
@@ -802,29 +807,82 @@ void main() {
         await tester.pumpAndSettle();
 
         expect(find.text('Android SMS Inbox Scanning'), findsOneWidget);
-        expect(find.text('Allow SMS Inbox Reading'), findsOneWidget);
-        expect(find.text('Import as Drafts'), findsOneWidget);
+        final allowReadFinder = find.text('Allow SMS Inbox Reading');
+        expect(allowReadFinder, findsOneWidget);
 
-        await tester.tap(find.text('Allow SMS Inbox Reading'));
+        final importAsDraftsFinder = find.text('Import as Drafts');
+        await tester.scrollUntilVisible(
+          importAsDraftsFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(importAsDraftsFinder, findsOneWidget);
+
+        await tester.scrollUntilVisible(
+          allowReadFinder,
+          -200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.ensureVisible(allowReadFinder);
+        await tester.pumpAndSettle();
+        await tester.tap(allowReadFinder);
         await tester.pumpAndSettle();
 
         expect(fakeService.requestPermissionCalls, 1);
-        expect(find.text('Scan Inbox Now'), findsOneWidget);
-        expect(find.text('Daily background scan (~24h)'), findsOneWidget);
+        final scanNowFinder = find.text('Scan Inbox Now');
+        await tester.scrollUntilVisible(
+          scanNowFinder,
+          -200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(scanNowFinder, findsOneWidget);
+
+        final dailyToggleFinder = find.text('Daily background scan (~24h)');
+        await tester.scrollUntilVisible(
+          dailyToggleFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(dailyToggleFinder, findsOneWidget);
         expect(controller.state.smsDrafts.length, 1);
 
         // Request RECEIVE_SMS independently without re-triggering READ_SMS scan.
-        expect(find.text('Allow Immediate Incoming SMS'), findsOneWidget);
-        await tester.tap(find.text('Allow Immediate Incoming SMS'));
+        final allowReceiveFinder = find.text('Allow Immediate Incoming SMS');
+        await tester.scrollUntilVisible(
+          allowReceiveFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.ensureVisible(allowReceiveFinder);
+        await tester.pumpAndSettle();
+        expect(allowReceiveFinder, findsOneWidget);
+        await tester.tap(allowReceiveFinder);
         await tester.pumpAndSettle();
 
         expect(fakeService.requestReceivePermissionCalls, 1);
-        expect(find.text('Active'), findsOneWidget);
+        final activeBadgeFinder = find.text('Active');
+        await tester.scrollUntilVisible(
+          activeBadgeFinder,
+          -200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(activeBadgeFinder, findsOneWidget);
         expect(
           controller.state.smsReceivePermissionStatus,
           DeviceSmsPermissionStatus.granted,
         );
-        expect(find.text('Import as Drafts'), findsOneWidget);
+
+        await tester.scrollUntilVisible(
+          importAsDraftsFinder,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pumpAndSettle();
+        expect(importAsDraftsFinder, findsOneWidget);
       },
     );
   });
@@ -1083,7 +1141,24 @@ void main() {
     test(
       '7. Late inbox materialization, fallback window closeness to checkpoint, and repository failure retry',
       () async {
-        final db = AppDatabase(NativeDatabase.memory());
+        final tempDir =
+            Directory.systemTemp.createTempSync('daywell_stage6_late_inbox_');
+        addTearDown(() {
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
+        });
+        final dbFile = File('${tempDir.path}/personal_management.sqlite');
+        AppDatabase openTestDb() {
+          return AppDatabase(
+            NativeDatabase(
+              dbFile,
+              setup: (rawDb) => rawDb.execute('PRAGMA busy_timeout = 5000;'),
+            ),
+          );
+        }
+
+        final db = openTestDb();
         await db.ensureInitialized();
         final repo = DriftFinanceRepository(db);
         var nowUtc = DateTime.utc(2026, 11, 27, 10, 0, 0);
@@ -1149,7 +1224,7 @@ void main() {
         // Headless fallback retry also returns false (WorkManager Result.retry()) until SMS appears.
         final headlessMissing =
             await AppStateManager.runHeadlessIncomingSmsProcess(
-          databaseBuilder: () => db,
+          databaseBuilder: openTestDb,
           smsInboxService: fakeService,
           nowUtcProvider: () => nowUtc,
           fallbackEventReceivedAtUtc: eventArrival,
@@ -1208,7 +1283,24 @@ void main() {
     test(
       '8. Independent permission grant/denial/revocation & headless RECEIVE_SMS isolation',
       () async {
-        final db = AppDatabase(NativeDatabase.memory());
+        final tempDir =
+            Directory.systemTemp.createTempSync('daywell_stage6_perm_');
+        addTearDown(() {
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
+        });
+        final dbFile = File('${tempDir.path}/personal_management.sqlite');
+        AppDatabase openTestDb() {
+          return AppDatabase(
+            NativeDatabase(
+              dbFile,
+              setup: (rawDb) => rawDb.execute('PRAGMA busy_timeout = 5000;'),
+            ),
+          );
+        }
+
+        final db = openTestDb();
         await db.ensureInitialized();
         final repo = DriftFinanceRepository(db);
         final nowUtc = DateTime.utc(2026, 11, 27, 12, 0, 0);
@@ -1274,7 +1366,7 @@ void main() {
         final scheduleBefore = fakeService.scheduleDailyScanCalls;
         final headlessBroadcastOk =
             await AppStateManager.runHeadlessIncomingSmsProcess(
-          databaseBuilder: () => db,
+          databaseBuilder: openTestDb,
           smsInboxService: fakeService,
           nowUtcProvider: () => nowUtc,
           incomingMessage: RawDeviceSmsMessage(
@@ -1320,7 +1412,7 @@ void main() {
         expect(afterReceiveRevoke.errorMessage, isNull);
         expect(
           await AppStateManager.runHeadlessIncomingSmsProcess(
-            databaseBuilder: () => db,
+            databaseBuilder: openTestDb,
             smsInboxService: fakeService,
             nowUtcProvider: () => nowUtc,
             incomingMessage: RawDeviceSmsMessage(

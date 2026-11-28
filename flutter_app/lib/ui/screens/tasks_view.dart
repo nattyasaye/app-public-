@@ -678,17 +678,27 @@ class _TasksViewState extends State<TasksView>
     titleCtrl.addListener(syncDirty);
     descCtrl.addListener(syncDirty);
 
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(
-          top: Radius.circular(SharedDesignTokens.radiusSheet),
-        ),
-      ),
-      builder: (ctx) => StatefulBuilder(
+    bool scopeAttached = false;
+    bool controllersDisposed = false;
+    void disposeControllers() {
+      if (controllersDisposed) return;
+      controllersDisposed = true;
+      updateModal = null;
+      titleCtrl.removeListener(syncDirty);
+      descCtrl.removeListener(syncDirty);
+      titleCtrl.dispose();
+      descCtrl.dispose();
+      modalTagAddCtrl.dispose();
+      modalSubtaskAddCtrl.dispose();
+      modalSubtaskEditCtrl.dispose();
+    }
+
+    Widget buildSheetBody(BuildContext ctx) {
+      return StatefulBuilder(
         builder: (modalContext, setModalState) {
-          updateModal = setModalState;
+          updateModal = (VoidCallback fn) {
+            if (modalContext.mounted) setModalState(fn);
+          };
           final semantic = modalContext.daywellColors;
 
           Future<void> submitTask() async {
@@ -1552,14 +1562,28 @@ class _TasksViewState extends State<TasksView>
             ),
           );
         },
+      );
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(SharedDesignTokens.radiusSheet),
+        ),
       ),
+      builder: (ctx) {
+        scopeAttached = true;
+        return _ModalDisposeScope(
+          onDispose: disposeControllers,
+          child: buildSheetBody(ctx),
+        );
+      },
     );
-    updateModal = null;
-    titleCtrl.dispose();
-    descCtrl.dispose();
-    modalTagAddCtrl.dispose();
-    modalSubtaskAddCtrl.dispose();
-    modalSubtaskEditCtrl.dispose();
+    if (!scopeAttached) {
+      disposeControllers();
+    }
   }
 
   void _showSubtaskDeletedUndo(
@@ -2712,13 +2736,15 @@ class _TasksViewState extends State<TasksView>
           selectedCategory != initialCategory;
     }
 
-    textCtrl.addListener(() {
+    void syncInboxDirty() {
       final dirty = hasUnsaved();
       if (dirty != lastDirty) {
         lastDirty = dirty;
         updateDialog?.call(() {});
       }
-    });
+    }
+
+    textCtrl.addListener(syncInboxDirty);
 
     const categoryChoices = [
       ('task', 'Task'),
@@ -2729,11 +2755,22 @@ class _TasksViewState extends State<TasksView>
       ('general', 'General'),
     ];
 
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
+    bool scopeAttached = false;
+    bool controllerDisposed = false;
+    void disposeController() {
+      if (controllerDisposed) return;
+      controllerDisposed = true;
+      updateDialog = null;
+      textCtrl.removeListener(syncInboxDirty);
+      textCtrl.dispose();
+    }
+
+    Widget buildDialogBody(BuildContext ctx) {
+      return StatefulBuilder(
         builder: (dialogCtx, setDialogState) {
-          updateDialog = setDialogState;
+          updateDialog = (VoidCallback fn) {
+            if (dialogCtx.mounted) setDialogState(fn);
+          };
 
           Future<void> submitInboxEdit() async {
             final trimmed = textCtrl.text.trim();
@@ -2827,10 +2864,22 @@ class _TasksViewState extends State<TasksView>
             ),
           );
         },
-      ),
+      );
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        scopeAttached = true;
+        return _ModalDisposeScope(
+          onDispose: disposeController,
+          child: buildDialogBody(ctx),
+        );
+      },
     );
-    updateDialog = null;
-    textCtrl.dispose();
+    if (!scopeAttached) {
+      disposeController();
+    }
   }
 
   Future<void> _dismissInboxItem(
@@ -4824,4 +4873,28 @@ class _LinkExistingNoteSheetState extends State<_LinkExistingNoteSheet> {
       ),
     );
   }
+}
+
+class _ModalDisposeScope extends StatefulWidget {
+  final VoidCallback onDispose;
+  final Widget child;
+
+  const _ModalDisposeScope({
+    required this.onDispose,
+    required this.child,
+  });
+
+  @override
+  State<_ModalDisposeScope> createState() => _ModalDisposeScopeState();
+}
+
+class _ModalDisposeScopeState extends State<_ModalDisposeScope> {
+  @override
+  void dispose() {
+    widget.onDispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

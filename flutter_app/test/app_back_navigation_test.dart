@@ -389,17 +389,20 @@ void main() {
       // 5. At Today root: 1st back prompts, >2s resets, 2nd back within 2s exits
       await tester.binding.handlePopRoute();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(find.text('Press back again to exit'), findsOneWidget);
       expect(exitCalls, 0);
 
       now = now.add(const Duration(seconds: 3));
       await tester.binding.handlePopRoute();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(exitCalls, 0);
 
       now = now.add(const Duration(seconds: 1));
       await tester.binding.handlePopRoute();
       await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
       expect(exitCalls, 1);
 
       expect(createdProject.id, isNotEmpty);
@@ -453,28 +456,32 @@ void main() {
       await tester.ensureVisible(find.text('Skip Setup'));
       await settle(tester);
       await tester.tap(find.text('Skip Setup'));
+      final setupWatch = Stopwatch()..start();
+      while (!state.financeController.state.isSetupCompleted &&
+          setupWatch.elapsed < const Duration(seconds: 10)) {
+        await tester.pump(const Duration(milliseconds: 20));
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 5)),
+        );
+      }
       await settle(tester);
-      expect(
-        find.descendant(
-          of: find.byType(TabBar),
-          matching: find.text('Transactions'),
-        ),
-        findsOneWidget,
+      final transactionsTab = find.descendant(
+        of: find.byType(TabBar),
+        matching: find.text('Transactions'),
       );
+      expect(transactionsTab, findsOneWidget);
 
-      await tester.tap(
-        find.descendant(
-          of: find.byType(TabBar),
-          matching: find.text('Transactions'),
-        ),
-      );
+      await tester.ensureVisible(transactionsTab);
       await settle(tester);
-      await tester.tap(
-        find.descendant(
-          of: find.byType(TabBar),
-          matching: find.text('Reports'),
-        ),
+      await tester.tap(transactionsTab);
+      await settle(tester);
+      final reportsTab = find.descendant(
+        of: find.byType(TabBar),
+        matching: find.text('Reports'),
       );
+      await tester.ensureVisible(reportsTab);
+      await settle(tester);
+      await tester.tap(reportsTab);
       await settle(tester);
 
       // Back steps Reports -> Transactions -> Overview -> Today
@@ -585,6 +592,8 @@ void main() {
         ),
         isTrue,
       );
+      await tester.pump(const Duration(seconds: 3));
+      await settle(tester);
 
       // B. Task Form Modal: clean dismisses; dirty prompts Discard
       shell.selectTab(DaywellTabId.tasks);
